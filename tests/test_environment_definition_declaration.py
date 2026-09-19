@@ -23,6 +23,7 @@ from weaver.fabric.environment_definition import (
     pip_entries,
     read_environment_definition,
     released_external_libraries,
+    released_requirement,
     runtime_requirements,
     weaver_requirement,
 )
@@ -143,18 +144,20 @@ def test_every_part_is_carried_as_inline_base64(tmp_path):
 
 @weaver_test()
 def test_a_list_that_does_not_exist_becomes_one_weaver_requirement(tmp_path):
-    assert pip_entries(released_external_libraries("", source="x"), source="x") == (
-        "weaverstack",
-    )
+    result = released_external_libraries("", source="x", version="0.9.0")
+
+    assert pip_entries(result, source="x") == ("weaverstack==0.9.0",)
 
 
 @weaver_test()
 def test_an_unrelated_pip_list_is_preserved(tmp_path):
     text = "dependencies:\n  - pip:\n      - fuzzywuzzy==0.18.0\n      - numpy\n"
 
-    entries = pip_entries(released_external_libraries(text, source="x"), source="x")
+    entries = pip_entries(
+        released_external_libraries(text, source="x", version="0.9.0"), source="x"
+    )
 
-    assert entries == ("fuzzywuzzy==0.18.0", "numpy", "weaverstack")
+    assert entries == ("fuzzywuzzy==0.18.0", "numpy", "weaverstack==0.9.0")
 
 
 @pytest.mark.parametrize(
@@ -169,6 +172,26 @@ def test_an_authored_weaver_specifier_becomes_this_weavers_pin(written):
     result = released_external_libraries(text, source="x", version="0.9.0")
 
     assert pip_entries(result, source="x") == ("weaverstack==0.9.0",)
+
+
+@weaver_test()
+def test_the_requirement_follows_the_client_version(monkeypatch):
+    """A release pins itself; a development build has no PyPI counterpart.
+
+    Naming no version reads the running client's, which is what a publication
+    does and what differs between a checkout and a release tag.
+    """
+
+    import weaver
+
+    assert released_requirement("0.9.0") == "weaverstack==0.9.0"
+    assert released_requirement("0.9.0.dev1") == "weaverstack"
+
+    monkeypatch.setattr(weaver, "__version__", "0.9.0")
+    assert released_requirement() == "weaverstack==0.9.0"
+
+    monkeypatch.setattr(weaver, "__version__", "0.9.0.dev1")
+    assert released_requirement() == "weaverstack"
 
 
 @weaver_test()
@@ -239,12 +262,12 @@ def test_comments_and_pip_options_survive_the_overlay():
         "      - fuzzywuzzy==0.18.0\n"
     )
 
-    result = released_external_libraries(text, source="x")
+    result = released_external_libraries(text, source="x", version="0.9.0")
 
     assert "# The packages this Environment installs." in result
     assert "  - matplotlib==1.0" in result
     assert "      - --index-url https://example.invalid/simple" in result
-    assert weaver_requirement(pip_entries(result, source="x")) == "weaverstack"
+    assert weaver_requirement(pip_entries(result, source="x")) == "weaverstack==0.9.0"
 
 
 @weaver_test()
@@ -317,9 +340,11 @@ def test_case_variant_weaver_requirements_are_the_same_requirement():
         "      - weaverstack>=2\n"
     )
 
-    entries = pip_entries(released_external_libraries(text, source="x"), source="x")
+    entries = pip_entries(
+        released_external_libraries(text, source="x", version="0.9.0"), source="x"
+    )
 
-    assert entries == ("weaverstack",)
+    assert entries == ("weaverstack==0.9.0",)
 
 
 # --- what a development publication may keep ----------------------------------
@@ -438,13 +463,13 @@ def test_a_pip_option_is_not_read_as_a_requirement():
         "      - numpy\n"
     )
 
-    result = released_external_libraries(text, source="x")
+    result = released_external_libraries(text, source="x", version="0.9.0")
 
     assert "      - --index-url https://example.invalid/simple" in result
     assert pip_entries(result, source="x") == (
         "--index-url https://example.invalid/simple",
         "numpy",
-        "weaverstack",
+        "weaverstack==0.9.0",
     )
 
 

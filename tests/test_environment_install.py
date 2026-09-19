@@ -38,6 +38,28 @@ OTHER_WHEEL = "userpackage-1.0-py3-none-any.whl"
 PLATFORM_JSON = b'{"metadata": {"type": "Environment", "displayName": "Runtime"}}'
 SPARK_YML = b"runtime_version: 1.3\n"
 
+#: The client version a publication runs as. Every test here names one, because
+#: a released client asks for `weaverstack==<version>` and a development build
+#: asks for `weaverstack`. Left to the package's own version, what a test
+#: expects would differ between a checkout and a release tag.
+RELEASE = "0.9.0"
+DEVELOPMENT = "0.9.0.dev1"
+
+
+def _as_client(monkeypatch, version: str) -> None:
+    """Publish as a client of this version, which is what it asks Fabric for."""
+
+    import weaver
+
+    monkeypatch.setattr(weaver, "__version__", version)
+
+
+@pytest.fixture(autouse=True)
+def _released_client(monkeypatch):
+    """A released client, unless the test names another version."""
+
+    _as_client(monkeypatch, RELEASE)
+
 
 def _env() -> Item:
     return Item(id="env-id", name="Runtime", type="Environment", workspace_id="ws-id")
@@ -210,12 +232,12 @@ def test_released_adds_one_weaver_requirement_and_keeps_the_rest(monkeypatch):
 
     result = _library_publication(monkeypatch, client)
 
-    assert "weaverstack" in client.imported[0]
+    assert f"{DISTRIBUTION}=={RELEASE}" in client.imported[0]
     assert "fuzzywuzzy==0.18.0" in client.imported[0]
     assert client.uploaded == []
     assert client.deleted == []
     assert result.mode == "released"
-    assert result.weaver_requirement == "weaverstack"
+    assert result.weaver_requirement == f"{DISTRIBUTION}=={RELEASE}"
     assert result.published
 
 
@@ -302,8 +324,9 @@ def _pip(*entries: str) -> str:
     return "dependencies:\n  - pip:\n" + "".join(f"      - {e}\n" for e in entries)
 
 
+#: What a development client asks for, and what a released one asks for.
 WEAVER_PIP = _pip(DISTRIBUTION)
-PINNED_PIP = _pip(f"{DISTRIBUTION}==0.9.0")
+PINNED_PIP = _pip(f"{DISTRIBUTION}=={RELEASE}")
 DEV_PIP = _pip("pyyaml", "mssql-python")
 STALE_WHEEL = "weaverstack-0.1.2.dev1-py3-none-any.whl"
 
@@ -313,7 +336,7 @@ def test_a_requirement_staged_but_never_published_is_published(monkeypatch):
     """The reported failure: a matching definition over an unpublished runtime."""
 
     client = _LibraryClient(
-        external=WEAVER_PIP, published_external="", installed=[], states=[""]
+        external=PINNED_PIP, published_external="", installed=[], states=[""]
     )
 
     result = _library_publication(monkeypatch, client)
@@ -326,7 +349,7 @@ def test_a_requirement_staged_but_never_published_is_published(monkeypatch):
 
 @weaver_test()
 def test_a_published_weaver_requirement_is_a_verified_noop(monkeypatch):
-    client = _LibraryClient(external=WEAVER_PIP, published_external=WEAVER_PIP)
+    client = _LibraryClient(external=PINNED_PIP, published_external=PINNED_PIP)
 
     result = _library_publication(monkeypatch, client)
 
@@ -335,25 +358,17 @@ def test_a_published_weaver_requirement_is_a_verified_noop(monkeypatch):
     assert result.publish_status == "AlreadyInstalled"
 
 
-def _as_release(monkeypatch, version: str) -> None:
-    """Run as a released client, whose requirement pins its own version."""
-
-    import weaver
-
-    monkeypatch.setattr(weaver, "__version__", version)
-
-
 @weaver_test()
 def test_an_exact_published_pin_matching_the_request_is_a_noop(monkeypatch):
     """`weaverstack==0.9.0` published against `weaverstack==0.9.0` requested."""
 
-    _as_release(monkeypatch, "0.9.0")
+    _as_client(monkeypatch, RELEASE)
     client = _LibraryClient(external=PINNED_PIP, published_external=PINNED_PIP)
 
     result = _library_publication(monkeypatch, client)
 
     assert client.published == 0
-    assert result.weaver_requirement == f"{DISTRIBUTION}==0.9.0"
+    assert result.weaver_requirement == f"{DISTRIBUTION}=={RELEASE}"
     assert result.publish_status == "AlreadyInstalled"
 
 
@@ -361,7 +376,7 @@ def test_an_exact_published_pin_matching_the_request_is_a_noop(monkeypatch):
 def test_a_published_pin_other_than_the_requested_one_is_published(monkeypatch):
     """`weaverstack==0.9.0` published against `weaverstack==0.9.1` requested."""
 
-    _as_release(monkeypatch, "0.9.1")
+    _as_client(monkeypatch, "0.9.1")
     client = _LibraryClient(
         external=_pip(f"{DISTRIBUTION}==0.9.1"), published_external=PINNED_PIP
     )
@@ -376,7 +391,7 @@ def test_a_published_pin_other_than_the_requested_one_is_published(monkeypatch):
 @weaver_test()
 def test_a_published_declaration_with_no_weaver_requirement_is_published(monkeypatch):
     client = _LibraryClient(
-        external=WEAVER_PIP, published_external=_pip("pyyaml", "sqlparse")
+        external=PINNED_PIP, published_external=_pip("pyyaml", "sqlparse")
     )
 
     _library_publication(monkeypatch, client)
@@ -389,7 +404,7 @@ def test_a_published_declaration_that_does_not_parse_is_published(monkeypatch):
     """Published content Weaver cannot read establishes nothing about it."""
 
     client = _LibraryClient(
-        external=WEAVER_PIP, published_external="dependencies: [oh: no: ["
+        external=PINNED_PIP, published_external="dependencies: [oh: no: ["
     )
 
     _library_publication(monkeypatch, client)
@@ -401,6 +416,7 @@ def test_a_published_declaration_that_does_not_parse_is_published(monkeypatch):
 def test_an_unpinned_request_is_not_met_by_a_published_pin(monkeypatch):
     """Different requirements, so the published one is not what was asked for."""
 
+    _as_client(monkeypatch, DEVELOPMENT)
     client = _LibraryClient(external=WEAVER_PIP, published_external=PINNED_PIP)
 
     _library_publication(monkeypatch, client)
@@ -442,7 +458,7 @@ def test_a_publication_under_way_settles_before_the_decision(monkeypatch):
     """A running publish is neither a success to report nor one to restart."""
 
     client = _LibraryClient(
-        external=WEAVER_PIP,
+        external=PINNED_PIP,
         installed=[_external(DISTRIBUTION)],
         states=["Running", "Success"],
     )
@@ -456,7 +472,7 @@ def test_a_publication_under_way_settles_before_the_decision(monkeypatch):
 @weaver_test()
 def test_a_publication_under_way_that_fails_is_not_already_installed(monkeypatch):
     client = _LibraryClient(
-        external=WEAVER_PIP,
+        external=PINNED_PIP,
         installed=[_external(DISTRIBUTION)],
         states=["Running", "Failed"],
         state="Failed",
@@ -471,7 +487,7 @@ def test_a_publication_under_way_that_fails_is_not_already_installed(monkeypatch
 @weaver_test()
 def test_a_failed_publication_is_never_reported_as_already_installed(monkeypatch):
     client = _LibraryClient(
-        external=WEAVER_PIP, installed=[_external(DISTRIBUTION)], state="Failed"
+        external=PINNED_PIP, installed=[_external(DISTRIBUTION)], state="Failed"
     )
 
     with pytest.raises(FabricError, match="finished with status 'Failed'"):
@@ -488,7 +504,7 @@ def test_a_published_state_that_cannot_be_read_is_not_a_noop(monkeypatch):
                 raise FabricError("reading the published declaration returned 500")
             return super().request(method, path, payload=payload, expected=expected)
 
-    client = _Unreadable(external=WEAVER_PIP)
+    client = _Unreadable(external=PINNED_PIP)
 
     with pytest.raises(FabricError, match="published declaration"):
         _library_publication(monkeypatch, client)
@@ -510,7 +526,7 @@ def test_a_development_publication_is_read_from_the_published_wheels():
 
 @weaver_test()
 def test_a_released_publication_is_read_from_the_published_declaration():
-    assert publishes_requirement(PINNED_PIP, f"{DISTRIBUTION}==0.9.0")
+    assert publishes_requirement(PINNED_PIP, f"{DISTRIBUTION}=={RELEASE}")
     assert not publishes_requirement(PINNED_PIP, f"{DISTRIBUTION}==0.9.1")
     assert not publishes_requirement(PINNED_PIP, DISTRIBUTION)
     assert not publishes_requirement(_pip("pyyaml"), DISTRIBUTION)
@@ -519,7 +535,7 @@ def test_a_released_publication_is_read_from_the_published_declaration():
 
 @weaver_test()
 def test_a_published_declaration_is_read_for_its_weaver_requirement():
-    assert published_weaver_requirement(PINNED_PIP) == f"{DISTRIBUTION}==0.9.0"
+    assert published_weaver_requirement(PINNED_PIP) == f"{DISTRIBUTION}=={RELEASE}"
     assert published_weaver_requirement(_pip("pyyaml", DISTRIBUTION)) == DISTRIBUTION
     assert published_weaver_requirement(_pip("pyyaml")) is None
     assert published_weaver_requirement("") is None
@@ -577,7 +593,7 @@ class _DefinitionClient:
             else list(installed)
         )
         self.published_external = (
-            WEAVER_PIP if published_external is None else published_external
+            PINNED_PIP if published_external is None else published_external
         )
         self.state = state
         self.components: dict = {}
@@ -767,7 +783,7 @@ def test_a_missing_environment_is_created_from_the_definition(monkeypatch, tmp_p
 @weaver_test()
 def test_an_identical_definition_does_not_republish(monkeypatch, tmp_path):
     path = _local(tmp_path, **{PLATFORM: PLATFORM_JSON})
-    overlaid = b"dependencies:\n  - pip:\n      - weaverstack\n"
+    overlaid = PINNED_PIP.encode()
     client = _DefinitionClient(
         current={PLATFORM: PLATFORM_JSON, EXTERNAL_LIBRARIES: overlaid}
     )
@@ -810,7 +826,7 @@ def test_an_identical_definition_with_nothing_published_is_still_published(
     """The definition matches, and Fabric has published none of it."""
 
     path = _local(tmp_path, **{PLATFORM: PLATFORM_JSON})
-    overlaid = b"dependencies:\n  - pip:\n      - weaverstack\n"
+    overlaid = PINNED_PIP.encode()
     client = _DefinitionClient(
         current={PLATFORM: PLATFORM_JSON, EXTERNAL_LIBRARIES: overlaid},
         installed=[],
@@ -908,14 +924,14 @@ def test_a_definition_fabric_reformatted_is_not_a_change(monkeypatch, tmp_path):
         **{
             PLATFORM: b'{\r\n  "metadata": {\r\n    "type": "Environment"\r\n  }\r\n}',
             SPARK_COMPUTE: b"runtime_version: '1.3'\r\ndriver_cores: 4\r\n",
-            EXTERNAL_LIBRARIES: b"dependencies:\n  - pip:\n      - weaverstack\n",
+            EXTERNAL_LIBRARIES: PINNED_PIP.encode(),
         },
     )
     client = _DefinitionClient(
         current={
             PLATFORM: b'{\n  "metadata": {\n    "type": "Environment"\n  }\n}',
             SPARK_COMPUTE: b"runtime_version: 1.3\ndriver_cores: 4\n",
-            EXTERNAL_LIBRARIES: b"dependencies:\n  - pip:\n      - weaverstack\n",
+            EXTERNAL_LIBRARIES: PINNED_PIP.encode(),
         }
     )
 
@@ -934,13 +950,13 @@ def test_a_changed_setting_is_still_a_change(monkeypatch, tmp_path):
         tmp_path,
         **{
             SPARK_COMPUTE: b"runtime_version: '1.3'\ndriver_cores: 8\n",
-            EXTERNAL_LIBRARIES: b"dependencies:\n  - pip:\n      - weaverstack\n",
+            EXTERNAL_LIBRARIES: PINNED_PIP.encode(),
         },
     )
     client = _DefinitionClient(
         current={
             SPARK_COMPUTE: b"runtime_version: 1.3\ndriver_cores: 4\n",
-            EXTERNAL_LIBRARIES: b"dependencies:\n  - pip:\n      - weaverstack\n",
+            EXTERNAL_LIBRARIES: PINNED_PIP.encode(),
         }
     )
 
