@@ -117,7 +117,12 @@ def test_publication_installs_a_runtime_and_settles_to_a_noop(
         root=CHECKOUT,
     )
 
+    # Checked first: a wheel version is a fingerprint of the checkout, so a
+    # source edit while this runs makes the second publication a real one.
+    assert second.wheel_filename == first.wheel_filename, (
+        "the checkout changed between the two publications, so the second built "
+        "a different wheel. Run this against a checkout nothing is editing."
+    )
     assert second.publish_status == "AlreadyInstalled"
     assert second.published is False
     assert second.action == "unchanged"
-    assert second.wheel_filename == first.wheel_filename
