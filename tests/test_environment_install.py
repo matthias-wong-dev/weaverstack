@@ -18,6 +18,7 @@ from weaver.fabric.client import FabricError
 from weaver.fabric.environment import (
     is_weaver_wheel,
     library_wheels,
+    publishes_weaver,
     resolve_environment_owner,
 )
 from weaver.fabric.environment_definition import (
@@ -116,13 +117,11 @@ class _LibraryClient:
         self.uploaded: list[str] = []
         self.deleted: list[str] = []
         self.published = 0
-        self.reads: list[str] = []
         self.api_base_url = "https://api.invalid/v1"
         self.token = "token"
         self.timeout = 30
 
     def paged(self, path, *, key, not_found_empty=False):
-        self.reads.append(path)
         return list(self.staged if "/staging/" in path else self.installed)
 
     def get_json(self, path):
@@ -405,8 +404,6 @@ def test_a_published_state_that_cannot_be_read_is_not_a_noop(monkeypatch):
 
 @weaver_test()
 def test_a_published_version_outside_the_requirement_is_not_installed():
-    from weaver.fabric.environment import publishes_weaver
-
     published = _libraries(_external(DISTRIBUTION, "0.8.0"))
 
     assert not publishes_weaver(published, wheel=None, requirement="weaverstack==0.9.0")
@@ -418,8 +415,6 @@ def test_a_published_version_outside_the_requirement_is_not_installed():
 def test_a_published_package_with_no_reported_version_counts_as_present():
     """Fabric does not always resolve a version; presence is then what it says."""
 
-    from weaver.fabric.environment import publishes_weaver
-
     published = _libraries(_external(DISTRIBUTION))
 
     assert publishes_weaver(published, wheel=None, requirement="weaverstack==0.9.0")
@@ -427,8 +422,6 @@ def test_a_published_package_with_no_reported_version_counts_as_present():
 
 @weaver_test()
 def test_another_projects_libraries_do_not_stand_in_for_weaver():
-    from weaver.fabric.environment import publishes_weaver
-
     published = _libraries(_external("fuzzywuzzy", "0.18.0"), _custom(OTHER_WHEEL))
 
     assert not publishes_weaver(published, wheel=None, requirement="weaverstack")
@@ -437,8 +430,6 @@ def test_another_projects_libraries_do_not_stand_in_for_weaver():
 
 @weaver_test()
 def test_a_development_publication_is_read_from_the_custom_wheels():
-    from weaver.fabric.environment import publishes_weaver
-
     published = _libraries(_custom(WHEEL), _external(DISTRIBUTION))
 
     assert publishes_weaver(published, wheel=WHEEL, requirement=None)
