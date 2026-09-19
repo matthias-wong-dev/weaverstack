@@ -29,6 +29,7 @@ from .environment_definition import (
     definition_payload,
     development_external_libraries,
     environment_name_from_path,
+    normalise_distribution,
     read_environment_definition,
     released_external_libraries,
     runtime_requirements,
@@ -57,14 +58,46 @@ UPDATED = "updated"
 UNCHANGED = "unchanged"
 
 
-def project_root() -> Path:
-    here = Path(__file__).resolve()
+def project_root(module: Path | str | None = None) -> Path:
+    """The Weaver source checkout this installation was imported from.
+
+    ``module`` is the installed Weaver module path the search walks up from.
+
+    A candidate ancestor is accepted only once its ``pyproject.toml`` names the
+    Weaver distribution. A virtual environment nested under an unrelated project
+    puts that project's ``pyproject.toml`` on the way up, and a ``--dev``
+    publication that built it would publish the wrong package.
+    """
+
+    here = Path(module or __file__).resolve()
     for parent in here.parents:
-        if (parent / "pyproject.toml").is_file():
+        candidate = parent / "pyproject.toml"
+        if candidate.is_file() and names_weaver(candidate):
             return parent
     raise CommandError(
-        "A Weaver project root was not found. Run `weaver fabric environment "
-        "publish --dev` from a checkout containing pyproject.toml."
+        f"Cannot publish with --dev: no {DISTRIBUTION} source checkout was "
+        f"found above {here}.\nInstall Weaver from the checkout in editable "
+        "mode, or publish the released package without --dev."
+    )
+
+
+def names_weaver(pyproject: Path) -> bool:
+    """Whether a ``pyproject.toml`` declares the Weaver distribution.
+
+    Unreadable or malformed metadata is not a Weaver checkout. Failing the
+    candidate keeps the search going instead of handing a build backend a
+    project Weaver cannot identify.
+    """
+
+    import tomllib
+
+    try:
+        payload = tomllib.loads(pyproject.read_text("utf-8"))
+    except (OSError, ValueError):
+        return False
+    declared = (payload.get("project") or {}).get("name")
+    return (
+        isinstance(declared, str) and normalise_distribution(declared) == DISTRIBUTION
     )
 
 
