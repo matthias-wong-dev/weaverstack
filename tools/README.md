@@ -4,8 +4,8 @@
 served by GitHub Pages from this directory. One part of it is generated, and it
 is committed so the published pages stay static.
 
-Pages use relative paths throughout, so opening a file directly in a browser
-works as well as serving it.
+Page links use root-relative clean routes. Assets use paths relative to each page.
+Preview the site through a server.
 
 ## The Sales example code
 
@@ -37,6 +37,5 @@ surrounding prose names them too, so change both.
 python3 -m http.server 4173 --directory docs
 ```
 
-The pages use absolute paths (`/assets/site.css`), so they need a server rather
-than opening the files directly. `.claude/launch.json` has the same server as a
-`site` configuration.
+The clean routes resolve through the preview server. `.claude/launch.json` has
+the same server as a `site` configuration.
