@@ -697,8 +697,6 @@ def parse_document(text: str, *, language: str) -> SesDocument:
     )
 
     if kind == TABLE:
-        if is_incremental and not primary_key:
-            raise MetadataError("Incremental: true requires a Primary key")
         if comparison and not primary_key:
             raise MetadataError(
                 "Comparison columns require a Primary key. Declare Primary key or "

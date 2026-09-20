@@ -189,6 +189,8 @@ def _reconcile(
     # ``_Staging`` answers is what the source proposed.
     evidence["staging"] = staging_view
 
+    if contract.appends_only:
+        return _append_only(spark, names, staging_view, columns, rows_read)
     if contract.replaces_wholesale:
         return _full_replace(spark, names, staging_view, columns, rows_read)
 
@@ -652,6 +654,11 @@ def _apply_changes(spark, names, change_view, contract: LoadContract, columns) -
 
 
 def _delete_driver(contract: LoadContract, deletes):
+    if contract.appends_only and deletes is not None:
+        raise LoadError(
+            f"{contract.qualified}: an append-only table cannot return explicit "
+            "deletes; declare a Primary key to identify rows for deletion"
+        )
     if contract.incremental:
         return deletes
     if deletes is not None:
@@ -686,6 +693,26 @@ def _apply_deletes(spark, names, delete_view, contract) -> None:
     spark.sql(
         f"MERGE INTO {names['target']} AS t USING {delete_view} AS d "
         f"ON {key_join('d', 't', contract.primary_key)} WHEN MATCHED THEN DELETE"
+    )
+
+
+def _append_only(spark, names, staging_view, columns, rows_read: int) -> LoadResult:
+    """Insert an unkeyed incremental window without reading existing rows."""
+
+    if not rows_read:
+        return LoadResult(succeeded=True, rows_read=0)
+    audit = delta_audit_names()
+    named = qualified("", columns)
+    audit_columns = qualified("", audit)
+    spark.sql(
+        f"INSERT INTO {names['target']} ({named}, {audit_columns})\n"
+        f"SELECT {named}, current_timestamp(), current_timestamp(), "
+        f"{live_delete_literal()} FROM {staging_view}"
+    )
+    return LoadResult(
+        succeeded=True,
+        rows_read=rows_read,
+        rows_inserted=rows_read,
     )
 
 

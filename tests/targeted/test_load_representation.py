@@ -164,7 +164,7 @@ def test_a_view_has_no_generated_load():
 #: A fingerprint of what each generator currently emits, beside the version that
 #: describes it. See the test below.
 GENERATED_FINGERPRINTS = {
-    "tsql": (15, "e7fe4dd295cfb3c32cc3e43e20e4f9e2da3d77a658be0534acaf68d5f3052d4e"),
+    "tsql": (16, "49b932ed347aaf6a359f63d8baa0b56cbf04cadf05e660811f401da9b4a9a8ab"),
     "spark": (9, "d0cdda197f8619dc2f679b7ef270154e439b76aaaf27f5001c79b489304a6acf"),
 }
 
@@ -421,6 +421,26 @@ def test_an_unkeyed_load_replaces_wholesale_and_rejects_nothing():
     assert "delete from [Sales].[Customer];" in payload
     assert "_Reject" not in payload
     assert REASON_DUPLICATE_PK not in payload
+
+
+@weaver_test()
+def test_an_incremental_unkeyed_warehouse_load_appends_with_generated_identity():
+    source = _no_key(_incremental(WAREHOUSE_TABLE)).replace(
+        "Schema:", "Identity: Customer key\n\nSchema:"
+    )
+    payload = (
+        _warehouse(source)
+        .create_load(item=WeaverItemId("Warehouse", "Reporting"))
+        .payload.decode()
+    )
+
+    # The one delete is the explicit reload gate. The ordinary load body keeps
+    # every existing row and inserts staging with no match or update path.
+    assert payload.count("delete from [Sales].[Customer];") == 1
+    assert payload.count("insert into [Sales].[Customer] (") == 1
+    assert "merge into [Sales].[Customer]" not in payload
+    assert "set @weaver_rows_deleted = 0;" in payload
+    assert "c.is_identity = 0" in payload
 
 
 @weaver_test()

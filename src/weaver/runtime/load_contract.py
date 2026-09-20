@@ -48,7 +48,11 @@ class LoadContract:
 
     @property
     def replaces_wholesale(self) -> bool:
-        return not self.primary_key
+        return not self.primary_key and not self.incremental
+
+    @property
+    def appends_only(self) -> bool:
+        return not self.primary_key and self.incremental
 
     @property
     def deletes_absent_rows(self) -> bool:

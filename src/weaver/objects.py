@@ -527,13 +527,16 @@ class Table(WeaverObject):
 
         return rows
 
-    An incremental table may return an explicit delete claim beside it, because
-    a window on the truth cannot retire a row by not carrying it::
+    An incremental table with no primary key appends every returned row. Existing
+    rows are left in place, and a declared identity is generated for each insert.
+
+    A keyed incremental table may return an explicit delete claim beside staging,
+    because a window on the truth cannot retire a row by not carrying it::
 
         return rows, retired
 
-    A non-incremental source is the whole truth, so a row's absence from it is
-    what retires the row and there is nothing a second value could say.
+    A non-incremental source is the whole truth. A keyed table retires rows absent
+    from it, while an unkeyed table is replaced wholesale.
     """
 
     def columns(self) -> tuple[str, ...]:

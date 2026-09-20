@@ -519,6 +519,46 @@ def test_identity_is_absent_from_every_delta_write_and_signature():
 
 
 @weaver_test()
+def test_an_unkeyed_incremental_lakehouse_load_appends_with_generated_identity():
+    identity_columns = (("Customer key", "bigint"), *TARGET_COLUMNS)
+    spark = _Spark(counts={"staging": 2}, target_columns=identity_columns)
+
+    result = load_table(
+        spark,
+        contract=_incremental(primary_key=(), identity_column="Customer key"),
+        lakehouse=_Lakehouse(),
+        staging_frame=_Staged(),
+    )
+
+    assert result.rows_inserted == 2
+    assert result.rows_updated == 0
+    assert result.rows_deleted == 0
+    assert spark.counted == ["staging"]
+    assert len(spark.mutations) == 1
+    written = spark.mutations[0]
+    assert written.startswith("INSERT INTO `lh`.`DWG`.`Customer`")
+    assert "Customer key" not in written
+    assert "MERGE" not in written
+    assert "DELETE" not in written
+
+
+@weaver_test()
+def test_an_unkeyed_incremental_table_cannot_claim_deletes():
+    spark = _Spark(counts={"staging": 2})
+
+    with pytest.raises(LoadError, match="append-only.*cannot return explicit deletes"):
+        load_table(
+            spark,
+            contract=_incremental(primary_key=()),
+            lakehouse=_Lakehouse(),
+            staging_frame=_Staged(),
+            deletes=_Staged(("Customer id",)),
+        )
+
+    assert spark.statements == []
+
+
+@weaver_test()
 def test_a_source_supplying_the_managed_identity_is_refused_before_work():
     identity_columns = (("Customer key", "bigint"), *TARGET_COLUMNS)
     spark = _Spark(counts=BUSY, target_columns=identity_columns)

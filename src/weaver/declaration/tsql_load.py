@@ -138,7 +138,9 @@ def generate_tsql_load_script(
     claims_deletes = program.deletes is not None
     staging_sql = _staging_sql(names, program, contract)
 
-    if contract.primary_key:
+    if contract.appends_only:
+        load_body = _append_only_body(names)
+    elif contract.primary_key:
         load_body = _primary_key_body(names, contract, claims_deletes)
     else:
         load_body = _full_replace_body(names)
@@ -168,6 +170,9 @@ def generate_tsql_load_script(
         target_table=names["target"],
         load_body=_indent(load_body, 4),
         end_artifact_cleanup=_indent(_end_cleanup(names, contract, claims_deletes), 4),
+        rows_deleted_assignment=_indent(
+            _rows_deleted_assignment(contract, names["target"]), 4
+        ),
     ).rstrip()
 
     return render_sql_template(
@@ -391,6 +396,25 @@ def _full_replace_body(names: dict) -> str:
         target_table=names["target"],
         staging_table=names["staging"],
     ).rstrip()
+
+
+def _append_only_body(names: dict) -> str:
+    return render_sql_template(
+        "load/append_only_body",
+        target_table=names["target"],
+        staging_table=names["staging"],
+    ).rstrip()
+
+
+def _rows_deleted_assignment(contract: LoadContract, target: str) -> str:
+    if contract.appends_only:
+        return "set @weaver_rows_deleted = 0;"
+    return (
+        "-- What the target actually lost, from its own cardinality.\n"
+        "select @weaver_rows_deleted =\n"
+        "    @weaver_target_before + @weaver_rows_inserted - count(*)\n"
+        f"from {target};"
+    )
 
 
 def _signature_expression() -> str:
