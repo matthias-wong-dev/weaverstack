@@ -73,6 +73,9 @@ def _raised(node, exc: BaseException) -> Outcome:
     # anything else is the dispatch itself coming apart, and saying so is the
     # difference between "the load refused these rows" and "something threw".
     named = isinstance(exc, WeaverError)
+    # A raised refusal reads as the returned one does, so an operator sees the
+    # same sentence whichever engine reported it.
+    refusal = getattr(result, "is_refusal", False)
     return Outcome(
         status=FAILED,
         raised=True,
@@ -82,7 +85,9 @@ def _raised(node, exc: BaseException) -> Outcome:
             error(
                 _failure_code(node) if named else DISPATCH_EXCEPTION,
                 (
-                    f"{node.node_id} failed: {exc}"
+                    f"{node.node_id} refused the load: {result.error_message}"
+                    if named and refusal
+                    else f"{node.node_id} failed: {exc}"
                     if named
                     else f"{node.node_id} raised {type(exc).__name__}: {exc}"
                 ),
@@ -118,18 +123,31 @@ def status_of(result) -> str:
 
     Tolerated rejects preserve the successful writes. A Static skip records that
     no work ran and is not an ordinary success.
+
+    A refusal is read before the reject count, because a gate that refuses a
+    load often has rejected rows to report and nothing was written.
     """
 
     if getattr(result, "is_static_skip", False):
         return SKIPPED
     if result.succeeded:
         return SUCCEEDED
+    if getattr(result, "is_refusal", False):
+        return FAILED
     return SUCCEEDED_WITH_REJECTS if getattr(result, "rows_rejected", 0) else FAILED
 
 
 def _messages(node, result) -> tuple:
     if result.succeeded:
         return ()
+    if getattr(result, "is_refusal", False):
+        return (
+            error(
+                _failure_code(node),
+                f"{node.node_id} refused the load: {result.error_message}",
+                source=node.primitive_kind,
+            ),
+        )
     if getattr(result, "rows_rejected", 0):
         return (
             warning(

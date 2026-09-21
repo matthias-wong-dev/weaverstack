@@ -42,6 +42,7 @@ def load(
     fault_tolerant: bool = False,
     dry_run: bool = False,
     reload: bool = False,
+    ignore_stability_threshold: bool = False,
     stale: bool = False,
     as_of: str | datetime | None = None,
     session=None,
@@ -64,6 +65,12 @@ def load(
     is removed, its ``_.LoadStatus`` goes to Pending, its target is emptied, and
     the authored load runs. It reaches what this request selected and nothing
     downstream.
+
+    ``ignore_stability_threshold`` waives the declared delete and update
+    limits for this invocation, for when a very large change is the correct
+    answer. It waives nothing else: null and unique key checks still reject
+    rows, fault tolerance is unchanged, and the selection, declarations and
+    bookmarks are untouched.
 
     ``stale`` runs the loadables ``weaver health`` reports as not green.
     Selecting nothing is a success. ``as_of`` is the freshness cutoff that
@@ -106,6 +113,7 @@ def load(
                 fault_tolerant=fault_tolerant,
                 dry_run=dry_run,
                 reload=reload,
+                ignore_stability_threshold=ignore_stability_threshold,
                 stale=stale,
                 as_of=threshold,
             )
@@ -130,6 +138,7 @@ def run_load(
     fault_tolerant: bool = False,
     dry_run: bool = False,
     reload: bool = False,
+    ignore_stability_threshold: bool = False,
     stale: bool = False,
     as_of: datetime | None = None,
 ) -> LoadRunReport:
@@ -206,6 +215,7 @@ def run_load(
                 fault_tolerant=fault_tolerant,
                 dry_run=dry_run,
                 reload=reload,
+                ignore_stability_threshold=ignore_stability_threshold,
             ),
             workspace=workspace,
             can_refresh=can_refresh(session, workspace),
@@ -277,6 +287,7 @@ def _as_load_report(result, *, started, record) -> LoadRunReport:
         dry_run=result.dry_run,
         fault_tolerant=result.fault_tolerant,
         reload=result.reload,
+        ignore_stability_threshold=result.ignore_stability_threshold,
         nodes=tuple(
             LoadNodeReport(
                 node_id=node.node_id,
@@ -323,14 +334,17 @@ def _raise_for_failure(report: LoadRunReport) -> None:
     )
     subject = first.logical_id or first.physical_target
     summaries = "; ".join(_status_summaries(report))
+    named = f"{_step_type(first).title()} failed for {subject}"
+    counted = f"; {summaries}" if summaries else ""
     raise LoadError(
-        f"{_step_type(first).title()} failed for {subject}"
-        + (f": {detail}" if detail else "")
-        + (f"; {summaries}" if summaries else ""),
+        named + (f": {detail}" if detail else "") + counted,
         result=first.result,
         report=report,
         workflow_id=report.workflow_id,
         executor=None if finding is None else finding.executor,
+        # The node's own detail is in the report. A caller that presented it
+        # says only which node failed and how the run finished.
+        summary=named + counted,
     )
 
 

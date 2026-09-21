@@ -56,6 +56,7 @@ RESULT_PARAMETERS = (
     ("error_message", "varchar(4000)"),
     ("bookmark_datetime", "datetime2(6)"),
     ("is_static_skip", "bit"),
+    ("is_refusal", "bit"),
 )
 
 #: Maps private procedure parameters to the stable logical result contract.
@@ -212,6 +213,9 @@ def _result_assignment(**values: str) -> str:
         "bookmark_datetime": "null",
         # Counts cannot distinguish a Static skip from an empty successful load.
         "is_static_skip": "cast(0 as bit)",
+        # Nor a refusal from a load that wrote its valid rows and set the rest
+        # aside: both report succeeded = 0 with rejects.
+        "is_refusal": "cast(0 as bit)",
     }
     defaults.update(values)
     return "\n".join(
@@ -384,12 +388,14 @@ def _primary_key_body(names: dict, contract: LoadContract, claims_deletes: bool)
             # A refusal preserves rows_read but reports no target writes.
             _result_assignment(
                 succeeded="cast(0 as bit)",
+                is_refusal="cast(1 as bit)",
                 rows_inserted="cast(0 as bigint)",
                 rows_updated="cast(0 as bigint)",
                 rows_deleted="cast(0 as bigint)",
             ),
             8,
         ),
+        reject_refusal_assignment=_reject_refusal_assignment(),
     ).rstrip()
 
 
@@ -414,7 +420,28 @@ def _append_only_body(names: dict, contract: LoadContract) -> str:
         survivor_materialisation=_unkeyed_survivor_materialisation(names, contract),
         intolerant_message=_escape_literal(INTOLERANT_MESSAGE),
         tolerated_message=_escape_literal(TOLERATED_MESSAGE),
+        reject_refusal_assignment=_reject_refusal_assignment(),
     ).rstrip()
+
+
+def _reject_refusal_assignment() -> str:
+    """What a load that refuses its rejected rows reports.
+
+    Settled here rather than at the procedure's end, because the refusal
+    returns from inside the load body with nothing written.
+    """
+
+    return _indent(
+        _result_assignment(
+            succeeded="cast(0 as bit)",
+            is_refusal="cast(1 as bit)",
+            error_message=f"'{_escape_literal(INTOLERANT_MESSAGE)}'",
+            rows_inserted="cast(0 as bigint)",
+            rows_updated="cast(0 as bigint)",
+            rows_deleted="cast(0 as bigint)",
+        ),
+        4,
+    )
 
 
 def _rows_deleted_assignment(contract: LoadContract, target: str) -> str:

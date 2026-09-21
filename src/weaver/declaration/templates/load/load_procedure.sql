@@ -6,6 +6,9 @@ create or alter procedure $load_procedure
     @fault_tolerant bit = 0
   , @ignore_stability_threshold bit = 0
   , @reload bit = 0
+  -- An orchestrated caller takes an expected refusal as a result so its counts
+  -- survive; called by hand the procedure throws, as it always has.
+  , @return_refusal bit = 0
 $result_parameters
 as
 begin

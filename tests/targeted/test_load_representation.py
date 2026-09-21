@@ -164,14 +164,14 @@ def test_a_view_has_no_generated_load():
 #: A fingerprint of what each generator currently emits, beside the version that
 #: describes it. See the test below.
 GENERATED_FINGERPRINTS = {
-    "tsql": (16, "49b932ed347aaf6a359f63d8baa0b56cbf04cadf05e660811f401da9b4a9a8ab"),
+    "tsql": (17, "c2e627660b318b6662a9406253c1ea3924edd3d09b35f5f0dec8ab2ef4a82388"),
     "tsql_append": (
-        16,
-        "ba256939be781198bfaa435fa39a83c5bac3658fc790a9c934d0571bcef62ee8",
+        17,
+        "4683fc8dfe3f29eee6ef91a4bc9ff9ad3a13301dd8bbaf6398e81ad89419a0a3",
     ),
     "tsql_append_validated": (
-        16,
-        "2e9ad5c53dabd60cc61003f13feebf219d112d926f0e70123eb8c6d00c67e857",
+        17,
+        "746faf122d1c67842e27c7766f68ea9c099a7801ff9a93258a6a3cb59e6e68eb",
     ),
     "spark": (9, "d0cdda197f8619dc2f679b7ef270154e439b76aaaf27f5001c79b489304a6acf"),
 }
@@ -1151,3 +1151,67 @@ def test_the_defaults_are_the_documented_ones():
     assert "@weaver_target_rows >= 1000000" in payload
     assert "/ @weaver_target_rows > 5" in payload
     assert "/ @weaver_target_rows > 20" in payload
+
+
+# --- how a generated procedure hands back a refusal ---------------------------
+
+
+@weaver_test()
+def test_the_procedure_can_be_asked_to_return_a_refusal_rather_than_throw():
+    """Called by hand it throws, as it always has. Orchestration asks for the
+    result, because an uncaught THROW returns no output values at all."""
+
+    payload = _body()
+
+    assert "@return_refusal bit = 0" in payload
+    assert "if @return_refusal = 0" in payload
+    assert "if @fault_tolerant = 0 and @return_refusal = 0" in payload
+
+
+@weaver_test()
+def test_a_breach_assigns_its_result_before_it_can_throw():
+    """The order the engine forces: values assigned after a THROW never exist,
+    and values assigned before one are discarded when it is uncaught."""
+
+    payload = _body()
+    assigned = payload.index("set @weaver_is_refusal = cast(1 as bit);")
+    thrown = payload.index("throw 51021")
+
+    assert assigned < thrown
+
+
+@weaver_test()
+@pytest.mark.parametrize(
+    "source", [WAREHOUSE_TABLE, _no_key(_incremental(WAREHOUSE_TABLE))]
+)
+def test_a_refused_load_reports_its_counts_and_no_writes(source):
+    """Whichever body refused it: the rejected rows are known, and the target
+    took nothing."""
+
+    payload = _body(source)
+    refusal = payload[: payload.index("throw 51020")]
+
+    assert "set @weaver_is_refusal = cast(1 as bit);" in refusal
+    assert "set @weaver_rows_inserted = cast(0 as bigint);" in refusal
+    assert "set @weaver_rows_updated = cast(0 as bigint);" in refusal
+    assert "set @weaver_rows_deleted = cast(0 as bigint);" in refusal
+
+
+@weaver_test()
+def test_a_clean_load_says_it_refused_nothing():
+    payload = _body()
+
+    assert "set @weaver_is_refusal = cast(0 as bit);" in payload
+
+
+@weaver_test()
+def test_a_breach_says_the_operation_the_count_the_size_and_the_limit():
+    """The same sentence the Delta gate produces, so one refusal reads the same
+    whichever engine reported it."""
+
+    payload = _body()
+
+    assert "'delete of ' + cast(@weaver_prospective_deletes as varchar(20))" in payload
+    assert "+ '% of ' + cast(@weaver_target_rows as varchar(20))" in payload
+    assert "', over the 5% threshold'" in payload
+    assert "'; the target was not modified'" in payload

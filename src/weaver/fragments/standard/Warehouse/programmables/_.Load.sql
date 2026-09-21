@@ -7,6 +7,9 @@ procedure raised.
 The implementation procedure is in [_], and the source object's schema is part
 of its name. `@item_name` omitted means recover it from [_].[Installation].
 
+`@ignore_stability_threshold = 1` waives the object's declared delete and
+update limits for this call, and nothing else.
+
 `@reload = 1` reconstructs the object from zero: [_].[LoadStatus] goes to Pending
 and [_].[Bookmark] goes to the sentinel, then the implementation procedure clears
 the target and runs. It reaches this object alone.
@@ -56,6 +59,7 @@ begin
     declare @error_message varchar(4000) = null;
     declare @bookmark_datetime datetime2(6) = null;
     declare @is_static_skip bit = null;
+    declare @is_refusal bit = null;
 
     if charindex('.', @object_name) = 0
     begin
@@ -111,6 +115,7 @@ begin
                     + N', @weaver_error_message = @weaver_error_message output'
                     + N', @weaver_bookmark_datetime = @weaver_bookmark_datetime output'
                     + N', @weaver_is_static_skip = @weaver_is_static_skip output'
+                    + N', @weaver_is_refusal = @weaver_is_refusal output'
                     + N';';
             end;
         end;
@@ -215,7 +220,8 @@ begin
                    @weaver_rows_rejected bigint output,
                    @weaver_error_message varchar(4000) output,
                    @weaver_bookmark_datetime datetime2(6) output,
-                   @weaver_is_static_skip bit output',
+                   @weaver_is_static_skip bit output,
+                   @weaver_is_refusal bit output',
                 @fault_tolerant = @fault_tolerant,
                 @ignore_stability_threshold = @ignore_stability_threshold,
                 @reload = @reload,
@@ -227,7 +233,8 @@ begin
                 @weaver_rows_rejected = @rows_rejected output,
                 @weaver_error_message = @error_message output,
                 @weaver_bookmark_datetime = @bookmark_datetime output,
-                @weaver_is_static_skip = @is_static_skip output;
+                @weaver_is_static_skip = @is_static_skip output,
+                @weaver_is_refusal = @is_refusal output;
         end;
     end try
     begin catch
@@ -247,6 +254,9 @@ begin
              when @weaver_error is not null then N'Error'
              when @is_static_skip = 1 then N'Skipped'
              when @succeeded = 1 then N'Succeeded'
+             -- Before the reject count: a refusal wrote nothing, and rejected
+             -- rows are usually why it refused.
+             when @is_refusal = 1 then N'Failed'
              when @rows_rejected > 0 then N'Rejected'
              else N'Failed' end;
 

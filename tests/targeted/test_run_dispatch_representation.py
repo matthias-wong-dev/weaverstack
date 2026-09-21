@@ -86,6 +86,7 @@ ROW = {
     "error_message": None,
     "bookmark_datetime": BEGAN,
     "is_static_skip": False,
+    "is_refusal": False,
 }
 
 
@@ -99,7 +100,9 @@ def test_a_warehouse_load_asks_for_its_result_by_name():
 
     procedure, inputs, outputs = sql.calls[0]
     assert procedure == "[_].[Load Sales.Customer]"
-    assert inputs == (("fault_tolerant", 0),)
+    # A refusal comes back as a result: a Fabric Warehouse discards output
+    # values when a procedure ends in an uncaught THROW.
+    assert inputs == (("fault_tolerant", 0), ("return_refusal", 1))
     assert outputs == PROCEDURE_RESULT_PARAMETERS
     assert result == LoadResult(
         succeeded=True,
@@ -297,7 +300,7 @@ def test_fault_tolerance_reaches_the_procedure_as_an_input():
         True, dict(ROW, rows_read=0, rows_inserted=0, rows_updated=0)
     )
 
-    assert sql.calls[0][1] == (("fault_tolerant", 1),)
+    assert sql.calls[0][1] == (("fault_tolerant", 1), ("return_refusal", 1))
 
 
 @weaver_test()

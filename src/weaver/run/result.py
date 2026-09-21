@@ -226,6 +226,8 @@ class RunResult:
     fault_tolerant: bool = False
     #: Whether the run reconstructed each selected table from zero.
     reload: bool = False
+    #: Whether the run waived the declared stability limits.
+    ignore_stability_threshold: bool = False
     nodes: tuple[RunNodeResult, ...] = ()
     edges: tuple[tuple[str, str], ...] = ()
     order: tuple[str, ...] = ()
@@ -255,6 +257,7 @@ class RunResult:
             "dry_run": self.dry_run,
             "fault_tolerant": self.fault_tolerant,
             "reload": self.reload,
+            "ignore_stability_threshold": self.ignore_stability_threshold,
             "selection": (
                 list(self.selection)
                 if isinstance(self.selection, tuple)

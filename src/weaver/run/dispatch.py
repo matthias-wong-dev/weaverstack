@@ -21,6 +21,7 @@ def dispatch_primitive(
     resolved=None,
     fault_tolerant: bool = False,
     reload: bool = False,
+    ignore_stability_threshold: bool = False,
     open_runtime=None,
     workspace=None,
     collect=False,
@@ -28,8 +29,9 @@ def dispatch_primitive(
 ):
     """Dispatch one installed primitive.
 
-    The runtime scope opens only for deployed Python modules. ``reload`` is
-    passed only to table loads; planning accepts it for no other work.
+    The runtime scope opens only for deployed Python modules. ``reload`` and
+    ``ignore_stability_threshold`` are passed only to table loads; planning
+    accepts neither for any other work.
     """
 
     if session is None:
@@ -43,11 +45,24 @@ def dispatch_primitive(
         return _validation(node, session, workspace, open_runtime, collect)
     if kind == WAREHOUSE_PROCEDURE:
         return _warehouse_procedure(
-            node, session, workspace, fault_tolerant, publication, reload
+            node,
+            session,
+            workspace,
+            fault_tolerant,
+            publication,
+            reload,
+            ignore_stability_threshold,
         )
     if kind in (PYTHON_TABLE, PYTHON_FOLDER):
         return _python(
-            node, session, workspace, resolved, fault_tolerant, open_runtime, reload
+            node,
+            session,
+            workspace,
+            resolved,
+            fault_tolerant,
+            open_runtime,
+            reload,
+            ignore_stability_threshold,
         )
     if kind == ENDPOINT_REFRESH:
         return _endpoint_refresh(node, session, workspace)
@@ -86,12 +101,23 @@ def _scope(open_runtime, node):
 
 
 def _warehouse_procedure(
-    node, session, workspace, fault_tolerant: bool, publication, reload: bool = False
+    node,
+    session,
+    workspace,
+    fault_tolerant: bool,
+    publication,
+    reload: bool = False,
+    ignore_stability_threshold: bool = False,
 ):
     """Call the object's procedure without the self-recording wrapper.
 
     Output parameters identify its result because authored setup may return
     unrelated result sets.
+
+    ``@return_refusal`` asks the procedure to return an expected refusal rather
+    than throw it. A Fabric Warehouse discards output values when a procedure
+    ends in an uncaught ``THROW``, even where the caller catches the error, so
+    throwing is how a refusal's counts get lost.
     """
 
     from ..declaration.tsql_load import (
@@ -100,6 +126,7 @@ def _warehouse_procedure(
     )
     from ..etl import load_procedure_name
     from ..runtime.load_result import LoadResult
+    from ..sql.errors import SqlError
     from ..targets import ItemRef, WarehouseTarget
 
     target = WarehouseTarget(ItemRef(node.physical_target.name))
@@ -107,20 +134,50 @@ def _warehouse_procedure(
     if publication is not None:
         publication.observe(node, session, workspace)
     sql = session.sql_executor(target, workspace=workspace)
+    procedure = load_procedure_name(node.logical_id.object_id)
+    inputs = (
+        ("fault_tolerant", 1 if fault_tolerant else 0),
+        ("return_refusal", 1),
+    )
     # `@reload` is named only when set: a procedure installed before reload
     # existed has no such parameter, and an ordinary load of it still runs.
-    inputs = (("fault_tolerant", 1 if fault_tolerant else 0),)
     if reload:
         inputs = inputs + (("reload", 1),)
-    row = sql.call_procedure(
-        load_procedure_name(node.logical_id.object_id),
-        inputs=inputs,
-        outputs=PROCEDURE_RESULT_PARAMETERS,
-    )
+    if ignore_stability_threshold:
+        inputs = inputs + (("ignore_stability_threshold", 1),)
+    try:
+        row = sql.call_procedure(
+            procedure, inputs=inputs, outputs=PROCEDURE_RESULT_PARAMETERS
+        )
+    except SqlError as exc:
+        _refuse_outdated_procedure(node, procedure, exc)
+        raise
     result = LoadResult.from_row(logical_result_row(row))
     if publication is not None:
         publication.settled(node.node_id, result)
     return result
+
+
+#: What a Warehouse says when a procedure is called with a parameter it predates.
+_UNKNOWN_PARAMETER = ("too many arguments", "return_refusal")
+
+
+def _refuse_outdated_procedure(node, procedure: str, exc: Exception) -> None:
+    """Name the rebuild when the installed procedure predates this contract.
+
+    Argument binding fails before the procedure body runs, so nothing loaded.
+    """
+
+    from ..errors import LoadError
+
+    message = str(exc).casefold()
+    if not any(part in message for part in _UNKNOWN_PARAMETER):
+        return
+    raise LoadError(
+        f"{node.node_id} cannot run: {procedure} was installed by an older "
+        "Weaver version and does not report refusals. Rebuild "
+        f"{node.logical_id.item} and load again."
+    ) from exc
 
 
 def _onelake_publication(node, session, workspace, publication):
@@ -155,6 +212,7 @@ def _python(
     fault_tolerant: bool,
     open_runtime,
     reload: bool = False,
+    ignore_stability_threshold: bool = False,
 ):
     """Run a deployed Python primitive in the scope that imports its module."""
 
@@ -165,16 +223,21 @@ def _python(
             "Rebuild and reinstall the project."
         )
 
+    from ..runtime.load_refusal import decoded_refusal, refused
     from ..runtime.load_result import LoadResult
 
-    return LoadResult.from_row(
-        _scope(open_runtime, node).dispatch_python(
-            node,
-            expected_class=expected,
-            fault_tolerant=fault_tolerant,
-            reload=reload,
-        )
+    row = _scope(open_runtime, node).dispatch_python(
+        node,
+        expected_class=expected,
+        fault_tolerant=fault_tolerant,
+        reload=reload,
+        ignore_stability_threshold=ignore_stability_threshold,
     )
+    if refused(row):
+        # A refusal the remote entry point returned as data rather than raising.
+        # Raised here, so both positions settle through the same path.
+        raise decoded_refusal(row)
+    return LoadResult.from_row(row)
 
 
 def python_primitive(
@@ -192,6 +255,7 @@ def python_primitive(
     catalogue=None,
     node_identity=None,
     reload: bool = False,
+    ignore_stability_threshold: bool = False,
 ):
     """Import and load a deployed Python primitive.
 
@@ -237,11 +301,15 @@ def python_primitive(
     # asynchronously, so a primitive that recorded itself would be a second
     # writer of the same row.
     #
-    # `reload` is named only when set: a Folder's `_load` does not take it, and
-    # planning has already refused a folder reload.
+    #
+    # `reload` and `ignore_stability_threshold` are named only when set: a
+    # Folder's `_load` takes neither, planning has already refused a folder
+    # reload, and a folder has no stability contract to waive.
     policy = {"fault_tolerant": fault_tolerant}
     if reload:
         policy["reload"] = True
+    if ignore_stability_threshold:
+        policy["ignore_stability_threshold"] = True
     return primitive._load(**policy)
 
 

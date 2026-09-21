@@ -248,6 +248,7 @@ def test_load_dry_run_emits_the_normal_run_report_shape(session):
         "dry_run",
         "fault_tolerant",
         "reload",
+        "ignore_stability_threshold",
         "workspace",
         "workflow_id",
         "workflow_id",

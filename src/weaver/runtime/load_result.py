@@ -16,6 +16,7 @@ RESULT_COLUMNS = (
     "error_message",
     "bookmark_datetime",
     "is_static_skip",
+    "is_refusal",
 )
 
 
@@ -34,6 +35,20 @@ class LoadResult:
     bookmark_datetime: datetime | None = None
     #: Explicit because zero counts cannot distinguish a static skip from an empty read.
     is_static_skip: bool = False
+    #: Whether a gate refused this load before the target was mutated. Explicit
+    #: because ``succeeded=False`` also spells a load that wrote its valid rows
+    #: and set the rest aside.
+    is_refusal: bool = False
+
+    @classmethod
+    def refusal(cls, message: str, **counts: int) -> "LoadResult":
+        """A gate's refusal, with the counts it had settled before refusing.
+
+        Nothing was written, so the counts describe what was read and set
+        aside, never what the target took.
+        """
+
+        return cls(succeeded=False, is_refusal=True, error_message=message, **counts)
 
     @classmethod
     def failure(cls, message: str, **counts: int) -> "LoadResult":
@@ -52,7 +67,9 @@ class LoadResult:
 
     @classmethod
     def from_row(cls, row) -> "LoadResult":
-        values = {name: row[name] for name in RESULT_COLUMNS}
+        # A row serialised before the discriminator existed says nothing about
+        # refusal, which is what its absence means.
+        values = {name: row.get(name) for name in RESULT_COLUMNS}
         return cls(
             succeeded=bool(values["succeeded"]),
             rows_read=int(values["rows_read"]),
@@ -63,6 +80,7 @@ class LoadResult:
             error_message=values["error_message"],
             bookmark_datetime=_instant(values["bookmark_datetime"]),
             is_static_skip=bool(values["is_static_skip"]),
+            is_refusal=bool(values["is_refusal"]),
         )
 
 
