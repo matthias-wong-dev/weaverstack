@@ -349,3 +349,24 @@ def test_build_reports_a_malformed_source_the_way_check_does(tmp_path):
         weaver.build(root, session=given_session(workspace=workspace))
 
     assert "Lakehouse/Raw/Tables/DWG__Customer.py" in str(refused.value)
+
+
+@weaver_test()
+def test_a_malformed_project_is_one_json_document_with_the_same_identity(
+    tmp_path, capsys
+):
+    """Machine output carries the file and cause the human form does, and only
+    that: no progress, no traceback fragment, one parseable document."""
+
+    root = _project(tmp_path / "project")
+    _document(root).write_text('"""\n- not a mapping\n"""\n', encoding="utf-8")
+    args = build_parser().parse_args(["check", str(root), "--json"])
+
+    assert handle_check(args) == 1
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert payload["status"] == "failed"
+    assert TABLE in payload["error"]["message"]
+    assert "Traceback" not in payload["error"]["message"]
+    assert captured.err == ""
