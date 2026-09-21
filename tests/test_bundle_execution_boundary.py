@@ -477,6 +477,20 @@ def test_the_low_level_archive_helper_takes_no_workspace(tmp_path):
 
 
 @weaver_test()
+def test_the_installer_installs_a_loaded_bundle_and_not_a_location():
+    """Reading one needs the store it lives on, and a bundle's own store is not
+    the workspace store it installs into. The caller says which."""
+
+    import inspect
+
+    from weaver.build_bundle import BuildBundle
+
+    annotation = inspect.signature(Installer.install).parameters["bundle"].annotation
+
+    assert annotation is BuildBundle or annotation == "BuildBundle"
+
+
+@weaver_test()
 def test_the_installer_takes_no_workspace_of_its_own():
     import inspect
 

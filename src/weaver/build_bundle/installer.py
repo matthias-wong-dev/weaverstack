@@ -15,10 +15,9 @@ from datetime import datetime, timezone
 from typing import Any, Mapping
 
 from ..errors import InstallError
-from ..locations import Location
 from ..store import Store
 from ..targets import ItemRef
-from .bundle import BuildBundle, load_bundle, validate_bundle
+from .bundle import BuildBundle, validate_bundle
 from .executors import default_executors
 from .executors.base import (
     ActionExecutor,
@@ -195,18 +194,18 @@ class Installer:
             return None
         return resolve(item)
 
-    def install(self, bundle: BuildBundle | Location) -> InstallationReport:
-        if isinstance(bundle, Location):
-            # A location is read through the Session's own store, which needs a
-            # workspace; only the manifest inside can name one.
-            bundle = load_bundle(bundle, store=self.session.store())
-            self._bind(bundle.plan)
-        else:
-            self._bind(bundle.plan)
-            # Revalidate pre-loaded bundles immediately before execution.
-            validate_bundle(
-                bundle.location, bundle.plan, store=bundle.store or self.store
-            )
+    def install(self, bundle: BuildBundle) -> InstallationReport:
+        """Execute a loaded bundle.
+
+        A bundle rather than a location: reading one needs the store it lives
+        on, and a bundle's own store is not the workspace store it installs
+        into. ``load_bundle`` or ``materialise_bundle_archive`` is where a
+        caller says which.
+        """
+
+        self._bind(bundle.plan)
+        # Revalidate immediately before execution.
+        validate_bundle(bundle.location, bundle.plan, store=bundle.store or self.store)
 
         plan = bundle.plan
         resolved = {target.id: self.resolve_target(target) for target in plan.targets}
