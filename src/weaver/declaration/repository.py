@@ -278,7 +278,13 @@ def parse_item_repository(
         *_standard_parts(authored),
         _generated_content(authored),
     )
-    return compose_repository(merged, root=root, store=store)
+    repository = compose_repository(merged, root=root, store=store)
+    # Imported here rather than at module scope: raw metadata parsing must not
+    # pull in the catalogue, which reads the metadata module itself.
+    from ..catalogue.capacity import validate_repository_capacity
+
+    validate_repository_capacity(repository)
+    return repository
 
 
 def read_repository_fragment(

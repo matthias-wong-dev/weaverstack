@@ -13,6 +13,7 @@ from typing import Iterable, Mapping, Sequence
 from ..declaration.metadata import AUDIT_LIVE_DELETE_DATETIME
 from ..errors import BuildError
 from ..tokens import BUILD_DATETIME_TOKEN
+from .capacity import overflows
 from .tables import (
     AUDIT_DELETE_COLUMN,
     AUDIT_INSERT_COLUMN,
@@ -260,6 +261,23 @@ def _merge_statement(
     )
 
 
+def _value(table: Table, row: Row, name: str) -> str:
+    """One projected value, refused rather than narrowed by the cast around it.
+
+    Defence in depth behind the offline check: a build-derived value, or a
+    direct caller of this renderer, reaches no other gate. Scoped to declaration
+    and deployment data, because what a run records is retained under its own
+    policy.
+    """
+
+    if isinstance(table, CatalogueTable):
+        for overflow in overflows(table, {name: row.get(name)}):
+            raise BuildError(
+                f"{table.name} cannot record this build: {overflow.describe()}."
+            )
+    return typed_literal(row.get(name), table.column(name))
+
+
 def _source_relation(table: Table, rows: Sequence[Row]) -> str:
     """Render a typed merge source.
 
@@ -267,12 +285,7 @@ def _source_relation(table: Table, rows: Sequence[Row]) -> str:
     """
 
     tuples = ",\n                    ".join(
-        "("
-        + ", ".join(
-            typed_literal(row.get(name), table.column(name))
-            for name in table.column_names
-        )
-        + ")"
+        "(" + ", ".join(_value(table, row, name) for name in table.column_names) + ")"
         for row in rows
     )
     # Positional raw names remain distinct from public output aliases.
@@ -438,11 +451,7 @@ def _keep_relation(table: Table, rows: Sequence[Row], identity: Sequence[str]) -
     branches = []
     for start in range(0, len(rows), VALUES_ROWS):
         tuples = ",\n                              ".join(
-            "("
-            + ", ".join(
-                typed_literal(row.get(name), table.column(name)) for name in identity
-            )
-            + ")"
+            "(" + ", ".join(_value(table, row, name) for name in identity) + ")"
             for row in rows[start : start + VALUES_ROWS]
         )
         branches.append(

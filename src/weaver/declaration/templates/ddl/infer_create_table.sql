@@ -13,6 +13,7 @@ end;
 $metadata_validation_sql
 
 $identity_guard_sql
+$column_ceiling_sql
 
 ;with primary_key_columns as (
 $primary_key_columns_cte
