@@ -77,10 +77,19 @@ SCHEMA = "DWG"
 #: second dropped the other out from under its own tests.
 OBJECT = "LoadCustomer"
 STATIC_OBJECT = "LoadStatic"
+#: The same table under thresholds a two-row change can breach.
+STRICT_OBJECT = "LoadStrict"
 
 
-def _source(object_name: str, *, static: bool = False) -> str:
+def _source(object_name: str, *, static: bool = False, strict: bool = False) -> str:
     static_line = "\nStatic: true\n" if static else ""
+    # Low enough that removing one row of two breaches, so a refusal needs no
+    # large fixture to provoke.
+    strict_lines = (
+        "\nDelete percentage threshold: 1\n\nStability row threshold: 1\n"
+        if strict
+        else ""
+    )
     return f"""/*
 Table ID: {SCHEMA}.{object_name}
 
@@ -89,7 +98,7 @@ Description: Customers.
 Lineage: The sales system.
 
 Primary key: Customer id
-{static_line}
+{static_line}{strict_lines}
 Identity: Customer key
 
 Schema:
@@ -127,10 +136,12 @@ class Estate:
 ITEM = WeaverItemId(*PROCEDURE_ITEM)
 
 
-def _install(executor, object_name: str, catalogue: str, *, static: bool) -> Estate:
+def _install(
+    executor, object_name: str, catalogue: str, *, static: bool, strict: bool = False
+) -> Estate:
     document = read_source_document(
         f"{SCHEMA}.{object_name}.sql",
-        _source(object_name, static=static).encode("utf-8"),
+        _source(object_name, static=static, strict=strict).encode("utf-8"),
         WAREHOUSE,
     )
     executor.execute_script(
@@ -192,6 +203,25 @@ def static_estate(
         STATIC_OBJECT,
         fabric_workspace.catalogue_item.name,
         static=True,
+    )
+    yield built
+    _drop(built)
+    forget_installations(built.executor)
+
+
+@pytest.fixture(scope="module")
+def strict_estate(
+    clean_disposable_warehouse, fabric_workspace, fabric_initialise_catalogue
+):
+    """The same table under thresholds a two-row change can breach."""
+
+    fabric_initialise_catalogue()
+    built = _install(
+        clean_disposable_warehouse.executor,
+        STRICT_OBJECT,
+        fabric_workspace.catalogue_item.name,
+        static=False,
+        strict=True,
     )
     yield built
     _drop(built)
@@ -274,14 +304,17 @@ def _source_rows(estate: Estate, rows) -> None:
         )
 
 
-def _load(estate: Estate, *, fault_tolerant: bool) -> LoadResult:
+def _load(estate: Estate, *, fault_tolerant: bool, **policy: bool) -> LoadResult:
     """The object's own procedure, which is what an orchestrated run calls."""
 
+    inputs = (("fault_tolerant", 1 if fault_tolerant else 0),) + tuple(
+        (name, 1 if value else 0) for name, value in sorted(policy.items())
+    )
     return LoadResult.from_row(
         logical_result_row(
             estate.executor.call_procedure(
                 f"[_].[Load {SCHEMA}.{estate.object_name}]",
-                inputs=(("fault_tolerant", 1 if fault_tolerant else 0),),
+                inputs=inputs,
                 outputs=PROCEDURE_RESULT_PARAMETERS,
             )
         )
@@ -1602,3 +1635,124 @@ def test_a_failed_static_reload_leaves_the_next_load_to_run(static_estate):
     assert run.extra["statistics"]["reload"] is False
     assert run.extra["statistics"]["read"] == len(CLEAN)
     assert run.extra["bookmark"] is not None
+
+
+# --- a refusal an orchestrator can read ----------------------------------------
+
+
+@weaver_test(remote=True, resources={"tds"})
+def test_a_thrown_refusal_returns_no_output_values_at_all(estate):
+    """The engine fact the returned-refusal contract exists for.
+
+    The procedure assigns its outputs before it throws, and the outer batch
+    catches the error, and the values are still gone. Recovering a refusal's
+    counts from a thrown call is therefore not possible here.
+    """
+
+    _reset(estate)
+    _source_rows(estate, REJECTABLE)
+
+    # The final result set, because the procedure's own statements come first.
+    captured = estate.executor.query_result_sets(
+        "declare @rows_read bigint;\n"
+        "declare @rejected bigint;\n"
+        "declare @caught int;\n"
+        "begin try\n"
+        f"    exec [_].[Load {SCHEMA}.{estate.object_name}]\n"
+        "        @fault_tolerant = 0\n"
+        "      , @weaver_rows_read = @rows_read output\n"
+        "      , @weaver_rows_rejected = @rejected output;\n"
+        "end try\n"
+        "begin catch\n"
+        "    set @caught = error_number();\n"
+        "end catch;\n"
+        "select @rows_read as rows_read, @rejected as rejected, "
+        "@caught as caught;"
+    )[-1][0]
+
+    assert captured["caught"] == 51020
+    assert captured["rows_read"] is None
+    assert captured["rejected"] is None
+
+
+@weaver_test(remote=True, resources={"tds"})
+def test_a_returned_refusal_carries_the_counts_it_settled(estate):
+    """What an orchestrated run reads instead: the same refusal, as a result.
+
+    It says it refused, so the run records a failure rather than a success with
+    rejects, and it still says how many rows it read and set aside.
+    """
+
+    _reset(estate)
+    _source_rows(estate, CLEAN)
+    _load(estate, fault_tolerant=False, return_refusal=True)
+    loaded = _contents(estate)
+
+    _source_rows(estate, REJECTABLE)
+    refused = _load(estate, fault_tolerant=False, return_refusal=True)
+
+    assert refused.is_refusal
+    assert not refused.succeeded
+    assert refused.rows_read == len(REJECTABLE)
+    assert refused.rows_rejected
+    assert refused.rows_inserted == 0
+    assert refused.rows_updated == 0
+    assert refused.rows_deleted == 0
+    # Refused before writing, so the target still holds what the clean load left.
+    assert _contents(estate) == loaded
+
+
+@weaver_test(remote=True, resources={"tds"})
+def test_an_excessive_change_is_refused_and_the_waiver_permits_it(strict_estate):
+    """One change, one contract, and only the waiver differs.
+
+    Declared at one percent of a target of at least one row, so removing one of
+    two rows breaches. Refused, the target keeps both rows. Waived, the same
+    change is applied.
+    """
+
+    estate = strict_estate
+    _reset(estate)
+    _source_rows(estate, CLEAN)
+    _load(estate, fault_tolerant=False, return_refusal=True)
+    seeded = _contents(estate)
+
+    _source_rows(estate, SHRUNK)
+    refused = _load(estate, fault_tolerant=False, return_refusal=True)
+    unchanged = _contents(estate)
+
+    permitted = _load(
+        estate,
+        fault_tolerant=False,
+        return_refusal=True,
+        ignore_stability_threshold=True,
+    )
+
+    assert len(seeded) == 2
+    assert refused.is_refusal
+    assert "over the 1% threshold" in refused.error_message
+    assert "the target was not modified" in refused.error_message
+    assert refused.rows_deleted == 0
+    assert unchanged == seeded
+
+    assert permitted.succeeded
+    assert permitted.rows_deleted == 1
+    assert len(_contents(estate)) == 1
+
+
+@weaver_test(remote=True, resources={"tds"})
+def test_a_refused_load_establishes_no_bookmark(strict_estate):
+    """A refusal wrote nothing, so there is no window to record having read."""
+
+    estate = strict_estate
+    _reset(estate)
+    _source_rows(estate, CLEAN)
+    _load(estate, fault_tolerant=False, return_refusal=True)
+    clean = _bookmark(estate)
+
+    _source_rows(estate, SHRUNK)
+    refused = _load(estate, fault_tolerant=False, return_refusal=True)
+
+    assert refused.is_refusal
+    assert refused.bookmark_datetime is None
+    assert _bookmark(estate) == clean
