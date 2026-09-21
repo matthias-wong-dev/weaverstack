@@ -14,6 +14,7 @@ from ..catalogue.runtime_state import (
     RuntimeStateInvalidation,
 )
 from .changes import TargetChange
+from .execution import BundleExecution
 from .incremental import BuildSelection
 from .targets import BoundTarget
 
@@ -228,6 +229,9 @@ class BuildPlan:
     targets: tuple[BoundTarget, ...]
     sequences: tuple[BuildSequence, ...]
     selection: BuildSelection
+    #: Where this bundle installs. Frozen at build time and never supplied by
+    #: the caller who installs it.
+    execution: BundleExecution
     omitted_nodes: tuple[OmittedNode, ...] = ()
     #: Added and removed objects by target id. This is part of the manifest and
     #: bundle identity, so the certified summary cannot change independently.
@@ -244,6 +248,7 @@ class BuildPlan:
             "repository_name": self.repository_name,
             "repository_signature": self.repository_signature,
             "targets": [target.to_mapping() for target in self.targets],
+            "execution": self.execution.to_mapping(),
             "sequences": [sequence.to_mapping() for sequence in self.sequences],
             "omitted_nodes": [node.to_mapping() for node in self.omitted_nodes],
             "target_changes": {
@@ -272,6 +277,7 @@ class BuildPlan:
                 BuildSequence.from_mapping(s) for s in mapping.get("sequences", ())
             ),
             selection=BuildSelection.from_mapping(mapping["selection"]),
+            execution=BundleExecution.from_mapping(mapping["execution"]),
             omitted_nodes=tuple(
                 OmittedNode.from_mapping(n) for n in mapping.get("omitted_nodes", ())
             ),

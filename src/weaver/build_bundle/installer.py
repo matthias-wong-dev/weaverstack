@@ -3,6 +3,10 @@
 Sequences are barriers. A failed sequence skips all later sequences, and every
 planned action receives one result. The installer resolves target capabilities
 through the Session; it never reads the source repository or changes the plan.
+
+The workspace every capability is reached through comes from the bundle, not
+from the Session. A Session supplies credentials, transport and reusable
+resources; it does not decide where a frozen bundle installs.
 """
 
 from __future__ import annotations
@@ -67,12 +71,27 @@ class Installer:
         self,
         session,
         *,
-        workspace: Any = None,
         executors: dict[str, ActionExecutor] | None = None,
     ) -> None:
         self.session = session
-        self.workspace = workspace if workspace is not None else session.workspace
         self.executors = default_executors() if executors is None else executors
+        self.workspace: Any = None
+
+    def _bind(self, plan) -> Any:
+        """Bind this installation to the workspace its bundle names.
+
+        Done before any capability is reached, so a mismatched live Spark
+        session is reported instead of quietly installing somewhere else.
+        """
+
+        from .execution import execution_spark_home, execution_workspace
+
+        workspace = execution_workspace(plan.execution, plan)
+        self.workspace = workspace
+        self.session.require_spark_home(
+            execution_spark_home(plan.execution, plan), workspace=workspace
+        )
+        return workspace
 
     @property
     def store(self) -> Store:
@@ -166,8 +185,12 @@ class Installer:
 
     def install(self, bundle: BuildBundle | Location) -> InstallationReport:
         if isinstance(bundle, Location):
-            bundle = load_bundle(bundle, store=self.store)
+            # A location is read through the Session's own store, which needs a
+            # workspace; only the manifest inside can name one.
+            bundle = load_bundle(bundle, store=self.session.store())
+            self._bind(bundle.plan)
         else:
+            self._bind(bundle.plan)
             # Revalidate pre-loaded bundles immediately before execution.
             validate_bundle(
                 bundle.location, bundle.plan, store=bundle.store or self.store

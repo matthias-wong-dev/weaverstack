@@ -28,6 +28,7 @@ from ..store import FilesystemStore, Store
 from ..targets import ItemRef
 from .builder import Builder
 from .bundle import BuildBundle, load_bundle
+from .execution import ExecutionIdentity, resolve_execution_identity
 from .installer import Installer
 from .models import BuildPlan
 from .prune import (
@@ -410,13 +411,12 @@ def install_bundle_archive(
     *,
     archive_store: Store,
     session,
-    workspace=None,
     executors=None,
 ) -> InstallationReport:
+    """Install an archive against the execution context it froze."""
+
     with materialise_bundle_archive(archive, store=archive_store) as bundle:
-        return Installer(session, workspace=workspace, executors=executors).install(
-            bundle
-        )
+        return Installer(session, executors=executors).install(bundle)
 
 
 def build_item_repository(
@@ -428,12 +428,13 @@ def build_item_repository(
     workspace=None,
     source_store: Store,
     catalogue_binding: WarehouseBinding,
+    execution: ExecutionIdentity | None = None,
     output: Location | None = None,
     executors=None,
 ) -> ItemBuildResult:
     """Build and install, optionally retaining the generated bundle at ``output``."""
 
-    installer = Installer(session, workspace=workspace, executors=executors)
+    installer = Installer(session, executors=executors)
 
     with tempfile.TemporaryDirectory(prefix="weaver-build-") as temporary:
         bundle = build_repository_bundle(
@@ -441,6 +442,12 @@ def build_item_repository(
             state=state,
             bindings=bindings,
             catalogue_binding=catalogue_binding,
+            execution=execution
+            if execution is not None
+            else resolve_execution_identity(
+                workspace if workspace is not None else session.workspace,
+                session=session,
+            ),
             source_store=source_store,
             output=output or Location((Path(temporary) / "bundle").as_posix()),
         )
@@ -461,6 +468,7 @@ def build_repository_bundle(
     state: BuildState,
     bindings: ItemBindings,
     catalogue_binding: WarehouseBinding,
+    execution: ExecutionIdentity,
     source_store: Store,
     output: Location,
 ) -> BuildBundle:
@@ -471,6 +479,7 @@ def build_repository_bundle(
         state=state,
         bindings=bindings,
         catalogue_binding=catalogue_binding,
+        execution=execution,
         source_store=source_store,
     ).build(output=output)
 
@@ -509,6 +518,10 @@ def build_item_repository_source(
             workspace=workspace,
             source_store=prepared.store,
             catalogue_binding=catalogue_binding,
+            execution=resolve_execution_identity(
+                workspace if workspace is not None else session.workspace,
+                session=session,
+            ),
             output=output,
             executors=executors,
         )

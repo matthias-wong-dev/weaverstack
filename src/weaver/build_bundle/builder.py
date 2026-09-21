@@ -11,6 +11,7 @@ from ..declaration.repository import WeaverRepository
 from ..locations import Location
 from ..store import Store
 from .bundle import BuildBundle
+from .execution import ExecutionIdentity
 from .targets import ItemBindings, WarehouseBinding
 
 
@@ -21,6 +22,9 @@ class Builder:
     bindings: ItemBindings
     catalogue_binding: WarehouseBinding
     source_store: Store
+    #: Resolved before planning starts. The planner completes it with the Spark
+    #: attachment its action set requires; it makes no calls of its own.
+    execution: ExecutionIdentity
 
     def build(self, *, output: Location | None = None) -> BuildBundle:
         from ..catalogue.state import reconcile_catalogue_state
@@ -44,6 +48,7 @@ class Builder:
             catalogue=reconciliation.catalogue,
             stale_claims=reconciliation.stale_claims,
             catalogue_binding=self.catalogue_binding,
+            execution=self.execution,
             shortcut_sources=self.state.shortcut_sources,
         )
 

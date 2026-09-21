@@ -485,6 +485,8 @@ class ConsoleScope(WorkspaceScope):
         self._credential = credential
         self._transport_store = None
         self._version_checked = False
+        #: The Lakehouse this scope's Livy session was acquired against.
+        self._attached_home: str | None = None
 
         self.auth: Resource = self.track(
             Resource(
@@ -628,6 +630,13 @@ class ConsoleScope(WorkspaceScope):
 
     # --- Livy ---------------------------------------------------------------
 
+    def attached_spark_home(self) -> str | None:
+        """The Lakehouse a started Livy session here is attached to."""
+
+        if self.livy is None or not self.livy.acquired:
+            return None
+        return self._attached_home
+
     def _acquire_livy(self):
         """Acquire a running, bootstrapped Livy session.
 
@@ -639,6 +648,9 @@ class ConsoleScope(WorkspaceScope):
 
         if self.auth is not None:
             self.auth.get()
+        # Recorded before the session exists, so a later requirement for another
+        # Lakehouse is refused rather than served by this attachment.
+        self._attached_home = self.spark_home or _configured_home(self.workspace)
         session = LivySession.for_workspace(
             self.workspace,
             resolver=self.resolver,
@@ -789,6 +801,13 @@ class ConsoleScope(WorkspaceScope):
             ),
             self.telemetry,
         )
+
+
+def _configured_home(workspace) -> str | None:
+    """The Lakehouse ``LivySession`` falls back to when none is named."""
+
+    configured = getattr(workspace, "configured_lakehouses", ()) or ()
+    return configured[0] if configured else None
 
 
 __all__ = ["ConsoleScope", "ConsoleSession", "WarmUp"]

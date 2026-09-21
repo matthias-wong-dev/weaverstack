@@ -248,18 +248,15 @@ def _requires_initialise(args) -> frozenset[str]:
 
 
 def _requires_install(args) -> frozenset[str]:
-    """A frozen bundle may contain any target kind, so declare the coarse set."""
+    """Install declares nothing to warm.
 
-    from weaver.sessions.requirements import (
-        AUTH,
-        LIVY,
-        ONELAKE,
-        RESOLVER,
-        TDS,
-        requirements,
-    )
+    What an installation needs is in its bundle, and the bundle has not been
+    read when a shell or workflow warms resources. Warming from the ambient
+    workspace could start a Spark session the bundle does not want and attach it
+    to the wrong Lakehouse.
+    """
 
-    return requirements(AUTH, RESOLVER, ONELAKE, LIVY, TDS)
+    return frozenset()
 
 
 def command_requirements(parsed) -> frozenset[str]:
@@ -693,7 +690,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     install.add_argument("--json", action="store_true", help="Emit the report as JSON.")
     add_non_interactive(install)
-    _add_workspace_args(install, include_catalogue=False, include_environment=False)
+    # No workspace options: the bundle names where it installs.
     install.set_defaults(handler=handle_install, requires=_requires_install)
 
     # Fabric commands do not read or write the Weaver catalogue.
@@ -926,17 +923,20 @@ def handle_environment_publish(args: argparse.Namespace) -> int:
 
 
 def handle_install(args: argparse.Namespace) -> int:
+    """Install a bundle against the execution context it froze.
+
+    No workspace is resolved here: doing so would let the caller's directory
+    decide where a frozen bundle lands.
+    """
+
     import json
 
     from weaver.operations.install import install
 
-    workspace = _resolve_workspace(args)
-    with _running_session(args, workspace) as opened:
-        report = install(
-            args.bundle,
-            workspace=workspace.workspace,
-            session=opened,
-        )
+    _prefer_desktop_credential(args)
+    # The Session opens with no workspace: the bundle binds it to one.
+    with _running_session(args, None) as opened:
+        report = install(args.bundle, session=opened)
     if args.json:
         print(json.dumps(report.to_mapping(), indent=2))
     else:

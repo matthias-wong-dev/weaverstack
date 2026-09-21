@@ -269,6 +269,11 @@ def _run_build(
         catalogue_items_for_build,
         read_build_state,
     )
+    from ..build_bundle.execution import resolve_execution_identity
+
+    # Where this build installs, resolved once against the Session before the
+    # pure planner is given anything.
+    execution = resolve_execution_identity(workspace, session=session)
 
     # Each state part is its own Step; nesting one here would exceed the
     # Task/Step/Sub-step telemetry hierarchy.
@@ -289,6 +294,7 @@ def _run_build(
                 state=state,
                 source_store=source_store,
                 catalogue_binding=catalogue_binding,
+                execution=execution,
                 output=output,
             )
         if present_selection:
@@ -311,12 +317,13 @@ def _run_build(
                 state=state,
                 source_store=source_store,
                 catalogue_binding=catalogue_binding,
+                execution=execution,
                 output=Location((Path(temporary) / "bundle").as_posix()),
             )
         if present_selection:
             session.report(_selection_lines(bundle.plan.selection, requested_bindings))
         with session.step("Install"):
-            report = Installer(session, workspace=workspace).install(bundle)
+            report = Installer(session).install(bundle)
         result = BuildResult(
             source=source,
             items=tuple(str(binding.item) for binding in requested_bindings.entries),

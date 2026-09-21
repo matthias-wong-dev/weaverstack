@@ -17,6 +17,7 @@ from weaver.build_bundle import (
     ItemBinding,
     ItemBindings,
     LakehouseBinding,
+    WarehouseBinding,
     build_item_repository_source,
     generate_item_build_bundle,
     install_bundle_archive,
@@ -105,7 +106,7 @@ def _bindings():
 
 
 def _control():
-    return LakehouseBinding(ItemRef("Weaver_Control"), workspace_name=WORKSPACE)
+    return WarehouseBinding(ItemRef("Weaver_Control"), workspace_name=WORKSPACE)
 
 
 def _inventories(bindings=None):

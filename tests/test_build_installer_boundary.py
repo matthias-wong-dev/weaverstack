@@ -12,6 +12,7 @@ from dataclasses import replace
 from datetime import datetime, timezone
 
 import pytest
+from support.bundles import given_execution, with_catalogue
 from support.sessions import given_installer
 from support.weaver_test import weaver_test
 from support.workspaces import given_resolver, given_workspace
@@ -93,9 +94,10 @@ def _bundle(tmp_path):
         bundle_id="",
         repository_name="MyRepo",
         repository_signature="sig",
-        targets=(TARGET,),
+        targets=with_catalogue((TARGET,)),
         sequences=sequences,
         selection=BuildSelection(Impact((), (), ()), (), (), ()),
+        execution=given_execution(with_catalogue((TARGET,)), sequences),
     )
     plan = replace(plan, bundle_id=compute_bundle_id(plan))
 
@@ -189,9 +191,10 @@ def test_operator_sequence_labels_are_aggregate_and_do_not_change_bundle_identit
         bundle_id="",
         repository_name="MyRepo",
         repository_signature="sig",
-        targets=(TARGET,),
+        targets=with_catalogue((TARGET,)),
         sequences=(sequence,),
         selection=BuildSelection(Impact((), (), ()), (), (), ()),
+        execution=given_execution(with_catalogue((TARGET,)), (sequence,)),
     )
     bundle_id = compute_bundle_id(plan)
 
@@ -297,9 +300,10 @@ def test_an_endpoint_refresh_a_host_cannot_perform_is_skipped_not_failed(tmp_pat
         bundle_id="",
         repository_name="MyRepo",
         repository_signature="sig",
-        targets=(TARGET,),
+        targets=with_catalogue((TARGET,)),
         sequences=(sequence,),
         selection=BuildSelection(Impact((), (), ()), (), (), ()),
+        execution=given_execution(with_catalogue((TARGET,)), (sequence,)),
     )
     plan = replace(plan, bundle_id=compute_bundle_id(plan))
     store = FilesystemStore()
@@ -353,22 +357,23 @@ def test_an_install_that_needs_no_spark_never_starts_one(tmp_path):
         payload=None,
         payload_sha256=None,
     )
+    sequences = (
+        BuildSequence(
+            number=8990,
+            description="refresh endpoints",
+            batches=(BuildBatch(id="refresh", target_id=TARGET.id, actions=(action,)),),
+        ),
+    )
+    targets = with_catalogue((TARGET,))
     plan = BuildPlan(
         format_version=SUPPORTED_FORMAT_VERSION,
         bundle_id="",
         repository_name="MyRepo",
         repository_signature="sig",
-        targets=(TARGET,),
-        sequences=(
-            BuildSequence(
-                number=8990,
-                description="refresh endpoints",
-                batches=(
-                    BuildBatch(id="refresh", target_id=TARGET.id, actions=(action,)),
-                ),
-            ),
-        ),
+        targets=targets,
+        sequences=sequences,
         selection=BuildSelection(Impact((), (), ()), (), (), ()),
+        execution=given_execution(targets, sequences),
     )
     plan = replace(plan, bundle_id=compute_bundle_id(plan))
     store = FilesystemStore()
@@ -430,22 +435,22 @@ def _tsql_batch(tmp_path, count: int):
                 payload_sha256=hashlib.sha256(data).hexdigest(),
             )
         )
+    sequences = (
+        BuildSequence(
+            number=10,
+            description="warehouse work",
+            batches=(BuildBatch(id="b", target_id=target.id, actions=tuple(actions)),),
+        ),
+    )
     plan = BuildPlan(
         format_version=SUPPORTED_FORMAT_VERSION,
         bundle_id="",
         repository_name="MyRepo",
         repository_signature="sig",
         targets=(target,),
-        sequences=(
-            BuildSequence(
-                number=10,
-                description="warehouse work",
-                batches=(
-                    BuildBatch(id="b", target_id=target.id, actions=tuple(actions)),
-                ),
-            ),
-        ),
+        sequences=sequences,
         selection=BuildSelection(Impact((), (), ()), (), (), ()),
+        execution=given_execution((target,), sequences),
     )
     plan = replace(plan, bundle_id=compute_bundle_id(plan))
     store = FilesystemStore()

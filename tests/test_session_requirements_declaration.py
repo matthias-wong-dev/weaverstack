@@ -179,6 +179,7 @@ def _scope(monkeypatch, *, environment="weaver", lakehouses=("Sales",)):
     scope.local_spark = None
     scope._lock = threading.RLock()
     scope._offered_spark_homes = set()
+    scope._required_spark_home = None
     scope.offer_spark_home(lakehouses)
     return scope
 

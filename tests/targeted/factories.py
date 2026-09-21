@@ -1283,19 +1283,24 @@ def single_action_bundle(
     of every installer failure.
     """
 
+    from support.bundles import given_execution, with_catalogue
+
     target = target or bound_target()
     payloads = {}
     if payload is not None and action.payload is not None:
         payloads[action.payload] = payload
+    targets = with_catalogue((target,))
+    sequences = (
+        _sequence(description=description, target_id=target.id, action=action),
+    )
     plan = BuildPlan(
         format_version=SUPPORTED_FORMAT_VERSION,
         bundle_id="",
         repository_name="weaver_items",
         repository_signature="repository-signature",
-        targets=(target,),
-        sequences=(
-            _sequence(description=description, target_id=target.id, action=action),
-        ),
+        targets=targets,
+        sequences=sequences,
+        execution=given_execution(targets, sequences),
     )
     plan = _with_identity(plan)
     return write_bundle(location, plan=plan, payloads=payloads, store=store)

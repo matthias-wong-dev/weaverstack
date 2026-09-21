@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from .source import SourceDocument
 
 #: Increment when the generated bundle shape changes.
-BUILD_FORMAT_VERSION = 3
+BUILD_FORMAT_VERSION = 4
 
 #: Salt for keyed-table physical signatures; increment when their shape changes.
 KEYED_TABLE_VERSION = 1

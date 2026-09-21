@@ -15,6 +15,7 @@ from dataclasses import replace
 
 import pytest
 import yaml
+from support.bundles import given_execution, with_catalogue
 from support.weaver_test import weaver_test
 
 from weaver.build_bundle import (
@@ -85,14 +86,16 @@ def _plan(bundle_id: str = "") -> BuildPlan:
             ),
         ),
     )
+    targets = with_catalogue((TARGET,))
     return BuildPlan(
         format_version=SUPPORTED_FORMAT_VERSION,
         bundle_id=bundle_id,
         repository_name="MyRepo",
         repository_signature="sig-abc",
-        targets=(TARGET,),
+        targets=targets,
         sequences=sequences,
         selection=BuildSelection(Impact((), (), ()), (), (), ()),
+        execution=given_execution(targets, sequences),
         omitted_nodes=(
             OmittedNode(node_id="sql:Reporting.Report", reason="target_unbound"),
         ),

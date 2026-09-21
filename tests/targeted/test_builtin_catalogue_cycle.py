@@ -23,6 +23,7 @@ from weaver.build_bundle import (
     build_item_repository,
     effective_item_bindings,
 )
+from weaver.build_bundle.execution import ExecutionIdentity
 from weaver.build_bundle.models import BUILD_TABLE, DROP_TABLE
 from weaver.build_bundle.workflow import BuildState
 from weaver.catalogue.state import Catalogue
@@ -217,6 +218,7 @@ def test_empty_registry_recovers_existing_protected_catalogue_tables(estate, tmp
             warehouse=ItemRef("Weaver"), workspace_name=WORKSPACE
         ),
         source_store=estate["store"],
+        execution=ExecutionIdentity(workspace_name=WORKSPACE),
     ).build(output=Location(str(tmp_path / "recovery-bundle")))
 
     physical = [
