@@ -6,10 +6,11 @@ import ast
 import codecs
 import hashlib
 import re
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from ..errors import DiscoveryError
+from ..errors import DiscoveryError, MetadataError
 from ..objects import BASE_CLASS_NAMES, BASE_CLASSES
 from ..signatures import implementation_signature
 from .dependencies import (
@@ -332,6 +333,48 @@ def read_source_document(
     )
 
 
+@contextmanager
+def _metadata_of(relative_path: str):
+    """Name the source file whose metadata could not be read.
+
+    The parser is given the extracted block, so any coordinates it reports are
+    positions in that block and say so. Applied here and nowhere below, so a
+    message names its file once.
+    """
+
+    try:
+        yield
+    except MetadataError as exc:
+        raise MetadataError(f"{relative_path}:\n  {_metadata_detail(exc)}") from exc
+
+
+def _metadata_detail(exc: MetadataError) -> str:
+    mark = getattr(getattr(exc, "__cause__", None), "problem_mark", None)
+    if mark is None:
+        return str(exc)
+    problem = getattr(exc.__cause__, "problem", None) or str(exc)
+    return f"Metadata line {mark.line + 1}, column {mark.column + 1}: {problem}"
+
+
+@contextmanager
+def _analysis_of(relative_path: str):
+    """Name the source file whose SQL the parser could not get through.
+
+    Only the parser's own failures. A defect in Weaver is not an invalid
+    statement and must not be reported as one.
+    """
+
+    from sqlparse.exceptions import SQLParseError
+
+    try:
+        yield
+    except (SQLParseError, RecursionError) as exc:
+        raise DiscoveryError(
+            f"{relative_path}:\n  SQL could not be analysed: "
+            f"{exc or type(exc).__name__}."
+        ) from exc
+
+
 def _check_declared_id(
     relative_path: str, document: SesDocument, filename_id: ObjectId
 ) -> None:
@@ -351,7 +394,8 @@ def _read_python(
     *,
     item_type: str,
 ) -> SourceDocument:
-    document = parse_document(extract_python_metadata(text), language=PYTHON)
+    with _metadata_of(relative_path):
+        document = parse_document(extract_python_metadata(text), language=PYTHON)
     _check_declared_id(relative_path, document, filename_id)
 
     if document.kind == VIEW:
@@ -539,14 +583,16 @@ def _read_sql(
     *,
     item_type: str,
 ) -> SourceDocument:
-    metadata_text, body = extract_sql_metadata_and_body(text)
-    document = parse_document(metadata_text, language=language)
+    with _metadata_of(relative_path):
+        metadata_text, body = extract_sql_metadata_and_body(text)
+        document = parse_document(metadata_text, language=language)
     _check_declared_id(relative_path, document, filename_id)
 
     if document.kind == FOLDER:
         raise DiscoveryError(f"{relative_path}: declare a Folder in Python, not SQL")
 
-    analysis = analyse_sql(body)
+    with _analysis_of(relative_path):
+        analysis = analyse_sql(body)
 
     if document.is_validation:
         _check_sql_validation_program(relative_path, document, body, language)

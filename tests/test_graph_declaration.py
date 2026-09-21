@@ -140,6 +140,93 @@ def test_a_cycle_is_found_among_unrelated_healthy_nodes():
         Graph("ABCDE", [("A", "B"), ("C", "D"), ("D", "E"), ("E", "C")])
 
 
+@weaver_test()
+def test_a_node_that_depends_on_itself_is_refused_before_ordering():
+    """A self-edge is caught on construction, so the cycle walk never sees it."""
+
+    with pytest.raises(GraphError, match="A depends on itself"):
+        Graph("A", [("A", "A")])
+
+
+#: Longer than the interpreter's own limit, so a walk that used the call stack
+#: would raise RecursionError instead of naming what is wrong.
+DEEP = 4000
+
+
+def _names(count: int) -> list[str]:
+    # Zero-padded so sorted order is numeric order, which is what makes the
+    # reported cycle predictable.
+    return [f"n{index:05d}" for index in range(count)]
+
+
+@weaver_test()
+def test_a_chain_deeper_than_the_recursion_limit_still_orders():
+    """Valid and very deep. Ordering is iterative, and so is the check for a
+    cycle it is about to conclude there is none of."""
+
+    names = _names(DEEP)
+    edges = list(zip(names, names[1:]))
+
+    assert Graph(names, edges).order() == tuple(names)
+
+
+@weaver_test()
+def test_a_cycle_deeper_than_the_recursion_limit_is_reported_as_a_cycle():
+    names = _names(DEEP)
+    edges = list(zip(names, names[1:])) + [(names[-1], names[0])]
+
+    with pytest.raises(GraphError) as info:
+        Graph(names, edges)
+
+    reported = str(info.value).removeprefix("dependency cycle: ").split(" -> ")
+    assert reported[0] == names[0]
+    assert reported[-1] == names[0]
+    assert len(reported) == DEEP + 1
+
+
+@weaver_test()
+def test_an_acyclic_tail_attached_to_a_deep_cycle_reports_the_cycle():
+    """The tail is residual too, so a walk that gave up would list it instead."""
+
+    names = _names(DEEP)
+    edges = list(zip(names, names[1:])) + [
+        (names[-1], names[0]),
+        (names[0], "tail"),
+    ]
+
+    with pytest.raises(GraphError) as info:
+        Graph(names + ["tail"], edges)
+
+    reported = str(info.value).removeprefix("dependency cycle: ").split(" -> ")
+    assert "tail" not in reported
+    assert reported[0] == reported[-1] == names[0]
+
+
+@weaver_test()
+def test_a_disconnected_cyclic_component_is_found_from_a_healthy_start():
+    """The first candidate in order leads nowhere, and the cycle is elsewhere."""
+
+    edges = [("A", "B"), ("Y", "Z"), ("Z", "Y")]
+
+    with pytest.raises(GraphError) as info:
+        Graph("ABYZ", edges)
+
+    assert "dependency cycle: Y -> Z -> Y" in str(info.value)
+
+
+@weaver_test()
+def test_the_same_graph_always_reports_the_same_cycle():
+    edges = [("C", "D"), ("D", "E"), ("E", "C"), ("A", "C")]
+    reported = set()
+
+    for _attempt in range(5):
+        with pytest.raises(GraphError) as info:
+            Graph("ABCDE", edges)
+        reported.add(str(info.value))
+
+    assert len(reported) == 1
+
+
 # --- traversal ---------------------------------------------------------------
 
 

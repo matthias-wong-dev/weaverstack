@@ -143,33 +143,58 @@ class Graph:
         return tuple(ordered)
 
     def _find_cycle(self, candidates: set[str]) -> list[str]:
-        path: list[str] = []
-        on_path: set[str] = set()
+        """One cycle among the nodes ordering could not place.
+
+        The walk carries its own stack. A residual component is as deep as the
+        project that declared it, and a diagnostic that ran out of interpreter
+        stack would replace the cycle a user has to fix with a crash inside the
+        code that was going to name it.
+
+        Roots and children are taken in sorted order, so the same repository
+        always reports the same cycle.
+        """
+
         seen: set[str] = set()
-
-        def walk(node: str) -> list[str] | None:
-            if node in on_path:
-                return path[path.index(node) :] + [node]
-            if node in seen:
-                return None
-            seen.add(node)
-            on_path.add(node)
-            path.append(node)
-            for child in sorted(self._downstream[node]):
-                if child not in candidates:
-                    continue
-                found = walk(child)
-                if found is not None:
-                    return found
-            path.pop()
-            on_path.discard(node)
-            return None
-
         for start in sorted(candidates):
-            found = walk(start)
-            if found is not None:
-                return found
+            if start in seen:
+                continue
+            # The active path, and where each node on it sits, so a back edge is
+            # sliced rather than searched for.
+            path: list[str] = []
+            depth: dict[str, int] = {}
+            # Each frame is a node and the children it has left to try, reversed
+            # so taking the next one is a pop from the end.
+            stack: list[tuple[str, list[str]]] = []
+            self._descend(start, candidates, path, depth, stack, seen)
+            while stack:
+                node, remaining = stack[-1]
+                if not remaining:
+                    stack.pop()
+                    del depth[path.pop()]
+                    continue
+                child = remaining.pop()
+                if child in depth:
+                    return path[depth[child] :] + [child]
+                if child in seen:
+                    continue
+                self._descend(child, candidates, path, depth, stack, seen)
         return sorted(candidates)
+
+    def _descend(self, node, candidates, path, depth, stack, seen) -> None:
+        """Put ``node`` on the active path with the children it may still try."""
+
+        seen.add(node)
+        depth[node] = len(path)
+        path.append(node)
+        stack.append(
+            (
+                node,
+                sorted(
+                    (child for child in self._downstream[node] if child in candidates),
+                    reverse=True,
+                ),
+            )
+        )
 
     # --- traversal --------------------------------------------------------
 
