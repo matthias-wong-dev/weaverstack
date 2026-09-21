@@ -310,3 +310,22 @@ def test_the_renderer_leaves_what_a_run_records_alone():
     )
 
     assert statement
+
+
+@weaver_test()
+def test_a_schema_description_names_the_schema_file_it_came_from(tmp_path, capsys):
+    """A schema row repeats its schema as its object, so its provenance is the
+    file that declared it rather than an object's."""
+
+    root = _project(tmp_path / "project")
+    schema = root / "Lakehouse" / "Raw" / "schemas" / "DWG.yml"
+    schema.write_text(
+        "Schema ID: DWG\n\nDescription: " + "d" * (PROSE + 1) + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(DiscoveryError) as refused:
+        check(root)
+
+    assert "schemas/DWG.yml" in str(refused.value)
+    assert "Description" in str(refused.value)

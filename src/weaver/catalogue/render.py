@@ -13,7 +13,7 @@ from typing import Iterable, Mapping, Sequence
 from ..declaration.metadata import AUDIT_LIVE_DELETE_DATETIME
 from ..errors import BuildError
 from ..tokens import BUILD_DATETIME_TOKEN
-from .capacity import overflows
+from .capacity import overflow_of
 from .tables import (
     AUDIT_DELETE_COLUMN,
     AUDIT_INSERT_COLUMN,
@@ -271,7 +271,8 @@ def _value(table: Table, row: Row, name: str) -> str:
     """
 
     if isinstance(table, CatalogueTable):
-        for overflow in overflows(table, {name: row.get(name)}):
+        overflow = overflow_of(table, row, name)
+        if overflow is not None:
             raise BuildError(
                 f"{table.name} cannot record this build: {overflow.describe()}."
             )
