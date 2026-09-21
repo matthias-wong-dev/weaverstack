@@ -107,11 +107,22 @@ def test_a_warehouse_table_carries_its_identity_column():
 
 
 @weaver_test()
-def test_no_primary_key_means_full_replacement():
+def test_a_non_incremental_table_without_primary_key_replaces_wholesale():
     header = TABLE_HEADER.replace("Primary key: Customer id\n", "")
     contract = LoadContract.from_document(_document(header))
 
     assert contract.replaces_wholesale is True
+    assert contract.appends_only is False
+    assert contract.deletes_absent_rows is False
+
+
+@weaver_test()
+def test_an_incremental_table_without_primary_key_appends_only():
+    header = TABLE_HEADER.replace("Primary key: Customer id\n", "")
+    contract = LoadContract.from_document(_document(header + "\nIncremental: true\n"))
+
+    assert contract.replaces_wholesale is False
+    assert contract.appends_only is True
     assert contract.deletes_absent_rows is False
 
 
@@ -236,6 +247,18 @@ def test_an_unkeyed_table_carries_no_uniqueness_machinery():
     )
 
     assert contract.replaces_wholesale is True
+    assert contract.unique_keys == (("Customer name",),)
+    assert contract.checks_merge_uniqueness is False
+
+
+@weaver_test()
+def test_an_unkeyed_incremental_table_keeps_window_unique_key_validation():
+    header = TABLE_HEADER.replace("Primary key: Customer id\n", "")
+    contract = LoadContract.from_document(
+        _document(header + "\nIncremental: true\nUnique keys:\n  - Customer name\n")
+    )
+
+    assert contract.appends_only is True
     assert contract.unique_keys == (("Customer name",),)
     assert contract.checks_merge_uniqueness is False
 

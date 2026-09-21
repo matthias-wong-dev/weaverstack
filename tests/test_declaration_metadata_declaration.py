@@ -333,10 +333,13 @@ def test_comparison_columns_require_a_primary_key():
 
 
 @weaver_test()
-def test_incremental_requires_a_primary_key():
+def test_incremental_without_primary_key_is_a_valid_append_only_declaration():
     without_key = TABLE_YAML.replace("Primary key: Order id\n", "")
-    with pytest.raises(MetadataError, match="requires a Primary key"):
-        parse(without_key + "\nIncremental: true")
+
+    document = parse(without_key + "\nIncremental: true")
+
+    assert document.is_incremental
+    assert document.primary_key == ()
 
 
 @weaver_test()

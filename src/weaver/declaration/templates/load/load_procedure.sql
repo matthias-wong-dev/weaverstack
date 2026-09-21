@@ -49,11 +49,7 @@ $load_body
 
 $end_artifact_cleanup
 
-    -- What the target actually lost, from its own cardinality rather than from
-    -- what the load intended to remove.
-    select @weaver_rows_deleted =
-        @weaver_target_before + @weaver_rows_inserted - count(*)
-    from $target_table;
+$rows_deleted_assignment
 
 $result_assignment
 end;

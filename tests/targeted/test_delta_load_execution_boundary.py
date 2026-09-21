@@ -519,6 +519,99 @@ def test_identity_is_absent_from_every_delta_write_and_signature():
 
 
 @weaver_test()
+def test_an_unkeyed_incremental_lakehouse_load_appends_with_generated_identity():
+    identity_columns = (("Customer key", "bigint"), *TARGET_COLUMNS)
+    spark = _Spark(counts={"staging": 2, "reject": 0}, target_columns=identity_columns)
+
+    result = load_table(
+        spark,
+        contract=_incremental(primary_key=(), identity_column="Customer key"),
+        lakehouse=_Lakehouse(),
+        staging_frame=_Staged(),
+    )
+
+    assert result.rows_inserted == 2
+    assert result.rows_updated == 0
+    assert result.rows_deleted == 0
+    assert spark.counted == ["staging", "reject"]
+    assert len(spark.mutations) == 1
+    written = spark.mutations[0]
+    assert written.startswith("INSERT INTO `lh`.`DWG`.`Customer`")
+    assert "Customer key" not in written
+    assert "MERGE" not in written
+    assert "DELETE" not in written
+
+
+@weaver_test()
+def test_an_unkeyed_incremental_lakehouse_load_rejects_duplicate_unique_keys():
+    spark, result = _load(
+        {"staging": 3, "reject": 1, "clean": 2},
+        contract=_incremental(primary_key=(), unique_keys=(("Email",),)),
+        fault_tolerant=True,
+    )
+
+    assert result.rows_read == 3
+    assert result.rows_inserted == 2
+    assert result.rows_updated == 0
+    assert result.rows_deleted == 0
+    assert result.rows_rejected == 1
+    assert result.succeeded is False
+    assert spark.counted == ["staging", "reject", "clean"]
+    assert len(spark.mutations) == 1
+    assert spark.mutations[0].startswith("INSERT INTO")
+    submitted = "\n".join(spark.statements)
+    assert "PARTITION BY s.`Email`" in submitted
+    assert "duplicate_unique_key: Email" in submitted
+    assert "JOIN `lh`.`DWG`.`Customer`" not in submitted
+
+
+@weaver_test()
+def test_an_unkeyed_incremental_lakehouse_load_enforces_not_null():
+    spark, result = _load(
+        {"staging": 2, "reject": 1, "clean": 1},
+        contract=_incremental(primary_key=(), not_null_columns=("Email",)),
+        fault_tolerant=True,
+    )
+
+    assert result.rows_read == 2
+    assert result.rows_inserted == 1
+    assert result.rows_rejected == 1
+    submitted = "\n".join(spark.statements)
+    assert "s.`Email` IS NULL" in submitted
+    assert "null_column: Email" in submitted
+    assert "FROM weaver_valid AS s" in submitted
+    assert "FROM weaver_unique_key AS s" not in submitted
+
+
+@weaver_test()
+def test_an_unkeyed_incremental_lakehouse_load_refuses_rejects_before_insert():
+    spark = _refused(
+        {"staging": 2, "reject": 1},
+        contract=_incremental(primary_key=(), unique_keys=(("Email",),)),
+        match="fault_tolerant = 0",
+    )
+
+    assert spark.mutations == []
+    assert spark.created == ["Customer_Staging", "Customer_Reject"]
+
+
+@weaver_test()
+def test_an_unkeyed_incremental_table_cannot_claim_deletes():
+    spark = _Spark(counts={"staging": 2})
+
+    with pytest.raises(LoadError, match="append-only.*cannot return explicit deletes"):
+        load_table(
+            spark,
+            contract=_incremental(primary_key=()),
+            lakehouse=_Lakehouse(),
+            staging_frame=_Staged(),
+            deletes=_Staged(("Customer id",)),
+        )
+
+    assert spark.statements == []
+
+
+@weaver_test()
 def test_a_source_supplying_the_managed_identity_is_refused_before_work():
     identity_columns = (("Customer key", "bigint"), *TARGET_COLUMNS)
     spark = _Spark(counts=BUSY, target_columns=identity_columns)

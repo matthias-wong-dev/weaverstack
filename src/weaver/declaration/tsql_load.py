@@ -3,6 +3,9 @@
 Keyed loads preserve this order: stage, discover rejects, apply the rejection
 gate, purge rejects, settle deletes and upserts, validate the proposed target,
 then mutate the target. Rejected rows remain available for inspection.
+
+Unkeyed incremental loads share the staging and rejection gates, then insert the
+survivors without matching the target.
 """
 
 from __future__ import annotations
@@ -138,7 +141,9 @@ def generate_tsql_load_script(
     claims_deletes = program.deletes is not None
     staging_sql = _staging_sql(names, program, contract)
 
-    if contract.primary_key:
+    if contract.appends_only:
+        load_body = _append_only_body(names, contract)
+    elif contract.primary_key:
         load_body = _primary_key_body(names, contract, claims_deletes)
     else:
         load_body = _full_replace_body(names)
@@ -168,6 +173,9 @@ def generate_tsql_load_script(
         target_table=names["target"],
         load_body=_indent(load_body, 4),
         end_artifact_cleanup=_indent(_end_cleanup(names, contract, claims_deletes), 4),
+        rows_deleted_assignment=_indent(
+            _rows_deleted_assignment(contract, names["target"]), 4
+        ),
     ).rstrip()
 
     return render_sql_template(
@@ -393,6 +401,139 @@ def _full_replace_body(names: dict) -> str:
     ).rstrip()
 
 
+def _append_only_body(names: dict, contract: LoadContract) -> str:
+    return render_sql_template(
+        "load/append_only_body",
+        reject_table=names["reject"],
+        upsert_table=names["upsert"],
+        target_table=names["target"],
+        staging_table=names["staging"],
+        rejection_reason=REJECTION_REASON,
+        reason_width=REJECTION_REASON_WIDTH,
+        reject_discovery=_unkeyed_reject_discovery(names, contract),
+        survivor_materialisation=_unkeyed_survivor_materialisation(names, contract),
+        intolerant_message=_escape_literal(INTOLERANT_MESSAGE),
+        tolerated_message=_escape_literal(TOLERATED_MESSAGE),
+    ).rstrip()
+
+
+def _rows_deleted_assignment(contract: LoadContract, target: str) -> str:
+    if contract.appends_only:
+        return "set @weaver_rows_deleted = 0;"
+    return (
+        "-- What the target actually lost, from its own cardinality.\n"
+        "select @weaver_rows_deleted =\n"
+        "    @weaver_target_before + @weaver_rows_inserted - count(*)\n"
+        f"from {target};"
+    )
+
+
+def _unkeyed_reject_discovery(names: dict, contract: LoadContract) -> str:
+    chain, rejects, _survivor = _unkeyed_validation_chain(names, contract)
+    union = "\nunion all\n".join(f"select * from {name}" for name in rejects)
+    return f";with {chain}\ninsert into {names['reject']}\n{union};"
+
+
+def _unkeyed_survivor_materialisation(names: dict, contract: LoadContract) -> str:
+    chain, _rejects, survivor = _unkeyed_validation_chain(names, contract)
+    return (
+        f";with {chain}\n"
+        f"insert into {names['upsert']}\n"
+        f"select __STAGING_SELECT_COLUMNS__ from {survivor} as s;"
+    )
+
+
+def _unkeyed_validation_chain(
+    names: dict, contract: LoadContract
+) -> tuple[str, tuple[str, ...], str]:
+    """Validate one append window without using a UQ as row identity."""
+
+    ctes: list[tuple[str, str]] = []
+    source = names["staging"]
+    internals = ""
+    if contract.unique_keys:
+        ctes.append(
+            (
+                "weaver_signed",
+                "select\n"
+                "    __STAGING_SELECT_COLUMNS__\n"
+                f"  , {_signature_expression()} as "
+                f"{_quote(WORKING_SIGNATURE_COLUMN)}\n"
+                f"from {names['staging']} as s",
+            )
+        )
+        source = "weaver_signed"
+        internals = f"\n  , s.{_quote(WORKING_SIGNATURE_COLUMN)}"
+
+    violation = _violation_predicate(contract)
+    ctes.extend(
+        (
+            (
+                "weaver_null_reject",
+                f"select\n{_reject_projection(_violation_reason(contract))}\n"
+                f"from {source} as s\n"
+                f"where {violation}",
+            ),
+            (
+                "weaver_valid",
+                "select\n"
+                f"    __STAGING_SELECT_COLUMNS__{internals}\n"
+                f"from {source} as s\n"
+                f"where not ({violation})",
+            ),
+        )
+    )
+    rejects = ["weaver_null_reject"]
+    source = "weaver_valid"
+    for index, unique_key in enumerate(contract.unique_keys, start=1):
+        ctes.extend(_unkeyed_unique_key_ctes(unique_key, index, source))
+        rejects.append(f"weaver_unique_{index}_reject")
+        source = f"weaver_unique_{index}_survivor"
+
+    chain = ",\n".join(f"{name} as (\n{_indent(sql, 4)}\n)" for name, sql in ctes)
+    return chain, tuple(rejects), source
+
+
+def _unkeyed_unique_key_ctes(
+    unique_key: tuple[str, ...], index: int, source: str
+) -> list[tuple[str, str]]:
+    participates_here = " and ".join(
+        f"s.{_quote(column)} is not null" for column in unique_key
+    )
+    ranked = f"weaver_unique_{index}_ranked"
+    reason = duplicate_unique_reason(unique_key)
+    signature = f"s.{_quote(WORKING_SIGNATURE_COLUMN)}"
+    return [
+        (
+            ranked,
+            "select\n"
+            "    __STAGING_SELECT_COLUMNS__\n"
+            f"  , {signature}\n"
+            f"  , row_number() over (\n"
+            f"        partition by {_aliased_columns('s', unique_key)}\n"
+            f"        order by {signature}) as "
+            f"{_quote(RANK_COLUMN)}\n"
+            f"from {source} as s",
+        ),
+        (
+            f"weaver_unique_{index}_reject",
+            f"select\n{_reject_projection(_reason_literal(reason))}\n"
+            f"from {ranked} as s\n"
+            f"where {participates_here}\n"
+            f"  and s.{_quote(RANK_COLUMN)} > 1",
+        ),
+        (
+            f"weaver_unique_{index}_survivor",
+            "select\n"
+            "    __STAGING_SELECT_COLUMNS__\n"
+            f"  , {signature}\n"
+            f"from {ranked} as s\n"
+            f"where not ({participates_here})\n"
+            f"   or s.{_quote(RANK_COLUMN)} = 1",
+        ),
+    ]
+
+
 def _signature_expression() -> str:
     """Hash one staged row's canonical comparison payload.
 
@@ -599,23 +740,29 @@ def _violation_predicate(contract: LoadContract, alias: str = "s") -> str:
     """Match rows with an unusable key or a declared not-null violation."""
 
     prefix = f"{alias}." if alias else ""
-    predicates = [_blank_key_predicate(contract.primary_key, alias=alias)]
+    predicates = []
+    if contract.primary_key:
+        predicates.append(_blank_key_predicate(contract.primary_key, alias=alias))
     predicates.extend(
         f"{prefix}{_quote(column)} is null" for column in contract.not_null_columns
     )
-    return "\n   or ".join(predicates)
+    return "\n   or ".join(predicates) if predicates else "1 = 0"
 
 
 def _violation_reason(contract: LoadContract, alias: str = "s") -> str:
     """Return one reason per refused row so thresholds count each row once."""
 
     width = REJECTION_REASON_WIDTH
-    if not contract.not_null_columns:
+    if not contract.primary_key and not contract.not_null_columns:
+        return f"cast(null as varchar({width}))"
+    if contract.primary_key and not contract.not_null_columns:
         return f"cast('{REASON_BLANK_PK}' as varchar({width}))"
-    branches = [
-        f"        when {_blank_key_predicate(contract.primary_key, alias=alias)}\n"
-        f"            then cast('{REASON_BLANK_PK}' as varchar({width}))"
-    ]
+    branches = []
+    if contract.primary_key:
+        branches.append(
+            f"        when {_blank_key_predicate(contract.primary_key, alias=alias)}\n"
+            f"            then cast('{REASON_BLANK_PK}' as varchar({width}))"
+        )
     branches.extend(
         f"        when {alias}.{_quote(column)} is null\n"
         f"            then cast('{null_column_reason(column)}' as varchar({width}))"
@@ -877,8 +1024,10 @@ def _merge_conflict_branch(
 def _cleanup(names: dict, contract: LoadContract, claims_deletes: bool) -> str:
     """Drop only this procedure's working tables, newest dependency first."""
 
-    if not contract.primary_key:
+    if contract.replaces_wholesale:
         keys = ("staging",)
+    elif contract.appends_only:
+        keys = ("reject", "upsert", "staging")
     elif _has_delete_relation(contract, claims_deletes):
         keys = ("reject", "upsert", "delete", "staging")
     else:
@@ -894,7 +1043,7 @@ def _end_cleanup(names: dict, contract: LoadContract, claims_deletes: bool) -> s
     """Keep working tables when a load rejects rows or stops at a gate."""
 
     cleanup = _cleanup(names, contract, claims_deletes)
-    if not contract.primary_key:
+    if contract.replaces_wholesale:
         return cleanup
     return f"if @weaver_rows_rejected = 0\nbegin\n{_indent(cleanup, 4)}\nend;"
 
@@ -926,9 +1075,11 @@ def _signature_payload_select(
     canonical value with its byte length keeps separators and nulls distinct.
     """
 
-    if not contract.primary_key:
+    if contract.appends_only and contract.unique_keys:
+        comparison_filter = "1 = 1"
+    elif not contract.primary_key:
         return "-- No primary key, so no row is compared and there is no signature."
-    if contract.comparison_columns:
+    elif contract.comparison_columns:
         names_in = ", ".join(
             _sql_literal(column.lower()) for column in contract.comparison_columns
         )

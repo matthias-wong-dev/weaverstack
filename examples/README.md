@@ -170,6 +170,23 @@ The source returns the schema columns and never supplies `Customer key`. New row
 receive a generated bigint. Keyed updates keep it; replacement or recreation
 assigns new values.
 
+An immutable feed can omit the primary key:
+
+```yaml
+Incremental: true
+Identity: Event key
+
+Schema:
+  Event type: string
+  Occurred at: timestamp
+```
+
+Each incremental window is validated against its declared `Not null` and `Unique
+keys`, then the surviving rows are appended. Unique keys apply within that window;
+they do not match existing target rows. Existing rows are not updated or deleted,
+and an empty window writes nothing. The source or its bookmark still decides which
+input has already been consumed.
+
 Or orchestrate the lot, in dependency order, from either mode:
 
 ``` bash
