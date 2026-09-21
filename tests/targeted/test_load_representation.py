@@ -165,6 +165,14 @@ def test_a_view_has_no_generated_load():
 #: describes it. See the test below.
 GENERATED_FINGERPRINTS = {
     "tsql": (16, "49b932ed347aaf6a359f63d8baa0b56cbf04cadf05e660811f401da9b4a9a8ab"),
+    "tsql_append": (
+        16,
+        "ba256939be781198bfaa435fa39a83c5bac3658fc790a9c934d0571bcef62ee8",
+    ),
+    "tsql_append_validated": (
+        16,
+        "2e9ad5c53dabd60cc61003f13feebf219d112d926f0e70123eb8c6d00c67e857",
+    ),
     "spark": (9, "d0cdda197f8619dc2f679b7ef270154e439b76aaaf27f5001c79b489304a6acf"),
 }
 
@@ -190,6 +198,22 @@ def test_a_change_to_generation_must_move_its_template_version():
             TSQL_LOAD_VERSION,
             hashlib.sha256(
                 _warehouse()
+                .create_load(item=WeaverItemId("Warehouse", "Reporting"))
+                .payload
+            ).hexdigest(),
+        ),
+        "tsql_append": (
+            TSQL_LOAD_VERSION,
+            hashlib.sha256(
+                _warehouse(_no_key(_incremental(WAREHOUSE_TABLE)))
+                .create_load(item=WeaverItemId("Warehouse", "Reporting"))
+                .payload
+            ).hexdigest(),
+        ),
+        "tsql_append_validated": (
+            TSQL_LOAD_VERSION,
+            hashlib.sha256(
+                _warehouse(_no_key(_incremental(CONSTRAINED)))
                 .create_load(item=WeaverItemId("Warehouse", "Reporting"))
                 .payload
             ).hexdigest(),
@@ -436,11 +460,39 @@ def test_an_incremental_unkeyed_warehouse_load_appends_with_generated_identity()
 
     # The one delete is the explicit reload gate. The ordinary load body keeps
     # every existing row and inserts staging with no match or update path.
+    assert (
+        "select @weaver_rows_read = count(*) from [Sales].[Customer_Staging];"
+        in payload
+    )
     assert payload.count("delete from [Sales].[Customer];") == 1
     assert payload.count("insert into [Sales].[Customer] (") == 1
     assert "merge into [Sales].[Customer]" not in payload
+    assert "update c\n" not in payload
+    assert "join [Sales].[Customer]" not in payload
     assert "set @weaver_rows_deleted = 0;" in payload
     assert "c.is_identity = 0" in payload
+
+
+@weaver_test()
+def test_an_incremental_unkeyed_warehouse_load_validates_staging_constraints():
+    payload = _body(_no_key(_incremental(CONSTRAINED)))
+
+    assert "s.[Customer name] is null" in payload
+    assert "null_column: Customer name" in payload
+    assert "partition by s.[Email]" in payload
+    assert "duplicate_unique_key: Email" in payload
+    assert "@weaver_rows_rejected > 0 and @fault_tolerant = 0" in payload
+    assert "rows were rejected and excluded from the load" in payload
+    assert "create table [Sales].[Customer_Upsert] as" in payload
+    assert "from [Sales].[Customer_Upsert] as u" in payload
+    assert "join [Sales].[Customer]" not in payload
+    assert "update c\n" not in payload
+
+    strict_gate = payload.index("@weaver_rows_rejected > 0 and @fault_tolerant = 0")
+    survivors = payload.index("create table [Sales].[Customer_Upsert] as")
+    target_insert = payload.index("insert into [Sales].[Customer] (")
+    tolerated_result = payload.index("rows were rejected and excluded from the load")
+    assert strict_gate < survivors < target_insert < tolerated_result
 
 
 @weaver_test()

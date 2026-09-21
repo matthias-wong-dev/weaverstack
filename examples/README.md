@@ -181,9 +181,11 @@ Schema:
   Occurred at: timestamp
 ```
 
-Each incremental window is appended. Existing rows are not matched, updated or
-deleted, and an empty window writes nothing. The source or its bookmark still
-decides which input has already been consumed.
+Each incremental window is validated against its declared `Not null` and `Unique
+keys`, then the surviving rows are appended. Unique keys apply within that window;
+they do not match existing target rows. Existing rows are not updated or deleted,
+and an empty window writes nothing. The source or its bookmark still decides which
+input has already been consumed.
 
 Or orchestrate the lot, in dependency order, from either mode:
 

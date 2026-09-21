@@ -84,9 +84,11 @@ def blank_key_predicate(columns, alias: str = "s") -> str:
 
 def violation_predicate(contract: LoadContract, alias: str = "s") -> str:
     prefix = f"{alias}." if alias else ""
-    predicates = [blank_key_predicate(contract.primary_key, alias)]
+    predicates = []
+    if contract.primary_key:
+        predicates.append(blank_key_predicate(contract.primary_key, alias))
     predicates += [f"{prefix}`{c}` IS NULL" for c in contract.not_null_columns]
-    return " OR ".join(predicates)
+    return " OR ".join(predicates) if predicates else "FALSE"
 
 
 def participates(columns, alias: str = "s") -> str:

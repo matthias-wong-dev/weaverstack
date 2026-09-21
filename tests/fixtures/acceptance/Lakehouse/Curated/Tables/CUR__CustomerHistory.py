@@ -9,9 +9,16 @@ Incremental: true
 
 Identity: ChangeKey
 
+Not null:
+  - CustomerName
+
+Unique keys:
+  - CustomerId
+
 Notes: |
   Each load reads source rows changed after this table's bookmark. With no
-  primary key, every row in that window is appended and existing versions remain.
+  primary key, every valid row in that window is appended and existing versions
+  remain. CustomerId is unique within one window; a later version may repeat it.
 
 Schema:
   CustomerId: integer

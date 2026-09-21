@@ -252,6 +252,18 @@ def test_an_unkeyed_table_carries_no_uniqueness_machinery():
 
 
 @weaver_test()
+def test_an_unkeyed_incremental_table_keeps_window_unique_key_validation():
+    header = TABLE_HEADER.replace("Primary key: Customer id\n", "")
+    contract = LoadContract.from_document(
+        _document(header + "\nIncremental: true\nUnique keys:\n  - Customer name\n")
+    )
+
+    assert contract.appends_only is True
+    assert contract.unique_keys == (("Customer name",),)
+    assert contract.checks_merge_uniqueness is False
+
+
+@weaver_test()
 def test_the_reject_vocabulary_names_the_column_or_key_that_refused_a_row():
     """A table may declare several unique keys, so "duplicate" alone is not enough."""
 

@@ -52,6 +52,7 @@ class LoadContract:
 
     @property
     def appends_only(self) -> bool:
+        """Whether validated staging is inserted without target reconciliation."""
         return not self.primary_key and self.incremental
 
     @property

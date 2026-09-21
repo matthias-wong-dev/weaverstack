@@ -189,12 +189,13 @@ def _reconcile(
     # ``_Staging`` answers is what the source proposed.
     evidence["staging"] = staging_view
 
-    if contract.appends_only:
-        return _append_only(spark, names, staging_view, columns, rows_read)
     if contract.replaces_wholesale:
         return _full_replace(spark, names, staging_view, columns, rows_read)
 
-    signature = row_signature("s", _comparison_columns(contract, columns), types)
+    signature_columns = (
+        columns if contract.appends_only else _comparison_columns(contract, columns)
+    )
+    signature = row_signature("s", signature_columns, types)
     rejects, reject_view = _discover_rejects(
         spark, held, names["target"], staging_view, contract, columns, signature
     )
@@ -216,9 +217,25 @@ def _reconcile(
                     rows_rejected=rows_rejected,
                 ),
             )
-        staging_view = _purge_staging(
+        staging_view, rows_accepted = _purge_staging(
             spark, held, names["target"], staging_view, contract, columns, signature
         )
+    else:
+        rows_accepted = rows_read
+
+    if contract.appends_only:
+        result = _append_only(
+            spark,
+            names,
+            staging_view,
+            columns,
+            rows_read=rows_read,
+            rows_inserted=rows_accepted,
+            rows_rejected=rows_rejected,
+        )
+        if rows_rejected:
+            return result.rejected(f"{rows_rejected} {TOLERATED_MESSAGE}")
+        return result
 
     change_view = _settled_changes(
         spark, held, names, staging_view, contract, columns, signature
@@ -319,7 +336,7 @@ def _discover_rejects(
 
 def _purge_staging(
     spark, held, target, staging_view, contract: LoadContract, columns, signature
-) -> str:
+) -> tuple[str, int]:
     """Derive survivors from the same chain that produced the rejects."""
 
     chain, _rejects = _validation_chain(staging_view, contract, columns, signature)
@@ -332,12 +349,20 @@ def _purge_staging(
         target,
         "clean",
     )
-    clean.count()
+    rows_accepted = clean.count()
     _give_back_one(spark, held, staging_view)
-    return clean_view
+    return clean_view, rows_accepted
 
 
 def _validation_chain(
+    staging_view, contract: LoadContract, columns, signature: str
+) -> tuple[str, list[str]]:
+    if not contract.primary_key:
+        return _unkeyed_validation_chain(staging_view, contract, columns, signature)
+    return _keyed_validation_chain(staging_view, contract, columns, signature)
+
+
+def _keyed_validation_chain(
     staging_view, contract: LoadContract, columns, signature: str
 ) -> tuple[str, list[str]]:
     named = qualified("s", columns)
@@ -393,6 +418,81 @@ def _validation_chain(
 
     chain = ",\n".join(f"{name} AS (\n{sql}\n)" for name, sql in ctes)
     return chain, rejects
+
+
+def _unkeyed_validation_chain(
+    staging_view, contract: LoadContract, columns, signature: str
+) -> tuple[str, list[str]]:
+    """Validate one append window without assigning a relational key."""
+
+    named = qualified("s", columns)
+    violation = violation_predicate(contract)
+    ctes = []
+    source = staging_view
+    if contract.unique_keys:
+        ctes.append(
+            (
+                "weaver_signed",
+                f"SELECT {named}, {signature} AS `{WORKING_SIGNATURE_COLUMN}`\n"
+                f"FROM {staging_view} AS s",
+            )
+        )
+        source = "weaver_signed"
+
+    ctes.extend(
+        (
+            (
+                "weaver_null_reject",
+                f"SELECT {named}, {_violation_reason(contract)} AS `{REJECTION_REASON}`\n"
+                f"FROM {source} AS s WHERE {violation}",
+            ),
+            (
+                "weaver_valid",
+                f"SELECT * FROM {source} AS s WHERE NOT ({violation})",
+            ),
+        )
+    )
+    rejects = ["weaver_null_reject"]
+    source = "weaver_valid"
+    for index, unique_key in enumerate(contract.unique_keys, start=1):
+        ctes.extend(_unkeyed_unique_key_ctes(unique_key, index, source, columns))
+        rejects.append(f"weaver_unique_{index}_reject")
+        source = f"weaver_unique_{index}_survivor"
+
+    chain = ",\n".join(f"{name} AS (\n{sql}\n)" for name, sql in ctes)
+    return chain, rejects
+
+
+def _unkeyed_unique_key_ctes(
+    unique_key, index: int, source: str, columns
+) -> list[tuple[str, str]]:
+    """Reject duplicate UQ rows inside one append window."""
+
+    named = qualified("s", columns)
+    participates_here = participates(unique_key)
+    ranked = f"weaver_unique_{index}_ranked"
+    reason = duplicate_unique_reason(unique_key)
+    return [
+        (
+            ranked,
+            f"SELECT {named}, s.`{WORKING_SIGNATURE_COLUMN}`, row_number() OVER (\n"
+            f"    PARTITION BY {qualified('s', unique_key)}\n"
+            f"    ORDER BY s.`{WORKING_SIGNATURE_COLUMN}`) AS `{RANK_COLUMN}`\n"
+            f"FROM {source} AS s",
+        ),
+        (
+            f"weaver_unique_{index}_reject",
+            f"SELECT {named}, '{reason}' AS `{REJECTION_REASON}`\n"
+            f"FROM {ranked} AS s\n"
+            f"WHERE {participates_here} AND s.`{RANK_COLUMN}` > 1",
+        ),
+        (
+            f"weaver_unique_{index}_survivor",
+            f"SELECT {named}, s.`{WORKING_SIGNATURE_COLUMN}`\n"
+            f"FROM {ranked} AS s\n"
+            f"WHERE NOT ({participates_here}) OR s.`{RANK_COLUMN}` = 1",
+        ),
+    ]
 
 
 def _unique_key_ctes(
@@ -473,19 +573,23 @@ def _unique_key_ctes(
 
 def _surviving_relation(contract: LoadContract) -> str:
     if not contract.unique_keys:
-        return "weaver_unique_key"
+        return "weaver_unique_key" if contract.primary_key else "weaver_valid"
     return f"weaver_unique_{len(contract.unique_keys)}_survivor"
 
 
 def _violation_reason(contract: LoadContract, alias: str = "s") -> str:
     """Choose one reason per rejected row so threshold counts remain row counts."""
 
-    if not contract.not_null_columns:
+    if not contract.primary_key and not contract.not_null_columns:
+        return "CAST(NULL AS STRING)"
+    if contract.primary_key and not contract.not_null_columns:
         return f"'{REASON_BLANK_PK}'"
-    branches = [
-        f"WHEN {blank_key_predicate(contract.primary_key, alias)} "
-        f"THEN '{REASON_BLANK_PK}'"
-    ]
+    branches = []
+    if contract.primary_key:
+        branches.append(
+            f"WHEN {blank_key_predicate(contract.primary_key, alias)} "
+            f"THEN '{REASON_BLANK_PK}'"
+        )
     branches += [
         f"WHEN {alias}.`{column}` IS NULL THEN '{null_column_reason(column)}'"
         for column in contract.not_null_columns
@@ -696,11 +800,24 @@ def _apply_deletes(spark, names, delete_view, contract) -> None:
     )
 
 
-def _append_only(spark, names, staging_view, columns, rows_read: int) -> LoadResult:
+def _append_only(
+    spark,
+    names,
+    staging_view,
+    columns,
+    *,
+    rows_read: int,
+    rows_inserted: int,
+    rows_rejected: int,
+) -> LoadResult:
     """Insert an unkeyed incremental window without reading existing rows."""
 
-    if not rows_read:
-        return LoadResult(succeeded=True, rows_read=0)
+    if not rows_inserted:
+        return LoadResult(
+            succeeded=True,
+            rows_read=rows_read,
+            rows_rejected=rows_rejected,
+        )
     audit = delta_audit_names()
     named = qualified("", columns)
     audit_columns = qualified("", audit)
@@ -712,7 +829,8 @@ def _append_only(spark, names, staging_view, columns, rows_read: int) -> LoadRes
     return LoadResult(
         succeeded=True,
         rows_read=rows_read,
-        rows_inserted=rows_read,
+        rows_inserted=rows_inserted,
+        rows_rejected=rows_rejected,
     )
 
 
