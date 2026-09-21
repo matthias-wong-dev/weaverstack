@@ -512,3 +512,226 @@ def test_a_workspace_bound_by_hand_cannot_redirect_a_bundle(tmp_path):
     installer.install(bundle)
 
     assert installer.workspace.workspace == "Sales"
+
+
+# --- one build makes one attachment decision -----------------------------------
+#
+# Fabric attaches a Livy session to one Lakehouse, and a build binds several. A
+# build that offered them all would attach to whichever physical name sorted
+# first, while the bundle freezes the target of the logical item that sorts
+# first. Where the two orders disagree the build's own installation is refused
+# by the Spark session the build itself started, so the choice is made once,
+# before anything can acquire Spark, and read from the same order both times.
+
+#: Logical order and physical name order disagree, which is the whole point.
+TWO_LAKEHOUSES = (("Lakehouse/Alpha", "Zulu_LH"), ("Lakehouse/Beta", "Alpha_LH"))
+
+
+class _BuildHalted(Exception):
+    """Raised at the platform seam, once the build has settled its attachment."""
+
+
+def _two_lakehouse_repository(tmp_path):
+    """One repository authoring both items, each with a table to build."""
+
+    from factories import _write, lakehouse_table, schema_document
+
+    from weaver.declaration.repository import parse_item_repository
+
+    root = tmp_path / "estate"
+    for logical, _physical in TWO_LAKEHOUSES:
+        _write(root, f"{logical}/schemas/DWG.yml", schema_document("DWG"))
+        _write(
+            root,
+            f"{logical}/Tables/DWG__Customer.py",
+            lakehouse_table("DWG.Customer"),
+        )
+    return root, parse_item_repository(Location(str(root)))
+
+
+def _two_lakehouse_bindings():
+    from factories import item_bindings
+
+    from weaver.build_bundle import effective_item_bindings
+    from weaver.targets import ItemRef
+
+    return effective_item_bindings(
+        item_bindings(*TWO_LAKEHOUSES, workspace_name="Sales"),
+        control_item=ItemRef("Weaver"),
+        workspace_name="Sales",
+    )
+
+
+def _two_lakehouse_session(workspace, *, root=None):
+    from support.workspaces import given_resolver
+
+    return given_session(
+        workspace=workspace,
+        store=FilesystemStore(),
+        resolver=given_resolver(
+            workspace=workspace,
+            lakehouses=("Zulu_LH", "Alpha_LH"),
+            warehouses=("Weaver",),
+            root=root,
+        ),
+    )
+
+
+def _attached_to(session, workspace, lakehouse: str):
+    """A Session whose Spark resource in this scope is already live."""
+
+    session.scope(workspace).attached_spark_home = lambda: lakehouse
+    return session
+
+
+def _build_two(root, session):
+    import weaver
+
+    return weaver.build(
+        str(root),
+        items=[
+            f"{logical}=Lakehouse/{physical}" for logical, physical in TWO_LAKEHOUSES
+        ],
+        session=session,
+    )
+
+
+@pytest.fixture
+def halted(monkeypatch):
+    """Stop each build at the platform seam, after it settles its attachment.
+
+    Preflight is a separate claim with its own tests, and reaching it here would
+    need a tenant.
+    """
+
+    import weaver.operations.build
+
+    def halt(workspace, **kwargs):
+        raise _BuildHalted("build")
+
+    monkeypatch.setattr(weaver.operations.build, "_preflight", lambda *a, **k: None)
+    monkeypatch.setattr(weaver.operations.build, "_run_build", halt)
+
+
+@weaver_test()
+def test_a_build_attaches_where_its_first_item_binds_not_where_the_name_sorts(
+    tmp_path, halted
+):
+    """``Alpha_LH`` is the name that sorts first and is not the attachment."""
+
+    root, _repository = _two_lakehouse_repository(tmp_path)
+    workspace = Workspace(workspace="Sales", catalogue="Warehouse/Weaver")
+    session = _two_lakehouse_session(workspace)
+
+    with pytest.raises(_BuildHalted):
+        _build_two(root, session)
+
+    assert session.scope(workspace).spark_home == "Zulu_LH"
+
+
+@weaver_test()
+def test_the_bundle_freezes_the_attachment_the_build_already_required(tmp_path):
+    """Generate and install in one Session, as a build does.
+
+    The installer refuses a bundle whose attachment disagrees with the live
+    one, so a build that chose differently from its own planner could not
+    install what it just generated.
+    """
+
+    from factories import target_inventory
+
+    from weaver.build_bundle import build_repository_bundle
+    from weaver.build_bundle.execution import ExecutionIdentity
+    from weaver.build_bundle.targets import WarehouseBinding
+    from weaver.build_bundle.workflow import BuildState
+    from weaver.catalogue.state import Catalogue
+    from weaver.operations.build import _spark_home
+    from weaver.targets import ItemRef
+
+    root, repository = _two_lakehouse_repository(tmp_path)
+    bindings = _two_lakehouse_bindings()
+    workspace = Workspace(workspace="Sales", catalogue="Warehouse/Weaver")
+    session = _two_lakehouse_session(workspace, root=tmp_path / "onelake")
+    store = FilesystemStore()
+    resolver = session.resolver(workspace)
+    for item in ("Zulu_LH", "Alpha_LH"):
+        store.make_directory(resolver.files_root(ItemRef(item)))
+        store.make_directory(resolver.tables_root(ItemRef(item)))
+
+    # What the build settles before anything can acquire Spark.
+    required = _spark_home(bindings)
+    session.require_spark_home(required, workspace=workspace)
+
+    bundle = build_repository_bundle(
+        repository,
+        bindings=bindings,
+        state=BuildState(
+            catalogue=Catalogue(rows={}),
+            target_inventories={
+                binding.item: target_inventory(
+                    target_id=binding.to_bound_target().id,
+                    kind=binding.to_bound_target().kind,
+                    target_name=binding.to_bound_target().name,
+                )
+                for binding in bindings.entries
+            },
+        ),
+        source_store=FilesystemStore(),
+        catalogue_binding=WarehouseBinding(
+            warehouse=ItemRef("Weaver"), workspace_name="Sales"
+        ),
+        execution=ExecutionIdentity(workspace_name="Sales"),
+        output=Location(str(tmp_path / "bundle")),
+    )
+
+    assert required == "Zulu_LH"
+    assert execution_spark_home(bundle.plan.execution, bundle.plan) == required
+    report = Installer(
+        session,
+        executors={
+            name: Recorder(name)
+            for name in (
+                "spark_sql",
+                "spark_sql_batch",
+                "spark_table",
+                "folder",
+                "shortcut",
+                "sql_endpoint_refresh",
+                "tsql",
+                "tsql_batch",
+                "load_file",
+                "runtime_state",
+            )
+        },
+    ).install(bundle)
+    assert report.succeeded
+
+
+@weaver_test()
+def test_a_reused_session_already_attached_where_the_build_needs_it_is_kept(
+    tmp_path, halted
+):
+    """Reuse is the point of passing a Session; only a mismatch is a problem."""
+
+    root, _repository = _two_lakehouse_repository(tmp_path)
+    workspace = Workspace(workspace="Sales", catalogue="Warehouse/Weaver")
+    session = _attached_to(_two_lakehouse_session(workspace), workspace, "Zulu_LH")
+
+    with pytest.raises(_BuildHalted):
+        _build_two(root, session)
+
+    assert session.scope(workspace).spark_home == "Zulu_LH"
+
+
+@weaver_test()
+def test_a_build_into_a_session_attached_elsewhere_is_refused_before_it_plans(
+    tmp_path, halted
+):
+    """The refusal arrives at the build, not at the install it would reach."""
+
+    root, _repository = _two_lakehouse_repository(tmp_path)
+    workspace = Workspace(workspace="Sales", catalogue="Warehouse/Weaver")
+    session = _attached_to(_two_lakehouse_session(workspace), workspace, "Archive_LH")
+
+    with pytest.raises(CommandError, match="attached to Lakehouse 'Archive_LH'"):
+        _build_two(root, session)

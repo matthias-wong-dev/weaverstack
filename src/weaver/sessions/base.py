@@ -635,8 +635,8 @@ class WorkspaceScope:
             required = self._required_spark_home
             if required is not None and required != name:
                 raise CommandError(
-                    f"This session is already installing into Lakehouse "
-                    f"{required!r} and cannot also use {name!r}."
+                    f"This session is bound to Lakehouse {required!r} and cannot "
+                    f"also use {name!r}. Run this work from its own session."
                 )
             attached = self.attached_spark_home()
             if attached is not None and attached != name:

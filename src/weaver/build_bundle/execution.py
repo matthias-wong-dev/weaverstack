@@ -186,19 +186,32 @@ def plan_needs_spark(plan) -> bool:
     )
 
 
-def select_spark_home(targets, *, needed: bool) -> str | None:
-    """The Lakehouse target a Spark session attaches to, or ``None``.
+def spark_home_of(targets):
+    """The Lakehouse a Spark session attaches to for these targets, or ``None``.
 
-    The first Lakehouse target in manifest order, so the same plan always
-    attaches to the same Lakehouse. Warehouse-only work needs no attachment and
-    gets none, which is what keeps it off Livy.
+    The first Lakehouse in the order given. A build and the planner read the
+    same ordered bound targets, so the attachment a build requires before Spark
+    starts is the one the bundle freezes.
+    """
+
+    for target in targets:
+        if target.kind == LAKEHOUSE_TARGET:
+            return target
+    return None
+
+
+def select_spark_home(targets, *, needed: bool) -> str | None:
+    """The id of the Lakehouse target a Spark session attaches to, or ``None``.
+
+    Warehouse-only work needs no attachment and gets none, which is what keeps
+    it off Livy.
     """
 
     if not needed:
         return None
-    for target in targets:
-        if target.kind == LAKEHOUSE_TARGET:
-            return target.id
+    home = spark_home_of(targets)
+    if home is not None:
+        return home.id
     raise BuildError(
         "This build installs Spark work but binds no Lakehouse to attach a Spark "
         "session to. Bind a Lakehouse item, or build only Warehouse items."
@@ -308,5 +321,6 @@ __all__ = [
     "execution_workspace",
     "plan_needs_spark",
     "select_spark_home",
+    "spark_home_of",
     "validate_execution",
 ]

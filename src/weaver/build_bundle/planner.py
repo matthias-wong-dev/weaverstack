@@ -284,13 +284,14 @@ def generate_item_build_bundle(
         targets=targets,
         sequences=sequences,
         selection=selection,
-        # The attachment is chosen once the action set is known, so Warehouse-only
-        # work freezes no Lakehouse and therefore acquires no Spark session.
+        # Warehouse-only work freezes no Lakehouse and therefore acquires no
+        # Spark session. The bound targets are read in the order ``build``
+        # reads its bindings, so the two cannot choose different attachments.
         execution=BundleExecution.of(
             execution,
             catalogue_target_id=catalogue_target.id,
             spark_home_target_id=select_spark_home(
-                targets, needed=_needs_spark(sequences)
+                target_by_item.values(), needed=_needs_spark(sequences)
             ),
         ),
         omitted_nodes=tuple(

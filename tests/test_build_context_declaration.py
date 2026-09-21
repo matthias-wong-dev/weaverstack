@@ -524,12 +524,13 @@ def test_a_resolved_workspace_and_a_configuration_file_is_refused_by_the_session
 #
 # Fabric creates a Livy session against a Lakehouse, so a host that crosses
 # needs the id of one. It comes from the bindings the build was given, which is
-# why a workspace configuring no Lakehouses can still build into one.
+# why a workspace configuring no Lakehouses can still build into one. Which
+# Lakehouse, where several are bound, is `test_bundle_execution_boundary`.
 
 
 @weaver_test()
-def test_a_build_offers_the_lakehouse_its_target_named(repository, captured):
-    """No configured targets, and the build still says where Spark could live."""
+def test_a_build_requires_the_lakehouse_its_target_named(repository, captured):
+    """No configured targets, and the build still says where Spark will live."""
 
     from weaver.sessions.testing import TestSession
 
@@ -544,7 +545,7 @@ def test_a_build_offers_the_lakehouse_its_target_named(repository, captured):
 
 
 @weaver_test()
-def test_a_warehouse_only_build_offers_none(captured, tmp_path):
+def test_a_warehouse_only_build_requires_none(captured, tmp_path):
     """Nothing to attach, and nothing that needs attaching."""
 
     from test_item_repository_declaration import _schema, _write
