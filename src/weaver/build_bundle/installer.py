@@ -77,6 +77,18 @@ class Installer:
         self.executors = default_executors() if executors is None else executors
         self.workspace: Any = None
 
+    def bind(self, workspace: Any) -> "Installer":
+        """Reach this workspace's capabilities, for a caller with no bundle.
+
+        A caller assembling one action's context by hand has no manifest to read
+        a workspace from and must not inherit one. :meth:`install` binds from
+        the manifest and overwrites whatever was set here, so this cannot
+        redirect a frozen bundle.
+        """
+
+        self.workspace = workspace
+        return self
+
     def _bind(self, plan) -> Any:
         """Bind this installation to the workspace its bundle names.
 
@@ -87,7 +99,7 @@ class Installer:
         from .execution import execution_spark_home, execution_workspace
 
         workspace = execution_workspace(plan.execution, plan)
-        self.workspace = workspace
+        self.bind(workspace)
         self.session.require_spark_home(
             execution_spark_home(plan.execution, plan), workspace=workspace
         )

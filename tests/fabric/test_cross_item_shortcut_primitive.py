@@ -184,7 +184,7 @@ def run_from_here(
             "run_from_here needs the harness's Session: building one here asks "
             "the capacity for a second Livy session and gets a dead one"
         )
-    installer = Installer(session, workspace=workspace)
+    installer = Installer(session).bind(workspace)
     resolved = {
         target.id: installer.resolve_target(target) for target in bundle.plan.targets
     }
@@ -262,7 +262,11 @@ def shortcut_estate(
     upload(store, staged, root)
     repository = parse_item_repository(staged, store=store)
 
-    bindings = item_bindings((PRODUCER, producer.name), (CONSUMER, consumer.name))
+    bindings = item_bindings(
+        (PRODUCER, producer.name),
+        (CONSUMER, consumer.name),
+        workspace_name=fabric_workspace.workspace,
+    )
     bundle = generate(
         workspace=fabric_workspace,
         resolver=resolver,
@@ -537,6 +541,7 @@ def test_a_warehouse_shortcut_is_a_view_over_the_bound_lakehouse(
         bindings=item_bindings(
             (WAREHOUSE_PRODUCER, producer.name),
             (WAREHOUSE_CONSUMER, warehouse.item.name),
+            workspace_name=fabric_workspace.workspace,
         ),
         catalogue=FixtureCatalogue.from_repository(
             repository, item="Warehouse/_weaver"

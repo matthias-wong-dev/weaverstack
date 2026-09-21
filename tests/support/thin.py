@@ -288,10 +288,14 @@ def thin_estate(
     repository = single_document_repository(
         root / "repository", schemas=(SCHEMA,), documents=documents
     )
-    bindings = item_bindings(("Lakehouse/Sales", lakehouse))
 
     if workspace is None:
         workspace = given_workspace(catalogue="Warehouse/Weaver_LH")
+    # After the workspace is settled: a binding's workspace name is what
+    # four-part Spark naming is spelled with, and a real workspace is not Demo.
+    bindings = item_bindings(
+        ("Lakehouse/Sales", lakehouse), workspace_name=workspace.workspace
+    )
     if resolver is None:
         resolver = given_resolver(
             workspace=workspace, lakehouses=("Weaver_LH", lakehouse), root=root

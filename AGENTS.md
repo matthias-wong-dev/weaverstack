@@ -196,7 +196,10 @@ way: the catalogue over TDS, a Lakehouse's views over Spark SQL, a Lakehouse's
 objects from storage, a Warehouse over TDS. A desktop `weaver build` therefore
 needs no published wheel, because its Spark SQL and TableBuilder submissions
 import no Weaver, and no Fabric Environment either, because they run on the
-workspace default. `load`, `test` and `install` ask for `--environment`.
+workspace default. `load` and `test` ask for `--environment`. `install` asks
+for nothing: a bundle carries the workspace, the catalogue, the Environment and
+the Lakehouse a Spark session attaches to, frozen when it was generated, and the
+Session that installs it supplies credentials and transport and no decision.
 
 Because the catalogue is a Warehouse, a Warehouse-only workflow performs zero
 Livy submissions. Catalogue reads, publication, `_.Log` writes and `_.Bookmark`
@@ -319,6 +322,7 @@ separate load/test engines         a per-position build
 old/new action terminology         build_uploaded_item_repository
 operation-local resource ownership update_catalogue / @update_catalogue
 Bookmark-specific build plumbing   a bespoke write per runtime table
+Installer(workspace=...)           weaver install --workspace
 the `provision` test scope          disposable-Lakehouse fixtures
 ROLE_ENTRY and entry artefacts     generate_load_entry / generate_test_entry
 planned_shortcuts                  _with_runtime_references

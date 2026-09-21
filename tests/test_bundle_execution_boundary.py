@@ -481,3 +481,20 @@ def test_the_installer_takes_no_workspace_of_its_own():
     import inspect
 
     assert "workspace" not in inspect.signature(Installer.__init__).parameters
+
+
+@weaver_test()
+def test_a_workspace_bound_by_hand_cannot_redirect_a_bundle(tmp_path):
+    """``bind`` is for a caller assembling one action's context without a
+    manifest. Installing one overwrites it, so it can redirect nothing."""
+
+    bundle = _spark_bundle(tmp_path)
+    session = _session(ELSEWHERE)
+    installer = Installer(session, executors={"spark_sql": Recorder("spark_sql")})
+
+    installer.bind(ELSEWHERE)
+    assert installer.workspace is ELSEWHERE
+
+    installer.install(bundle)
+
+    assert installer.workspace.workspace == "Sales"
