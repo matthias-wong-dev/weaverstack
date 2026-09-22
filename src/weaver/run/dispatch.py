@@ -30,8 +30,7 @@ def dispatch_primitive(
     """Dispatch one installed primitive.
 
     The runtime scope opens only for deployed Python modules. ``reload`` and
-    ``ignore_stability_threshold`` are passed only to table loads; planning
-    accepts neither for any other work.
+    ``ignore_stability_threshold`` are table policy and reach table loads alone.
     """
 
     if session is None:
@@ -54,6 +53,10 @@ def dispatch_primitive(
             ignore_stability_threshold,
         )
     if kind in (PYTHON_TABLE, PYTHON_FOLDER):
+        # `reload` and the stability waiver are table policy, and a Folder's
+        # `_load` takes neither. Filtered here, where the primitive kind is
+        # known, so a selection holding both runs with the waiver set.
+        table = kind == PYTHON_TABLE
         return _python(
             node,
             session,
@@ -61,8 +64,8 @@ def dispatch_primitive(
             resolved,
             fault_tolerant,
             open_runtime,
-            reload,
-            ignore_stability_threshold,
+            reload and table,
+            ignore_stability_threshold and table,
         )
     if kind == ENDPOINT_REFRESH:
         return _endpoint_refresh(node, session, workspace)
@@ -301,10 +304,9 @@ def python_primitive(
     # asynchronously, so a primitive that recorded itself would be a second
     # writer of the same row.
     #
-    #
-    # `reload` and `ignore_stability_threshold` are named only when set: a
-    # Folder's `_load` takes neither, planning has already refused a folder
-    # reload, and a folder has no stability contract to waive.
+    # `reload` and `ignore_stability_threshold` are named only when set, so a
+    # primitive whose `_load` takes neither is called the way it always was.
+    # Dispatch has already dropped both for a Folder.
     policy = {"fault_tolerant": fault_tolerant}
     if reload:
         policy["reload"] = True

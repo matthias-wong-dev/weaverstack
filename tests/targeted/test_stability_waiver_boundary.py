@@ -12,6 +12,7 @@ moves an exception.
 
 from __future__ import annotations
 
+import pathlib
 from types import SimpleNamespace
 
 import pytest
@@ -98,21 +99,30 @@ class _Scope:
         return self.row
 
 
-def _python(row, **policy):
-    scope = _Scope(row)
-    node = SimpleNamespace(
-        node_id="Sales.Customer",
-        primitive_kind="python_table",
+def _node(kind: str = "python_table", object: str = "Customer"):
+    return SimpleNamespace(
+        node_id=f"Sales.{object}",
+        primitive_kind=kind,
         physical_target=PhysicalTargetRef("lakehouse", "Sales_LH"),
-        logical_id=SimpleNamespace(object_id=ObjectId("Sales", "Customer")),
+        logical_id=SimpleNamespace(object_id=ObjectId("Sales", object)),
     )
-    returned = dispatch_primitive(
+
+
+def _dispatch(node, scope, **policy):
+    return dispatch_primitive(
         node,
         session=SimpleNamespace(),
-        resolved=SimpleNamespace(expected_class="Sales__Customer"),
+        resolved=SimpleNamespace(
+            expected_class=f"Sales__{node.logical_id.object_id.object}"
+        ),
         open_runtime=scope,
         **policy,
     )
+
+
+def _python(row, kind: str = "python_table", **policy):
+    scope = _Scope(row)
+    returned = _dispatch(_node(kind), scope, **policy)
     return returned, scope
 
 
@@ -179,22 +189,161 @@ def test_a_waived_python_load_reaches_the_table_primitive():
     assert scope.calls[0]["ignore_stability_threshold"] is True
 
 
+# --- and a Folder is not given table policy ------------------------------------
+#
+# A Folder has no stability contract, and its ``_load`` takes no waiver. A
+# selection naming a Folder and a Table is ordinary, so dropping the argument
+# where the primitive kind is known is what lets one run carry both.
+
+#: A deployed primitive's whole contract, and the two signatures that differ.
+DEPLOYED = {
+    "python_folder": """\
+class Sales__Raw:
+    def __init__(self, spark, lakehouse=None):
+        self.called = None
+
+    def _load(self, fault_tolerant=False):
+        from weaver.runtime.load_result import LoadResult
+
+        Sales__Raw.called = dict(fault_tolerant=fault_tolerant)
+        return LoadResult(succeeded=True)
+""",
+    "python_table": """\
+class Sales__Customer:
+    def __init__(self, spark, lakehouse=None):
+        self.called = None
+
+    def _load(self, fault_tolerant=False, reload=False,
+              ignore_stability_threshold=False):
+        from weaver.runtime.load_result import LoadResult
+
+        Sales__Customer.called = dict(
+            fault_tolerant=fault_tolerant,
+            reload=reload,
+            ignore_stability_threshold=ignore_stability_threshold,
+        )
+        return LoadResult(succeeded=True)
+""",
+}
+
+
+def _deployed(tmp_path, kind: str, object: str):
+    """A real local dispatch whose deployed module is written here.
+
+    Everything from ``dispatch_primitive`` down is production code, including
+    the module import and the ``_load`` call, so a keyword the class cannot take
+    is the ``TypeError`` it is in Fabric. The Fabric mount is the one boundary
+    stood in for, as ``support.workspaces.mounted_lakehouse`` stands in for it.
+    """
+
+    from support.workspaces import given_resolver
+
+    from weaver.etl import LOAD_ROOT
+    from weaver.lakehouse import _MOUNTS, lakehouse_for
+    from weaver.run.runtime_boundary import DirectRunScope
+    from weaver.runtime.python_context import RuntimeScope
+    from weaver.targets import ItemRef
+    from weaver.workspaces import Workspace
+
+    workspace = Workspace(workspace="Demo", catalogue="Warehouse/Weaver")
+    resolver = given_resolver(workspace=workspace, lakehouses=("Sales_LH",))
+    _MOUNTS[lakehouse_for(resolver, ItemRef("Sales_LH")).spark_root] = str(tmp_path)
+
+    session = SimpleNamespace(
+        resolver=lambda ws=None: resolver, spark=lambda ws=None: None
+    )
+    node = _node(kind, object=object)
+    node.logical_id.item = "Lakehouse/Sales"
+    node.primitive_object = SimpleNamespace(schema="Sales", object=object)
+
+    root = pathlib.Path(tmp_path) / "Files" / LOAD_ROOT / "Sales"
+    root.mkdir(parents=True, exist_ok=True)
+    (root / f"{object}.py").write_text(DEPLOYED[kind], encoding="utf-8")
+
+    scope = DirectRunScope(RuntimeScope.new(), session, workspace)
+    return node, SimpleNamespace(get=lambda: scope)
+
+
 @weaver_test()
-def test_only_a_table_load_is_given_the_keyword():
-    """A Folder's ``_load`` does not take it, and a validation is not a load."""
+def test_a_folder_load_runs_with_the_waiver_asked_for(tmp_path):
+    """The mixed selection this was failing on, from the Folder's side."""
 
-    import inspect
+    node, runtime = _deployed(tmp_path, "python_folder", "Raw")
 
-    from weaver.objects import Folder, Table
-    from weaver.run.dispatch import python_primitive
+    result = _dispatch(node, runtime, ignore_stability_threshold=True, reload=False)
 
-    assert "ignore_stability_threshold" in inspect.signature(Table._load).parameters
-    assert (
-        "ignore_stability_threshold" not in inspect.signature(Folder._load).parameters
-    )
-    assert (
-        "ignore_stability_threshold" in inspect.signature(python_primitive).parameters
-    )
+    assert result.succeeded
+
+
+@weaver_test()
+def test_a_table_load_in_the_same_run_still_gets_the_waiver(tmp_path):
+    """One run, one waiver, two primitive kinds, and only one of them takes it."""
+
+    node, runtime = _deployed(tmp_path, "python_table", "Customer")
+
+    result = _dispatch(node, runtime, ignore_stability_threshold=True)
+
+    assert result.succeeded
+    assert runtime.get().runtime_scope  # the module was imported, not stubbed
+
+
+@weaver_test()
+def test_a_folder_reload_is_dropped_the_same_way(tmp_path):
+    """``reload`` is the other table-only policy, and a Folder cannot take it."""
+
+    node, runtime = _deployed(tmp_path, "python_folder", "Raw")
+
+    assert _dispatch(node, runtime, reload=True).succeeded
+
+
+@weaver_test()
+def test_an_unwaived_folder_load_is_unchanged(tmp_path):
+    node, runtime = _deployed(tmp_path, "python_folder", "Raw")
+
+    assert _dispatch(node, runtime).succeeded
+
+
+@weaver_test()
+def test_a_remote_folder_dispatch_submits_no_table_policy():
+    """Across Livy the policy crosses as a program's arguments, so it is visible."""
+
+    from weaver.run.runtime_boundary import FabricRunScope
+
+    submitted = []
+
+    class Session:
+        def execute_python(self, program, workspace=None):
+            submitted.append(program.source)
+            return LoadResult(succeeded=True).as_row()
+
+    node = _node("python_folder", object="Raw")
+    node.logical_id.item = "Lakehouse/Sales"
+    node.primitive_object = SimpleNamespace(schema="Sales", object="Raw")
+    scope = FabricRunScope(Session(), None, "run-1")
+
+    _dispatch(node, SimpleNamespace(get=lambda: scope), ignore_stability_threshold=True)
+
+    assert "ignore_stability_threshold" not in submitted[-1]
+    assert "'reload': False" in submitted[-1]
+
+
+@weaver_test()
+def test_the_self_recording_entry_point_asks_for_the_refusal_too():
+    """``_.Load`` records what a refusal counted, so it cannot let it throw.
+
+    The counts are gone by the time an outer CATCH runs, so a manual
+    ``exec [_].[Load]`` that let the procedure throw recorded zeroes for
+    everything the gate had already settled.
+    """
+
+    from weaver.fragments import standard_fragment
+
+    entry = standard_fragment("Warehouse")["programmables/_.Load.sql"].decode("utf-8")
+
+    assert "@return_refusal = @return_refusal" in entry
+    assert "@return_refusal = 1," in entry
+    # Recorded first, raised after, so the evidence outlives the failure.
+    assert entry.index("[_].[LoadStatistic]") < entry.index("throw 51032")
 
 
 @weaver_test()

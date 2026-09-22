@@ -7,6 +7,12 @@ procedure raised.
 The implementation procedure is in [_], and the source object's schema is part
 of its name. `@item_name` omitted means recover it from [_].[Installation].
 
+It is called with `@return_refusal = 1`, so a refused load returns its counts
+and its reason instead of throwing them away: a Fabric Warehouse discards output
+values when a procedure ends in an uncaught THROW, even where the caller catches
+the error. The refusal is recorded as Failed and then raised as 51032, so the
+call still fails outward.
+
 `@ignore_stability_threshold = 1` waives the object's declared delete and
 update limits for this call, and nothing else.
 
@@ -106,6 +112,7 @@ begin
                     + N'@fault_tolerant = @fault_tolerant'
                     + N', @ignore_stability_threshold = @ignore_stability_threshold'
                     + N', @reload = @reload'
+                    + N', @return_refusal = @return_refusal'
                     + N', @weaver_succeeded = @weaver_succeeded output'
                     + N', @weaver_rows_read = @weaver_rows_read output'
                     + N', @weaver_rows_inserted = @weaver_rows_inserted output'
@@ -212,6 +219,7 @@ begin
                 N'@fault_tolerant bit,
                    @ignore_stability_threshold bit,
                    @reload bit,
+                   @return_refusal bit,
                    @weaver_succeeded bit output,
                    @weaver_rows_read bigint output,
                    @weaver_rows_inserted bigint output,
@@ -225,6 +233,7 @@ begin
                 @fault_tolerant = @fault_tolerant,
                 @ignore_stability_threshold = @ignore_stability_threshold,
                 @reload = @reload,
+                @return_refusal = 1,
                 @weaver_succeeded = @succeeded output,
                 @weaver_rows_read = @rows_read output,
                 @weaver_rows_inserted = @rows_inserted output,
@@ -446,5 +455,14 @@ begin
             case when @weaver_error_number >= 50000 then @weaver_error_number
                  else 51031 end;
         throw @weaver_number, @weaver_rethrow, 1;
+    end;
+
+    -- The refusal returned rather than threw, so that everything above could
+    -- record what it counted. Raised here, once the record is durable.
+    if @is_refusal = 1
+    begin
+        set @weaver_rethrow = cast(
+            coalesce(@error_message, N'the load was refused') as nvarchar(2048));
+        throw 51032, @weaver_rethrow, 1;
     end;
 end;

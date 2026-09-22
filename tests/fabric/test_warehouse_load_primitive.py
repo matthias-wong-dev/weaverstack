@@ -364,6 +364,8 @@ def _statistics(estate: Estate) -> list:
 
     rows = estate.executor.query(
         "select [Rows read] as [read], [Rows inserted] as inserted, "
+        "[Rows updated] as updated, [Rows deleted] as deleted, "
+        "[Rows rejected] as rejected, "
         "[Is reload] as reload, [Is static skip] as skip "
         "from [_].[LoadStatistic] " + _identity_predicate(estate) + " "
         "order by [Started datetime]"
@@ -380,9 +382,11 @@ def _log(estate: Estate) -> list:
 
     rows = estate.executor.query(
         "select [Task type] as task, [Result] as result, [Target name] as target "
+        ", [Message] as message "
         "from [_].[Log] "
         f"where [Schema name] = N'{SCHEMA}' "
-        f"and [Object name] = N'{estate.object_name}'"
+        f"and [Object name] = N'{estate.object_name}' "
+        "order by [Started datetime]"
     )
     return [dict(row) for row in rows]
 
@@ -756,6 +760,55 @@ def test_a_refusal_is_recorded_and_then_raised_to_the_caller(estate):
     assert _status(estate)["result"] == "Failed"
     assert _log(estate)[0]["result"] == "Failed"
     assert _bookmark(estate) is None
+
+
+@weaver_test(remote=True, resources={"tds"})
+def test_a_refusal_through_the_entry_point_records_what_it_counted(estate):
+    """The manual call records the same evidence an orchestrated run reports.
+
+    ``_.Load`` asks the implementation procedure to return its refusal rather
+    than throw it, because a Fabric Warehouse discards output values when a
+    procedure ends in an uncaught THROW. Throwing left the entry point with
+    nothing to record but zeroes for counts it had already settled.
+    """
+
+    from weaver.sql.errors import SqlError
+
+    _reset(estate)
+    _source_rows(estate, CLEAN)
+    _standalone(estate)
+    loaded = _contents(estate)
+    clean = _bookmark(estate)
+
+    _source_rows(estate, REJECTABLE)
+    # The same refusal as the orchestrated path settles, so what the entry
+    # point recorded can be compared with what the gate actually counted.
+    returned = _load(estate, fault_tolerant=False, return_refusal=True)
+
+    with pytest.raises((SqlError, Exception)) as raised:
+        _standalone(estate, fault_tolerant=False)
+
+    statistic = _statistics(estate)[-1]
+    logged = _log(estate)[-1]
+    assert "rejected" in str(raised.value).casefold()
+    assert _status(estate)["result"] == "Failed"
+    assert logged["result"] == "Failed"
+    assert "rejected" in str(logged["message"]).casefold()
+    # What the gate had already counted, rather than the zeroes a lost output
+    # set coalesces to.
+    assert returned.is_refusal
+    assert returned.rows_read == len(REJECTABLE)
+    assert returned.rows_rejected > 0
+    assert statistic["read"] == returned.rows_read
+    assert statistic["rejected"] == returned.rows_rejected
+    assert (statistic["inserted"], statistic["updated"], statistic["deleted"]) == (
+        0,
+        0,
+        0,
+    )
+    # Refused before writing, and a refusal reads no window it can record.
+    assert _contents(estate) == loaded
+    assert _bookmark(estate) == clean
 
 
 @weaver_test(remote=True, resources={"tds"})
