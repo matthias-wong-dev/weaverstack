@@ -28,7 +28,7 @@ from weaver.operations.check import check
 #: The widest catalogue column, and the one authored prose lands in.
 PROSE = capacity_of(TABLE_DICTIONARY.column("description"))
 #: Where a serialised column set lands.
-LIST = capacity_of(TABLE_DICTIONARY.column("comparison_columns"))
+LIST = capacity_of(TABLE_DICTIONARY.column("not_null_columns"))
 #: An ordinary identifier column.
 IDENTIFIER = capacity_of(TABLE_DICTIONARY.column("object_name"))
 
@@ -71,6 +71,20 @@ def test_capacity_is_read_from_the_column_that_would_store_the_value():
     assert LIST == 1000
     assert IDENTIFIER == 128
     assert capacity_of(TABLE_DICTIONARY.column("is_incremental")) is None
+
+
+@weaver_test()
+def test_an_unbounded_column_has_no_capacity_to_check():
+    """A named comparison set is as wide as the author made it.
+
+    Narrowing one to fit storage would change what a load treats as a change,
+    so the column is ``varchar(max)`` and there is nothing here to refuse.
+    """
+
+    column = TABLE_DICTIONARY.column("comparison_columns")
+
+    assert column.warehouse_type == "varchar(max)"
+    assert capacity_of(column) is None
 
 
 @weaver_test()
@@ -179,21 +193,41 @@ def test_an_exactly_fitting_value_survives_projection_and_rendering(tmp_path):
 
 @weaver_test()
 def test_a_serialised_column_set_that_overflows_its_column_is_refused(tmp_path):
-    """Comparison columns are stored as one comma-separated value."""
+    """A declared column set is stored as one comma-separated value."""
 
     root = _project(tmp_path / "project")
     columns = tuple(f"Column{index:04d}" for index in range(120))
     _table(
         root,
-        extra="\nComparison columns: " + ", ".join(columns) + "\n",
+        extra="\nNot null:\n" + "".join(f"  - {name}\n" for name in columns),
         columns=("CustomerId", *columns),
     )
 
     with pytest.raises(DiscoveryError) as refused:
         check(root)
 
-    assert "Comparison columns" in str(refused.value)
+    assert "Not null columns" in str(refused.value)
     assert f"stores {LIST}" in str(refused.value)
+
+
+@weaver_test()
+def test_a_named_comparison_set_is_not_bounded_by_the_catalogue(tmp_path):
+    """Past every bounded width, and accepted.
+
+    The comparison set drives update detection, so a capacity that forced an
+    author to narrow one would change the load rather than the record of it.
+    """
+
+    root = _project(tmp_path / "unbounded")
+    columns = tuple(f"Column{index:04d}" for index in range(700))
+    _table(
+        root,
+        extra="\nComparison columns: " + ", ".join(columns) + "\n",
+        columns=("CustomerId", *columns),
+    )
+
+    assert stored_size(", ".join(columns)) > PROSE
+    assert check(root).project_folder == root.as_posix()
 
 
 @weaver_test()

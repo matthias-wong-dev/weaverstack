@@ -164,9 +164,11 @@ def _render_inferred_create(
         primary_key_columns_cte=_render_primary_key_cte(document.primary_key),
         not_null_columns_cte=_render_name_only_cte(document.not_null),
         type_case=_render_type_case(mapping),
-        target_table=target,
         target_table_literal=_sql_literal(target),
-        pk_constraint=_pk_constraint_name(document.qualified),
+        # Both are written into a literal that builds the statement, and an
+        # object name may hold an apostrophe.
+        quoted_target=_escape_literal(target),
+        quoted_pk_constraint=_escape_literal(_pk_constraint_name(document.qualified)),
     )
 
 
@@ -189,6 +191,9 @@ def _render_column_ceiling(document: SesDocument, temp_literal: str) -> str:
     from ..catalogue.capacity import WAREHOUSE_MAX_COLUMNS
 
     managed = managed_column_count(document)
+    # An object name may hold an apostrophe, so the subject is a literal rather
+    # than text interpolated into one.
+    subject = _sql_literal(f"weaver: {document.qualified} would have ")
     return f"""declare @weaver_columns int;
 declare @weaver_width_error nvarchar(2048);
 
@@ -199,7 +204,7 @@ where c.[object_id] = object_id({temp_literal});
 if @weaver_columns + {managed} > {WAREHOUSE_MAX_COLUMNS}
 begin
     set @weaver_width_error = concat(
-        N'weaver: {document.qualified} would have ',
+        {subject},
         @weaver_columns + {managed},
         N' columns and a Fabric Warehouse table holds {WAREHOUSE_MAX_COLUMNS}. ',
         @weaver_columns,

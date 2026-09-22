@@ -37,21 +37,13 @@ def _columns(count: int) -> str:
 
 
 def _source(*, business: int, keyed: bool = True, identity: bool = True) -> bytes:
-    """One Warehouse table of a declared width.
-
-    A wide table declares a narrow comparison set. Left to default it would be
-    every non-key column, and that serialised list is itself a catalogue value
-    with a width of its own, which is a different claim from this one.
-    """
+    """One Warehouse table of a declared width."""
 
     key = "\nPrimary key: Column00000\n" if keyed else ""
     surrogate = "\nIdentity: Customer key\n" if identity else ""
-    comparison = (
-        "\nComparison columns: Column00001\n" if keyed and business > 50 else ""
-    )
     return (
         "/*\nTable ID: Sales.Customer\n\nDescription: Customers.\n\n"
-        f"Lineage: The sales system.\n{key}{surrogate}{comparison}"
+        f"Lineage: The sales system.\n{key}{surrogate}"
         f"\nSchema:\n{_columns(business)}*/\nselect 1;\n"
     ).encode("utf-8")
 
@@ -177,24 +169,17 @@ def test_an_unkeyed_table_is_measured_by_its_own_additions():
 
 
 @weaver_test()
-def test_a_wide_table_must_narrow_the_column_set_the_catalogue_records(tmp_path):
-    """The other limit a wide table meets, and it is a catalogue one.
+def test_a_wide_table_is_refused_by_the_ceiling_and_by_nothing_else(tmp_path):
+    """The only limit a wide table meets here is the platform's.
 
-    Left to default, comparison columns are every non-key column, and that
-    serialised list is a bounded catalogue value. A table wide enough to worry
-    about the column ceiling is far past it.
+    A table this wide leaves its comparison set to default, and the default is
+    every non-key column. The catalogue records what an author named, so a
+    default it does not store cannot be what refuses the project.
     """
 
     root = _project(tmp_path / "derived", business=200, keyed=True, identity=True)
-    document = root / "Warehouse" / "Reporting" / "Sales.Customer.sql"
-    document.write_bytes(
-        document.read_bytes().replace(b"\nComparison columns: Column00001\n", b"")
-    )
 
-    with pytest.raises(DiscoveryError) as refused:
-        check(root)
-
-    assert "Comparison columns" in str(refused.value)
+    assert check(root).project_folder == root.as_posix()
 
 
 @weaver_test()
@@ -208,7 +193,6 @@ def test_a_lakehouse_table_is_not_refused_by_a_warehouse_rule(tmp_path):
     wide.write_text(
         '"""\nTable ID: DWG.Wide\n\nDescription: Wide.\n\n'
         "Lineage: The sales system.\n\nPrimary key: Column00000\n"
-        "\nComparison columns: Column00001\n"
         f"\nSchema:\n{_columns(WAREHOUSE_MAX_COLUMNS + 50)}"
         '"""\n\nfrom weaver import Table\n\n\n'
         "class DWG__Wide(Table):\n    def read(self):\n        return None\n",
@@ -238,14 +222,14 @@ def test_a_generated_working_table_is_never_wider_than_its_target():
 # --- a shape only the engine can count -----------------------------------------
 
 
-def _inferred_script() -> str:
+def _inferred_script(object: str = "Customer") -> str:
     """The same declaration with its shape left to the query."""
 
     return generate_tsql_table_script(
         read_source_document(
-            "Sales.Customer.sql",
+            f"Sales.{object}.sql",
             (
-                "/*\nTable ID: Sales.Customer\n\nDescription: Customers.\n\n"
+                f"/*\nTable ID: Sales.{object}\n\nDescription: Customers.\n\n"
                 "Lineage: The sales system.\n\nPrimary key: Column00000\n"
                 "\nIdentity: Customer key\n*/\nselect * from [Raw].[Customer];\n"
             ).encode("utf-8"),
@@ -301,3 +285,28 @@ def test_a_declared_schema_needs_no_generated_guard():
     script = generate_tsql_table_script(document, "select 1;")
 
     assert "@weaver_columns" not in script
+
+
+@weaver_test()
+def test_an_object_name_holding_an_apostrophe_survives_every_literal():
+    """An inferred table builds itself from strings, and a name is legal in one.
+
+    The shape is only known to the engine, so the create statement, its primary
+    key and the width diagnostic are all assembled as text and executed. A name
+    written straight into any of them closes the literal and leaves the whole
+    batch unparseable, which is a table that cannot build rather than a bad
+    message.
+    """
+
+    script = _inferred_script("O'Brien")
+
+    assert "N'weaver: Sales.O''Brien would have '" in script
+    assert "N'create table [Sales].[O''Brien] ('" in script
+    assert "N'alter table [Sales].[O''Brien] add constraint [PK_O''Brien] '" in script
+    # Nothing else reopened a literal: the guard still ends where it should.
+    assert "throw 51002, @weaver_width_error, 1;" in script
+
+
+@weaver_test()
+def test_an_ordinary_name_reads_as_it_always_did():
+    assert "N'weaver: Sales.Customer would have '" in _inferred_script()
