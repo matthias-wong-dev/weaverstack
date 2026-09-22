@@ -164,14 +164,14 @@ def test_a_view_has_no_generated_load():
 #: A fingerprint of what each generator currently emits, beside the version that
 #: describes it. See the test below.
 GENERATED_FINGERPRINTS = {
-    "tsql": (17, "c2e627660b318b6662a9406253c1ea3924edd3d09b35f5f0dec8ab2ef4a82388"),
+    "tsql": (18, "e6211d5568e4dab0eb24f7113779658d832963be2618dc290d5d9569f2c19468"),
     "tsql_append": (
-        17,
+        18,
         "4683fc8dfe3f29eee6ef91a4bc9ff9ad3a13301dd8bbaf6398e81ad89419a0a3",
     ),
     "tsql_append_validated": (
-        17,
-        "746faf122d1c67842e27c7766f68ea9c099a7801ff9a93258a6a3cb59e6e68eb",
+        18,
+        "550b44d703365d7dfbe3f88d9d622f194a7a511b022cf18827cce192a59095f1",
     ),
     "spark": (9, "d0cdda197f8619dc2f679b7ef270154e439b76aaaf27f5001c79b489304a6acf"),
 }
@@ -625,7 +625,7 @@ def test_change_is_detected_by_a_stored_row_signature():
 
     body = _body()
 
-    assert "convert(varbinary(32), hashbytes('SHA2_256'" in body
+    assert "lower(convert(char(64), hashbytes('SHA2_256'" in body
     assert "q.[Row signature] <> t.[Row signature]" in body
     assert "except" not in body.lower()
 

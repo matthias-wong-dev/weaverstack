@@ -553,17 +553,18 @@ def test_folders_have_no_audit_columns():
 
 @weaver_test()
 def test_a_keyed_table_carries_a_row_signature_column():
-    """Spelled and typed for the representation.
+    """Named per engine, typed for the one representation both engines use.
 
-    A Warehouse keeps the digest as bytes; Spark's ``sha2`` returns hex text, so
-    Delta keeps that. The two are never compared with each other.
+    The digest is lowercase 64-character hexadecimal on either engine, so a
+    ``char(64)`` and a Delta string hold the same text. Only the column names
+    remain engine-specific.
     """
 
     delta = parse(TABLE_YAML).signature_column
     warehouse = parse(TABLE_YAML, language=SQL).signature_column
 
     assert (delta.name, delta.type) == ("row_signature", "string")
-    assert (warehouse.name, warehouse.type) == ("Row signature", "varbinary(32)")
+    assert (warehouse.name, warehouse.type) == ("Row signature", "char(64)")
 
 
 @weaver_test()

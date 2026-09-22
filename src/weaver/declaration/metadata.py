@@ -214,11 +214,12 @@ AUDIT_LIVE_DELETE_DATETIME = "9999-12-31 23:59:59.999999"
 #: target wholesale and never compares a row with anything.
 SIGNATURE_COLUMN = "Row signature"
 
-#: The signature's physical type follows the representation. A Warehouse stores
-#: the digest as bytes; Spark's ``sha2`` returns the hex text, so Delta stores
-#: that. The two engines need not agree byte for byte, because a signature is
+#: One representation on both engines: the digest as lowercase 64-character
+#: hexadecimal, which is what Spark's ``sha2`` returns and what a Warehouse
+#: converts its ``hashbytes`` result to. The digests themselves still differ,
+#: because each engine canonicalises its own physical types, and a signature is
 #: only ever compared with another signature from the same table.
-_SIGNATURE_TYPES = {PYTHON: "string", SPARK_SQL: "string", SQL: "varbinary(32)"}
+_SIGNATURE_TYPES = {PYTHON: "string", SPARK_SQL: "string", SQL: "char(64)"}
 
 
 def signature_column_name(language: str) -> str:

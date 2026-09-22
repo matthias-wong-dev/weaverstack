@@ -1038,7 +1038,20 @@ def _signatures(estate: WideEstate) -> dict:
         f"select [Customer id], [Row signature] from "
         f"[{SCHEMA}].[{estate.object_name}] order by [Customer id];"
     )
-    return {str(row["Customer id"]): bytes(row["Row signature"]) for row in rows}
+    return {str(row["Customer id"]): str(row["Row signature"]) for row in rows}
+
+
+def _signature_column_type(estate: WideEstate) -> tuple[str, int]:
+    """What Fabric physically gave the signature column, as it describes it."""
+
+    (row,) = estate.executor.query(
+        "select t.name as type_name, c.max_length as max_length "
+        "from sys.columns as c "
+        "inner join sys.types as t on t.user_type_id = c.user_type_id "
+        f"where c.[object_id] = object_id(N'[{SCHEMA}].[{estate.object_name}]') "
+        "and c.name = N'Row signature';"
+    )
+    return str(row["type_name"]), int(row["max_length"])
 
 
 def _reject_reasons(estate: WideEstate) -> dict:
@@ -1126,6 +1139,7 @@ def _constrained_run(estate):
         extra={
             "reasons": _reject_reasons(estate),
             "signatures": _signatures(estate),
+            "signature_type": _signature_column_type(estate),
         },
     )
 
@@ -1185,11 +1199,15 @@ def test_declared_constraints_refuse_rows_and_the_survivors_load(constrained_est
     assert len(tuples) == len(set(tuples))
     assert [row[0] for row in refused.contents if row[2] is None] == ["c8", "c9"]
 
-    # Every loaded row carries a signature of its own.
+    # Every loaded row carries a signature of its own, spelled the way a Delta
+    # table spells one: lowercase 64-character hexadecimal.
     signatures = refused.extra["signatures"]
     assert sorted(signatures) == SURVIVING_KEYS
     assert all(signatures.values())
     assert len(set(signatures.values())) == len(signatures)
+    assert refused.extra["signature_type"] == ("char", 64)
+    assert all(len(value) == 64 for value in signatures.values())
+    assert all(set(value) <= set("0123456789abcdef") for value in signatures.values())
 
     # An unchanged source is one equality test per row, and no work.
     assert unchanged.result.succeeded is True

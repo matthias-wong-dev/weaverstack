@@ -14,9 +14,11 @@ whatever separator was chosen, and both mistakes are silent: the row never
 updates.
 
 The two engines are asserted side by side because they are required to agree on
-those properties and required not to agree on the bytes. A Warehouse hashes to
-``varbinary(32)``; Spark's ``sha2`` returns hex text. A signature is only ever
-compared with another signature from the same table.
+those properties and on how a digest is spelled: lowercase 64-character
+hexadecimal on both, which is what Spark's ``sha2`` returns and what a
+Warehouse converts its ``hashbytes`` result to. The digests themselves still
+differ, because each engine canonicalises its own physical types, and a
+signature is only ever compared with another signature from the same table.
 
 That the digests behave. That a changed row really does produce a different one,
 is proved by running a load (``tests/fabric/test_warehouse_load_primitive.py``
@@ -281,24 +283,66 @@ def test_the_warehouse_names_a_style_for_every_ambiguous_type():
 
 @weaver_test()
 def test_the_warehouse_hash_is_narrowed_to_the_column_it_is_stored_in():
-    """``varbinary(32)`` holds it, so the digest is converted to it explicitly.
+    """``char(64)`` holds it, so the digest is spelled into it explicitly.
 
-    Left to Fabric's inference the expression is a broad ``varbinary``, and what
-    reaches the column then depends on the conversion rather than on the digest.
+    Left to Fabric's inference the conversion width is not the column's, and
+    what reaches the column then depends on the conversion rather than on the
+    digest. Style 2 is the hexadecimal spelling, without a ``0x`` prefix.
     """
 
-    assert "convert(varbinary(32), hashbytes('SHA2_256'" in procedure(
+    assert "lower(convert(char(64), hashbytes('SHA2_256'" in procedure(
         _warehouse_installer()
     )
+    assert ", 2))" in procedure(_warehouse_installer())
 
 
 @weaver_test()
-def test_the_two_engines_agree_on_the_payload_and_not_on_the_bytes():
-    """Required to differ: Spark's sha2 returns hex text, hashbytes returns bytes.
+def test_both_engines_store_the_digest_the_same_way():
+    """One representation: lowercase 64-character hexadecimal, on either engine.
 
-    Within one table a signature is only ever compared with another from the same
-    table, so what has to match across engines is which columns are covered and
-    how each value is written, not the digest.
+    A consumer reading a Delta signature and a Warehouse signature compares
+    them as they stand, without converting one to the other's spelling.
+    """
+
+    from weaver.declaration.metadata import _SIGNATURE_TYPES, SQL
+
+    assert _SIGNATURE_TYPES[PYTHON] == "string"
+    assert _SIGNATURE_TYPES[SPARK_SQL] == "string"
+    assert _SIGNATURE_TYPES[SQL] == "char(64)"
+
+    warehouse = procedure(_warehouse_installer())
+
+    assert _delta().startswith("sha2(")
+    assert "lower(convert(char(64)" in warehouse
+    assert "varbinary(32)" not in warehouse
+
+
+@weaver_test()
+def test_a_known_digest_fits_the_representation_both_engines_use():
+    """A SHA-256 digest is 64 lowercase hexadecimal characters, and only that.
+
+    Spark's ``sha2`` returns this text. ``convert`` with style 2 spells the
+    same 32 bytes, and ``lower`` makes it the same text, which is why
+    ``char(64)`` is the width and not an approximation of one.
+    """
+
+    import hashlib
+
+    digest = hashlib.sha256(b"").hexdigest()
+
+    assert digest == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    assert len(digest) == 64
+    assert digest == digest.lower()
+    assert set(digest) <= set("0123456789abcdef")
+
+
+@weaver_test()
+def test_the_two_engines_agree_on_the_payload_and_not_on_the_digest():
+    """Required to differ: each engine canonicalises its own physical types.
+
+    Within one table a signature is only ever compared with another from the
+    same table, so what has to match across engines is which columns are
+    covered, how each value is written, and how the digest is spelled.
     """
 
     delta = _delta()

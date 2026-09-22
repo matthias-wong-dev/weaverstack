@@ -565,10 +565,12 @@ def _signature_expression() -> str:
     """Hash one staged row's canonical comparison payload.
 
     The empty prefix keeps the expression valid with no comparison columns; all
-    rows then share a signature.
+    rows then share a signature. ``convert`` with style 2 spells the 32 digest
+    bytes as 64 hexadecimal characters, and ``lower`` makes that the same
+    spelling Spark's ``sha2`` produces for a Delta table.
     """
 
-    return f"convert(varbinary(32), hashbytes('SHA2_256', N''{SIGNATURE_PAYLOAD}))"
+    return f"lower(convert(char(64), hashbytes('SHA2_256', N''{SIGNATURE_PAYLOAD}), 2))"
 
 
 def _reject_discovery(names: dict, contract: LoadContract) -> str:

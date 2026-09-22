@@ -18,7 +18,8 @@ if TYPE_CHECKING:
 BUILD_FORMAT_VERSION = 4
 
 #: Salt for keyed-table physical signatures; increment when their shape changes.
-KEYED_TABLE_VERSION = 1
+#: Version 2 stores the Warehouse row signature as ``char(64)`` hexadecimal.
+KEYED_TABLE_VERSION = 2
 
 #: Runtime dispatch key shared by local and Fabric Spark sessions.
 SPARK_SQL_EXECUTOR = "spark_sql"
