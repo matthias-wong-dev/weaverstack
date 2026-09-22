@@ -1417,37 +1417,24 @@ def handle_test(args: argparse.Namespace) -> int:
 
 
 def _test_once(args: argparse.Namespace) -> int:
-    """Render a completed validation report before returning its process status."""
+    """Render a completed validation report, then return its process status.
 
-    from weaver.errors import ValidationError
+    The report is what `weaver.test` returns. Turning findings and validations
+    that could not be evaluated into a failing exit code is the CLI's own.
+    """
+
+    from weaver.test_report import FAILED, INVALID
 
     workspace = _resolve_workspace(args)
-    try:
-        with _running_session(args, workspace) as opened:
-            report = _run_test(
-                workspace,
-                items=run_items(args) or None,
-                name=args.name,
-                file=args.file,
-                dry_run=args.dry_run,
-                strict=True,
-                session=opened,
-            )
-    except ValidationError as exc:
-        if exc.report is None:
-            _render_error(exc, args=args)
-        elif args.json:
-            print(
-                _json_document(
-                    _test_mapping(
-                        exc.report,
-                        targeted=args.name is not None or args.file is not None,
-                    )
-                )
-            )
-        else:
-            _print_test(exc.report)
-        return 1
+    with _running_session(args, workspace) as opened:
+        report = _run_test(
+            workspace,
+            items=run_items(args) or None,
+            name=args.name,
+            file=args.file,
+            dry_run=args.dry_run,
+            session=opened,
+        )
 
     if args.json:
         print(
@@ -1459,12 +1446,10 @@ def _test_once(args: argparse.Namespace) -> int:
         )
     else:
         _print_test(report)
-    return 0
+    return 1 if report.status in (FAILED, INVALID) else 0
 
 
-def _run_test(
-    workspace, *, items, name, file, dry_run: bool, strict: bool, session=None
-):
+def _run_test(workspace, *, items, name, file, dry_run: bool, session=None):
     """Dispatch Warehouse validations over TDS and Lakehouse modules in-session."""
 
     from weaver.sessions.host import use_or_create_session
@@ -1475,7 +1460,6 @@ def _run_test(
             name=name,
             file=file,
             dry_run=dry_run,
-            strict=strict,
             session=opened,
             **_command_context(workspace),
         )

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 
 class WeaverError(Exception):
     """Base class for every Weaver error."""
@@ -102,20 +100,13 @@ class LoadError(WeaverError):
 class ValidationError(WeaverError):
     """Raised when a Test or Assumption cannot be evaluated.
 
-    ``result`` carries a failed-to-run result when available. ``report`` carries
-    a completed run rejected by strict mode.
+    ``result`` carries a failed-to-run result when available. A completed run
+    is a report, not an exception, however the validations came out.
     """
 
-    def __init__(
-        self,
-        message: str,
-        *,
-        result: object | None = None,
-        report: Any | None = None,
-    ) -> None:
+    def __init__(self, message: str, *, result: object | None = None) -> None:
         super().__init__(message)
         self.result = result
-        self.report = report
 
 
 class DiscoveryError(WeaverError):

@@ -131,3 +131,21 @@ def test_internal_composition_seams_are_not_top_level_attributes():
         "DoctorReport",
     }
     assert all(not hasattr(weaver, name) for name in internal)
+
+
+@weaver_test()
+def test_running_validations_has_one_python_contract():
+    """A completed run is a report, whatever the validations found.
+
+    The report separates findings from validations that could not be
+    evaluated. Turning either into a failing process status is the CLI's.
+    """
+
+    import inspect
+
+    from weaver.errors import ValidationError
+
+    parameters = inspect.signature(weaver.test).parameters
+
+    assert "strict" not in parameters
+    assert "report" not in inspect.signature(ValidationError).parameters

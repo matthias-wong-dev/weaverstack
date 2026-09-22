@@ -83,12 +83,16 @@ def journey(
     fabric_fork_catalogue,
     fabric_mirror_lakehouse,
     fabric_target_lakehouse,
+    fabric_initialise_catalogue,
     weaver_session,
     tmp_path_factory,
 ):
     """One estate: built, loaded, mirrored, validated, rebuilt, materialised."""
 
     register_session(weaver_session)
+    # An earlier module may have emptied the catalogue Warehouse. Every step
+    # here reads the runtime catalogue, so stand it up before the first build.
+    fabric_initialise_catalogue()
     estate = LAKEHOUSE_JOURNEY_FIXTURE.disposable(tmp_path_factory.mktemp("lh-mirror"))
 
     run = Acceptance(name="lakehouse-mirror")
