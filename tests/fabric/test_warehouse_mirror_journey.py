@@ -135,6 +135,9 @@ class Estate:
     bookmarks: dict[str, str]
     #: ``Wh.ProductRollup`` in the mirrored Warehouse, once it holds its own rows.
     dependant_rows: list[tuple]
+    #: ``Schema.Object`` to its ``_.LoadStatus`` result in the catalogue the
+    #: mirror borrows from, which is where the inherited state comes from.
+    source_load_status: dict[str, str]
 
 
 # --- the journey --------------------------------------------------------------
@@ -167,6 +170,9 @@ def journey(
     run.source_sql = _sql(warehouse_session, fabric_workspace, run.source_name)
     run.target_sql = _sql(warehouse_session, fabric_workspace, run.target_name)
     run.catalogue_sql = _sql(warehouse_session, fabric_workspace, run.catalogue_name)
+    run.source_catalogue_sql = _sql(
+        warehouse_session, fabric_workspace, run.source_catalogue_name
+    )
     run.forked = replace(fabric_workspace, catalogue=f"Warehouse/{run.catalogue_name}")
     run.session = warehouse_session
     into_mirror = [f"{ITEM}=Warehouse/{run.target_name}"]
@@ -415,6 +421,13 @@ def _observe(run) -> Estate:
             )
         },
         dependant_rows=_dependant_rows(run),
+        source_load_status={
+            f"{row['Schema name']}.{row['Object name']}": str(row["Result"])
+            for row in run.source_catalogue_sql.query(
+                "select [Schema name], [Object name], [Result] "
+                f"from {_q('LoadStatus')} where [Item name] = N'Reporting'"
+            )
+        },
     )
 
 
@@ -503,6 +516,29 @@ def test_the_catalogue_records_what_is_borrowed(journey):
 
 
 @weaver_test(remote=True)
+def test_the_source_load_runs_and_settles_what_the_mirror_will_carry(journey):
+    """This run's own evidence that the source was loaded, rather than residue.
+
+    The catalogue this suite shares is reused between runs and keeps its
+    ``_.LoadStatus`` rows, so a claim that the source reads Succeeded can be
+    satisfied by a row an earlier run wrote. The report is what says this run
+    did the work, and the settled state the mirror carries is that work's.
+    """
+
+    journey.require("load the source")
+    report = journey["load the source"].result
+    ran = {
+        node.logical_id: node
+        for node in report.nodes
+        if node.logical_id and node.executed
+    }
+
+    assert report.succeeded
+    assert ran[f"{ITEM}/{MATERIALISED}"].succeeded
+    assert ran[f"{ITEM}/{DEPENDANT}"].succeeded
+
+
+@weaver_test(remote=True)
 def test_the_fork_inherits_the_source_catalogues_settled_state(journey):
     """What the destination starts from, and what the later build has to end.
 
@@ -510,10 +546,15 @@ def test_the_fork_inherits_the_source_catalogues_settled_state(journey):
     destination opens describing loads that ran against the source's tables.
     """
 
-    journey.require("mirror")
+    journey.require("load the source", "mirror")
     observed = journey["mirror"].observation
     sentinel = BOOKMARK_SENTINEL.replace(tzinfo=None)
 
+    # The load that ran against the source settled it there.
+    assert observed.source_load_status[MATERIALISED] == _result(SUCCEEDED)
+    assert observed.source_load_status[DEPENDANT] == _result(SUCCEEDED)
+
+    # And the destination opens holding that same state as its own.
     assert observed.load_status[MATERIALISED] == _result(SUCCEEDED)
     assert observed.load_status[DEPENDANT] == _result(SUCCEEDED)
     assert observed.bookmarks[MATERIALISED] != sentinel
@@ -765,6 +806,11 @@ def test_a_materialised_object_is_left_unloaded(journey):
     assert observed.load_status[MATERIALISED] == _result(PENDING)
     assert observed.bookmarks[DEPENDANT] == sentinel
     assert observed.bookmarks[MATERIALISED] == sentinel
+
+    # The source is untouched, so the two catalogues now disagree, which is
+    # what says the destination wrote its own state rather than re-reading one.
+    assert observed.source_load_status[DEPENDANT] == _result(SUCCEEDED)
+    assert observed.source_load_status[MATERIALISED] == _result(SUCCEEDED)
 
 
 @weaver_test(remote=True)
