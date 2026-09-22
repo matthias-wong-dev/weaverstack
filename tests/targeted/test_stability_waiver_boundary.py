@@ -288,6 +288,18 @@ def test_a_table_load_in_the_same_run_still_gets_the_waiver(tmp_path):
 
 
 @weaver_test()
+def test_one_waived_run_carries_a_folder_and_a_table_together(tmp_path):
+    """The selection the defect was found on: both kinds, one policy."""
+
+    # One Lakehouse, one deployed tree, two objects, as a run reaches them.
+    folder, folder_runtime = _deployed(tmp_path, "python_folder", "Raw")
+    table, table_runtime = _deployed(tmp_path, "python_table", "Customer")
+
+    assert _dispatch(folder, folder_runtime, ignore_stability_threshold=True).succeeded
+    assert _dispatch(table, table_runtime, ignore_stability_threshold=True).succeeded
+
+
+@weaver_test()
 def test_a_folder_reload_is_dropped_the_same_way(tmp_path):
     """``reload`` is the other table-only policy, and a Folder cannot take it."""
 
