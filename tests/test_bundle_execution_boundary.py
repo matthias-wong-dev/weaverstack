@@ -264,14 +264,23 @@ def test_a_spark_session_attached_elsewhere_is_refused_before_any_action(tmp_pat
 
 
 @weaver_test()
-def test_two_bundles_cannot_share_one_scope_with_different_attachments(tmp_path):
+def test_a_scope_that_started_nothing_takes_the_next_bundles_attachment(tmp_path):
+    """One session serves one piece of work after another.
+
+    Until Spark is running there is nothing to disagree with: a mirror, or a
+    second build into another Lakehouse, is ordinary and would be refused by a
+    requirement that outlived the work that made it.
+    """
+
     bundle = _spark_bundle(tmp_path)
     workspace = execution_workspace(bundle.plan.execution, bundle.plan)
     session = _session(workspace)
+    session.require_spark_home("Archive_LH", workspace=workspace)
+
     session.require_spark_home("Sales_LH", workspace=workspace)
 
-    with pytest.raises(CommandError, match="cannot also use"):
-        session.require_spark_home("Archive_LH", workspace=workspace)
+    assert session.scope(workspace).spark_home == "Sales_LH"
+    assert _installed(bundle, session)[0].succeeded
 
 
 # --- Warehouse-only work stays off Spark ---------------------------------------

@@ -169,11 +169,11 @@ class Session(ABC):
     def require_spark_home(
         self, lakehouse: str | None, *, workspace: Workspace | None = None
     ) -> None:
-        """Bind this workspace's Spark attachment to exactly one Lakehouse.
+        """Name the one Lakehouse this workspace's next Spark session attaches to.
 
-        A frozen bundle names its attachment; offers from earlier commands must
-        not change it. ``None`` requires nothing, which is what Warehouse-only
-        work passes.
+        A build settles its own, and a frozen bundle carries the one its build
+        settled; offers from earlier commands must not change either. ``None``
+        requires nothing, which is what Warehouse-only work passes.
         """
 
         self.scope(workspace).require_spark_home(lakehouse)
@@ -621,10 +621,12 @@ class WorkspaceScope:
             self._offered_spark_homes |= names
 
     def require_spark_home(self, lakehouse: str | None) -> None:
-        """Fix this scope's attachment, refusing a live one that cannot serve it.
+        """Fix this scope's next attachment, refusing a live one that cannot serve it.
 
-        A cold scope takes the requirement whatever it was previously offered. A
-        scope already attached elsewhere is reported rather than silently
+        A cold scope takes the requirement whatever it was offered or required
+        before, because nothing has been attached yet and a session serves one
+        piece of work after another. Once Spark is running the attachment is
+        physical: a scope attached elsewhere is reported rather than silently
         redirected, because the caller owns that resource.
         """
 
@@ -632,17 +634,11 @@ class WorkspaceScope:
             return
         name = str(lakehouse)
         with self._lock:
-            required = self._required_spark_home
-            if required is not None and required != name:
-                raise CommandError(
-                    f"This session is bound to Lakehouse {required!r} and cannot "
-                    f"also use {name!r}. Run this work from its own session."
-                )
             attached = self.attached_spark_home()
             if attached is not None and attached != name:
                 raise CommandError(
                     f"This session's Spark session is attached to Lakehouse "
-                    f"{attached!r}; this bundle needs {name!r}. Install it from a "
+                    f"{attached!r}; this work needs {name!r}. Run it from a "
                     "session that has not started Spark elsewhere."
                 )
             self._required_spark_home = name
