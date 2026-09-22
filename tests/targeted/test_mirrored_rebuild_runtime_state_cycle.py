@@ -308,9 +308,7 @@ def test_the_established_state_is_what_the_catalogue_action_carries(rebuilt):
         for each in rebuilt.plan.actions()
         if each[2].kind == "reconcile_runtime_state"
     ]
-    content = FilesystemStore().read(
-        rebuilt.location.join(*action.payload.split("/"))
-    )
+    content = FilesystemStore().read(rebuilt.location.join(*action.payload.split("/")))
     established = {
         one["table"]: {row["object_name"]: row for row in one["rows"]}
         for one in json.loads(content.decode("utf-8"))["establish"]
@@ -372,7 +370,12 @@ def _after_the_build() -> Catalogue:
         .table(f"{REPORTING}/Sales.Source", result="pending")
         .table(f"{REPORTING}/Sales.Aggregate", result="pending")
         .table(f"{REPORTING}/Sales.Report", result="pending")
-        .table(f"{REPORTING}/Sales.Reference", object_type="view", loaded=at(1), moved=at(1))
+        .table(
+            f"{REPORTING}/Sales.Reference",
+            object_type="view",
+            loaded=at(1),
+            moved=at(1),
+        )
         .mirrors(f"{REPORTING}/Sales.Reference", source_target=SOURCE_TARGET)
         .reads(f"{REPORTING}/Sales.Aggregate", "Sales.Source")
         .reads(f"{REPORTING}/Sales.Report", "Sales.Aggregate")

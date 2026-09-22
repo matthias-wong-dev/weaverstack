@@ -2,7 +2,7 @@
 
 Build a source estate, mirror the item into another Warehouse, run its
 installed validations there, build again with nothing changed, then change one
-declaration and build again.
+declaration and build again, then load what that build materialised.
 
 A tenant answers what only Fabric can: whether a three-part View resolves
 across Warehouses, whether a row written at the source is visible through one,
@@ -15,6 +15,7 @@ Steps run in file order and do not cascade.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from datetime import datetime
 
 import pytest
 from support.acceptance import Acceptance
@@ -22,7 +23,13 @@ from support.build_envs import WAREHOUSE_ESTATE_FIXTURE
 from support.weaver_test import register_session, weaver_test
 
 import weaver
-from weaver.catalogue.tables import CATALOGUE_SCHEMA
+from weaver.catalogue.tables import (
+    BOOKMARK_SENTINEL,
+    CATALOGUE_SCHEMA,
+    PENDING,
+    SUCCEEDED,
+)
+from weaver.catalogue.tables import LOAD_STATUS as LOAD_STATUS_TABLE
 from weaver.catalogue.tables import MIRROR as MIRROR_TABLE
 from weaver.targets import ItemRef, WarehouseTarget
 
@@ -37,6 +44,24 @@ CHANGED = "Changed"
 
 #: The object whose declaration changes, and the one every later claim watches.
 MATERIALISED = "Wh.Product"
+
+#: The object downstream of it, unchanged, and rebuilt because it is a
+#: dependency impact. It carries the state a mirror borrowed into this
+#: catalogue, so the build has to end that state before it drops the View.
+DEPENDANT = "Wh.ProductRollup"
+
+DEPENDANT_SOURCE = f"""/*
+Table ID: {DEPENDANT}
+
+Description: Products, rolled up from the base table.
+
+Lineage: $Wh.Product
+
+Primary key: ProductId
+*/
+select p.ProductId, p.ProductName
+from [Wh].[Product] as p;
+"""
 
 #: The object whose query reads the ``_`` surface, which puts it downstream of
 #: ``Warehouse/_weaver`` in the dependency graph. A fork copies every row as it
@@ -104,6 +129,12 @@ class Estate:
     loadable: dict[str, bool]
     #: ``Wh.Product`` at the source, which no build in this journey may touch.
     source_rows: list[tuple]
+    #: ``Schema.Object`` to its ``_.LoadStatus`` result, from the fork catalogue.
+    load_status: dict[str, str]
+    #: ``Schema.Object`` to its ``_.Bookmark`` instant, as text.
+    bookmarks: dict[str, str]
+    #: ``Wh.ProductRollup`` in the mirrored Warehouse, once it holds its own rows.
+    dependant_rows: list[tuple]
 
 
 # --- the journey --------------------------------------------------------------
@@ -125,6 +156,7 @@ def journey(
     estate = WAREHOUSE_ESTATE_FIXTURE.disposable(tmp_path_factory.mktemp("mirror"))
     _write(estate, f"{ITEM}/tests/{VALIDATION}.sql", VALIDATION_SOURCE)
     _write(estate, f"{ITEM}/{SURFACE_READER}.sql", SURFACE_READER_SOURCE)
+    _write(estate, f"{ITEM}/{DEPENDANT}.sql", DEPENDANT_SOURCE)
 
     run = Acceptance(name="warehouse-mirror")
     run.source_name = session_disposable_warehouse.item.name
@@ -148,6 +180,13 @@ def journey(
                 session=warehouse_session,
             )
         ),
+    )
+    # The state a mirror copies in has to be settled state, or the build that
+    # materialises a borrowed object has nothing to overwrite and the claim
+    # about overwriting it would pass against an estate that never held one.
+    run.step(
+        "load the source",
+        lambda: _loaded(weaver.load([ITEM], session=warehouse_session)),
     )
     run.step("seed the source", lambda: _seed(run.source_sql))
     mirrored = run.step(
@@ -215,6 +254,28 @@ def journey(
         ),
     )
     materialised.observation = _observe(run)
+    run.loading_config = _forked_config(run, tmp_path_factory.mktemp("wh-load"))
+    selected = run.step(
+        "select a stale load",
+        lambda: weaver.load(
+            [ITEM],
+            stale=True,
+            dry_run=True,
+            session=warehouse_session,
+            workspace_config=run.loading_config,
+        ),
+    )
+    selected.observation = _observe(run)
+    loaded = run.step(
+        "load what the build materialised",
+        lambda: weaver.load(
+            [ITEM],
+            stale=True,
+            session=warehouse_session,
+            workspace_config=run.loading_config,
+        ),
+    )
+    loaded.observation = _observe(run)
     return run
 
 
@@ -256,6 +317,12 @@ def _built(result):
     if not result.succeeded:
         raise AssertionError("; ".join(f.describe() for f in result.errors))
     return result
+
+
+def _loaded(report):
+    if not report.succeeded:
+        raise AssertionError("; ".join(message.message for message in report.messages))
+    return report
 
 
 def _seed(sql) -> None:
@@ -332,7 +399,47 @@ def _observe(run) -> Estate:
                 "select [ProductId], [ProductName] from [Wh].[Product]"
             )
         ],
+        load_status={
+            f"{row['Schema name']}.{row['Object name']}": str(row["Result"])
+            for row in run.catalogue_sql.query(
+                f"select [Schema name], [Object name], [Result] from {_q('LoadStatus')}"
+            )
+        },
+        bookmarks={
+            f"{row['Schema name']}.{row['Object name']}": _instant(
+                row["Bookmark datetime"]
+            )
+            for row in run.catalogue_sql.query(
+                "select [Schema name], [Object name], [Bookmark datetime] "
+                f"from {_q('Bookmark')}"
+            )
+        },
+        dependant_rows=_dependant_rows(run),
     )
+
+
+def _instant(value) -> datetime:
+    """A bookmark as an instant, so a comparison is not about driver spelling."""
+
+    return value if isinstance(value, datetime) else datetime.fromisoformat(str(value))
+
+
+def _dependant_rows(run) -> list[tuple]:
+    """``Wh.ProductRollup`` where it stands, which is a View until it is built."""
+
+    return [
+        (int(row["ProductId"]), str(row["ProductName"]))
+        for row in run.target_sql.query(
+            f"select [ProductId], [ProductName] from [{DEPENDANT.replace('.', '].[')}] "
+            "order by [ProductId]"
+        )
+    ]
+
+
+def _result(value: str) -> str:
+    """A load result as ``_.LoadStatus`` stores it, not as Weaver names it."""
+
+    return str(LOAD_STATUS_TABLE.column("result").to_public(value))
 
 
 def _q(name: str) -> str:
@@ -388,10 +495,29 @@ def test_the_catalogue_records_what_is_borrowed(journey):
         "Wh.CustomerDim",
         "Wh.CustomerOrder",
         "Wh.Product",
+        "Wh.ProductRollup",
         "Rpt.CustomerSummary",
     }
     assert set(observed.borrowed.values()) == {"View"}
     assert not any(observed.loadable.values())
+
+
+@weaver_test(remote=True)
+def test_the_fork_inherits_the_source_catalogues_settled_state(journey):
+    """What the destination starts from, and what the later build has to end.
+
+    A mirror copies ``_.LoadStatus`` and ``_.Bookmark`` as they stand, so the
+    destination opens describing loads that ran against the source's tables.
+    """
+
+    journey.require("mirror")
+    observed = journey["mirror"].observation
+    sentinel = BOOKMARK_SENTINEL.replace(tzinfo=None)
+
+    assert observed.load_status[MATERIALISED] == _result(SUCCEEDED)
+    assert observed.load_status[DEPENDANT] == _result(SUCCEEDED)
+    assert observed.bookmarks[MATERIALISED] != sentinel
+    assert observed.bookmarks[DEPENDANT] != sentinel
 
 
 @weaver_test(remote=True)
@@ -457,7 +583,7 @@ def test_the_result_names_every_warehouse_it_emptied(journey):
     assert result.items == (ITEM,)
     assert result.mirrored[ITEM]["source"] == f"Warehouse/{journey.source_name}"
     assert result.mirrored[ITEM]["target"] == f"Warehouse/{journey.target_name}"
-    assert result.mirrored[ITEM]["relations"] == 6
+    assert result.mirrored[ITEM]["relations"] == 7
     assert result.mirrored[ITEM]["programmables"] > 0
 
 
@@ -528,11 +654,25 @@ def test_the_changed_object_becomes_a_local_table(journey):
 
 
 @weaver_test(remote=True)
+def test_a_dependency_impact_becomes_a_local_table_too(journey):
+    """``Wh.ProductRollup`` is unchanged and rebuilt because its source changed."""
+
+    journey.require("build the changed declaration")
+    relations = _relations(journey["build the changed declaration"].observation)
+
+    assert relations[DEPENDANT] == "U"
+
+
+@weaver_test(remote=True)
 def test_everything_unchanged_is_still_a_view(journey):
     journey.require("build the changed declaration")
     relations = _relations(journey["build the changed declaration"].observation)
 
-    assert {name: kind for name, kind in relations.items() if name != MATERIALISED} == {
+    assert {
+        name: kind
+        for name, kind in relations.items()
+        if name not in (MATERIALISED, DEPENDANT)
+    } == {
         "Wh.Customer": "V",
         "Wh.CustomerDelta": "V",
         "Wh.CustomerDim": "V",
@@ -547,6 +687,7 @@ def test_only_the_materialised_object_stops_being_borrowed(journey):
     observed = journey["build the changed declaration"].observation
 
     assert MATERIALISED not in observed.borrowed
+    assert DEPENDANT not in observed.borrowed
     assert set(observed.borrowed) == {
         "Wh.Customer",
         "Wh.CustomerDelta",
@@ -564,7 +705,12 @@ def test_the_materialised_object_is_the_only_loadable_one(journey):
     loadable = journey["build the changed declaration"].observation.loadable
 
     assert loadable[MATERIALISED] is True
-    assert not [name for name, yes in loadable.items() if yes and name != MATERIALISED]
+    assert loadable[DEPENDANT] is True
+    assert not [
+        name
+        for name, yes in loadable.items()
+        if yes and name not in (MATERIALISED, DEPENDANT)
+    ]
 
 
 @weaver_test(remote=True)
@@ -596,3 +742,94 @@ def test_health_reads_the_mirror_and_calls_the_build_green(journey):
         (finding.code, finding.object_id) for finding in report.build.findings
     ] == []
     assert report.build.status == "green"
+
+
+# --- the runtime state a materialised object is left in -----------------------
+
+
+@weaver_test(remote=True)
+def test_a_materialised_object_is_left_unloaded(journey):
+    """The state it borrowed described rows that are no longer at the address.
+
+    Settled before the build, by the load that ran against the source, and
+    unloaded after it. Read together with
+    ``test_the_fork_inherits_the_source_catalogues_settled_state``.
+    """
+
+    journey.require("mirror", "build the changed declaration")
+    observed = journey["build the changed declaration"].observation
+
+    sentinel = BOOKMARK_SENTINEL.replace(tzinfo=None)
+
+    assert observed.load_status[DEPENDANT] == _result(PENDING)
+    assert observed.load_status[MATERIALISED] == _result(PENDING)
+    assert observed.bookmarks[DEPENDANT] == sentinel
+    assert observed.bookmarks[MATERIALISED] == sentinel
+
+
+@weaver_test(remote=True)
+def test_a_materialised_table_starts_empty(journey):
+    """The rows were the source's. A build creates the table, not its contents."""
+
+    journey.require("build the changed declaration")
+
+    assert journey["build the changed declaration"].observation.dependant_rows == []
+
+
+@weaver_test(remote=True)
+def test_a_stale_load_selects_every_object_the_build_materialised(journey):
+    """The selection ``load --stale`` makes, before it runs anything."""
+
+    journey.require("select a stale load")
+    report = journey["select a stale load"].result
+    selected = {node.logical_id for node in report.nodes if node.logical_id}
+
+    assert f"{ITEM}/{MATERIALISED}" in selected
+    assert f"{ITEM}/{DEPENDANT}" in selected
+    assert f"{ITEM}/Wh.Customer" not in selected, "a borrowed object is not selected"
+
+
+@weaver_test(remote=True)
+def test_a_stale_load_orders_the_dependant_after_its_source(journey):
+    """Both were rebuilt, so the plan carries the edge between them."""
+
+    journey.require("select a stale load")
+    report = journey["select a stale load"].result
+    logical = {node.node_id: node.logical_id for node in report.nodes}
+    edges = {
+        (logical.get(producer), logical.get(consumer))
+        for producer, consumer in report.edges
+    }
+
+    assert (f"{ITEM}/{MATERIALISED}", f"{ITEM}/{DEPENDANT}") in edges
+
+
+@weaver_test(remote=True)
+def test_a_stale_load_repopulates_what_the_build_materialised(journey):
+    """The end of the transition: the estate holds its own rows again."""
+
+    journey.require("load what the build materialised")
+    step = journey["load what the build materialised"]
+
+    assert step.result.succeeded, "; ".join(
+        message.message for message in step.result.messages
+    )
+    assert step.observation.dependant_rows == [(10, "Widget II"), (20, "Gadget")]
+    assert step.observation.load_status[DEPENDANT] == _result(SUCCEEDED)
+
+
+@weaver_test(remote=True)
+def test_a_stale_load_leaves_the_borrowed_objects_borrowed(journey):
+    """A mirrored subject's rows are the source's, and a load here is not its load."""
+
+    journey.require("load what the build materialised")
+    observed = journey["load what the build materialised"].observation
+
+    assert set(observed.borrowed) == {
+        "Wh.Customer",
+        "Wh.CustomerDelta",
+        "Wh.CustomerDim",
+        "Wh.CustomerOrder",
+        "Rpt.CustomerSummary",
+    }
+    assert observed.source_rows == [(SENTINEL[0], CHANGED)]
