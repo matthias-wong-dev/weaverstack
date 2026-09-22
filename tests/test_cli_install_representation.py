@@ -15,22 +15,39 @@ from weaver_cli.main import (
 
 
 @weaver_test()
-def test_install_requires_a_bundle_and_accepts_workspace_configuration():
-    parsed = build_parser().parse_args(["install", "handover", "--workspace", "Sales"])
+def test_install_takes_a_bundle_and_nothing_that_could_redirect_it():
+    parsed = build_parser().parse_args(["install", "handover"])
 
     assert parsed.bundle == "handover"
-    assert parsed.workspace == "Sales"
-    assert not hasattr(parsed, "environment")
-    assert not hasattr(parsed, "catalogue")
-    assert command_requirements(parsed)
+    for option in ("workspace", "workspace_config", "environment", "catalogue"):
+        assert not hasattr(parsed, option)
 
 
 @weaver_test()
-@pytest.mark.parametrize("option", ["--environment", "--catalogue"])
+@pytest.mark.parametrize(
+    "option", ["--environment", "--catalogue", "--workspace", "--workspace-config"]
+)
 def test_bundle_install_does_not_accept_deployment_configuration(option, capsys):
     with pytest.raises(SystemExit):
         build_parser().parse_args(["install", "handover", option, "Runtime"])
     assert f"unrecognized arguments: {option} Runtime" in capsys.readouterr().err
+
+
+@weaver_test()
+def test_install_warms_nothing_before_its_bundle_has_been_read():
+    """A shell and a workflow warm resources from declared requirements.
+
+    Install's requirements are in its bundle, which has not been read yet, so
+    warming would start a Spark session against the ambient workspace's
+    Lakehouse rather than the one the bundle names.
+    """
+
+    from weaver_cli.main import command_lakehouses
+
+    parsed = build_parser().parse_args(["install", "handover"])
+
+    assert command_requirements(parsed) == frozenset()
+    assert command_lakehouses(parsed) == ()
 
 
 @weaver_test()
@@ -53,25 +70,36 @@ def test_environment_publish_accepts_a_qualified_reference_without_workspace():
 
 
 @weaver_test()
-def test_bundle_install_passes_the_resolved_workspace_to_core(monkeypatch, capsys):
+def test_bundle_install_hands_core_the_bundle_and_an_unplaced_session(
+    monkeypatch, capsys
+):
+    """The CLI resolves no workspace: the bundle says where it installs.
+
+    The Session it opens therefore has no workspace of its own; the installer
+    binds it to the one the manifest names.
+    """
+
     cli = import_module("weaver_cli.main")
     import weaver.operations.install as install_operation
-    from weaver.workspaces import Workspace
 
     seen = {}
-    workspace = Workspace(workspace="Sales")
-    monkeypatch.setattr(cli, "_resolve_workspace", lambda args: workspace)
+    monkeypatch.setattr(
+        cli,
+        "_resolve_workspace",
+        lambda args: pytest.fail("install must not resolve a workspace"),
+    )
+    monkeypatch.setattr(cli, "_prefer_desktop_credential", lambda *_args: None)
     monkeypatch.setattr(
         install_operation,
         "install",
         lambda bundle, **kwargs: seen.update(bundle=bundle, **kwargs) or _Report(),
     )
 
-    args = build_parser().parse_args(["install", "handover", "--workspace", "Sales"])
+    args = build_parser().parse_args(["install", "handover"])
     assert cli.handle_install(args) == 0
     assert seen["bundle"] == "handover"
-    assert seen["workspace"] == "Sales"
-    assert seen["session"].workspace is workspace
+    assert set(seen) == {"bundle", "session"}
+    assert seen["session"].workspace is None
     output = capsys.readouterr().out
     assert "2 succeeded" in output
     assert "1 failed" in output

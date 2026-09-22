@@ -38,7 +38,7 @@ Schema:
   Primary key: varchar(1000)
   Not null columns: varchar(1000)
   Identity column: varchar(128)
-  Comparison columns: varchar(1000)
+  Comparison columns: varchar(max)
   Is incremental: bit
   Is static: bit
   Prohibit rebuild: bit
@@ -71,7 +71,8 @@ Column notes:
   Identity column: >-
     Weaver's managed surrogate column, when one is declared.
   Comparison columns: >-
-    Columns whose change drives an upsert.
+    Columns an author named to drive an upsert. Null where none were named,
+    which is every eligible non-key column.
   Is incremental: >-
     Whether load accumulates rows rather than replacing them.
   Is static: >-
@@ -93,7 +94,7 @@ select cast(null as varchar(128)) as [Item type]
      , cast(null as varchar(1000)) as [Primary key]
      , cast(null as varchar(1000)) as [Not null columns]
      , cast(null as varchar(128)) as [Identity column]
-     , cast(null as varchar(1000)) as [Comparison columns]
+     , cast(null as varchar(max)) as [Comparison columns]
      , cast(null as bit) as [Is incremental]
      , cast(null as bit) as [Is static]
      , cast(null as bit) as [Prohibit rebuild]

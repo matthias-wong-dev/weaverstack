@@ -34,10 +34,11 @@ import yaml
 from ..errors import BuildError
 from ..locations import Location
 from ..store import Store
+from .execution import validate_execution
 from .models import DELETE_FILE, OMISSION_REASONS, BuildPlan
 
 #: The only bundle format this code writes and accepts.
-SUPPORTED_FORMAT_VERSION = 3
+SUPPORTED_FORMAT_VERSION = 4
 
 PLAN_FILENAME = "plan.yml"
 PAYLOAD_DIR = "payload"
@@ -140,10 +141,22 @@ def plan_from_yaml(text: str) -> BuildPlan:
     loaded = yaml.safe_load(text)
     if not isinstance(loaded, dict):
         raise BuildError("plan.yml must be a mapping")
+    # Before deserialising: a bundle written by another format is reported as an
+    # unsupported format, not as a missing field of this one.
+    check_format_version(loaded.get("format_version"))
     try:
         return BuildPlan.from_mapping(loaded)
     except KeyError as exc:
         raise BuildError(f"plan.yml is missing a required field: {exc}") from exc
+
+
+def check_format_version(version) -> None:
+    if version != SUPPORTED_FORMAT_VERSION:
+        raise BuildError(
+            f"Bundle format version {version} is not supported; this Weaver "
+            f"version supports {SUPPORTED_FORMAT_VERSION}. Regenerate the bundle "
+            "with this Weaver version."
+        )
 
 
 # --- writing -----------------------------------------------------------------
@@ -214,12 +227,7 @@ def validate_bundle(location: Location, plan: BuildPlan, *, store: Store) -> Non
 
 
 def validate_plan_structure(plan: BuildPlan) -> None:
-    if plan.format_version != SUPPORTED_FORMAT_VERSION:
-        raise BuildError(
-            f"Bundle format version {plan.format_version} is not supported; this "
-            f"Weaver version supports {SUPPORTED_FORMAT_VERSION}. Regenerate the "
-            "bundle with this Weaver version."
-        )
+    check_format_version(plan.format_version)
 
     for node in plan.omitted_nodes:
         if node.reason not in OMISSION_REASONS:
@@ -294,6 +302,10 @@ def validate_plan_structure(plan: BuildPlan) -> None:
             f"The build bundle's installation stages are not uniquely ordered: "
             f"{seen_numbers}. Regenerate it with this Weaver version."
         )
+
+    # Last, so a descriptor is checked against targets and actions already known
+    # to be well formed.
+    validate_execution(plan.execution, plan)
 
 
 def _validate_action_shape(action, omitted_ids) -> None:

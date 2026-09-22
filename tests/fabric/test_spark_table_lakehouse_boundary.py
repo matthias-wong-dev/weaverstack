@@ -65,7 +65,7 @@ def spark_table_estate(
         "emit({'cleared': True})\n"
     )
 
-    installer = Installer(weaver_session, workspace=fabric_workspace)
+    installer = Installer(weaver_session).bind(fabric_workspace)
     target = ResolvedTarget(
         bound=bound_target(id="target-1", item_id=fabric_target_lakehouse.name),
         lakehouse=item,

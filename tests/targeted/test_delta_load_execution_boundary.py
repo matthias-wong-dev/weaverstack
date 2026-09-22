@@ -1248,3 +1248,106 @@ def test_a_durable_write_that_failed_does_not_count_as_written():
     ]
     assert spark.created == ["Customer_Reject"]
     assert spark.leaked == []
+
+
+# --- the waiver, and what it does not waive -----------------------------------
+
+
+#: One excessive change: nine of ten rows deleted, against a 1% limit.
+EXCESSIVE = dict(BUSY, deleted=9, target=10)
+
+
+def _strict() -> LoadContract:
+    return _contract(delete_threshold=1, stability_rows=1)
+
+
+@weaver_test()
+def test_the_same_excessive_change_is_refused_and_then_permitted():
+    """One change, one contract, and only the waiver differs.
+
+    Refused, nothing reaches the target. Waived, the same change is applied.
+    """
+
+    refused = _refused(EXCESSIVE, contract=_strict(), match="over the 1% threshold")
+    spark, result = _load(
+        EXCESSIVE, contract=_strict(), ignore_stability_threshold=True
+    )
+
+    assert refused.mutations == []
+    assert result.succeeded
+    assert result.rows_deleted == 9
+    assert spark.mutations
+
+
+@weaver_test()
+def test_a_waived_gate_still_asks_nothing_of_the_target():
+    """The waiver removes the gate, and the count exists only to feed it."""
+
+    spark, _result = _load(
+        EXCESSIVE, contract=_strict(), ignore_stability_threshold=True
+    )
+
+    assert _target_counts(spark) == []
+
+
+@weaver_test()
+def test_the_waiver_does_not_waive_a_rejected_row():
+    """It waives one declared limit. Row validity is not that limit."""
+
+    spark = _refused(
+        {"staging": 2, "reject": 1, "clean": 1},
+        contract=_contract(not_null_columns=("Email",)),
+        ignore_stability_threshold=True,
+        match="rows were rejected",
+    )
+
+    assert spark.mutations == []
+
+
+@weaver_test()
+def test_a_refused_stability_breach_says_it_refused():
+    """``succeeded = False`` also spells a load that wrote its valid rows.
+
+    A run classifies a refusal as a failure and tolerated rejects as a success
+    with rejects, so the two cannot be told apart by their counts alone.
+    """
+
+    spark = _Spark(counts=EXCESSIVE)
+    with pytest.raises(LoadError) as refused:
+        load_table(
+            spark,
+            contract=_strict(),
+            lakehouse=_Lakehouse(),
+            staging_frame=_Staged(),
+        )
+
+    assert refused.value.result.is_refusal
+    assert refused.value.result.rows_deleted == 0
+
+
+@weaver_test()
+def test_a_breach_returned_under_fault_tolerance_is_still_a_refusal():
+    """Fault tolerance chooses whether the refusal is raised or returned.
+
+    It does not make the breach a tolerated outcome: nothing was written.
+    """
+
+    _spark, result = _load(EXCESSIVE, contract=_strict(), fault_tolerant=True)
+
+    assert result.is_refusal
+    assert not result.succeeded
+
+
+@weaver_test()
+def test_a_tolerated_reject_is_not_a_refusal():
+    """The other reading of ``succeeded = False``, and it did write."""
+
+    spark, result = _load(
+        {"staging": 2, "reject": 1, "clean": 1},
+        contract=_incremental(primary_key=(), not_null_columns=("Email",)),
+        fault_tolerant=True,
+    )
+
+    assert not result.is_refusal
+    assert result.rows_rejected == 1
+    assert spark.mutations

@@ -14,7 +14,12 @@ select @weaver_rows_rejected = count(*) from $reject_table;
 $duplicate_key_count
 -- Nothing is written yet, so the target is left as it was.
 if @weaver_rows_rejected > 0 and @fault_tolerant = 0
-    throw 51020, '$intolerant_message', 1;
+begin
+$reject_refusal_assignment
+    if @return_refusal = 0
+        throw 51020, '$intolerant_message', 1;
+    return;
+end;
 
 /*-- Staging becomes the accepted incoming state --*/
 
@@ -52,22 +57,32 @@ $prospective_deletes
 if @ignore_stability_threshold = 0 and @weaver_target_rows > 0
     and @weaver_target_rows >= $stability_rows
 begin
+    -- Worded as the Delta gate words it, so one refusal reads the same
+    -- whichever engine reported it.
     if @weaver_prospective_deletes * 100.0 / @weaver_target_rows > $delete_threshold
         set @weaver_error = 'delete of ' + cast(@weaver_prospective_deletes as varchar(20))
-            + ' rows is over the $delete_threshold% threshold of '
-            + cast(@weaver_target_rows as varchar(20));
+            + ' rows is '
+            + cast(cast(@weaver_prospective_deletes * 100.0 / @weaver_target_rows
+                as decimal(18, 1)) as varchar(20))
+            + '% of ' + cast(@weaver_target_rows as varchar(20))
+            + ', over the $delete_threshold% threshold';
     else if @weaver_prospective_updates * 100.0 / @weaver_target_rows > $update_threshold
         set @weaver_error = 'update of ' + cast(@weaver_prospective_updates as varchar(20))
-            + ' rows is over the $update_threshold% threshold of '
-            + cast(@weaver_target_rows as varchar(20));
+            + ' rows is '
+            + cast(cast(@weaver_prospective_updates * 100.0 / @weaver_target_rows
+                as decimal(18, 1)) as varchar(20))
+            + '% of ' + cast(@weaver_target_rows as varchar(20))
+            + ', over the $update_threshold% threshold';
 
     -- A breach never writes. @ignore_stability_threshold is how to permit one.
     if @weaver_error is not null
     begin
         set @weaver_error = @weaver_error + '; the target was not modified';
-        if @fault_tolerant = 0
-            throw 51021, @weaver_error, 1;
+        -- Assigned before the throw, and read only by a caller that asked for
+        -- the refusal: an uncaught THROW returns no output values at all.
 $breach_result_assignment
+        if @fault_tolerant = 0 and @return_refusal = 0
+            throw 51021, @weaver_error, 1;
         return;
     end;
 end;

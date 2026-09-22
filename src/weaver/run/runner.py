@@ -88,6 +88,10 @@ class RunRequest:
     #: Reconstruct each selected table from zero. ``load`` only, and local to
     #: what the request selected.
     reload: bool = False
+    #: Waive the declared delete and update stability limits for this run only.
+    #: ``load`` only. It waives nothing else: null and unique key checks, fault
+    #: tolerance, selection and bookmarks are untouched.
+    ignore_stability_threshold: bool = False
 
     def __post_init__(self) -> None:
         from ..errors import CommandError
@@ -107,6 +111,8 @@ class RunRequest:
             raise CommandError("selected= applies only to loads")
         if self.reload and self.kind != LOAD:
             raise CommandError("reload applies only to loads")
+        if self.ignore_stability_threshold and self.kind != LOAD:
+            raise CommandError("ignore_stability_threshold applies only to loads")
 
     @classmethod
     def load(cls, items: Sequence, **policy) -> "RunRequest":
@@ -141,6 +147,7 @@ class RunRequest:
             "fault_tolerant": self.fault_tolerant,
             "dry_run": self.dry_run,
             "reload": self.reload,
+            "ignore_stability_threshold": self.ignore_stability_threshold,
         }
 
 
@@ -412,6 +419,9 @@ class Runner:
                     resolved=resolved,
                     fault_tolerant=self.request.fault_tolerant,
                     reload=self.request.reload,
+                    ignore_stability_threshold=(
+                        self.request.ignore_stability_threshold
+                    ),
                     open_runtime=self.runtime_scope(session),
                     workspace=self.workspace,
                     publication=self.publication,
@@ -508,6 +518,7 @@ class Runner:
             dry_run=self.request.dry_run,
             fault_tolerant=self.request.fault_tolerant,
             reload=self.request.reload,
+            ignore_stability_threshold=self.request.ignore_stability_threshold,
             nodes=nodes,
             edges=graph.edges,
             order=tuple(node.node_id for node in graph.order()),

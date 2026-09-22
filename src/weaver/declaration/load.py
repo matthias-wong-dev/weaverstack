@@ -11,7 +11,7 @@ if TYPE_CHECKING:
     from .source import SourceDocument
 
 #: Increment the relevant salt whenever generated load output changes.
-TSQL_LOAD_VERSION = 16
+TSQL_LOAD_VERSION = 17
 SPARK_LOAD_VERSION = 9
 
 #: Generated Warehouse loads are procedures; Lakehouse loads are deployed files.

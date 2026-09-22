@@ -28,12 +28,13 @@ from support.weaver_test import weaver_test
 from support.workspaces import WORKSPACE, given_resolver, given_workspace
 
 from weaver.build_bundle import (
-    LakehouseBinding,
+    WarehouseBinding,
     build_item_repository,
     build_repository_bundle,
     effective_item_bindings,
     load_bundle,
 )
+from weaver.build_bundle.execution import ExecutionIdentity
 from weaver.build_bundle.workflow import BuildState
 from weaver.catalogue.state import Catalogue as RealCatalogue
 from weaver.locations import Location
@@ -133,8 +134,8 @@ def build(estate, **overrides):
         "session": estate["session"],
         "executors": estate["executors"],
         "source_store": estate["store"],
-        "catalogue_binding": LakehouseBinding(
-            lakehouse=ItemRef("Weaver"), workspace_name="Demo"
+        "catalogue_binding": WarehouseBinding(
+            warehouse=ItemRef("Weaver"), workspace_name="Demo"
         ),
     }
     arguments.update(overrides)
@@ -165,9 +166,10 @@ def test_bundle_generation_is_a_durable_seam_before_installation(estate, tmp_pat
             catalogue=RealCatalogue(rows={}), target_inventories=_inventories()
         ),
         source_store=estate["store"],
-        catalogue_binding=LakehouseBinding(
-            lakehouse=ItemRef("Weaver"), workspace_name="Demo"
+        catalogue_binding=WarehouseBinding(
+            warehouse=ItemRef("Weaver"), workspace_name="Demo"
         ),
+        execution=ExecutionIdentity(workspace_name=WORKSPACE),
         output=output,
     )
 

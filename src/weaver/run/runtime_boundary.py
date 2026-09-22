@@ -36,7 +36,13 @@ class RunScope(Protocol):
     """A run-scoped importer and dispatcher for deployed modules."""
 
     def dispatch_python(
-        self, node, *, expected_class: str, fault_tolerant: bool, reload: bool = False
+        self,
+        node,
+        *,
+        expected_class: str,
+        fault_tolerant: bool,
+        reload: bool = False,
+        ignore_stability_threshold: bool = False,
     ) -> dict:
         """Run one deployed module and return its transport-neutral row."""
 
@@ -57,7 +63,13 @@ class DirectRunScope:
         self._catalogue = catalogue
 
     def dispatch_python(
-        self, node, *, expected_class: str, fault_tolerant: bool, reload: bool = False
+        self,
+        node,
+        *,
+        expected_class: str,
+        fault_tolerant: bool,
+        reload: bool = False,
+        ignore_stability_threshold: bool = False,
     ):
         from .dispatch import python_primitive
 
@@ -70,6 +82,7 @@ class DirectRunScope:
             expected_class=expected_class,
             fault_tolerant=fault_tolerant,
             reload=reload,
+            ignore_stability_threshold=ignore_stability_threshold,
             runtime_scope=self.runtime_scope,
             session=self._session,
             workspace=self._workspace,
@@ -143,28 +156,37 @@ class FabricRunScope:
     # --- what dispatch asks of it -------------------------------------------
 
     def dispatch_python(
-        self, node, *, expected_class: str, fault_tolerant: bool, reload: bool = False
+        self,
+        node,
+        *,
+        expected_class: str,
+        fault_tolerant: bool,
+        reload: bool = False,
+        ignore_stability_threshold: bool = False,
     ):
         """Dispatch a flattened node without serialising the Runner model."""
 
         from .entry import run_python_primitive
 
-        return self._submit(
-            run_python_primitive,
-            {
-                "run_id": self.run_id,
-                "node_id": node.node_id,
-                "item": str(node.logical_id.item),
-                "target": node.physical_target.name,
-                "schema": node.primitive_object.schema,
-                "object": node.primitive_object.object,
-                "expected_class": expected_class,
-                "fault_tolerant": fault_tolerant,
-                "reload": reload,
-                "identity": str(node.logical_id) if node.logical_id else None,
-            },
-            detail=node.node_id,
-        )
+        arguments = {
+            "run_id": self.run_id,
+            "node_id": node.node_id,
+            "item": str(node.logical_id.item),
+            "target": node.physical_target.name,
+            "schema": node.primitive_object.schema,
+            "object": node.primitive_object.object,
+            "expected_class": expected_class,
+            "fault_tolerant": fault_tolerant,
+            "reload": reload,
+            "identity": str(node.logical_id) if node.logical_id else None,
+        }
+        if ignore_stability_threshold:
+            # Named only when set, so an ordinary load still crosses to a
+            # published Weaver that predates the waiver. A requested waiver is
+            # always named, so an older runtime fails loudly rather than
+            # loading without it.
+            arguments["ignore_stability_threshold"] = True
+        return self._submit(run_python_primitive, arguments, detail=node.node_id)
 
     def dispatch_validation(self, installed, *, collect: bool):
 

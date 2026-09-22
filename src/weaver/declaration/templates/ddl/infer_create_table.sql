@@ -13,6 +13,7 @@ end;
 $metadata_validation_sql
 
 $identity_guard_sql
+$column_ceiling_sql
 
 ;with primary_key_columns as (
 $primary_key_columns_cte
@@ -67,7 +68,9 @@ $signature_column_sql)
 select
     @weaver_create_sql = (
         select
-            N'create table $target_table (' + char(10)
+            -- The names here are rendered inside a literal, so they arrive
+            -- escaped. Everywhere else they are bracket-quoted identifiers.
+            N'create table $quoted_target (' + char(10)
             + string_agg(
                 convert(nvarchar(max), case
                     when column_ordinal = $first_ordinal then N'    ' + column_definition
@@ -80,7 +83,7 @@ select
     ),
     @weaver_pk_sql = (
         select
-            N'alter table $target_table add constraint $pk_constraint '
+            N'alter table $quoted_target add constraint $quoted_pk_constraint '
             + N'primary key nonclustered ('
             + string_agg(convert(nvarchar(max), quotename(column_name)), N', ')
                 within group (order by column_ordinal)

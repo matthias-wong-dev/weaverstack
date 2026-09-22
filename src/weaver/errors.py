@@ -77,6 +77,9 @@ class LoadError(WeaverError):
 
     ``result`` carries load counts, ``report`` the partial run and
     ``workflow_id`` the location of durable evidence when each is available.
+
+    ``summary`` is the same failure without the node detail, for a caller that
+    has already presented the report the detail is in.
     """
 
     def __init__(
@@ -87,11 +90,13 @@ class LoadError(WeaverError):
         report: object | None = None,
         workflow_id: str | None = None,
         executor: str | None = None,
+        summary: str | None = None,
     ) -> None:
         super().__init__(message, executor=executor)
         self.result = result
         self.report = report
         self.workflow_id = workflow_id
+        self.summary = summary
 
 
 class ValidationError(WeaverError):

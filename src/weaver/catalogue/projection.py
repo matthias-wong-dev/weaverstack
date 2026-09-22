@@ -175,9 +175,7 @@ def project_item_catalogue(
                     "primary_key": column_set(source.document.primary_key),
                     "not_null_columns": column_set(source.document.declared_not_null),
                     "identity_column": source.document.identity,
-                    "comparison_columns": column_set(
-                        source.document.comparison_columns
-                    ),
+                    "comparison_columns": _comparison_columns(source.document),
                     **_behaviour(source),
                     "signature": signature,
                 }
@@ -494,6 +492,21 @@ def _described(source, all_documents, repository) -> dict:
         "lineage": lineage.literal,
         "lineage_reference": lineage.reference,
     }
+
+
+def _comparison_columns(document) -> str | None:
+    """The comparison set an author named, or nothing.
+
+    The effective set defaults to every eligible non-key column, and the
+    catalogue does not store that: it is derived from the schema beside it, and
+    writing it out would turn a default nobody wrote into a value wide enough to
+    exceed the column that holds it. Comparison needs a primary key, so an
+    unkeyed table records none whatever it declared.
+    """
+
+    if not document.primary_key:
+        return None
+    return column_set(document.declared_comparison_columns)
 
 
 def _behaviour(source) -> dict:

@@ -33,6 +33,7 @@ from .catalogue_actions import (
 from .documents import lakehouse_build_stages, warehouse_build_stages
 from .drops import lakehouse_drop_stages, warehouse_drop_stages
 from .endpoints import lakehouse_endpoint_refresh_stage
+from .execution import BundleExecution, ExecutionIdentity, select_spark_home
 from .incremental import installed_as_pointer, select_build, stale_through_shortcuts
 from .models import OMIT_TARGET_UNBOUND, BuildPlan, OmittedNode
 from .prune import TargetInventory, lakehouse_prune_stage, warehouse_prune_stage
@@ -60,10 +61,18 @@ def generate_item_build_bundle(
     catalogue: Catalogue,
     stale_claims: tuple = (),
     catalogue_binding: WarehouseBinding,
+    execution: ExecutionIdentity | None = None,
     shortcut_sources: Mapping[str, object] | None = None,
 ) -> BuildBundle:
     if catalogue_binding is None:
         raise BuildError("Select a catalogue Warehouse before building")
+    if execution is None:
+        # The bindings already name the workspace. An orchestrated build resolves
+        # ids and the Environment and passes them in; planning alone knows
+        # neither, and says so rather than inventing them.
+        execution = ExecutionIdentity(
+            workspace_name=catalogue_binding.workspace_name or ""
+        )
     by_item = bindings.by_item
     if not by_item:
         raise BuildError("Select at least one Weaver item to build")
@@ -275,6 +284,16 @@ def generate_item_build_bundle(
         targets=targets,
         sequences=sequences,
         selection=selection,
+        # Warehouse-only work freezes no Lakehouse and therefore acquires no
+        # Spark session. The bound targets are read in the order ``build``
+        # reads its bindings, so the two cannot choose different attachments.
+        execution=BundleExecution.of(
+            execution,
+            catalogue_target_id=catalogue_target.id,
+            spark_home_target_id=select_spark_home(
+                target_by_item.values(), needed=_needs_spark(sequences)
+            ),
+        ),
         omitted_nodes=tuple(
             sorted(omitted, key=lambda node: (node.node_id, node.reason))
         ),
@@ -288,6 +307,19 @@ def generate_item_build_bundle(
         plan=plan,
         payloads=payloads,
         store=store,
+    )
+
+
+def _needs_spark(sequences) -> bool:
+    """Whether any planned action has to run through a Spark session."""
+
+    from .execution import SPARK_EXECUTORS
+
+    return any(
+        action.executor in SPARK_EXECUTORS
+        for sequence in sequences
+        for batch in sequence.batches
+        for action in batch.actions
     )
 
 

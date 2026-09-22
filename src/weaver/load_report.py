@@ -142,6 +142,8 @@ class LoadRunReport:
     #: Whether the run reconstructed each selected table from zero. Dry runs
     #: record the requested mode.
     reload: bool = False
+    #: Whether the run waived the declared delete and update stability limits.
+    ignore_stability_threshold: bool = False
     nodes: tuple[LoadNodeReport, ...] = ()
     edges: tuple[tuple[str, str], ...] = ()
     order: tuple[str, ...] = ()
@@ -167,6 +169,7 @@ class LoadRunReport:
             "dry_run": self.dry_run,
             "fault_tolerant": self.fault_tolerant,
             "reload": self.reload,
+            "ignore_stability_threshold": self.ignore_stability_threshold,
             "workspace": self.workspace,
             "workflow_id": self.workflow_id,
             "started_at": self.started_at,
@@ -185,6 +188,9 @@ class LoadRunReport:
             dry_run=bool(payload.get("dry_run", False)),
             fault_tolerant=bool(payload.get("fault_tolerant", False)),
             reload=bool(payload.get("reload", False)),
+            ignore_stability_threshold=bool(
+                payload.get("ignore_stability_threshold", False)
+            ),
             nodes=tuple(
                 LoadNodeReport.from_mapping(one) for one in payload.get("nodes") or ()
             ),

@@ -248,18 +248,15 @@ def _requires_initialise(args) -> frozenset[str]:
 
 
 def _requires_install(args) -> frozenset[str]:
-    """A frozen bundle may contain any target kind, so declare the coarse set."""
+    """Install declares nothing to warm.
 
-    from weaver.sessions.requirements import (
-        AUTH,
-        LIVY,
-        ONELAKE,
-        RESOLVER,
-        TDS,
-        requirements,
-    )
+    What an installation needs is in its bundle, and the bundle has not been
+    read when a shell or workflow warms resources. Warming from the ambient
+    workspace could start a Spark session the bundle does not want and attach it
+    to the wrong Lakehouse.
+    """
 
-    return requirements(AUTH, RESOLVER, ONELAKE, LIVY, TDS)
+    return frozenset()
 
 
 def command_requirements(parsed) -> frozenset[str]:
@@ -498,6 +495,14 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     load.add_argument(
+        "--ignore-stability-threshold",
+        action="store_true",
+        help=(
+            "Waive the declared delete and update limits for this load. Row "
+            "checks, fault tolerance and selection are unchanged."
+        ),
+    )
+    load.add_argument(
         "--stale",
         action="store_true",
         help="Load only the objects whose load health is not green.",
@@ -693,7 +698,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     install.add_argument("--json", action="store_true", help="Emit the report as JSON.")
     add_non_interactive(install)
-    _add_workspace_args(install, include_catalogue=False, include_environment=False)
+    # No workspace options: the bundle names where it installs.
     install.set_defaults(handler=handle_install, requires=_requires_install)
 
     # Fabric commands do not read or write the Weaver catalogue.
@@ -926,17 +931,20 @@ def handle_environment_publish(args: argparse.Namespace) -> int:
 
 
 def handle_install(args: argparse.Namespace) -> int:
+    """Install a bundle against the execution context it froze.
+
+    No workspace is resolved here: doing so would let the caller's directory
+    decide where a frozen bundle lands.
+    """
+
     import json
 
     from weaver.operations.install import install
 
-    workspace = _resolve_workspace(args)
-    with _running_session(args, workspace) as opened:
-        report = install(
-            args.bundle,
-            workspace=workspace.workspace,
-            session=opened,
-        )
+    _prefer_desktop_credential(args)
+    # The Session opens with no workspace: the bundle binds it to one.
+    with _running_session(args, None) as opened:
+        report = install(args.bundle, session=opened)
     if args.json:
         print(json.dumps(report.to_mapping(), indent=2))
     else:
@@ -1235,15 +1243,26 @@ def _load_once(args: argparse.Namespace) -> int:
                 fault_tolerant=args.fault_tolerant,
                 dry_run=args.dry_run,
                 reload=args.reload,
+                ignore_stability_threshold=args.ignore_stability_threshold,
                 stale=args.stale,
                 as_of=args.as_of,
                 session=opened,
             )
     except LoadError as exc:
         # Preserve the partial report carried by an intolerant failure.
-        if not args.json and getattr(exc, "report", None) is not None:
+        presented = not args.json and getattr(exc, "report", None) is not None
+        if presented:
             _print_load(exc.report)
-        _render_error(exc, args=args, report=getattr(exc, "report", None))
+        _render_error(
+            exc,
+            args=args,
+            report=getattr(exc, "report", None),
+            # A refusal's detail is already under its node in the report above,
+            # and it is long. Any other failure keeps its cause here, which may
+            # be the only place it is said.
+            brief=presented
+            and getattr(getattr(exc, "result", None), "is_refusal", False),
+        )
         if not args.json and getattr(exc, "workflow_id", None):
             print(f"  Workflow: {exc.workflow_id}", file=sys.stderr)
         return 1
@@ -1263,6 +1282,7 @@ def _run_load(
     fault_tolerant: bool,
     dry_run: bool,
     reload: bool = False,
+    ignore_stability_threshold: bool = False,
     stale: bool = False,
     as_of=None,
     session=None,
@@ -1277,6 +1297,7 @@ def _run_load(
             fault_tolerant=fault_tolerant,
             dry_run=dry_run,
             reload=reload,
+            ignore_stability_threshold=ignore_stability_threshold,
             stale=stale,
             as_of=as_of,
             session=opened,
@@ -1997,12 +2018,15 @@ def _check_once(args: argparse.Namespace) -> int:
     return 0
 
 
-def _render_error(exc: BaseException, *, args=None, report=None) -> None:
+def _render_error(
+    exc: BaseException, *, args=None, report=None, brief: bool = False
+) -> None:
     import json
 
     from weaver.errors import reported_message
 
-    message = reported_message(exc) or str(exc)
+    summary = getattr(exc, "summary", None) if brief else None
+    message = summary or reported_message(exc) or str(exc)
     executor = _reported_executor(exc)
     error = {"message": message}
     if executor is not None:

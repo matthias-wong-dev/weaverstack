@@ -25,6 +25,7 @@ from support.workspaces import WORKSPACE, given_workspace
 
 import weaver
 from weaver.build_bundle import Builder, WarehouseBinding, effective_item_bindings
+from weaver.build_bundle.execution import ExecutionIdentity
 from weaver.build_bundle.workflow import BuildState
 from weaver.catalogue.state import Catalogue
 from weaver.catalogue.tables import (
@@ -122,6 +123,7 @@ def test_public_load_reconstructs_a_built_runtime_reference_without_manual_depen
             warehouse=ItemRef("Weaver"), workspace_name=WORKSPACE
         ),
         source_store=store,
+        execution=ExecutionIdentity(workspace_name=WORKSPACE),
     ).build(output=Location(str(tmp_path / "bundle")))
 
     procedure = next(

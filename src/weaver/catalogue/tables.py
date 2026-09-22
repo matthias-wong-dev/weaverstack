@@ -99,6 +99,12 @@ WAREHOUSE_TYPES = {
 PROSE_TYPE = "varchar(4000)"
 LIST_TYPE = "varchar(1000)"
 
+#: Unbounded, for a column set an author may declare over a wide table. Any
+#: bound here would make the catalogue, not the platform, the thing that refuses
+#: a project, and narrowing a comparison set to fit storage would change what a
+#: load treats as a change. A Fabric Warehouse stores 16 MB in a varchar(max).
+WIDE_LIST_TYPE = "varchar(max)"
+
 #: The signature column, on every table.
 SIGNATURE = "signature"
 
@@ -450,8 +456,11 @@ TABLE_DICTIONARY = CatalogueTable(
         ),
         CatalogueColumn(
             "comparison_columns",
-            sql_type=LIST_TYPE,
-            description="Columns whose change drives an upsert.",
+            sql_type=WIDE_LIST_TYPE,
+            description=(
+                "Columns an author named to drive an upsert. Null where none "
+                "were named, which is every eligible non-key column."
+            ),
         ),
         *_behaviour(),
         _signature("the object's source file"),

@@ -1045,3 +1045,102 @@ def test_a_missing_physical_target_is_left_to_dispatch(livy):
 
     assert livy.submitted
     assert _FakeResolver.asked == []
+
+
+# --- a refusal is said once ----------------------------------------------------
+
+
+REFUSAL = (
+    "delete of 900 rows is 90.0% of 1000, over the 5% threshold; "
+    "the target was not modified"
+)
+
+
+def _refused_report():
+    from weaver.load_report import LoadMessage
+
+    node = LoadNodeReport(
+        node_id="load:Lakehouse/Sales/Tables/Sales.Customer",
+        logical_id="Lakehouse/Sales/Tables/Sales.Customer",
+        physical_target="Lakehouse/Sales",
+        primitive_kind="python_table",
+        dispatch_location="/x/Sales__Customer.py",
+        status=FAILED,
+        executed=True,
+        result=LoadResult.refusal(REFUSAL, rows_read=1000),
+        messages=(
+            LoadMessage(
+                code="primitive_failure",
+                severity="error",
+                message=f"Sales.Customer refused the load: {REFUSAL}",
+                source="python_table",
+            ),
+        ),
+    )
+    return _report(status=TASK_FAILED, nodes=(node,), workflow_id="0f8b2c1d")
+
+
+def _refusing(monkeypatch):
+    report = _refused_report()
+
+    def raising(targets, **kwargs):
+        raise LoadError(
+            f"Load failed for Lakehouse/Sales/Tables/Sales.Customer: {REFUSAL}; "
+            "Load summary: 1 failed",
+            result=report.nodes[0].result,
+            report=report,
+            workflow_id="0f8b2c1d",
+            summary=(
+                "Load failed for Lakehouse/Sales/Tables/Sales.Customer; "
+                "Load summary: 1 failed"
+            ),
+        )
+
+    monkeypatch.setattr(weaver, "load", raising)
+
+
+@weaver_test()
+def test_a_refusal_is_detailed_in_the_report_and_not_repeated_in_the_footer(
+    monkeypatch, capsys, desktop_credential
+):
+    """The detail belongs under the node it is about.
+
+    Printing it again in the footer makes one refusal look like two, and the
+    footer is where an operator looks for which node failed and how the run
+    finished.
+    """
+
+    _refusing(monkeypatch)
+
+    exit_code = main(_command())
+    captured = capsys.readouterr()
+    together = captured.out + captured.err
+
+    assert exit_code == 1
+    assert together.count(REFUSAL) == 1
+    assert REFUSAL in captured.out
+    assert "Load failed for Lakehouse/Sales/Tables/Sales.Customer" in captured.err
+    assert "Load summary: 1 failed" in captured.err
+    assert "Workflow: 0f8b2c1d" in captured.err
+    assert "Traceback" not in together
+
+
+@weaver_test()
+def test_a_refused_json_run_is_one_document_carrying_the_same_evidence(
+    monkeypatch, capsys, desktop_credential
+):
+    _refusing(monkeypatch)
+
+    assert main(_command("--json")) == 1
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    node = payload["report"]["nodes"][0]
+
+    assert payload["status"] == "failed"
+    assert REFUSAL in payload["error"]["message"]
+    assert node["status"] == FAILED
+    assert node["rows"]["rows_read"] == 1000
+    assert node["rows"]["is_refusal"] is True
+    assert REFUSAL in node["messages"][0]["message"]
+    assert captured.err == ""

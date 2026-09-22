@@ -76,7 +76,10 @@ def test_build_state_is_read_without_importing_weaver_in_fabric(
     named schema and so does not depend on what is there.
     """
 
-    bindings = item_bindings(("Lakehouse/Sales", emptied_target.name))
+    bindings = item_bindings(
+        ("Lakehouse/Sales", emptied_target.name),
+        workspace_name=fabric_workspace.workspace,
+    )
     state = read_build_state(
         bindings,
         required_catalogue_items=(),

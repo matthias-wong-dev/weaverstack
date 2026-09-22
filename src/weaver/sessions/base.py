@@ -166,6 +166,18 @@ class Session(ABC):
 
         self.scope(workspace).offer_spark_home(lakehouses)
 
+    def require_spark_home(
+        self, lakehouse: str | None, *, workspace: Workspace | None = None
+    ) -> None:
+        """Name the one Lakehouse this workspace's next Spark session attaches to.
+
+        A build settles its own, and a frozen bundle carries the one its build
+        settled; offers from earlier commands must not change either. ``None``
+        requires nothing, which is what Warehouse-only work passes.
+        """
+
+        self.scope(workspace).require_spark_home(lakehouse)
+
     @property
     def workflow_id(self) -> str | None:
         return self._workflow_id
@@ -589,6 +601,8 @@ class WorkspaceScope:
         self._resources: list[Resource] = []
         #: Candidate Lakehouses for Livy attachment, not execution destinations.
         self._offered_spark_homes: set[str] = set()
+        #: An exact attachment a frozen bundle requires. It outranks every offer.
+        self._required_spark_home: str | None = None
         # Acquisition may re-enter the scope to resolve the resource.
         self._lock = threading.RLock()
 
@@ -606,15 +620,46 @@ class WorkspaceScope:
         with self._lock:
             self._offered_spark_homes |= names
 
+    def require_spark_home(self, lakehouse: str | None) -> None:
+        """Fix this scope's next attachment, refusing a live one that cannot serve it.
+
+        A cold scope takes the requirement whatever it was offered or required
+        before, because nothing has been attached yet and a session serves one
+        piece of work after another. Once Spark is running the attachment is
+        physical: a scope attached elsewhere is reported rather than silently
+        redirected, because the caller owns that resource.
+        """
+
+        if not lakehouse:
+            return
+        name = str(lakehouse)
+        with self._lock:
+            attached = self.attached_spark_home()
+            if attached is not None and attached != name:
+                raise CommandError(
+                    f"This session's Spark session is attached to Lakehouse "
+                    f"{attached!r}; this work needs {name!r}. Run it from a "
+                    "session that has not started Spark elsewhere."
+                )
+            self._required_spark_home = name
+
+    def attached_spark_home(self) -> str | None:
+        """The Lakehouse a live Spark resource here is attached to, if any."""
+
+        return None
+
     @property
     def spark_home(self) -> str | None:
-        """Return a stable Livy attachment from the offered Lakehouses.
+        """Return a stable Livy attachment for this scope.
 
-        The first name in sorted order keeps attachment stable. None lets the
-        caller fall back to the workspace configuration.
+        A required attachment wins outright. Otherwise the first offered name in
+        sorted order keeps attachment stable, and None lets the caller fall back
+        to the workspace configuration.
         """
 
         with self._lock:
+            if self._required_spark_home is not None:
+                return self._required_spark_home
             offered = sorted(self._offered_spark_homes)
         return offered[0] if offered else None
 

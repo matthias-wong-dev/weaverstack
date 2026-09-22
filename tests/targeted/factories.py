@@ -1283,19 +1283,24 @@ def single_action_bundle(
     of every installer failure.
     """
 
+    from support.bundles import given_execution, with_catalogue
+
     target = target or bound_target()
     payloads = {}
     if payload is not None and action.payload is not None:
         payloads[action.payload] = payload
+    targets = with_catalogue((target,))
+    sequences = (
+        _sequence(description=description, target_id=target.id, action=action),
+    )
     plan = BuildPlan(
         format_version=SUPPORTED_FORMAT_VERSION,
         bundle_id="",
         repository_name="weaver_items",
         repository_signature="repository-signature",
-        targets=(target,),
-        sequences=(
-            _sequence(description=description, target_id=target.id, action=action),
-        ),
+        targets=targets,
+        sequences=sequences,
+        execution=given_execution(targets, sequences),
     )
     plan = _with_identity(plan)
     return write_bundle(location, plan=plan, payloads=payloads, store=store)
@@ -1492,8 +1497,16 @@ def warehouse_context(*, sql=None, **extra):
     )
 
 
-def item_bindings(*pairs: tuple[str, str]) -> ItemBindings:
-    """``("Lakehouse/Sales", "Sales_LH")`` pairs, typed by the logical item."""
+def item_bindings(
+    *pairs: tuple[str, str], workspace_name: str = WORKSPACE
+) -> ItemBindings:
+    """``("Lakehouse/Sales", "Sales_LH")`` pairs, typed by the logical item.
+
+    ``workspace_name`` is the workspace these targets live in. A test against a
+    real one has to say so: the name is what four-part Spark naming is spelled
+    with, and a bundle whose targets name a workspace its execution does not is
+    refused.
+    """
 
     bindings = []
     for logical, physical in pairs:
@@ -1501,9 +1514,9 @@ def item_bindings(*pairs: tuple[str, str]) -> ItemBindings:
         # Four-part Spark naming is spelled with the workspace's display name,
         # so a binding that carried none could not name what it builds.
         binding = (
-            LakehouseBinding(ItemRef(physical), workspace_name=WORKSPACE)
+            LakehouseBinding(ItemRef(physical), workspace_name=workspace_name)
             if item.item_type == "Lakehouse"
-            else WarehouseBinding(ItemRef(physical), workspace_name=WORKSPACE)
+            else WarehouseBinding(ItemRef(physical), workspace_name=workspace_name)
         )
         bindings.append(ItemBinding(item, binding))
     return ItemBindings(tuple(bindings))

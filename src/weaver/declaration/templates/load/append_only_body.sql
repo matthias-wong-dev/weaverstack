@@ -11,7 +11,12 @@ $reject_discovery
 
 select @weaver_rows_rejected = count(*) from $reject_table;
 if @weaver_rows_rejected > 0 and @fault_tolerant = 0
-    throw 51020, '$intolerant_message', 1;
+begin
+$reject_refusal_assignment
+    if @return_refusal = 0
+        throw 51020, '$intolerant_message', 1;
+    return;
+end;
 
 /*-- The accepted rows in this append window --*/
 

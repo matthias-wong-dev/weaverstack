@@ -34,6 +34,8 @@ from support.weaver_test import weaver_test
 #: it, and it is dropped when the body ends.
 SCHEMA = "Refusal"
 OBJECT = "DeltaConstrained"
+#: The same shape under thresholds a one-row change can breach.
+STABILITY_OBJECT = "DeltaStability"
 
 #: The declaration the load reads. A key, a required column, a nullable unique
 #: column and a composite unique key. The same shape the Warehouse file uses, so
@@ -76,6 +78,27 @@ REFUSABLE = [
     ["c9", "Nine", None, 10, "I"],
 ]
 
+#: A key and nothing else, under a limit removing one of two rows passes.
+STABILITY_HEADER = """Table ID: {schema}.{object}
+
+Description: Customers.
+
+Lineage: The sales system.
+
+Primary key: Customer id
+
+Delete percentage threshold: 1
+
+Stability row threshold: 1
+
+Schema:
+  Customer id: string
+  Customer name: string
+"""
+
+SEEDED = [["c1", "One"], ["c2", "Two"]]
+SHRUNK = [["c1", "One"]]
+
 BODY = r'''
 from weaver import lakehouse_for
 from weaver.declaration.metadata import PYTHON, parse_document
@@ -96,6 +119,13 @@ WORKING = ("_Staging", "_Reject", "_Delete", "_Upsert", "_Change", "_StagingKeep
 contract = LoadContract.from_document(
     parse_document(HEADER.format(schema=SCHEMA, object=OBJECT), language=PYTHON)
 )
+stability_contract = LoadContract.from_document(
+    parse_document(
+        STABILITY_HEADER.format(schema=SCHEMA, object=STABILITY_OBJECT),
+        language=PYTHON,
+    )
+)
+STABILITY_COLUMNS = ["Customer id", "Customer name"]
 
 
 def qualified(suffix=""):
@@ -136,6 +166,55 @@ def run(fault_tolerant):
         return {"raised": None, "result": result.as_row()}
     except LoadError as refused:
         return {"raised": str(refused), "result": None}
+
+
+def stability_qualified(suffix=""):
+    return destination.qualify(SCHEMA, STABILITY_OBJECT + suffix)
+
+
+def arrange_stability():
+    for suffix in (*WORKING, ""):
+        spark.sql(f"DROP TABLE IF EXISTS {stability_qualified(suffix)}")
+    business = ", ".join(f"`{name}` string" for name in STABILITY_COLUMNS)
+    audit = ", ".join(f"`{name}` timestamp NOT NULL" for name in delta_audit_names())
+    signature = f"`{delta_signature_name()}` string NOT NULL"
+    spark.sql(
+        f"CREATE TABLE {stability_qualified()} ({business}, {audit}, {signature}) "
+        f"USING delta {COLUMN_MAPPING}"
+    )
+
+
+def run_stability(rows, waived):
+    """One load of the stability object, however it ended."""
+
+    frame = spark.createDataFrame(
+        [tuple(row) for row in rows],
+        ", ".join(f"`{name}` string" for name in STABILITY_COLUMNS),
+    )
+    try:
+        result = load_table(
+            spark,
+            contract=stability_contract,
+            lakehouse=destination,
+            staging_frame=frame,
+            deletes=None,
+            fault_tolerant=False,
+            ignore_stability_threshold=waived,
+        )
+        return {"raised": None, "result": result.as_row()}
+    except LoadError as refused:
+        return {
+            "raised": str(refused),
+            "result": None,
+            "carried": refused.result.as_row(),
+        }
+
+
+def stability_contents():
+    rows = spark.sql(
+        f"SELECT `Customer id` FROM {stability_qualified()} ORDER BY `Customer id`"
+    ).collect()
+    return [row["Customer id"] for row in rows]
 
 
 def contents():
@@ -201,6 +280,16 @@ try:
         ).collect()
     }
     seen["tolerated_artefacts"] = artefacts()
+
+    # The same excessive change, refused and then permitted. One declaration,
+    # one change, and only the waiver differs.
+    arrange_stability()
+    seen["seeded"] = run_stability(SEEDED, False)
+    seen["seeded_contents"] = stability_contents()
+    seen["refused"] = run_stability(SHRUNK, False)
+    seen["refused_contents"] = stability_contents()
+    seen["waived"] = run_stability(SHRUNK, True)
+    seen["waived_contents"] = stability_contents()
 finally:
     spark.sql(
         "DROP SCHEMA IF EXISTS "
@@ -231,6 +320,10 @@ def test_the_delta_keyed_load_refuses_incoming_rows_and_loads_the_survivors(
         f"OBJECT = {OBJECT!r}\n"
         f"HEADER = {HEADER!r}\n"
         f"REFUSABLE = {REFUSABLE!r}\n"
+        f"STABILITY_OBJECT = {STABILITY_OBJECT!r}\n"
+        f"STABILITY_HEADER = {STABILITY_HEADER!r}\n"
+        f"SEEDED = {SEEDED!r}\n"
+        f"SHRUNK = {SHRUNK!r}\n"
     )
 
     seen = livy_session.run(preamble + BODY).payload
@@ -273,3 +366,22 @@ def test_the_delta_keyed_load_refuses_incoming_rows_and_loads_the_survivors(
     signatures = seen["tolerated_signatures"]
     assert all(signatures.values())
     assert len(set(signatures.values())) == len(signatures)
+
+    # The stability gate, and the waiver that is the only way past it.
+    assert seen["seeded_contents"] == ["c1", "c2"]
+
+    refused = seen["refused"]
+    # The same sentence the Warehouse gate produces, from the other engine.
+    assert "delete of 1 rows is 50.0% of 2, over the 1% threshold" in refused["raised"]
+    assert "the target was not modified" in refused["carried"]["error_message"]
+    assert refused["carried"]["is_refusal"] is True
+    assert refused["carried"]["rows_read"] == 1
+    assert refused["carried"]["rows_deleted"] == 0
+    # Refused before writing, so the target still holds both rows.
+    assert seen["refused_contents"] == ["c1", "c2"]
+
+    waived = seen["waived"]["result"]
+    assert waived["succeeded"] is True
+    assert waived["is_refusal"] is False
+    assert waived["rows_deleted"] == 1
+    assert seen["waived_contents"] == ["c1"]

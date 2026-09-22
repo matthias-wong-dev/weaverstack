@@ -5,6 +5,7 @@ Source parsing and request validation finish before target state is read.
 
 from __future__ import annotations
 
+import shutil
 import stat
 import tempfile
 import zipfile
@@ -22,12 +23,13 @@ from ..catalogue.state import (
 )
 from ..declaration.model import WeaverItemId, WeaverRepository
 from ..declaration.repository import parse_item_repository
-from ..errors import BuildError
+from ..errors import BuildError, DiscoveryError
 from ..locations import Location
 from ..store import FilesystemStore, Store
 from ..targets import ItemRef
 from .builder import Builder
 from .bundle import BuildBundle, load_bundle
+from .execution import ExecutionIdentity, resolve_execution_identity
 from .installer import Installer
 from .models import BuildPlan
 from .prune import (
@@ -291,16 +293,69 @@ def materialise_tree(
 
     with tempfile.TemporaryDirectory(prefix=prefix) as temporary:
         destination = Path(temporary) / _snapshot_name(source)
-        copier = getattr(store, "copy_to_local", None)
-        if callable(copier):
-            copier(source, destination)
-        else:
-            _copy_tree_through_store(source, store, destination)
+        # Only the copy. Wrapping the yield as well would report a failure in
+        # whatever reads the snapshot as a failure to take it.
+        try:
+            copier = getattr(store, "copy_to_local", None)
+            if callable(copier):
+                copier(source, destination)
+            else:
+                _copy_tree_through_store(source, store, destination)
+        # A source file that cannot be read is a source failure, so it is
+        # rendered and retried like every other one an offline check reports.
+        except shutil.Error as exc:
+            raise DiscoveryError(_copy_failures(source, exc)) from exc
+        except OSError as exc:
+            raise DiscoveryError(
+                f"{source.value} could not be read: {_os_failure(source, exc)}"
+            ) from exc
         if not destination.is_dir():
             raise BuildError(
                 f"materialising {source.value} did not create {destination}"
             )
         yield MaterialisedTree(Location(destination.as_posix()), FilesystemStore())
+
+
+#: How many failing files a copy error names before it stops listing them.
+COPY_FAILURE_LIMIT = 5
+
+
+def _copy_failures(source: Location, exc: shutil.Error) -> str:
+    """Name the files a recursive copy could not take, bounded.
+
+    ``shutil`` collects every failure of a tree copy into one error. Rendering
+    all of them would bury the first, which is usually the one to fix.
+    """
+
+    failures = exc.args[0] if exc.args and isinstance(exc.args[0], list) else []
+    if not failures:
+        return f"{source.value} could not be copied: {exc}"
+    named = [
+        f"  {_relative(source, str(entry[0]))}: {entry[-1]}"
+        for entry in failures[:COPY_FAILURE_LIMIT]
+    ]
+    omitted = len(failures) - len(named)
+    if omitted > 0:
+        named.append(f"  ... and {omitted} more file(s)")
+    return f"{source.value} could not be copied:\n" + "\n".join(named)
+
+
+def _os_failure(source: Location, exc: OSError) -> str:
+    named = getattr(exc, "filename", None)
+    detail = exc.strerror or str(exc)
+    return f"{_relative(source, named)}: {detail}" if named else detail
+
+
+def _relative(source: Location, path: str | None) -> str:
+    """A failing file as the project names it, never as the snapshot does."""
+
+    if not path:
+        return source.value
+    root = source.value.rstrip("/")
+    text = str(path).replace("\\", "/")
+    if text.startswith(root + "/"):
+        return text[len(root) + 1 :]
+    return text
 
 
 def _snapshot_name(source: Location) -> str:
@@ -410,13 +465,12 @@ def install_bundle_archive(
     *,
     archive_store: Store,
     session,
-    workspace=None,
     executors=None,
 ) -> InstallationReport:
+    """Install an archive against the execution context it froze."""
+
     with materialise_bundle_archive(archive, store=archive_store) as bundle:
-        return Installer(session, workspace=workspace, executors=executors).install(
-            bundle
-        )
+        return Installer(session, executors=executors).install(bundle)
 
 
 def build_item_repository(
@@ -428,12 +482,13 @@ def build_item_repository(
     workspace=None,
     source_store: Store,
     catalogue_binding: WarehouseBinding,
+    execution: ExecutionIdentity | None = None,
     output: Location | None = None,
     executors=None,
 ) -> ItemBuildResult:
     """Build and install, optionally retaining the generated bundle at ``output``."""
 
-    installer = Installer(session, workspace=workspace, executors=executors)
+    installer = Installer(session, executors=executors)
 
     with tempfile.TemporaryDirectory(prefix="weaver-build-") as temporary:
         bundle = build_repository_bundle(
@@ -441,6 +496,12 @@ def build_item_repository(
             state=state,
             bindings=bindings,
             catalogue_binding=catalogue_binding,
+            execution=execution
+            if execution is not None
+            else resolve_execution_identity(
+                workspace if workspace is not None else session.workspace,
+                session=session,
+            ),
             source_store=source_store,
             output=output or Location((Path(temporary) / "bundle").as_posix()),
         )
@@ -461,6 +522,7 @@ def build_repository_bundle(
     state: BuildState,
     bindings: ItemBindings,
     catalogue_binding: WarehouseBinding,
+    execution: ExecutionIdentity,
     source_store: Store,
     output: Location,
 ) -> BuildBundle:
@@ -471,6 +533,7 @@ def build_repository_bundle(
         state=state,
         bindings=bindings,
         catalogue_binding=catalogue_binding,
+        execution=execution,
         source_store=source_store,
     ).build(output=output)
 
@@ -509,6 +572,10 @@ def build_item_repository_source(
             workspace=workspace,
             source_store=prepared.store,
             catalogue_binding=catalogue_binding,
+            execution=resolve_execution_identity(
+                workspace if workspace is not None else session.workspace,
+                session=session,
+            ),
             output=output,
             executors=executors,
         )

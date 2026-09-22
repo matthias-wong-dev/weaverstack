@@ -129,8 +129,9 @@ def build(
         validate_build_request(prepared.repository, bindings, catalogue_binding=control)
         _preflight(resolved_workspace, bindings, session=session)
         with use_or_create_session(session, workspace=resolved_workspace) as opened:
-            # Fabric requires a Lakehouse attachment before Spark starts.
-            opened.offer_spark_home(_bound_lakehouses(bindings))
+            # Fabric requires a Lakehouse attachment before Spark starts, and
+            # the bundle freezes the same one.
+            opened.require_spark_home(_spark_home(bindings))
             arguments: dict[str, Any] = dict(
                 repository=prepared.repository,
                 source_store=prepared.store,
@@ -148,14 +149,19 @@ def build(
                 return result
 
 
-def _bound_lakehouses(bindings) -> tuple[str, ...]:
-    from ..declaration.model import LAKEHOUSE
+def _spark_home(bindings) -> str | None:
+    """The one Lakehouse this build attaches Spark to, or ``None``.
 
-    return tuple(
-        binding.target.item.name
-        for binding in bindings.entries
-        if binding.target.physical_kind == LAKEHOUSE
-    )
+    Chosen before anything can acquire Spark, from the bindings in the order the
+    planner reads them, so the running attachment is the one the bundle freezes
+    and an install into this session cannot be refused by its own build.
+    """
+
+    from ..build_bundle.execution import spark_home_of
+
+    ordered = sorted(bindings.entries, key=lambda binding: str(binding.item))
+    home = spark_home_of(binding.target for binding in ordered)
+    return home.item.name if home is not None else None
 
 
 def _build_context_lines(workspace: Workspace, bindings) -> tuple[str, ...]:
@@ -269,6 +275,11 @@ def _run_build(
         catalogue_items_for_build,
         read_build_state,
     )
+    from ..build_bundle.execution import resolve_execution_identity
+
+    # Where this build installs, resolved once against the Session before the
+    # pure planner is given anything.
+    execution = resolve_execution_identity(workspace, session=session)
 
     # Each state part is its own Step; nesting one here would exceed the
     # Task/Step/Sub-step telemetry hierarchy.
@@ -289,6 +300,7 @@ def _run_build(
                 state=state,
                 source_store=source_store,
                 catalogue_binding=catalogue_binding,
+                execution=execution,
                 output=output,
             )
         if present_selection:
@@ -311,12 +323,13 @@ def _run_build(
                 state=state,
                 source_store=source_store,
                 catalogue_binding=catalogue_binding,
+                execution=execution,
                 output=Location((Path(temporary) / "bundle").as_posix()),
             )
         if present_selection:
             session.report(_selection_lines(bundle.plan.selection, requested_bindings))
         with session.step("Install"):
-            report = Installer(session, workspace=workspace).install(bundle)
+            report = Installer(session).install(bundle)
         result = BuildResult(
             source=source,
             items=tuple(str(binding.item) for binding in requested_bindings.entries),

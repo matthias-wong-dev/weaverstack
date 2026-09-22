@@ -211,7 +211,7 @@ def _reconcile(
             # rather than an unwind.
             raise LoadError(
                 f"{contract.qualified}: {INTOLERANT_MESSAGE}",
-                result=LoadResult.failure(
+                result=LoadResult.refusal(
                     INTOLERANT_MESSAGE,
                     rows_read=rows_read,
                     rows_rejected=rows_rejected,
@@ -267,7 +267,7 @@ def _reconcile(
         # with incoming rows, and this is the target's own validity.
         raise LoadError(
             f"{contract.qualified}: {MERGE_CONFLICT_MESSAGE}",
-            result=LoadResult.failure(MERGE_CONFLICT_MESSAGE),
+            result=LoadResult.refusal(MERGE_CONFLICT_MESSAGE),
         )
 
     # Everything the load is about to do is settled, so the gate judges it before
@@ -288,7 +288,10 @@ def _reconcile(
         # change the threshold was declared to prevent, so what fault_tolerant
         # decides here is only whether the refusal is raised or returned.
         keep(staging=staging_view, delete=deleting)
-        refused = LoadResult.failure(
+        # A refusal even when fault tolerance returns it rather than raising:
+        # what the gate settled was proposed, and the target still holds what it
+        # held. The counts are what was read and set aside, never what it took.
+        refused = LoadResult.refusal(
             BREACH_MESSAGE.format(reason=breach),
             rows_read=rows_read,
             rows_rejected=rows_rejected,

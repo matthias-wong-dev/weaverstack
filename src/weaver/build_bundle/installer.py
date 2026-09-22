@@ -3,6 +3,10 @@
 Sequences are barriers. A failed sequence skips all later sequences, and every
 planned action receives one result. The installer resolves target capabilities
 through the Session; it never reads the source repository or changes the plan.
+
+The workspace every capability is reached through comes from the bundle, not
+from the Session. A Session supplies credentials, transport and reusable
+resources; it does not decide where a frozen bundle installs.
 """
 
 from __future__ import annotations
@@ -11,10 +15,9 @@ from datetime import datetime, timezone
 from typing import Any, Mapping
 
 from ..errors import InstallError
-from ..locations import Location
 from ..store import Store
 from ..targets import ItemRef
-from .bundle import BuildBundle, load_bundle, validate_bundle
+from .bundle import BuildBundle, validate_bundle
 from .executors import default_executors
 from .executors.base import (
     ActionExecutor,
@@ -67,12 +70,39 @@ class Installer:
         self,
         session,
         *,
-        workspace: Any = None,
         executors: dict[str, ActionExecutor] | None = None,
     ) -> None:
         self.session = session
-        self.workspace = workspace if workspace is not None else session.workspace
         self.executors = default_executors() if executors is None else executors
+        self.workspace: Any = None
+
+    def bind(self, workspace: Any) -> "Installer":
+        """Reach this workspace's capabilities, for a caller with no bundle.
+
+        A caller assembling one action's context by hand has no manifest to read
+        a workspace from and must not inherit one. :meth:`install` binds from
+        the manifest and overwrites whatever was set here, so this cannot
+        redirect a frozen bundle.
+        """
+
+        self.workspace = workspace
+        return self
+
+    def _bind(self, plan) -> Any:
+        """Bind this installation to the workspace its bundle names.
+
+        Done before any capability is reached, so a mismatched live Spark
+        session is reported instead of quietly installing somewhere else.
+        """
+
+        from .execution import execution_spark_home, execution_workspace
+
+        workspace = execution_workspace(plan.execution, plan)
+        self.bind(workspace)
+        self.session.require_spark_home(
+            execution_spark_home(plan.execution, plan), workspace=workspace
+        )
+        return workspace
 
     @property
     def store(self) -> Store:
@@ -164,14 +194,18 @@ class Installer:
             return None
         return resolve(item)
 
-    def install(self, bundle: BuildBundle | Location) -> InstallationReport:
-        if isinstance(bundle, Location):
-            bundle = load_bundle(bundle, store=self.store)
-        else:
-            # Revalidate pre-loaded bundles immediately before execution.
-            validate_bundle(
-                bundle.location, bundle.plan, store=bundle.store or self.store
-            )
+    def install(self, bundle: BuildBundle) -> InstallationReport:
+        """Execute a loaded bundle.
+
+        A bundle rather than a location: reading one needs the store it lives
+        on, and a bundle's own store is not the workspace store it installs
+        into. ``load_bundle`` or ``materialise_bundle_archive`` is where a
+        caller says which.
+        """
+
+        self._bind(bundle.plan)
+        # Revalidate immediately before execution.
+        validate_bundle(bundle.location, bundle.plan, store=bundle.store or self.store)
 
         plan = bundle.plan
         resolved = {target.id: self.resolve_target(target) for target in plan.targets}

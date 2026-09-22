@@ -157,16 +157,62 @@ def _render_inferred_create(
         metadata_validation_sql=_render_metadata_validation(document, temp_literal),
         identity_guard_sql=_render_identity_guard(identity, temp_literal)
         + _render_internal_guard(document.signature_column, temp_literal),
+        column_ceiling_sql=_render_column_ceiling(document, temp_literal),
         identity_column_sql=_render_identity_union(identity),
         signature_column_sql=_render_signature_union(document.signature_column),
         first_ordinal="0" if identity else "1",
         primary_key_columns_cte=_render_primary_key_cte(document.primary_key),
         not_null_columns_cte=_render_name_only_cte(document.not_null),
         type_case=_render_type_case(mapping),
-        target_table=target,
         target_table_literal=_sql_literal(target),
-        pk_constraint=_pk_constraint_name(document.qualified),
+        # Both are written into a literal that builds the statement, and an
+        # object name may hold an apostrophe.
+        quoted_target=_escape_literal(target),
+        quoted_pk_constraint=_escape_literal(_pk_constraint_name(document.qualified)),
     )
+
+
+def managed_column_count(document: SesDocument) -> int:
+    """How many columns Weaver adds to a Warehouse table of its own accord."""
+
+    return len(document.internal_columns) + (1 if document.identity_column else 0)
+
+
+def _render_column_ceiling(document: SesDocument, temp_literal: str) -> str:
+    """Refuse a query whose shape would exceed the platform's column ceiling.
+
+    A declared schema is counted while the project is still a project. This one
+    cannot be: only the engine knows how many columns ``select *`` produces. So
+    the count happens where the shape is known, after the temporary shape table
+    and before the persistent create. Earlier actions in the bundle may already
+    have run; this stops the table, not the build.
+    """
+
+    from ..catalogue.capacity import WAREHOUSE_MAX_COLUMNS
+
+    managed = managed_column_count(document)
+    # An object name may hold an apostrophe, so the subject is a literal rather
+    # than text interpolated into one.
+    subject = _sql_literal(f"weaver: {document.qualified} would have ")
+    return f"""declare @weaver_columns int;
+declare @weaver_width_error nvarchar(2048);
+
+select @weaver_columns = count(*)
+from tempdb.sys.columns as c
+where c.[object_id] = object_id({temp_literal});
+
+if @weaver_columns + {managed} > {WAREHOUSE_MAX_COLUMNS}
+begin
+    set @weaver_width_error = concat(
+        {subject},
+        @weaver_columns + {managed},
+        N' columns and a Fabric Warehouse table holds {WAREHOUSE_MAX_COLUMNS}. ',
+        @weaver_columns,
+        N' from the query, plus {managed} Weaver adds.'
+    );
+    throw 51002, @weaver_width_error, 1;
+end;
+"""
 
 
 def _render_identity_union(column) -> str:

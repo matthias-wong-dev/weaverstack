@@ -7,6 +7,15 @@ procedure raised.
 The implementation procedure is in [_], and the source object's schema is part
 of its name. `@item_name` omitted means recover it from [_].[Installation].
 
+It is called with `@return_refusal = 1`, so a refused load returns its counts
+and its reason instead of throwing them away: a Fabric Warehouse discards output
+values when a procedure ends in an uncaught THROW, even where the caller catches
+the error. The refusal is recorded as Failed and then raised as 51032, so the
+call still fails outward.
+
+`@ignore_stability_threshold = 1` waives the object's declared delete and
+update limits for this call, and nothing else.
+
 `@reload = 1` reconstructs the object from zero: [_].[LoadStatus] goes to Pending
 and [_].[Bookmark] goes to the sentinel, then the implementation procedure clears
 the target and runs. It reaches this object alone.
@@ -56,6 +65,7 @@ begin
     declare @error_message varchar(4000) = null;
     declare @bookmark_datetime datetime2(6) = null;
     declare @is_static_skip bit = null;
+    declare @is_refusal bit = null;
 
     if charindex('.', @object_name) = 0
     begin
@@ -102,6 +112,7 @@ begin
                     + N'@fault_tolerant = @fault_tolerant'
                     + N', @ignore_stability_threshold = @ignore_stability_threshold'
                     + N', @reload = @reload'
+                    + N', @return_refusal = @return_refusal'
                     + N', @weaver_succeeded = @weaver_succeeded output'
                     + N', @weaver_rows_read = @weaver_rows_read output'
                     + N', @weaver_rows_inserted = @weaver_rows_inserted output'
@@ -111,6 +122,7 @@ begin
                     + N', @weaver_error_message = @weaver_error_message output'
                     + N', @weaver_bookmark_datetime = @weaver_bookmark_datetime output'
                     + N', @weaver_is_static_skip = @weaver_is_static_skip output'
+                    + N', @weaver_is_refusal = @weaver_is_refusal output'
                     + N';';
             end;
         end;
@@ -207,6 +219,7 @@ begin
                 N'@fault_tolerant bit,
                    @ignore_stability_threshold bit,
                    @reload bit,
+                   @return_refusal bit,
                    @weaver_succeeded bit output,
                    @weaver_rows_read bigint output,
                    @weaver_rows_inserted bigint output,
@@ -215,10 +228,12 @@ begin
                    @weaver_rows_rejected bigint output,
                    @weaver_error_message varchar(4000) output,
                    @weaver_bookmark_datetime datetime2(6) output,
-                   @weaver_is_static_skip bit output',
+                   @weaver_is_static_skip bit output,
+                   @weaver_is_refusal bit output',
                 @fault_tolerant = @fault_tolerant,
                 @ignore_stability_threshold = @ignore_stability_threshold,
                 @reload = @reload,
+                @return_refusal = 1,
                 @weaver_succeeded = @succeeded output,
                 @weaver_rows_read = @rows_read output,
                 @weaver_rows_inserted = @rows_inserted output,
@@ -227,7 +242,8 @@ begin
                 @weaver_rows_rejected = @rows_rejected output,
                 @weaver_error_message = @error_message output,
                 @weaver_bookmark_datetime = @bookmark_datetime output,
-                @weaver_is_static_skip = @is_static_skip output;
+                @weaver_is_static_skip = @is_static_skip output,
+                @weaver_is_refusal = @is_refusal output;
         end;
     end try
     begin catch
@@ -247,6 +263,9 @@ begin
              when @weaver_error is not null then N'Error'
              when @is_static_skip = 1 then N'Skipped'
              when @succeeded = 1 then N'Succeeded'
+             -- Before the reject count: a refusal wrote nothing, and rejected
+             -- rows are usually why it refused.
+             when @is_refusal = 1 then N'Failed'
              when @rows_rejected > 0 then N'Rejected'
              else N'Failed' end;
 
@@ -436,5 +455,14 @@ begin
             case when @weaver_error_number >= 50000 then @weaver_error_number
                  else 51031 end;
         throw @weaver_number, @weaver_rethrow, 1;
+    end;
+
+    -- The refusal returned rather than threw, so that everything above could
+    -- record what it counted. Raised here, once the record is durable.
+    if @is_refusal = 1
+    begin
+        set @weaver_rethrow = cast(
+            coalesce(@error_message, N'the load was refused') as nvarchar(2048));
+        throw 51032, @weaver_rethrow, 1;
     end;
 end;

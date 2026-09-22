@@ -34,6 +34,7 @@ from __future__ import annotations
 import hashlib
 
 import yaml
+from support.bundles import given_execution
 from support.weaver_test import weaver_test
 
 from weaver.build_bundle import (
@@ -101,22 +102,22 @@ def _plan(action: InstallAction) -> BuildPlan:
     target = BoundTarget(
         id="warehouse-Reporting", kind="warehouse", item_id="Reporting"
     )
+    sequences = (
+        BuildSequence(
+            number=60,
+            description="install runtime artefacts",
+            batches=(BuildBatch(id="b-load", target_id=target.id, actions=(action,)),),
+        ),
+    )
     return BuildPlan(
         format_version=SUPPORTED_FORMAT_VERSION,
         bundle_id="",
         repository_name="MyRepo",
         repository_signature="sig-abc",
         targets=(target,),
-        sequences=(
-            BuildSequence(
-                number=60,
-                description="install runtime artefacts",
-                batches=(
-                    BuildBatch(id="b-load", target_id=target.id, actions=(action,)),
-                ),
-            ),
-        ),
+        sequences=sequences,
         selection=BuildSelection(Impact((), (), ()), (), (), ()),
+        execution=given_execution((target,), sequences),
         omitted_nodes=(),
     )
 
