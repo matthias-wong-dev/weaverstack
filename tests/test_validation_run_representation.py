@@ -177,10 +177,11 @@ def _ran(validation, executor=None, *, collect=False):
 
 
 @weaver_test()
-def test_strict_failure_carries_the_completed_report_and_fails_the_test_task():
+def test_a_failing_run_is_reported_and_the_test_task_is_marked_failed():
+    """A finding is an outcome, not an exception, and the Task still says so."""
+
     from datetime import datetime, timezone
 
-    from weaver.errors import ValidationError
     from weaver.operations.test import _reported
     from weaver.sessions import ConsoleSession
 
@@ -197,18 +198,17 @@ def test_strict_failure_carries_the_completed_report_and_fails_the_test_task():
     progress = io.StringIO()
 
     with ConsoleSession(progress=progress) as session:
-        with pytest.raises(ValidationError) as raised:
-            with session.task("Test"):
-                _reported(
-                    nodes=(node,),
-                    started=datetime.now(timezone.utc),
-                    strict=True,
-                    selection=None,
-                    workflow_id="workflow-1",
-                )
+        with session.task("Test") as frame:
+            report = _reported(
+                nodes=(node,),
+                started=datetime.now(timezone.utc),
+                workflow_id="workflow-1",
+            )
+            frame.failed = not report.succeeded
 
-    assert raised.value.report.status == FAILED
-    assert raised.value.report.nodes == (node,)
+    assert report.status == FAILED
+    assert report.nodes == (node,)
+    assert not report.succeeded
     assert "✗ Test" in progress.getvalue()
 
 

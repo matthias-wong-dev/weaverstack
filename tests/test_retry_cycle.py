@@ -601,6 +601,6 @@ def test_a_validation_report_is_never_offered_a_retry(monkeypatch, capsys, statu
     parsed = _cli().build_parser().parse_args(["test", "Lakehouse/Sales"])
     parsed.session = _Session()
 
-    assert _cli().handle_test(parsed) == 0
+    assert _cli().handle_test(parsed) == 1
     assert runs == [1]
     assert terminal.presses == 0
