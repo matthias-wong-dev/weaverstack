@@ -61,12 +61,7 @@ def captured(monkeypatch, desktop_credential):
     def fake(items, **kwargs):
         seen["items"] = items
         seen.update(kwargs)
-        returned = seen.get("report", report)
-        if kwargs.get("strict") and returned.status in (FAILED, INVALID):
-            from weaver.errors import ValidationError
-
-            raise ValidationError("validation failed", report=returned)
-        return returned
+        return seen.get("report", report)
 
     monkeypatch.setattr(weaver, "test", fake)
     return seen
@@ -158,7 +153,15 @@ def test_dry_run_is_passed_through(captured, capsys):
 @weaver_test()
 def test_a_passing_run_exits_zero(captured, capsys):
     assert _run("Lakehouse/Sales") == 0
-    assert captured["strict"] is True
+
+
+@weaver_test()
+def test_the_operation_is_asked_for_a_report_and_nothing_else(captured, capsys):
+    """The CLI owns the exit code, so it asks for no behaviour of its own."""
+
+    _run("Lakehouse/Sales")
+
+    assert "strict" not in captured
 
 
 @weaver_test()
@@ -547,7 +550,7 @@ def test_the_workflow_is_pointed_at(captured, capsys):
     assert "Workflow: 0f8b2c1d" in capsys.readouterr().out
 
 
-# --- dry run and strict reach file mode too ------------------------------------
+# --- dry run reaches file mode too ------------------------------------
 
 
 @weaver_test()

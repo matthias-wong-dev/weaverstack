@@ -337,6 +337,7 @@ Weaver's own dependency resolver   EnvironmentPackageConflict
 SUPPORTED_FABRIC_RUNTIMES          per-runtime wheel ABI selection
 initialise --no-input              a wipe dry run as its own preflight
 a per-command interaction check    workspace-config as the wiped estate
+weaver.test(strict=True)
 ```
 
 The `provision` scope went when the suite moved to fixed items. Standing the

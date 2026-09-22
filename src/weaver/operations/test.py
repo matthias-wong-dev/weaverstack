@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Sequence
 
 from ..declaration.model import WeaverItemId
-from ..errors import CommandError, ValidationError
+from ..errors import CommandError
 from ..targets import lakehouse_names
 from ..test_report import (
     FAILED,
@@ -38,7 +38,6 @@ def test(
     environment: str | None = None,
     workspace_config: str | Path | None = None,
     dry_run: bool = False,
-    strict: bool = False,
     session=None,
 ) -> ValidationRunReport:
     """Run the installed validations the named items own.
@@ -49,6 +48,9 @@ def test(
     ``name`` runs one installed validation and includes its diagnostic rows.
     ``file`` compiles and runs an uninstalled source file against exactly one
     item. The two options are mutually exclusive.
+
+    A completed run returns its report whatever the validations found. The
+    report distinguishes findings from validations that could not be evaluated.
     """
 
     if name is not None and file is not None:
@@ -74,16 +76,17 @@ def test(
         with opened.task(
             "Test (dry run)" if dry_run else "Test",
             ", ".join(map(str, requested)) or "every installed item",
-        ):
-            return run_test(
+        ) as frame:
+            report = run_test(
                 opened,
                 workspace=resolved,
                 items=requested,
                 name=name,
                 file=file,
                 dry_run=dry_run,
-                strict=strict,
             )
+            frame.failed = not report.succeeded
+            return report
 
 
 def run_test(
@@ -95,7 +98,6 @@ def run_test(
     file: str | Path | None = None,
     state=None,
     dry_run: bool = False,
-    strict: bool = False,
 ) -> ValidationRunReport:
     """Run validations through a prepared Session.
 
@@ -141,8 +143,6 @@ def run_test(
         return _reported(
             nodes=(node,),
             started=started,
-            strict=strict,
-            selection=str(file),
             workflow_id=None,
         )
 
@@ -184,8 +184,6 @@ def run_test(
     return _reported(
         nodes=tuple(_as_validation_node(node) for node in result.nodes),
         started=started,
-        strict=strict,
-        selection=name,
         workflow_id=None if record is None else record.workflow_id,
     )
 
@@ -275,39 +273,15 @@ def _reported(
     *,
     nodes: Sequence[ValidationNodeReport],
     started: datetime,
-    strict: bool,
-    selection: str | None,
     workflow_id: str | None,
 ) -> ValidationRunReport:
-    status = run_status(nodes)
-    report = ValidationRunReport(
-        status=status,
+    return ValidationRunReport(
+        status=run_status(nodes),
         nodes=tuple(nodes),
         workflow_id=workflow_id,
         started_at=started.isoformat(),
         finished_at=datetime.now(timezone.utc).isoformat(),
     )
-    if strict and status in (FAILED, INVALID):
-        raise ValidationError(
-            _failure_message(report),
-            report=report,
-        )
-    return report
-
-
-def _failure_message(report: ValidationRunReport) -> str:
-    parts = []
-    for node in report.invalid_nodes:
-        parts.append(f"{node.logical_id} could not be evaluated")
-    for node in report.failed_nodes:
-        result = node.result
-        found = (
-            f"{getattr(result, 'violation_count', 0)} violation(s)"
-            if hasattr(result, "violation_count")
-            else f"{getattr(result, 'failure_count', 0)} discrepancy row(s)"
-        )
-        parts.append(f"{node.logical_id} found {found}")
-    return "; ".join(parts)
 
 
 __all__ = ["TASK_TYPE", "run_test", "test"]
