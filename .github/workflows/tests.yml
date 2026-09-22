@@ -35,6 +35,10 @@ jobs:
       - run: pip install -r requirements-dev.txt
       - run: pip install -e . --no-deps
 
+      # The install above is --no-deps, so nothing has yet checked that the
+      # pinned versions satisfy what the package metadata requires.
+      - run: python -m pip check
+
       # Mechanical hygiene first: it is seconds, and a lint failure should not
       # wait behind three minutes of tests to be reported.
       - run: ruff check src tests examples tools hatch_build.py

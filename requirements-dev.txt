@@ -8,9 +8,17 @@
 # Universal: resolved for every platform and Python that `requires-python`
 # allows, with environment markers, so one file serves the whole matrix.
 #
+# Every pin here must satisfy the specifier pyproject.toml declares for it.
+# `tests/test_dependency_invariant.py` checks that without resolving anything,
+# and CI runs `pip check` after installing, because it installs Weaver with
+# `--no-deps` and would otherwise not notice.
+#
 # Refresh after changing dependencies in pyproject.toml:
 #
-#     uv pip compile --universal --extra dev --no-header pyproject.toml #         -o requirements-dev.txt
+#     uv pip compile --universal --extra dev --no-header pyproject.toml -o requirements-dev.txt
+#
+# That writes the whole file, so put this header back afterwards. Everything
+# below it is uv's output and is not edited by hand.
 #
 azure-core==1.41.0
     # via azure-identity
@@ -51,6 +59,7 @@ mssql-python-odbc==18.6.2
     # via mssql-python
 packaging==26.2
     # via
+    #   weaverstack (pyproject.toml)
     #   build
     #   pytest
 pluggy==1.6.0
@@ -76,7 +85,7 @@ requests==2.34.2
     #   msal
 ruff==0.16.3
     # via weaverstack (pyproject.toml)
-sqlparse==0.5.5
+sqlparse==0.6.0
     # via weaverstack (pyproject.toml)
 typing-extensions==4.16.0
     # via

@@ -149,6 +149,7 @@ def journey(
     fabric_catalogue,
     fabric_fork_catalogue,
     fabric_mirror_warehouse,
+    fabric_initialise_catalogue,
     session_disposable_warehouse,
     warehouse_session,
     tmp_path_factory,
@@ -156,6 +157,9 @@ def journey(
     """One estate: built, mirrored, validated, rebuilt, then materialised."""
 
     register_session(warehouse_session)
+    # An earlier module may have emptied the catalogue Warehouse. Every step
+    # here reads the runtime catalogue, so stand it up before the first build.
+    fabric_initialise_catalogue()
     estate = WAREHOUSE_ESTATE_FIXTURE.disposable(tmp_path_factory.mktemp("mirror"))
     _write(estate, f"{ITEM}/tests/{VALIDATION}.sql", VALIDATION_SOURCE)
     _write(estate, f"{ITEM}/{SURFACE_READER}.sql", SURFACE_READER_SOURCE)
