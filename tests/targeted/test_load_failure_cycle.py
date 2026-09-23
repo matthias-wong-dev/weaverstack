@@ -76,16 +76,6 @@ SUMMARY = "load:Warehouse/Reporting_WH/Sales.Summary"
 OK = LoadResult(succeeded=True, rows_read=3, rows_inserted=3)
 
 
-class Unused:
-    """Stands in wherever a real capability would be, and is never reached."""
-
-    def __getattr__(self, name):
-        def refuse(*args, **kwargs):
-            raise AssertionError(f"dispatch is injected; {name} must not be called")
-
-        return refuse
-
-
 @dataclass
 class Prepared:
     """Catalogue state and the Session a run reaches engines through."""

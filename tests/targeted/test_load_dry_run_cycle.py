@@ -56,23 +56,6 @@ REFRESH = "refresh:Lakehouse/Raw_LH"
 SUMMARY = "load:Warehouse/Reporting_WH/Sales.Summary"
 
 
-class Forbidden:
-    """Anything reaching this is a dry run that was not one."""
-
-    def __init__(self, what: str) -> None:
-        self.what = what
-
-    def __call__(self, *args, **kwargs):
-        raise AssertionError(f"a dry run must not {self.what}")
-
-    # A Spark session, a store and a SQL executor all in one, so a single object
-    # can stand in wherever dispatch would have reached.
-    sql = query = execute = execute_script = read = write = __call__
-
-    def refresh_sql_endpoint(self, item):
-        raise AssertionError("a dry run must not refresh an endpoint")
-
-
 @dataclass
 class Prepared:
     """Catalogue state and a Session whose store refuses writes."""

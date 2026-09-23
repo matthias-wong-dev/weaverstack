@@ -435,20 +435,8 @@ def _status(estate: Estate) -> dict | None:
     return _read(estate, "status")["status"]
 
 
-def _statistics(estate: Estate) -> list:
-    return _read(estate, "statistics")["statistics"]
-
-
-def _log(estate: Estate) -> list:
-    return _read(estate, "log")["log"]
-
-
 def _contents(estate: Estate):
     return _read(estate, "contents")["contents"]
-
-
-def _leftovers(estate: Estate) -> int:
-    return _read(estate, "leftovers")["leftovers"]
 
 
 @dataclass(frozen=True)

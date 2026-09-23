@@ -49,8 +49,6 @@ from weaver.catalogue.tables import (
     PROJECTED_TABLES,
 )
 from weaver.declaration import parse_item_repository
-from weaver.declaration.metadata import ObjectId
-from weaver.declaration.model import WeaverDocumentId
 from weaver.etl import item_bookmarkable_objects
 from weaver.locations import Location
 from weaver.store import FilesystemStore
@@ -186,10 +184,6 @@ def _flagged(source: str, line: str) -> str:
     marker = "Primary key: "
     at = source.index(marker)
     return source[:at] + line + "\n\n" + source[at:]
-
-
-def _object(name: str) -> WeaverDocumentId:
-    return WeaverDocumentId(item_id(ITEM), ObjectId("Sales", name))
 
 
 def _bindings():
