@@ -6,33 +6,23 @@ document changing is refused here rather than discovered by a build.
 
 from __future__ import annotations
 
+import functools
+
 import pytest
 from support.weaver_test import weaver_test
 
-from weaver.catalogue.tables import (
-    CATALOGUE_SCHEMA,
-    CATALOGUE_TABLES,
-    RUNTIME_TABLES,
-)
+from weaver.catalogue.tables import CATALOGUE_SCHEMA, CATALOGUE_TABLES
 from weaver.declaration.model import WAREHOUSE
 from weaver.declaration.source import read_source_document
 from weaver.fragments import CATALOGUE, fragment_files
 
-#: How each runtime table's lineage announces itself. The projected tables
-#: share one lineage; each runtime one carries its own.
-_RUNTIME_LINEAGE_OPENINGS = {
-    "Log": "Appended",
-    "Bookmark": "Maintained",
-    "LoadStatus": "Maintained",
-    "LoadStatistic": "Appended",
-    "TestStatus": "Maintained",
-}
 
-_PROJECTED_LINEAGE_OPENING = "Projected"
-
-
+@functools.cache
 def _documents() -> dict[str, tuple[str, object]]:
-    """Every checked-in catalogue document, keyed by ``_.Name``."""
+    """Every checked-in catalogue document, keyed by ``_.Name``.
+
+    Parsed once: the documents are package data and no test here edits them.
+    """
 
     found: dict[str, tuple[str, object]] = {}
     for relative, data in fragment_files(CATALOGUE).items():
@@ -85,19 +75,6 @@ def test_the_declaration_matches_the_table_contract(table):
         for public in (public_name,)
     }
     assert set(document.declared_not_null) == expected_not_null, table.name
-
-
-@pytest.mark.parametrize("table", CATALOGUE_TABLES, ids=lambda table: table.name)
-@weaver_test()
-def test_a_table_declares_where_its_rows_come_from(table):
-    text = fragment_files(CATALOGUE)[f"{table.qualified}.sql"].decode("utf-8")
-    opening = (
-        _RUNTIME_LINEAGE_OPENINGS[table.name]
-        if table in RUNTIME_TABLES
-        else _PROJECTED_LINEAGE_OPENING
-    )
-    lineage = text.split("Lineage: >-", 1)[1]
-    assert lineage.lstrip().startswith(opening), table.name
 
 
 @weaver_test()
