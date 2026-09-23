@@ -211,8 +211,8 @@ results["runtime"] = sorted(
 results["resolved"] = {}
 for table in STANDARD_SURFACE_TABLES:
     reference = destination.qualify("_", table.name)
-    counted = spark.sql(f"select count(*) as n from {reference}").collect()[0]["n"]
-    results["resolved"][table.name] = [reference, counted]
+    read = len(spark.sql(f"select * from {reference} limit 1").collect())
+    results["resolved"][table.name] = [reference, read]
 emit(results)
 """
 
@@ -250,12 +250,11 @@ def test_one_build_installs_the_lakehouse_references_and_the_next_plans_none(
     assert "_" in seen["tables"], seen["tables"]
     assert {table.name for table in STANDARD_SURFACE_TABLES} <= set(seen["runtime"])
     for table in STANDARD_SURFACE_TABLES:
-        reference, counted = seen["resolved"][table.name]
+        reference, read = seen["resolved"][table.name]
         assert reference.endswith(f"`_`.`{table.name}`")
-        # What it counts is the catalogue Warehouse's own table, so the number
-        # belongs to the estate rather than to this test; that a count came back
-        # through the shortcut at all is the claim.
-        assert isinstance(counted, int)
+        # The rows are the catalogue Warehouse's own and belong to the estate, so
+        # the claim is that a read through the shortcut completed, empty or not.
+        assert read in (0, 1)
 
 
 # --- The developer-facing load API ---------------------------------------------

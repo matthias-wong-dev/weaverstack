@@ -261,10 +261,8 @@ def test_a_built_warehouse_is_given_views_over_the_catalogues_runtime_tables(
     } <= present
     # And each resolves, a three-part name in another database, selected here.
     for table in STANDARD_SURFACE_TABLES:
-        counted = warehouse.executor.query(
-            f"select count(*) as n from [_].[{table.name}]"
-        )
-        assert int(dict(counted[0])["n"]) >= 0, table.name
+        read = warehouse.executor.query(f"select top (1) * from [_].[{table.name}]")
+        assert len(read) <= 1, table.name
 
 
 @weaver_test(remote=True, resources={"rest", "tds"})

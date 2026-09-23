@@ -928,8 +928,12 @@ def fabric_empty_lakehouse(
 
 
 @pytest.fixture(scope="session")
-def fabric_initialise_catalogue(fabric_workspace, weaver_session):
-    """Build the package-owned catalogue Item after a fixture reset."""
+def fabric_initialise_catalogue(fabric_workspace, warehouse_session):
+    """Build the package-owned catalogue Item after a fixture reset.
+
+    Over TDS alone: the catalogue is a Warehouse, so standing it up starts no
+    Spark session.
+    """
 
     from support.catalogue import build_catalogue_item
 
@@ -940,8 +944,9 @@ def fabric_initialise_catalogue(fabric_workspace, weaver_session):
             catalogue=fabric_workspace.catalogue_item,
             workspace=fabric_workspace,
             store=OneLakeDfsClient(),
-            session=weaver_session,
+            session=warehouse_session,
         )
+        warehouse_session.flush()
         assert result.succeeded, [
             (action.action_id, action.error_message)
             for action in result.report.action_results()
