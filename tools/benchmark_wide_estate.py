@@ -31,6 +31,8 @@ class WideEstateSpec:
 
     @classmethod
     def from_objects(cls, objects: int, *, seed: int = 20260924) -> "WideEstateSpec":
+        if objects < 2 * NODES_PER_BRANCH:
+            raise ValueError("a benchmark needs at least 50 objects in two branches")
         if objects % NODES_PER_BRANCH:
             raise ValueError(f"objects must be divisible by {NODES_PER_BRANCH}")
         return cls(branches=objects // NODES_PER_BRANCH, seed=seed)
@@ -127,7 +129,11 @@ def make_topology(spec: WideEstateSpec) -> EstateTopology:
         for index in range(10):
             nodes.append(_node(branch, f"Fan{index:02d}", "view", "Root"))
 
-        groups = ((0, 1, 2), (3, 4, 5), (6, 7), (8, 9))
+        base_groups = ((0, 1, 2), (3, 4, 5), (6, 7), (8, 9))
+        offset = (spec.seed + branch) % 10
+        groups = tuple(
+            tuple((member + offset) % 10 for member in group) for group in base_groups
+        )
         for index, group in enumerate(groups):
             nodes.append(
                 _node(
@@ -331,7 +337,7 @@ def benchmark_estate(root: Path, spec: WideEstateSpec) -> dict:
             False,
         ),
     )
-    results = []
+    prepared = []
     for name, root_names, cold in scenarios:
         root_ids = tuple(identities[value] for value in root_names)
         scenario_registered = (
@@ -341,7 +347,6 @@ def benchmark_estate(root: Path, spec: WideEstateSpec) -> dict:
                 registered, root_ids, stale_signature=f"stale-{name}"
             )
         )
-        scenario_physical = {} if cold else physical_types
         expected_descendants = {
             candidate
             for root_name in root_names
@@ -350,37 +355,69 @@ def benchmark_estate(root: Path, spec: WideEstateSpec) -> dict:
         expected_selected = (
             set(topology.identities) if cold else set(root_names) | expected_descendants
         )
+        prepared.append(
+            {
+                "name": name,
+                "root_names": root_names,
+                "registered": scenario_registered,
+                "physical_types": {} if cold else physical_types,
+                "expected_descendants": expected_descendants,
+                "expected_selected": expected_selected,
+                "cold": cold,
+            }
+        )
 
-        started = perf_counter()
+    def evaluate(scenario):
         impact = determine_impact(
             repository,
-            scenario_registered,
+            scenario["registered"],
             selected=selected,
-            physical_types=scenario_physical,
+            physical_types=scenario["physical_types"],
         )
-        elapsed = perf_counter() - started
         actual_descendants = {str(value) for value in impact.impacted_descendants}
         actual_selected = {str(value) for value in (*impact.new, *impact.impacted)}
+        matches = (
+            actual_selected == scenario["expected_selected"]
+            and actual_descendants == scenario["expected_descendants"]
+        )
+        return actual_descendants, actual_selected, matches
+
+    for scenario in prepared:
+        _actual_descendants, _actual_selected, matches = evaluate(scenario)
+        if not matches:
+            raise AssertionError(
+                f"{scenario['name']} differs from the independent oracle before timing"
+            )
+
+    results = []
+    for scenario in prepared:
+        started = perf_counter()
+        actual_descendants, actual_selected, matches = evaluate(scenario)
+        elapsed = perf_counter() - started
+        if not matches:
+            raise AssertionError(
+                f"{scenario['name']} changed after validation; timing was discarded"
+            )
+        root_names = scenario["root_names"]
         touched_branches = {
             by_identity[identity].branch for identity in actual_selected
         }
         intended_branches = (
             set(range(spec.branches))
-            if cold
+            if scenario["cold"]
             else {by_identity[root].branch for root in root_names}
         )
         results.append(
             {
-                "name": name,
+                "name": scenario["name"],
                 "seconds": elapsed,
                 "changed_roots": list(root_names),
-                "expected_descendant_set": sorted(expected_descendants),
+                "expected_descendant_set": sorted(scenario["expected_descendants"]),
                 "actual_descendant_set": sorted(actual_descendants),
                 "actual_affected_set": sorted(actual_selected),
                 "selected_object_count": len(actual_selected),
-                "expected_selected_object_count": len(expected_selected),
-                "matches_oracle": actual_selected == expected_selected
-                and actual_descendants == expected_descendants,
+                "expected_selected_object_count": len(scenario["expected_selected"]),
+                "matches_oracle": True,
                 "physical_actions_executed": 0,
                 "unrelated_branches_untouched": touched_branches <= intended_branches,
             }

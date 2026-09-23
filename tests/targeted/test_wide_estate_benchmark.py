@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 from support.weaver_test import weaver_test
 
 from tools.benchmark_wide_estate import (
@@ -44,6 +45,22 @@ def test_ten_branch_topology_has_250_objects_and_required_graph_shapes():
 
 
 @weaver_test()
+def test_seed_selects_one_repeatable_topology_variant():
+    first = make_topology(WideEstateSpec(branches=2, seed=1))
+    repeated = make_topology(WideEstateSpec(branches=2, seed=1))
+    another = make_topology(WideEstateSpec(branches=2, seed=2))
+
+    assert first == repeated
+    assert first.edges != another.edges
+
+
+@weaver_test()
+def test_a_benchmark_needs_two_independent_branches(tmp_path):
+    with pytest.raises(ValueError, match="at least 50 objects"):
+        benchmark_estate(tmp_path, WideEstateSpec.from_objects(25))
+
+
+@weaver_test()
 def test_generated_repository_matches_the_independent_topology(tmp_path):
     topology = make_topology(WideEstateSpec(branches=1))
     write_estate(tmp_path, topology)
@@ -71,6 +88,28 @@ def test_every_local_benchmark_scenario_matches_the_oracle(tmp_path):
         scenario["unrelated_branches_untouched"] for scenario in result["scenarios"]
     )
     assert all("actual_affected_set" in scenario for scenario in result["scenarios"])
+    mid_graph = next(
+        scenario
+        for scenario in result["scenarios"]
+        if scenario["name"] == "mid_graph_change"
+    )
+    expected_mid_graph = {
+        _identity(0, "Chain03"),
+        _identity(0, "Chain04"),
+        _identity(0, "Bridge"),
+        *(_identity(0, f"Leaf{index:02d}") for index in range(4)),
+    }
+    assert set(mid_graph["expected_descendant_set"]) == expected_mid_graph
+    assert set(mid_graph["actual_descendant_set"]) == expected_mid_graph
+    assert set(result["timings"]) == {
+        "topology_seconds",
+        "source_write_seconds",
+        "parse_seconds",
+        "signature_seconds",
+        "total_seconds",
+    }
+    assert all(value >= 0 for value in result["timings"].values())
+    assert all(scenario["seconds"] >= 0 for scenario in result["scenarios"])
     assert {
         scenario["name"]: scenario["selected_object_count"]
         for scenario in result["scenarios"]
@@ -82,3 +121,26 @@ def test_every_local_benchmark_scenario_matches_the_oracle(tmp_path):
         "high_fan_out_change": 25,
         "independent_branch_changes": 26,
     }
+
+
+@pytest.mark.parametrize("objects", [250, 1000])
+@weaver_test()
+def test_required_scale_estates_compose(tmp_path, objects):
+    result = benchmark_estate(tmp_path, WideEstateSpec.from_objects(objects))
+
+    assert result["topology"]["objects"] == objects
+    assert result["topology_oracle_matches_repository"] is True
+    assert result["all_scenarios_match"] is True
+
+
+@weaver_test()
+def test_a_wrong_impact_is_rejected_before_benchmark_evidence(monkeypatch, tmp_path):
+    from weaver.build_bundle.incremental import Impact
+
+    monkeypatch.setattr(
+        "weaver.build_bundle.incremental.determine_impact",
+        lambda *args, **kwargs: Impact(new=(), changed=(), impacted_descendants=()),
+    )
+
+    with pytest.raises(AssertionError, match="before timing"):
+        benchmark_estate(tmp_path, WideEstateSpec(branches=2))
