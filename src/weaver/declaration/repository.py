@@ -12,6 +12,7 @@ generated content are each read into a :class:`RepositoryPart`, combined through
 from __future__ import annotations
 
 import ast
+import functools
 import hashlib
 from dataclasses import dataclass, field, replace
 from typing import Iterable, Mapping, TypeVar
@@ -337,7 +338,10 @@ def _documents_of(part: RepositoryPart, item: WeaverItemId) -> list[SourceDocume
     ]
 
 
+@functools.cache
 def _catalogue_part() -> RepositoryPart:
+    """The built-in catalogue item, parsed once per process from package data."""
+
     from ..catalogue.builtin import BUILTIN_ITEM
     from ..fragments import CATALOGUE, fragment_files
 
