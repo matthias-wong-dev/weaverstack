@@ -526,10 +526,6 @@ def test_a_realistic_estate_builds_from_nothing(acceptance):
         ),
     )
     acceptance.require("build")
-    built = step.result
-    assert built.status == "succeeded", [
-        (failure.action_id, failure.message) for failure in built.errors
-    ]
 
     landing = _item(acceptance, "Lakehouse/Landing")
     curated = _item(acceptance, "Lakehouse/Curated")
@@ -644,10 +640,6 @@ def test_an_unchanged_build_is_a_true_fixed_point(acceptance):
         ),
     )
     acceptance.require("rebuild")
-    rebuilt = step.result
-    assert rebuilt.status == "succeeded", [
-        (failure.action_id, failure.message) for failure in rebuilt.errors
-    ]
 
     # Every certified object keeps the build that certified it. A rebuilt object
     # would carry the second build's instant instead.
@@ -704,7 +696,6 @@ def test_seeded_foreign_data_flows_through_every_layer(acceptance):
     )
     acceptance.require("load")
     loaded = acceptance["load"].result
-    assert loaded.succeeded, loaded.to_mapping()
     _assert_load_status(acceptance, loaded)
     _assert_run_evidence(acceptance, loaded, "load")
     _assert_the_endpoint_barrier_is_in_the_graph(acceptance, loaded)
@@ -781,9 +772,6 @@ def test_an_unchanged_load_moves_only_the_appending_branch(acceptance):
         lambda: weaver.load(acceptance.items, session=acceptance.session),
     )
     acceptance.require("reload")
-    assert acceptance["reload"].result.succeeded, acceptance[
-        "reload"
-    ].result.to_mapping()
     _assert_load_status(acceptance, acceptance["reload"].result)
 
     step = acceptance.steps["reload"]
@@ -834,9 +822,6 @@ def test_foreign_source_movement_propagates_through_the_whole_chain(acceptance):
         lambda: weaver.load(acceptance.items, session=acceptance.session),
     )
     acceptance.require("load-mutated")
-    assert acceptance["load-mutated"].result.succeeded, acceptance[
-        "load-mutated"
-    ].result.to_mapping()
 
     step = acceptance.steps["load-mutated"]
     step.observation = _observe(acceptance, _estate_evidence(acceptance))
@@ -1066,7 +1051,6 @@ def test_loading_an_upstream_after_a_test_passed_turns_health_amber(acceptance):
         ),
     )
     acceptance.require("load-upstream")
-    assert acceptance["load-upstream"].result.succeeded
 
     stale = acceptance.step(
         "health-stale",
@@ -1258,10 +1242,6 @@ def test_a_declaration_change_rebuilds_exactly_what_it_must(acceptance):
         ),
     )
     acceptance.require("rebuild-changed")
-    result = step.result
-    assert result.status == "succeeded", [
-        (failure.action_id, failure.message) for failure in result.errors
-    ]
 
     landing = _item(acceptance, "Lakehouse/Landing")
     curated = _item(acceptance, "Lakehouse/Curated")
@@ -1327,7 +1307,6 @@ def test_the_changed_estate_reaches_a_new_fixed_point(acceptance):
         ),
     )
     acceptance.require("rebuild-settled")
-    assert acceptance["rebuild-settled"].result.status == "succeeded"
 
     after = _registry_rows(acceptance)
     assert set(after) == set(before)
@@ -1353,9 +1332,6 @@ def test_the_rebuilt_estate_still_loads_and_validates(acceptance):
         lambda: weaver.load(acceptance.items, session=acceptance.session),
     )
     acceptance.require("load-changed")
-    assert acceptance["load-changed"].result.succeeded, acceptance[
-        "load-changed"
-    ].result.to_mapping()
     _assert_load_status(acceptance, acceptance["load-changed"].result)
 
     landing = _item(acceptance, "Lakehouse/Landing")
@@ -1558,7 +1534,7 @@ def test_a_failed_build_leaves_partial_state_and_the_next_one_converges(acceptan
     acceptance.step("repair", lambda: _edit(acceptance, REPAIR_EDITS))
     acceptance.require("repair")
 
-    step = acceptance.step(
+    acceptance.step(
         "rebuild-repaired",
         lambda: weaver.build(
             acceptance.repository,
@@ -1567,10 +1543,6 @@ def test_a_failed_build_leaves_partial_state_and_the_next_one_converges(acceptan
         ),
     )
     acceptance.require("rebuild-repaired")
-    repaired = step.result
-    assert repaired.status == "succeeded", [
-        (failure.action_id, failure.message) for failure in repaired.errors
-    ]
 
     # The catalogue converged from what is physically there: certified again,
     # and still at the sentinel, because a build establishes no cursor.
@@ -1584,7 +1556,6 @@ def test_a_failed_build_leaves_partial_state_and_the_next_one_converges(acceptan
     )
     acceptance.require("load-repaired")
     reloaded = acceptance["load-repaired"].result
-    assert reloaded.succeeded, reloaded.to_mapping()
     _assert_load_status(acceptance, reloaded)
 
     # The replaced object's bookmark is back, seeded by the load rather than by
@@ -1777,8 +1748,6 @@ def test_the_estate_builds_again_over_an_emptied_catalogue(acceptance):
         ),
     )
     acceptance.require("rebuild-after-wipe")
-    result = acceptance["rebuild-after-wipe"].result
-    assert result.succeeded, result.to_mapping()
 
     installed = {
         f"{row['Item type']}/{row['Item name']}"

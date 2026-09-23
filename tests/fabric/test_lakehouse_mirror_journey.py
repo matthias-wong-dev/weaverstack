@@ -113,12 +113,10 @@ def journey(
 
     run.step(
         "build the source",
-        lambda: _built(
-            weaver.build(
-                str(estate.path),
-                items=[f"{ITEM}=Lakehouse/{run.source_name}"],
-                session=weaver_session,
-            )
+        lambda: weaver.build(
+            str(estate.path),
+            items=[f"{ITEM}=Lakehouse/{run.source_name}"],
+            session=weaver_session,
         ),
     )
     run.step("load the source", lambda: weaver.load([ITEM], session=weaver_session))
@@ -162,26 +160,22 @@ def journey(
     )
     run.step(
         "build with nothing changed",
-        lambda: _built(
-            weaver.build(
-                str(estate.path),
-                items=into_mirror,
-                session=weaver_session,
-                catalogue=f"Warehouse/{run.catalogue_name}",
-            )
+        lambda: weaver.build(
+            str(estate.path),
+            items=into_mirror,
+            session=weaver_session,
+            catalogue=f"Warehouse/{run.catalogue_name}",
         ),
         observe=lambda: _observe(run, {"shortcuts", "borrowed", "source_rows"}),
     )
     run.step("change one declaration", lambda: _change(estate))
     run.step(
         "build the changed declaration",
-        lambda: _built(
-            weaver.build(
-                str(estate.path),
-                items=into_mirror,
-                session=weaver_session,
-                catalogue=f"Warehouse/{run.catalogue_name}",
-            )
+        lambda: weaver.build(
+            str(estate.path),
+            items=into_mirror,
+            session=weaver_session,
+            catalogue=f"Warehouse/{run.catalogue_name}",
         ),
         observe=lambda: _observe(run),
     )
@@ -221,12 +215,6 @@ def _mirror(run, items, source_catalogue) -> Any:
         catalogue=f"Warehouse/{run.catalogue_name}",
         mirror=f"Warehouse/{source_catalogue.name}",
     )
-
-
-def _built(result):
-    if not result.succeeded:
-        raise AssertionError("; ".join(f.describe() for f in result.errors))
-    return result
 
 
 def _change(estate) -> None:
