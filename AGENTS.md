@@ -467,8 +467,10 @@ pytest -m full_integration    # injects checkout wheel; no publish needed
 ```
 
 The routine Fabric run is `pytest -m "fabric and not full_integration"`. The
-acceptance journey is most of the suite's Fabric time, so it runs by name before
-a release and when a change alters how build, load, test and wipe compose.
+release run is `pytest -m fabric --runslow`: it adds the acceptance journey,
+which is most of the suite's Fabric time, and the `slow` tests, whose claims a
+routine test covers closely but not exactly. Run it before a release and when a
+change alters how build, load, test and wipe compose.
 
 The scope is one of core, remote, hosted or integration. Integration needs no
 additional position flag. Resources are a separate closed vocabulary: `tds`,

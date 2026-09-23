@@ -14,6 +14,7 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
+import pytest
 from sql_support import CatalogObject, populate_warehouse, system_schemas, user_objects
 from support.weaver_test import weaver_test
 
@@ -34,6 +35,7 @@ EXPECTED_OBJECTS = {
 }
 
 
+@pytest.mark.slow
 @weaver_test(remote=True, resources={"tds"})
 def test_weaver_wipes_a_populated_warehouse(
     clean_disposable_warehouse,
