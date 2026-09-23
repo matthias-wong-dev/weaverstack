@@ -12,6 +12,9 @@ the fork decides is settled without a tenant, in
 
 The destination is ``PYTEST_WEAVER_FORK``, which nothing else in the suite
 reads, because a fork empties what it writes into.
+
+Runs with ``--runslow``. Both mirror journeys fork on every run, and the
+Warehouse one checks signatures, instants and the catalogue's own row.
 """
 
 from __future__ import annotations
@@ -33,6 +36,8 @@ from weaver.catalogue.tables import (
     REGISTRY,
 )
 from weaver.catalogue.tsql import identifier, literal
+
+pytestmark = pytest.mark.slow
 
 #: Rows the destination catalogue writes about itself. Its own build published
 #: them, naming the Warehouse its ``_`` schema is in, so they are held apart
