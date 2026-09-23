@@ -44,7 +44,7 @@ above has to arrive in the Warehouse under the frozen ``[Result]`` vocabulary.
 from __future__ import annotations
 
 import pytest
-from support.thin import OUTCOMES, thin_estate
+from support.thin import OUTCOMES, report_node, thin_estate
 from support.weaver_test import weaver_test
 
 from weaver.errors import LoadError
@@ -124,7 +124,7 @@ def test_every_deployed_primitive_is_reached(tolerated):
 
 @weaver_test(hosted=True)
 def test_a_succeeding_primitive_is_reported_as_succeeded(tolerated):
-    node = _node(tolerated, "Success")
+    node = report_node(tolerated, "Success")
 
     assert node.status == SUCCEEDED
     assert node.result.rows_inserted == 2
@@ -134,7 +134,7 @@ def test_a_succeeding_primitive_is_reported_as_succeeded(tolerated):
 def test_a_reported_failure_is_a_failed_node_rather_than_an_exception(tolerated):
     """The primitive returned a failure. Nothing raised, and nothing was lost."""
 
-    node = _node(tolerated, "Failure")
+    node = report_node(tolerated, "Failure")
 
     assert node.status == FAILED
     assert "the source system said no" in _said(node)
@@ -151,7 +151,7 @@ def test_an_exception_the_primitive_never_normalised_is_still_one_failed_node(
     than a traceback the desktop can re-raise.
     """
 
-    node = _node(tolerated, "Raises")
+    node = report_node(tolerated, "Raises")
 
     assert node.status == FAILED
     assert "unreachable" in _said(node)
@@ -161,7 +161,7 @@ def test_an_exception_the_primitive_never_normalised_is_still_one_failed_node(
 def test_a_result_that_cannot_report_an_outcome_fails_that_node_only(tolerated):
     """A primitive that answered with a dict is a fault, not a success."""
 
-    node = _node(tolerated, "Malformed")
+    node = report_node(tolerated, "Malformed")
 
     assert node.status == FAILED
     assert any(one.status == SUCCEEDED for one in tolerated.nodes), (
@@ -173,7 +173,7 @@ def test_a_result_that_cannot_report_an_outcome_fails_that_node_only(tolerated):
 def test_tolerated_rejections_are_reported_without_failing_the_node(tolerated):
     """Rows refused and rows written, both counted, and the node still stands."""
 
-    node = _node(tolerated, "Rejects")
+    node = report_node(tolerated, "Rejects")
 
     assert node.result.rows_rejected == 1
     assert node.result.rows_inserted == 2
@@ -211,15 +211,6 @@ def _said(node) -> str:
         " ".join(message.message for message in node.messages)
         + " "
         + str(getattr(node.result, "error_message", "") or "")
-    )
-
-
-def _node(report, outcome: str):
-    for node in report.nodes:
-        if node.logical_id.endswith(f".{outcome}"):
-            return node
-    raise AssertionError(
-        f"{outcome} is not in {[node.logical_id for node in report.nodes]}"
     )
 
 

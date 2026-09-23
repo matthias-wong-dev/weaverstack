@@ -298,24 +298,6 @@ def test_an_implied_and_a_declared_spelling_may_not_differ_by_case(tmp_path):
     assert f"{ITEM}/Tables/sales__Thing.py" in message
 
 
-# --- case-only duplicate schemas ---------------------------------------------
-#
-# A case-insensitive file system cannot hold both Abc.yml and abc.yml, so the
-# rejection is driven through the reader directly with a stub store rather than
-# real files. It is a case-sensitive file system this guards against.
-
-
-class _StubStore:
-    def __init__(self, contents: dict[str, bytes]) -> None:
-        self._contents = contents
-
-    def read(self, location) -> bytes:
-        for relative, data in self._contents.items():
-            if location.value.endswith(relative):
-                return data
-        raise KeyError(location.value)
-
-
 # --- what an implied schema reaches -------------------------------------------
 
 

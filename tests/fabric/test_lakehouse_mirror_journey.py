@@ -20,6 +20,7 @@ from dataclasses import dataclass, replace
 from typing import Any
 
 import pytest
+from mirror_support import forked_config
 from support.acceptance import Acceptance
 from support.build_envs import LAKEHOUSE_JOURNEY_FIXTURE
 from support.weaver_test import register_session, weaver_test
@@ -53,24 +54,27 @@ RUNTIME_ROOT = "/".join(RUNTIME_TREE)
 
 @dataclass(frozen=True)
 class Estate:
-    """What the estate holds at one moment, read after one transition."""
+    """What the estate holds at one moment, read after one transition.
+
+    Each transition reads only what its claims ask of it; the rest stay None.
+    """
 
     #: ``path/name`` to source path, for every shortcut the mirror holds.
-    shortcuts: dict[str, str]
+    shortcuts: dict[str, str] | None = None
     #: Relation names Spark reports in the item's own schema.
-    relations: frozenset[str]
+    relations: frozenset[str] | None = None
     #: ``Schema.Object`` to physical type, from ``_.Mirror``.
-    borrowed: dict[str, str]
+    borrowed: dict[str, str] | None = None
     #: Item name to target name, from ``_.Installation``.
-    installed: dict[str, str]
+    installed: dict[str, str] | None = None
     #: Whether each data node has a load to dispatch, from the installed graph.
-    loadable: dict[str, bool]
+    loadable: dict[str, bool] | None = None
     #: Rows the source still holds, which no build in this journey may touch.
-    source_rows: int
+    source_rows: int | None = None
     #: Deployed file to digest under ``Files/_/Load``, keyed by ``source`` and
     #: ``target``. A digest of each side at one moment is what separates a local
     #: copy from a shortcut: writes through a shortcut move both.
-    runtime: dict[str, dict[str, str]]
+    runtime: dict[str, dict[str, str]] | None = None
 
 
 # --- the journey --------------------------------------------------------------
@@ -86,6 +90,7 @@ def journey(
     fabric_initialise_catalogue,
     weaver_session,
     tmp_path_factory,
+    request,
 ):
     """One estate: built, loaded, mirrored, validated, rebuilt, materialised."""
 
@@ -107,15 +112,15 @@ def journey(
         WarehouseTarget(ItemRef(run.catalogue_name)), workspace=fabric_workspace
     )
     into_mirror = [f"{ITEM}=Lakehouse/{run.target_name}"]
+    # Steps whose only readers run with --runslow.
+    release = request.config.getoption("--runslow")
 
     run.step(
         "build the source",
-        lambda: _built(
-            weaver.build(
-                str(estate.path),
-                items=[f"{ITEM}=Lakehouse/{run.source_name}"],
-                session=weaver_session,
-            )
+        lambda: weaver.build(
+            str(estate.path),
+            items=[f"{ITEM}=Lakehouse/{run.source_name}"],
+            session=weaver_session,
         ),
     )
     run.step("load the source", lambda: weaver.load([ITEM], session=weaver_session))
@@ -124,31 +129,33 @@ def journey(
         lambda: _mirror(run, into_mirror, fabric_catalogue),
         observe=lambda: _observe(run),
     )
-    run.step(
-        "mirror again",
-        lambda: _mirror(run, into_mirror, fabric_catalogue),
-        observe=lambda: _observe(run),
-    )
-    run.health_config = _forked_config(run, tmp_path_factory.mktemp("lh-health"))
+    if release:
+        run.step(
+            "mirror again",
+            lambda: _mirror(run, into_mirror, fabric_catalogue),
+            observe=lambda: _observe(run, {"shortcuts", "borrowed", "relations"}),
+        )
+    run.health_config = forked_config(run, tmp_path_factory.mktemp("lh-health"))
     run.step(
         "report health over the mirror",
         lambda: weaver.health(
             [ITEM], session=weaver_session, workspace_config=run.health_config
         ),
     )
-    # The item declares a Folder, and reload covers tables. A second
-    # ordinary load re-dates every status row, which is the lifecycle movement
-    # the fork has to see.
-    run.step(
-        "load the source again",
-        lambda: weaver.load([ITEM], session=weaver_session),
-    )
-    run.step(
-        "report health after the source advanced",
-        lambda: weaver.health(
-            [ITEM], session=weaver_session, workspace_config=run.health_config
-        ),
-    )
+    if release:
+        # The item declares a Folder, and reload covers tables. A second
+        # ordinary load re-dates every status row, which is the lifecycle
+        # movement the fork has to see.
+        run.step(
+            "load the source again",
+            lambda: weaver.load([ITEM], session=weaver_session),
+        )
+        run.step(
+            "report health after the source advanced",
+            lambda: weaver.health(
+                [ITEM], session=weaver_session, workspace_config=run.health_config
+            ),
+        )
     run.step(
         "validate the mirror",
         lambda: weaver.test(
@@ -159,26 +166,22 @@ def journey(
     )
     run.step(
         "build with nothing changed",
-        lambda: _built(
-            weaver.build(
-                str(estate.path),
-                items=into_mirror,
-                session=weaver_session,
-                catalogue=f"Warehouse/{run.catalogue_name}",
-            )
+        lambda: weaver.build(
+            str(estate.path),
+            items=into_mirror,
+            session=weaver_session,
+            catalogue=f"Warehouse/{run.catalogue_name}",
         ),
-        observe=lambda: _observe(run),
+        observe=lambda: _observe(run, {"shortcuts", "borrowed", "source_rows"}),
     )
     run.step("change one declaration", lambda: _change(estate))
     run.step(
         "build the changed declaration",
-        lambda: _built(
-            weaver.build(
-                str(estate.path),
-                items=into_mirror,
-                session=weaver_session,
-                catalogue=f"Warehouse/{run.catalogue_name}",
-            )
+        lambda: weaver.build(
+            str(estate.path),
+            items=into_mirror,
+            session=weaver_session,
+            catalogue=f"Warehouse/{run.catalogue_name}",
         ),
         observe=lambda: _observe(run),
     )
@@ -189,27 +192,6 @@ def journey(
 # --- driving it ---------------------------------------------------------------
 
 
-def _forked_config(run, directory):
-    """A workspace configuration naming the fork and the catalogue it mirrors.
-
-    ``mirror:`` reaches a Workspace from configuration alone, and it is what
-    tells health where a mirrored object's load state is recorded.
-    """
-
-    path = directory / "workspace-config.yml"
-    path.write_text(
-        "\n".join(
-            (
-                f"workspace: {run.workspace.workspace}",
-                f"catalogue: Warehouse/{run.catalogue_name}",
-                f"mirror: Warehouse/{run.source_catalogue_name}",
-            )
-        ),
-        encoding="utf-8",
-    )
-    return path
-
-
 def _mirror(run, items, source_catalogue) -> Any:
     return weaver.mirror(
         items,
@@ -218,12 +200,6 @@ def _mirror(run, items, source_catalogue) -> Any:
         catalogue=f"Warehouse/{run.catalogue_name}",
         mirror=f"Warehouse/{source_catalogue.name}",
     )
-
-
-def _built(result):
-    if not result.succeeded:
-        raise AssertionError("; ".join(f.describe() for f in result.errors))
-    return result
 
 
 def _change(estate) -> None:
@@ -265,57 +241,69 @@ def _runtime_tree(run, name: str) -> dict[str, str]:
     }
 
 
-def _observe(run) -> Estate:
-    """The estate as this transition left it."""
+#: Everything an observation can read.
+EVERYTHING = frozenset(
+    ("shortcuts", "relations", "borrowed", "installed", "loadable", "source_rows")
+    + ("runtime",)
+)
+
+
+def _observe(run, wanted=EVERYTHING) -> Estate:
+    """What this transition's claims read of the estate it left."""
 
     from weaver.catalogue.state import catalogue_for
 
     resolver = run.session.resolver(run.workspace)
-    destination = resolver.spark_destination(ItemRef(run.target_name))
-    source = resolver.spark_destination(ItemRef(run.source_name))
-    with catalogue_for(run.session, run.forked) as catalogue:
-        dag = catalogue.dag()
-    return Estate(
-        shortcuts={
+    seen: dict = {}
+    if "shortcuts" in wanted:
+        seen["shortcuts"] = {
             each.qualified: each.target_path or ""
             for each in resolver.onelake_shortcuts(ItemRef(run.target_name))
-        },
-        relations=frozenset(
+        }
+    if "relations" in wanted:
+        destination = resolver.spark_destination(ItemRef(run.target_name))
+        seen["relations"] = frozenset(
             str(row["tableName"])
             for row in _spark(
                 run, f"SHOW TABLES IN {destination.qualified_schema('DWG')}"
             )
-        ),
-        borrowed={
+        )
+    if {"borrowed", "installed"} & wanted:
+        borrowed, installed = run.catalogue_sql.query_result_sets(
+            "select [Schema name], [Object name], [Physical type] from "
+            f"[{CATALOGUE_SCHEMA}].[{MIRROR_TABLE.name}] "
+            "where [Item type] = N'Lakehouse';\n"
+            "select [Item name], [Target name] from "
+            f"[{CATALOGUE_SCHEMA}].[Installation] where [Item type] = N'Lakehouse';"
+        )
+        seen["borrowed"] = {
             f"{row['Schema name']}.{row['Object name']}": str(row["Physical type"])
-            for row in run.catalogue_sql.query(
-                "select [Schema name], [Object name], [Physical type] from "
-                f"[{CATALOGUE_SCHEMA}].[{MIRROR_TABLE.name}] "
-                "where [Item type] = N'Lakehouse'"
-            )
-        },
-        installed={
-            str(row["Item name"]): str(row["Target name"])
-            for row in run.catalogue_sql.query(
-                "select [Item name], [Target name] from "
-                f"[{CATALOGUE_SCHEMA}].[Installation] where [Item type] = N'Lakehouse'"
-            )
-        },
-        loadable={
+            for row in borrowed
+        }
+        seen["installed"] = {
+            str(row["Item name"]): str(row["Target name"]) for row in installed
+        }
+    if "loadable" in wanted:
+        with catalogue_for(run.session, run.forked) as catalogue:
+            dag = catalogue.dag()
+        seen["loadable"] = {
             node.load_name: node.can_load
             for node in dag.nodes
             if str(node.item) == ITEM and node.load_name
-        },
-        source_rows=int(
+        }
+    if "source_rows" in wanted:
+        source = resolver.spark_destination(ItemRef(run.source_name))
+        seen["source_rows"] = int(
             _spark(
                 run, f"SELECT count(*) as n FROM {source.qualify('DWG', 'Customer')}"
             )[0]["n"]
-        ),
-        runtime={
+        )
+    if "runtime" in wanted:
+        seen["runtime"] = {
             "source": _runtime_tree(run, run.source_name),
             "target": _runtime_tree(run, run.target_name),
-        },
-    )
+        }
+    return Estate(**seen)
 
 
 # --- what the mirror stood up -------------------------------------------------
@@ -459,6 +447,7 @@ def test_the_mirrored_lakehouse_runs_its_installed_validations(journey):
     assert {node.status for node in report.nodes} == {"passed"}
 
 
+@pytest.mark.slow
 @weaver_test(remote=True)
 def test_mirroring_again_leaves_the_same_estate(journey):
     """A mirror is reconstruction, so a half-finished one is rerun, not repaired."""
@@ -600,6 +589,7 @@ def test_health_reads_the_mirror_and_calls_the_build_green(journey):
     assert report.load.subjects > 0
 
 
+@pytest.mark.slow
 @weaver_test(remote=True)
 def test_a_load_at_the_source_reaches_the_forks_report(journey):
     """The fork ran nothing, and the lifecycle its mirrored objects carry moved.
