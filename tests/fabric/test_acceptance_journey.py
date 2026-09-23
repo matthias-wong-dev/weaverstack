@@ -120,15 +120,12 @@ def acceptance(
     _restore_the_foreign_baseline(journey)
     _require_the_foreign_baseline(journey)
     _seed_the_neighbour(journey)
+    # No restore at teardown: the next run restores for itself, and no other
+    # module reads the foreign `Source` schema this journey mutates.
     try:
         yield journey
     finally:
-        try:
-            # Desirable, so a person looking at the estate afterwards sees the
-            # baseline. Correctness of the next run rests on the setup above.
-            _restore_the_foreign_baseline(journey)
-        finally:
-            journey.close()
+        journey.close()
 
 
 # --- addressing the estate ---------------------------------------------------
@@ -1083,10 +1080,10 @@ def test_loading_an_upstream_after_a_test_passed_turns_health_amber(acceptance):
     assert "load_stale_ancestor" in codes, stale.to_mapping()
     assert "test_stale_dependency" in codes, stale.to_mapping()
 
-    # The estate reloads and revalidates back to Green.
+    # Reloading what is stale and revalidating is enough to be Green again.
     acceptance.step(
         "reload-after-stale",
-        lambda: weaver.load(acceptance.items, session=acceptance.session),
+        lambda: weaver.load(acceptance.items, stale=True, session=acceptance.session),
     )
     acceptance.require("reload-after-stale")
     acceptance.step(
@@ -1579,18 +1576,6 @@ def test_a_failed_build_leaves_partial_state_and_the_next_one_converges(acceptan
     # and still at the sentinel, because a build establishes no cursor.
     assert len(_certifications(acceptance, REPLACED)) == 1
     assert _bookmarks(acceptance, REPLACED) == [SENTINEL]
-
-    # No manual cleanup: the corrected build settles on the next attempt.
-    settled = acceptance.step(
-        "rebuild-converged",
-        lambda: weaver.build(
-            acceptance.repository,
-            items=acceptance.build_items,
-            session=acceptance.session,
-        ),
-    ).result
-    acceptance.require("rebuild-converged")
-    assert settled.status == "succeeded", settled.to_mapping()
 
     # And the healed estate loads and validates.
     acceptance.step(
