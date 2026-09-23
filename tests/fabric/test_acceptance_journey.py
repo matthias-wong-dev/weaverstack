@@ -8,8 +8,8 @@ The estate reads the foreign workspace through every shortcut shape Weaver
 supports, and it reads them by consuming them: a broken shortcut fails because
 a load could not materialise what it points at.
 
-Scenarios run in file order and do not cascade. A failed transition is recorded
-and every later scenario skips naming the step that broke.
+Scenarios run in file order and do not cascade. A failed transition fails the
+scenario that took it, and every later scenario skips naming the step that broke.
 
 Table shortcut installation waits for both the named relation and the Delta path
 that authored Python loads read before the next item starts.
@@ -123,9 +123,12 @@ def acceptance(
     try:
         yield journey
     finally:
-        # Desirable, so a person looking at the estate afterwards sees the
-        # baseline. Correctness of the next run rests on the setup above.
-        _restore_the_foreign_baseline(journey)
+        try:
+            # Desirable, so a person looking at the estate afterwards sees the
+            # baseline. Correctness of the next run rests on the setup above.
+            _restore_the_foreign_baseline(journey)
+        finally:
+            journey.close()
 
 
 # --- addressing the estate ---------------------------------------------------
@@ -527,8 +530,6 @@ def test_a_realistic_estate_builds_from_nothing(acceptance):
     )
     acceptance.require("build")
     built = step.result
-    if built.status != "succeeded":
-        acceptance.fail("build")
     assert built.status == "succeeded", [
         (failure.action_id, failure.message) for failure in built.errors
     ]
@@ -1261,8 +1262,6 @@ def test_a_declaration_change_rebuilds_exactly_what_it_must(acceptance):
     )
     acceptance.require("rebuild-changed")
     result = step.result
-    if result.status != "succeeded":
-        acceptance.fail("rebuild-changed")
     assert result.status == "succeeded", [
         (failure.action_id, failure.message) for failure in result.errors
     ]
@@ -1572,8 +1571,6 @@ def test_a_failed_build_leaves_partial_state_and_the_next_one_converges(acceptan
     )
     acceptance.require("rebuild-repaired")
     repaired = step.result
-    if repaired.status != "succeeded":
-        acceptance.fail("rebuild-repaired")
     assert repaired.status == "succeeded", [
         (failure.action_id, failure.message) for failure in repaired.errors
     ]

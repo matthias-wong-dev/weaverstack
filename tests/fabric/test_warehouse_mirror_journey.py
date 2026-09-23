@@ -199,7 +199,7 @@ def journey(
         lambda: _loaded(weaver.load([ITEM], session=warehouse_session)),
     )
     run.step("seed the source", lambda: _seed(run.source_sql))
-    mirrored = run.step(
+    run.step(
         "mirror",
         lambda: weaver.mirror(
             into_mirror,
@@ -208,9 +208,9 @@ def journey(
             catalogue=f"Warehouse/{run.catalogue_name}",
             mirror=f"Warehouse/{fabric_catalogue.name}",
         ),
+        observe=lambda: _observe(run),
     )
-    mirrored.observation = _observe(run)
-    again = run.step(
+    run.step(
         "mirror again",
         lambda: weaver.mirror(
             into_mirror,
@@ -219,8 +219,8 @@ def journey(
             catalogue=f"Warehouse/{run.catalogue_name}",
             mirror=f"Warehouse/{fabric_catalogue.name}",
         ),
+        observe=lambda: _observe(run),
     )
-    again.observation = _observe(run)
     run.step("read a source change through the mirror", lambda: _read_through(run))
     run.step(
         "report health over the mirror",
@@ -239,7 +239,7 @@ def journey(
             catalogue=f"Warehouse/{run.catalogue_name}",
         ),
     )
-    rebuilt = run.step(
+    run.step(
         "build with nothing changed",
         lambda: _built(
             weaver.build(
@@ -249,10 +249,10 @@ def journey(
                 catalogue=f"Warehouse/{run.catalogue_name}",
             )
         ),
+        observe=lambda: _observe(run),
     )
-    rebuilt.observation = _observe(run)
     run.step("change one declaration", lambda: _change(estate))
-    materialised = run.step(
+    run.step(
         "build the changed declaration",
         lambda: _built(
             weaver.build(
@@ -262,10 +262,10 @@ def journey(
                 catalogue=f"Warehouse/{run.catalogue_name}",
             )
         ),
+        observe=lambda: _observe(run),
     )
-    materialised.observation = _observe(run)
     run.loading_config = _forked_config(run, tmp_path_factory.mktemp("wh-load"))
-    selected = run.step(
+    run.step(
         "select a stale load",
         lambda: weaver.load(
             [ITEM],
@@ -274,9 +274,9 @@ def journey(
             session=warehouse_session,
             workspace_config=run.loading_config,
         ),
+        observe=lambda: _observe(run),
     )
-    selected.observation = _observe(run)
-    loaded = run.step(
+    run.step(
         "load what the build materialised",
         lambda: weaver.load(
             [ITEM],
@@ -284,9 +284,10 @@ def journey(
             session=warehouse_session,
             workspace_config=run.loading_config,
         ),
+        observe=lambda: _observe(run),
     )
-    loaded.observation = _observe(run)
-    return run
+    yield run
+    run.close()
 
 
 # --- driving it ---------------------------------------------------------------

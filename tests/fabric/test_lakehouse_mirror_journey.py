@@ -119,12 +119,16 @@ def journey(
         ),
     )
     run.step("load the source", lambda: weaver.load([ITEM], session=weaver_session))
-    mirrored = run.step("mirror", lambda: _mirror(run, into_mirror, fabric_catalogue))
-    mirrored.observation = _observe(run)
-    again = run.step(
-        "mirror again", lambda: _mirror(run, into_mirror, fabric_catalogue)
+    run.step(
+        "mirror",
+        lambda: _mirror(run, into_mirror, fabric_catalogue),
+        observe=lambda: _observe(run),
     )
-    again.observation = _observe(run)
+    run.step(
+        "mirror again",
+        lambda: _mirror(run, into_mirror, fabric_catalogue),
+        observe=lambda: _observe(run),
+    )
     run.health_config = _forked_config(run, tmp_path_factory.mktemp("lh-health"))
     run.step(
         "report health over the mirror",
@@ -153,7 +157,7 @@ def journey(
             catalogue=f"Warehouse/{run.catalogue_name}",
         ),
     )
-    rebuilt = run.step(
+    run.step(
         "build with nothing changed",
         lambda: _built(
             weaver.build(
@@ -163,10 +167,10 @@ def journey(
                 catalogue=f"Warehouse/{run.catalogue_name}",
             )
         ),
+        observe=lambda: _observe(run),
     )
-    rebuilt.observation = _observe(run)
     run.step("change one declaration", lambda: _change(estate))
-    materialised = run.step(
+    run.step(
         "build the changed declaration",
         lambda: _built(
             weaver.build(
@@ -176,9 +180,10 @@ def journey(
                 catalogue=f"Warehouse/{run.catalogue_name}",
             )
         ),
+        observe=lambda: _observe(run),
     )
-    materialised.observation = _observe(run)
-    return run
+    yield run
+    run.close()
 
 
 # --- driving it ---------------------------------------------------------------
