@@ -6,6 +6,8 @@ document changing is refused here rather than discovered by a build.
 
 from __future__ import annotations
 
+import functools
+
 import pytest
 from support.weaver_test import weaver_test
 
@@ -31,8 +33,12 @@ _RUNTIME_LINEAGE_OPENINGS = {
 _PROJECTED_LINEAGE_OPENING = "Projected"
 
 
+@functools.cache
 def _documents() -> dict[str, tuple[str, object]]:
-    """Every checked-in catalogue document, keyed by ``_.Name``."""
+    """Every checked-in catalogue document, keyed by ``_.Name``.
+
+    Parsed once: the documents are package data and no test here edits them.
+    """
 
     found: dict[str, tuple[str, object]] = {}
     for relative, data in fragment_files(CATALOGUE).items():
