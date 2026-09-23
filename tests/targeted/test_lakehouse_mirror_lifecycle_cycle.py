@@ -21,24 +21,21 @@ from pathlib import Path
 from factories import (
     ITEM,
     FixtureInventory,
+    built_catalogue,
     full_estate,
     item_bindings,
     item_id,
+    plan_actions,
 )
 from support.weaver_test import weaver_test
 from support.workspaces import WORKSPACE
 
 from weaver.build_bundle import WarehouseBinding, generate_item_build_bundle
-from weaver.build_bundle.catalogue_actions import (
-    DEREGISTER_MIRROR_SLUG,
-    desired_catalogue,
-)
-from weaver.build_bundle.planner import certifiable_identities
+from weaver.build_bundle.catalogue_actions import DEREGISTER_MIRROR_SLUG
 from weaver.build_bundle.shortcuts import ResolvedShortcutSource
 from weaver.catalogue.state import Catalogue, reconcile_catalogue_state
 from weaver.catalogue.tables import (
     MIRROR,
-    PROJECTED_TABLES,
     STANDARD_SURFACE_TABLES,
 )
 from weaver.declaration import parse_item_repository
@@ -100,22 +97,6 @@ def _object(qualified: str, *, files: bool = False) -> WeaverDocumentId:
 
 def _bindings():
     return item_bindings((ITEM, TARGET))
-
-
-def _installed(repository) -> Catalogue:
-    """The catalogue a successful build of this estate leaves behind."""
-
-    bindings = _bindings()
-    by_item = {binding.item: binding for binding in bindings.entries}
-    state = desired_catalogue(
-        repository,
-        certifiable_identities(repository, by_item),
-        {binding.item: binding.to_bound_target() for binding in bindings.entries},
-    )
-    return Catalogue(
-        rows=state.rows,
-        materialised=frozenset(table.name for table in PROJECTED_TABLES),
-    )
 
 
 def _borrowing(catalogue: Catalogue) -> Catalogue:
@@ -181,10 +162,6 @@ def _build(repository, output: Path, *, catalogue, inventory):
     return reconciliation, bundle
 
 
-def _actions(bundle):
-    return [action for _sequence, _batch, action in bundle.plan.actions()]
-
-
 def _payload(bundle, action):
     content = FilesystemStore().read(bundle.location.join(*action.payload.split("/")))
     return json.loads(content.decode("utf-8"))
@@ -198,7 +175,7 @@ def _selective(tmp_path: Path):
     return _build(
         changed,
         tmp_path / "bundle",
-        catalogue=_borrowing(_installed(installed)),
+        catalogue=_borrowing(built_catalogue(installed, _bindings())),
         inventory=_inventory(installed),
     )
 
@@ -211,7 +188,7 @@ def test_a_borrowed_relation_stands_at_its_declared_address_as_itself(tmp_path):
     """Registry, ``_.Mirror`` and the inventory agree, so nothing is stale."""
 
     repository = _estate(tmp_path / "repo")
-    catalogue = _borrowing(_installed(repository))
+    catalogue = _borrowing(built_catalogue(repository, _bindings()))
 
     reconciliation = reconcile_catalogue_state(
         catalogue, inventories={item_id(ITEM): _inventory(repository)}
@@ -233,11 +210,11 @@ def test_an_unchanged_build_over_a_mirrored_lakehouse_plans_nothing(tmp_path):
     _reconciled, bundle = _build(
         repository,
         tmp_path / "bundle",
-        catalogue=_borrowing(_installed(repository)),
+        catalogue=_borrowing(built_catalogue(repository, _bindings())),
         inventory=_inventory(repository),
     )
 
-    assert _actions(bundle) == []
+    assert plan_actions(bundle) == []
 
 
 # --- one changed declaration --------------------------------------------------
@@ -248,14 +225,16 @@ def test_a_borrowed_table_comes_off_as_a_shortcut(tmp_path):
     """A Spark drop would reach the storage the source owns."""
 
     _reconciled, bundle = _selective(tmp_path)
-    dropped = [action for action in _actions(bundle) if action.kind == "drop_shortcut"]
+    dropped = [
+        action for action in plan_actions(bundle) if action.kind == "drop_shortcut"
+    ]
 
     assert [action.resource_node_id for action in dropped] == [
         str(_object(MATERIALISED))
     ]
     assert not [
         action
-        for action in _actions(bundle)
+        for action in plan_actions(bundle)
         if action.kind in {"drop_table", "prune_table"}
     ]
 
@@ -266,7 +245,7 @@ def test_the_name_is_waited_on_before_an_owned_object_takes_it(tmp_path):
 
     _reconciled, bundle = _selective(tmp_path)
     ((dropped,),) = (
-        [action for action in _actions(bundle) if action.kind == "drop_shortcut"],
+        [action for action in plan_actions(bundle) if action.kind == "drop_shortcut"],
     )
 
     assert dropped.awaits_name_release

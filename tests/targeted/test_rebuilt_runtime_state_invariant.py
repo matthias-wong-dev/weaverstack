@@ -18,14 +18,12 @@ shows up here as a rebuilt object with no row.
 from __future__ import annotations
 
 import json
-from dataclasses import replace
 from pathlib import Path
 
 import pytest
 from factories import (
-    FixtureInventory,
+    built_catalogue,
     catalogue_inventory,
-    item_bindings,
     item_id,
     schema_document,
     warehouse_table,
@@ -33,10 +31,14 @@ from factories import (
 )
 from support.weaver_test import weaver_test
 from support.workspaces import WORKSPACE
+from warehouse_mirror import (
+    ITEM,
+    mirror_bindings,
+    mirror_inventory,
+    with_borrowed,
+)
 
 from weaver.build_bundle import WarehouseBinding, generate_item_build_bundle
-from weaver.build_bundle.catalogue_actions import desired_catalogue
-from weaver.build_bundle.planner import certifiable_identities
 from weaver.build_bundle.runtime_tables import RECONCILE_SLUG
 from weaver.catalogue.builtin import BUILTIN_ITEM
 from weaver.catalogue.state import Catalogue, reconcile_catalogue_state
@@ -44,21 +46,13 @@ from weaver.catalogue.tables import (
     BOOKMARK,
     BOOKMARK_SENTINEL_TEXT,
     LOAD_STATUS,
-    MIRROR,
     PENDING,
-    PROJECTED_TABLES,
 )
 from weaver.declaration import parse_item_repository
-from weaver.declaration.metadata import ObjectId
-from weaver.declaration.model import WeaverDocumentId
 from weaver.etl import item_bookmarkable_objects
 from weaver.locations import Location
 from weaver.store import FilesystemStore
 from weaver.targets import ItemRef
-
-ITEM = "Warehouse/Model"
-TARGET = "Model_Dev"
-SOURCE_TARGET = "Model"
 
 #: Borrowed to begin with. ``Sales.Owned`` is not: it holds its own rows, so
 #: it is the half of ``Prohibit rebuild`` that has data to protect.
@@ -188,48 +182,6 @@ def _flagged(source: str, line: str) -> str:
     return source[:at] + line + "\n\n" + source[at:]
 
 
-def _object(name: str) -> WeaverDocumentId:
-    return WeaverDocumentId(item_id(ITEM), ObjectId("Sales", name))
-
-
-def _bindings():
-    return item_bindings((ITEM, TARGET))
-
-
-def _installed(repository) -> Catalogue:
-    bindings = _bindings()
-    by_item = {binding.item: binding for binding in bindings.entries}
-    state = desired_catalogue(
-        repository,
-        certifiable_identities(repository, by_item),
-        {binding.item: binding.to_bound_target() for binding in bindings.entries},
-    )
-    return Catalogue(
-        rows=state.rows,
-        materialised=frozenset(table.name for table in PROJECTED_TABLES),
-    )
-
-
-def _borrowing(catalogue: Catalogue, *names: str) -> Catalogue:
-    item = item_id(ITEM)
-    rows = {each: dict(tables) for each, tables in catalogue.rows.items()}
-    rows[item][MIRROR.name] = tuple(
-        {
-            "item_type": item.item_type,
-            "item_name": item.item_name,
-            "schema_name": "Sales",
-            "object_name": name,
-            "source_workspace_name": WORKSPACE,
-            "source_target_name": SOURCE_TARGET,
-            "source_schema_name": "Sales",
-            "source_object_name": name,
-            "physical_type": "view",
-        }
-        for name in names
-    )
-    return Catalogue(rows=rows, materialised=catalogue.materialised | {MIRROR.name})
-
-
 def _settled(catalogue: Catalogue, repository) -> Catalogue:
     """Every bookmarkable object loaded and settled, as a mirror copies them."""
 
@@ -252,38 +204,24 @@ def _settled(catalogue: Catalogue, repository) -> Catalogue:
     )
 
 
-def _inventory(repository, *, borrowed: tuple[str, ...] = BORROWED):
-    bound = {b.item: b.to_bound_target() for b in _bindings().entries}
-    inventory = FixtureInventory.from_repository(
-        repository,
-        item=ITEM,
-        target_id=bound[item_id(ITEM)].id,
-        kind="warehouse",
-        target_name=TARGET,
-    )
-    names = {f"Sales.{name}" for name in borrowed}
-    return replace(
-        inventory,
-        tables=tuple(name for name in inventory.tables if name not in names),
-        views=tuple(sorted(set(inventory.views) | names)),
-    )
-
-
 @pytest.fixture
 def rebuilt(tmp_path):
     """A build of a changed ``Sales.Source`` over a fully borrowed, settled estate."""
 
     installed = _estate(tmp_path / "installed")
     changed = _estate(tmp_path / "changed", source=CHANGED)
-    catalogue = _settled(_borrowing(_installed(installed), *BORROWED), installed)
+    catalogue = _settled(
+        with_borrowed(built_catalogue(installed, mirror_bindings()), *BORROWED),
+        installed,
+    )
     inventories = {
-        item_id(ITEM): _inventory(installed),
+        item_id(ITEM): mirror_inventory(installed, borrowed=BORROWED),
         BUILTIN_ITEM: catalogue_inventory(holding=True),
     }
     reconciliation = reconcile_catalogue_state(catalogue, inventories=inventories)
     return generate_item_build_bundle(
         changed,
-        bindings=_bindings(),
+        bindings=mirror_bindings(),
         output=Location(str(tmp_path / "bundle")),
         store=FilesystemStore(),
         target_inventories=inventories,

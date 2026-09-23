@@ -343,14 +343,6 @@ def fabric_target_lakehouse(fabric_workspace_item, fabric_client):
 
 
 #: The roles a cross-item shortcut run needs its own Lakehouses for.
-#:
-#: A producer and a consumer, because a cross-item shortcut is the one thing a single
-#: destination cannot express. There has to be something to point across to. And a
-#: second producer for the Warehouse case, because sharing one would leave that
-#: estate building into a Lakehouse the Lakehouse estate had already built: the
-#: producer's table would be unchanged, incremental selection would correctly emit
-#: no work and no endpoint refresh for it, and the ordering that test is about would
-#: not be in the plan at all. Cheaper to give it its own than to weaken the test.
 SHORTCUT_LAKEHOUSE_ROLES = ("producer", "consumer", "warehouse_producer")
 
 
@@ -369,7 +361,7 @@ def fabric_shortcut_lakehouses(fabric_workspace_item, fabric_client):
 
     return {
         role: _ensure_lakehouse(fabric_client, fabric_workspace_item, role)
-        for role in ("producer", "consumer", "warehouse_producer")
+        for role in SHORTCUT_LAKEHOUSE_ROLES
     }
 
 
@@ -1385,8 +1377,7 @@ def _fabric_build_context(
     def generate(bundle_name: str = "buildtest"):
         # Generation runs IN the session, against the native Spark catalogue.
         # The item type chooses its binding, so one context serves a Lakehouse
-        # estate or a mixed one without a test naming a target kind, the same
-        # rule `_bindings_for` applies locally.
+        # estate or a mixed one without a test naming a target kind.
         binds = ", ".join(
             (
                 f"ItemBinding(WeaverItemId.parse({item!r}), "

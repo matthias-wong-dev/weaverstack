@@ -427,12 +427,6 @@ def test_a_folder_shortcut_needs_no_readability_wait(tmp_path, monkeypatch):
     assert "addressable_after_seconds" not in details
 
 
-class _NoTransportStore(FilesystemStore):
-    """A store with no link operation, as a OneLake DFS client has none."""
-
-    link = None
-
-
 @weaver_test()
 def test_an_environment_that_cannot_create_a_shortcut_says_so(tmp_path):
     """A shortcut is a OneLake shortcut, so a host that cannot make one cannot
