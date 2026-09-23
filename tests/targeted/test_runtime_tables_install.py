@@ -56,9 +56,11 @@ from weaver.targets import ItemRef
 CATALOGUE = WarehouseBinding(ItemRef("Weaver"), workspace_name=WORKSPACE)
 
 
-@pytest.fixture
-def estate(tmp_path):
-    return full_estate(tmp_path / "repo")
+@pytest.fixture(scope="module")
+def estate(tmp_path_factory):
+    """Parsed once: a repository is frozen and nothing here writes its tree."""
+
+    return full_estate(tmp_path_factory.mktemp("estate") / "repo")
 
 
 #: A catalogue holding no rows at all, which is every state these tests start
@@ -148,6 +150,24 @@ def _bundle(repository, tmp_path, *, catalogue=None, inventories=None):
         else _inventories(repository),
         catalogue=catalogue if catalogue is not None else EMPTY,
         catalogue_binding=CATALOGUE,
+    )
+
+
+@pytest.fixture(scope="module")
+def first_build(estate, tmp_path_factory):
+    """The bundle over an empty catalogue, generated once for the tests reading it."""
+
+    return _bundle(estate, tmp_path_factory.mktemp("first-build"))
+
+
+@pytest.fixture(scope="module")
+def rebuild(estate, tmp_path_factory):
+    """The bundle over a catalogue holding both loadable Lakehouse bookmarks."""
+
+    return _bundle(
+        estate,
+        tmp_path_factory.mktemp("rebuild"),
+        catalogue=_holding("Tables/DWG.Customer", "Files/Raw.CustomerCsv"),
     )
 
 
@@ -335,14 +355,14 @@ def test_a_build_of_objects_that_hold_no_bookmark_says_nothing_either(estate):
 
 
 @weaver_test()
-def test_a_first_build_removes_nothing_and_establishes_everything(estate, tmp_path):
+def test_a_first_build_removes_nothing_and_establishes_everything(first_build):
     """The table arrives with this bundle, so the read found no rows to remove.
 
     The build still writes state: every object it installs gets a row saying
     where it stands.
     """
 
-    bundle = _bundle(estate, tmp_path)
+    bundle = first_build
 
     assert bundle.plan.runtime_state == ()
     assert _runtime_state_actions(bundle)
@@ -355,18 +375,14 @@ def test_a_first_build_removes_nothing_and_establishes_everything(estate, tmp_pa
 
 
 @weaver_test()
-def test_a_rebuild_returns_what_it_replaces_to_the_sentinel(estate, tmp_path):
+def test_a_rebuild_returns_what_it_replaces_to_the_sentinel(rebuild):
     """Every loadable object rebuilt, so every cursor goes back to the start.
 
     The row stays. An installed loadable always has one, and the sentinel is
     what says no clean load has established a cursor for this incarnation.
     """
 
-    bundle = _bundle(
-        estate,
-        tmp_path,
-        catalogue=_holding("Tables/DWG.Customer", "Files/Raw.CustomerCsv"),
-    )
+    bundle = rebuild
 
     assert bundle.plan.runtime_state == ()
     rows = {
@@ -383,14 +399,10 @@ def test_a_rebuild_returns_what_it_replaces_to_the_sentinel(estate, tmp_path):
 
 
 @weaver_test()
-def test_only_current_state_is_reconciled(estate, tmp_path):
+def test_only_current_state_is_reconciled(rebuild):
     """Current state only. Nothing historical is named on either side."""
 
-    bundle = _bundle(
-        estate,
-        tmp_path,
-        catalogue=_holding("Tables/DWG.Customer", "Files/Raw.CustomerCsv"),
-    )
+    bundle = rebuild
 
     assert {one.table for one in bundle.plan.runtime_state_established} <= {
         table.name for table in CURRENT_STATE_TABLES
@@ -401,14 +413,10 @@ def test_only_current_state_is_reconciled(estate, tmp_path):
 
 
 @weaver_test()
-def test_bookmarks_are_reconciled_before_the_first_physical_action(estate, tmp_path):
+def test_bookmarks_are_reconciled_before_the_first_physical_action(rebuild):
     """The safety property: an invalidation that failed to happen is silent."""
 
-    bundle = _bundle(
-        estate,
-        tmp_path,
-        catalogue=_holding("Tables/DWG.Customer", "Files/Raw.CustomerCsv"),
-    )
+    bundle = rebuild
     physical = {
         "create_schema",
         "build_table",
@@ -427,14 +435,10 @@ def test_bookmarks_are_reconciled_before_the_first_physical_action(estate, tmp_p
 
 
 @weaver_test()
-def test_the_reset_is_one_action(estate, tmp_path):
+def test_the_reset_is_one_action(rebuild):
     """One lifecycle decision, so one action carrying the whole intent."""
 
-    bundle = _bundle(
-        estate,
-        tmp_path,
-        catalogue=_holding("Tables/DWG.Customer", "Files/Raw.CustomerCsv"),
-    )
+    bundle = rebuild
     (_sequence, action), *rest = _runtime_state_actions(bundle)
 
     assert not rest
@@ -442,7 +446,7 @@ def test_the_reset_is_one_action(estate, tmp_path):
 
 
 @weaver_test()
-def test_the_action_carries_the_intent_the_plan_states(estate, tmp_path):
+def test_the_action_carries_the_intent_the_plan_states(rebuild):
     """What runs and what the plan says it means are one computation.
 
     A summary the planner writes about its own plan proves nothing on its own;
@@ -451,11 +455,7 @@ def test_the_action_carries_the_intent_the_plan_states(estate, tmp_path):
 
     from weaver.catalogue.runtime_state import read_invalidation
 
-    bundle = _bundle(
-        estate,
-        tmp_path,
-        catalogue=_holding("Tables/DWG.Customer", "Files/Raw.CustomerCsv"),
-    )
+    bundle = rebuild
     (_sequence, action), *_rest = _runtime_state_actions(bundle)
     carried = read_invalidation(bundle.store.read(bundle.location / action.payload))
     established, invalidated = carried
@@ -472,10 +472,10 @@ def test_the_action_carries_the_intent_the_plan_states(estate, tmp_path):
 
 
 @weaver_test()
-def test_a_view_is_recorded_after_the_physical_work(estate, tmp_path):
+def test_a_view_is_recorded_after_the_physical_work(first_build):
     """A View is Succeeded once its DDL has run, so its stage follows the build."""
 
-    bundle = _bundle(estate, tmp_path)
+    bundle = first_build
     order = [action.id for _sequence, _batch, action in bundle.plan.actions()]
 
     assert VIEW_STATE_SLUG in order
@@ -514,12 +514,10 @@ def test_a_view_that_is_not_rebuilt_is_not_recorded(estate):
 
 
 @weaver_test()
-def test_runtime_references_precede_warehouse_documents_that_read_them(
-    estate, tmp_path
-):
+def test_runtime_references_precede_warehouse_documents_that_read_them(first_build):
     """A table build may execute authored SQL that selects ``_.Bookmark``."""
 
-    bundle = _bundle(estate, tmp_path)
+    bundle = first_build
     order = [action.id for _sequence, _batch, action in bundle.plan.actions()]
 
     reference = order.index(_references(bundle, "Warehouse")[0])
@@ -604,37 +602,6 @@ def test_both_items_of_one_build_are_one_intent(estate):
         ("Warehouse", "Reporting", "Sales", "Customer"),
     }
     assert [one.table for one in establishment].count(BOOKMARK.name) == 1
-
-
-def _two_items() -> Catalogue:
-    """A catalogue holding one bookmark row for each of two items."""
-
-    return Catalogue(
-        {
-            item_id(ITEM): {
-                "Bookmark": (
-                    {
-                        "item_type": "Lakehouse",
-                        "item_name": "Sales",
-                        "schema_name": "Tables/DWG",
-                        "object_name": "Customer",
-                        "bookmark_datetime": LOADED_AT,
-                    },
-                )
-            },
-            item_id(WAREHOUSE_ITEM): {
-                "Bookmark": (
-                    {
-                        "item_type": "Warehouse",
-                        "item_name": "Reporting",
-                        "schema_name": "Rpt",
-                        "object_name": "Customer",
-                        "bookmark_datetime": LOADED_AT,
-                    },
-                )
-            },
-        }
-    )
 
 
 # --- it is never dropped -------------------------------------------------------

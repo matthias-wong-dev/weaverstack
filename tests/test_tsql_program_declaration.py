@@ -65,10 +65,6 @@ def _validate(body: str, *, primary_key=("Customer id",), incremental=True) -> N
     )
 
 
-def _staging(body: str) -> str:
-    return _program(body).staging.sql
-
-
 # --- what counts as one query -------------------------------------------------
 
 

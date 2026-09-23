@@ -20,7 +20,6 @@ from weaver.store import Store
 from weaver.targets import ItemRef
 
 from .observation import Observation, observation_from, observe_body
-from .workspaces import WORKSPACE
 
 if TYPE_CHECKING:  # names used only in annotations
     from weaver.workspaces import Workspace
@@ -261,21 +260,6 @@ class BuildEnv:
         )
 
 
-def _outcome_from_report(report) -> InstallOutcome:
-    return InstallOutcome(
-        status=report.status,
-        bundle_id=report.bundle_id,
-        sequence_status={s.number: s.status for s in report.sequences},
-        action_status={a.action_id: a.status for a in report.action_results()},
-        action_order=tuple(a.action_id for a in report.action_results()),
-        action_error={
-            a.action_id: f"{a.error_type}: {a.error_message}"
-            for a in report.action_results()
-            if a.error_type
-        },
-    )
-
-
 def _upload_tree(store, source: Path, destination) -> None:
     """Install a repository, replacing whatever was there under that name.
 
@@ -297,66 +281,6 @@ def _upload_tree(store, source: Path, destination) -> None:
             store.write(
                 destination.join(*path.relative_to(source).parts), path.read_bytes()
             )
-
-
-def _bindings_for(
-    weaver_repo_fixture, *, lakehouse=None, warehouse=None, lakehouses=None
-):
-    """Bind the fixture's declared items to whichever targets this env has.
-
-    The item type chooses the binding, so one environment serves a Lakehouse
-    fixture, a Warehouse fixture or a mixed one without a test naming a target
-    kind. Items the fixture does not list stay unbound, which is how the mixed
-    estate proves its Warehouse leaves are omitted.
-
-    ``lakehouses`` maps a specific item to its own Lakehouse, for the one thing a
-    single destination cannot express: a cross-item shortcut needs the producer and
-    the consumer in different Lakehouses, or the shortcut would point a name at
-    something already in the same place. ``lakehouse`` remains the default for
-    every item not named there, so single-target fixtures are untouched.
-    """
-
-    from weaver.build_bundle import (
-        ItemBinding,
-        ItemBindings,
-        LakehouseBinding,
-        WarehouseBinding,
-    )
-    from weaver.declaration.model import LAKEHOUSE, WeaverItemId
-
-    by_item = {
-        WeaverItemId.parse(name): ref for name, ref in (lakehouses or {}).items()
-    }
-    entries = []
-    for name in weaver_repo_fixture.items:
-        item = WeaverItemId.parse(name)
-        if item.item_type == LAKEHOUSE:
-            bound = by_item.get(item, lakehouse)
-            if bound is None:
-                raise AssertionError(f"{item} needs a Lakehouse this env does not have")
-            entries.append(
-                ItemBinding(
-                    item,
-                    LakehouseBinding(lakehouse=bound, workspace_name=WORKSPACE),
-                )
-            )
-        else:
-            if warehouse is None:
-                raise AssertionError(f"{item} needs a Warehouse this env does not have")
-            entries.append(
-                ItemBinding(
-                    item,
-                    WarehouseBinding(warehouse=warehouse, workspace_name=WORKSPACE),
-                )
-            )
-    return ItemBindings(tuple(entries))
-
-
-#: Every schema any build fixture registers, in either Lakehouse. Dropped on
-#: local-env teardown, so a shared Spark catalogue never leaks one test's objects
-#: into the next, the one place catalogue cleanup lives; tests never do it
-#: themselves. They are dropped through the destination, because a local schema's
-#: real database name carries the Lakehouse it belongs to.
 
 
 def _install_estate(env) -> InstalledEstate:

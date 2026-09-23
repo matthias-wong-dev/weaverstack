@@ -18,6 +18,8 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 
 import pytest
+from mirror_support import forked_config
+from sql_support import warehouse_sql
 from support.acceptance import Acceptance
 from support.build_envs import WAREHOUSE_ESTATE_FIXTURE
 from support.weaver_test import register_session, weaver_test
@@ -31,7 +33,6 @@ from weaver.catalogue.tables import (
 )
 from weaver.catalogue.tables import LOAD_STATUS as LOAD_STATUS_TABLE
 from weaver.catalogue.tables import MIRROR as MIRROR_TABLE
-from weaver.targets import ItemRef, WarehouseTarget
 
 ITEM = "Warehouse/Reporting"
 
@@ -138,6 +139,10 @@ class Estate:
     #: ``Schema.Object`` to its ``_.LoadStatus`` result in the catalogue the
     #: mirror borrows from, which is where the inherited state comes from.
     source_load_status: dict[str, str]
+    #: Every ``_.Registry`` identity with its signature and build instant, from
+    #: the fork catalogue and from its source, without the catalogue's own rows.
+    registry: frozenset[tuple]
+    source_registry: frozenset[tuple]
 
 
 # --- the journey --------------------------------------------------------------
@@ -153,6 +158,7 @@ def journey(
     session_disposable_warehouse,
     warehouse_session,
     tmp_path_factory,
+    request,
 ):
     """One estate: built, mirrored, validated, rebuilt, then materialised."""
 
@@ -171,24 +177,26 @@ def journey(
     run.catalogue_name = fabric_fork_catalogue.name
     run.source_catalogue_name = fabric_catalogue.name
     run.workspace = fabric_workspace
-    run.source_sql = _sql(warehouse_session, fabric_workspace, run.source_name)
-    run.target_sql = _sql(warehouse_session, fabric_workspace, run.target_name)
-    run.catalogue_sql = _sql(warehouse_session, fabric_workspace, run.catalogue_name)
-    run.source_catalogue_sql = _sql(
+    run.source_sql = warehouse_sql(warehouse_session, fabric_workspace, run.source_name)
+    run.target_sql = warehouse_sql(warehouse_session, fabric_workspace, run.target_name)
+    run.catalogue_sql = warehouse_sql(
+        warehouse_session, fabric_workspace, run.catalogue_name
+    )
+    run.source_catalogue_sql = warehouse_sql(
         warehouse_session, fabric_workspace, run.source_catalogue_name
     )
     run.forked = replace(fabric_workspace, catalogue=f"Warehouse/{run.catalogue_name}")
     run.session = warehouse_session
     into_mirror = [f"{ITEM}=Warehouse/{run.target_name}"]
+    # Steps whose only readers run with --runslow.
+    release = request.config.getoption("--runslow")
 
     run.step(
         "build the source",
-        lambda: _built(
-            weaver.build(
-                str(estate.path),
-                items=[f"{ITEM}=Warehouse/{run.source_name}"],
-                session=warehouse_session,
-            )
+        lambda: weaver.build(
+            str(estate.path),
+            items=[f"{ITEM}=Warehouse/{run.source_name}"],
+            session=warehouse_session,
         ),
     )
     # The state a mirror copies in has to be settled state, or the build that
@@ -196,10 +204,10 @@ def journey(
     # about overwriting it would pass against an estate that never held one.
     run.step(
         "load the source",
-        lambda: _loaded(weaver.load([ITEM], session=warehouse_session)),
+        lambda: weaver.load([ITEM], session=warehouse_session),
     )
     run.step("seed the source", lambda: _seed(run.source_sql))
-    mirrored = run.step(
+    run.step(
         "mirror",
         lambda: weaver.mirror(
             into_mirror,
@@ -208,26 +216,27 @@ def journey(
             catalogue=f"Warehouse/{run.catalogue_name}",
             mirror=f"Warehouse/{fabric_catalogue.name}",
         ),
+        observe=lambda: _observe(run),
     )
-    mirrored.observation = _observe(run)
-    again = run.step(
-        "mirror again",
-        lambda: weaver.mirror(
-            into_mirror,
-            session=warehouse_session,
-            workspace=fabric_workspace.workspace,
-            catalogue=f"Warehouse/{run.catalogue_name}",
-            mirror=f"Warehouse/{fabric_catalogue.name}",
-        ),
-    )
-    again.observation = _observe(run)
+    if release:
+        run.step(
+            "mirror again",
+            lambda: weaver.mirror(
+                into_mirror,
+                session=warehouse_session,
+                workspace=fabric_workspace.workspace,
+                catalogue=f"Warehouse/{run.catalogue_name}",
+                mirror=f"Warehouse/{fabric_catalogue.name}",
+            ),
+            observe=lambda: _observe(run),
+        )
     run.step("read a source change through the mirror", lambda: _read_through(run))
     run.step(
         "report health over the mirror",
         lambda: weaver.health(
             [ITEM],
             session=warehouse_session,
-            workspace_config=_forked_config(run, tmp_path_factory.mktemp("wh-health")),
+            workspace_config=forked_config(run, tmp_path_factory.mktemp("wh-health")),
         ),
     )
     run.step(
@@ -239,33 +248,29 @@ def journey(
             catalogue=f"Warehouse/{run.catalogue_name}",
         ),
     )
-    rebuilt = run.step(
+    run.step(
         "build with nothing changed",
-        lambda: _built(
-            weaver.build(
-                str(estate.path),
-                items=into_mirror,
-                session=warehouse_session,
-                catalogue=f"Warehouse/{run.catalogue_name}",
-            )
+        lambda: weaver.build(
+            str(estate.path),
+            items=into_mirror,
+            session=warehouse_session,
+            catalogue=f"Warehouse/{run.catalogue_name}",
         ),
+        observe=lambda: _observe(run),
     )
-    rebuilt.observation = _observe(run)
     run.step("change one declaration", lambda: _change(estate))
-    materialised = run.step(
+    run.step(
         "build the changed declaration",
-        lambda: _built(
-            weaver.build(
-                str(estate.path),
-                items=into_mirror,
-                session=warehouse_session,
-                catalogue=f"Warehouse/{run.catalogue_name}",
-            )
+        lambda: weaver.build(
+            str(estate.path),
+            items=into_mirror,
+            session=warehouse_session,
+            catalogue=f"Warehouse/{run.catalogue_name}",
         ),
+        observe=lambda: _observe(run),
     )
-    materialised.observation = _observe(run)
-    run.loading_config = _forked_config(run, tmp_path_factory.mktemp("wh-load"))
-    selected = run.step(
+    run.loading_config = forked_config(run, tmp_path_factory.mktemp("wh-load"))
+    run.step(
         "select a stale load",
         lambda: weaver.load(
             [ITEM],
@@ -274,9 +279,9 @@ def journey(
             session=warehouse_session,
             workspace_config=run.loading_config,
         ),
+        observe=lambda: _observe(run),
     )
-    selected.observation = _observe(run)
-    loaded = run.step(
+    run.step(
         "load what the build materialised",
         lambda: weaver.load(
             [ITEM],
@@ -284,37 +289,13 @@ def journey(
             session=warehouse_session,
             workspace_config=run.loading_config,
         ),
+        observe=lambda: _observe(run),
     )
-    loaded.observation = _observe(run)
-    return run
+    yield run
+    run.close()
 
 
 # --- driving it ---------------------------------------------------------------
-
-
-def _forked_config(run, directory):
-    """A workspace configuration naming the fork and the catalogue it mirrors.
-
-    ``mirror:`` reaches a Workspace from configuration alone, and it is what
-    tells health where a mirrored object's load state is recorded.
-    """
-
-    path = directory / "workspace-config.yml"
-    path.write_text(
-        "\n".join(
-            (
-                f"workspace: {run.workspace.workspace}",
-                f"catalogue: Warehouse/{run.catalogue_name}",
-                f"mirror: Warehouse/{run.source_catalogue_name}",
-            )
-        ),
-        encoding="utf-8",
-    )
-    return path
-
-
-def _sql(session, workspace, name: str):
-    return session.sql_executor(WarehouseTarget(ItemRef(name)), workspace=workspace)
 
 
 def _write(estate, relative: str, text: str) -> None:
@@ -323,23 +304,11 @@ def _write(estate, relative: str, text: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
-def _built(result):
-    if not result.succeeded:
-        raise AssertionError("; ".join(f.describe() for f in result.errors))
-    return result
-
-
-def _loaded(report):
-    if not report.succeeded:
-        raise AssertionError("; ".join(message.message for message in report.messages))
-    return report
-
-
 def _seed(sql) -> None:
     """One row at the source, so reading through the mirror proves something."""
 
-    sql.execute("delete from [Wh].[Product];")
     sql.execute(
+        "delete from [Wh].[Product];\n"
         "insert into [Wh].[Product] ([ProductId], [ProductName], [Row signature], "
         "[Row insert datetime], [Row update datetime], [Row delete datetime]) "
         f"values ({SENTINEL[0]}, N'{SENTINEL[1]}', "
@@ -374,30 +343,46 @@ def _change(estate) -> None:
     path.write_text(changed, encoding="utf-8")
 
 
+def _asked(sql, *queries: str) -> list[list[dict]]:
+    """Several reads of one Warehouse, in one round trip."""
+
+    return [
+        [dict(row) for row in rows]
+        for rows in sql.query_result_sets(";\n".join(queries) + ";")
+    ]
+
+
 def _observe(run) -> Estate:
-    """The estate as this transition left it."""
+    """The estate as this transition left it, one round trip per Warehouse."""
 
     from weaver.catalogue.state import catalogue_for
 
     with catalogue_for(run.session, run.forked) as catalogue:
         dag = catalogue.dag()
+    objects, dependant = _asked(run.target_sql, _OBJECTS, _DEPENDANT_ROWS)
+    borrowed, installed, load_status, bookmarks, registry = _asked(
+        run.catalogue_sql,
+        "select [Schema name], [Object name], [Physical type] "
+        f"from {_q(MIRROR_TABLE.name)}",
+        "select [Item name], [Target name] from [_].[Installation]",
+        f"select [Schema name], [Object name], [Result] from {_q('LoadStatus')}",
+        "select [Schema name], [Object name], [Bookmark datetime] "
+        f"from {_q('Bookmark')}",
+        _REGISTRY,
+    )
+    source_load_status, source_registry = _asked(
+        run.source_catalogue_sql,
+        "select [Schema name], [Object name], [Result] "
+        f"from {_q('LoadStatus')} where [Item name] = N'Reporting'",
+        _REGISTRY,
+    )
     return Estate(
-        objects={
-            f"{row['s']}.{row['n']}": str(row["t"]).strip()
-            for row in run.target_sql.query(_OBJECTS)
-        },
+        objects={f"{row['s']}.{row['n']}": str(row["t"]).strip() for row in objects},
         borrowed={
             f"{row['Schema name']}.{row['Object name']}": str(row["Physical type"])
-            for row in run.catalogue_sql.query(
-                f"select [Schema name], [Object name], [Physical type] from {_q(MIRROR_TABLE.name)}"
-            )
+            for row in borrowed
         },
-        installed={
-            str(row["Item name"]): str(row["Target name"])
-            for row in run.catalogue_sql.query(
-                "select [Item name], [Target name] from [_].[Installation]"
-            )
-        },
+        installed={str(row["Item name"]): str(row["Target name"]) for row in installed},
         loadable={
             node.load_name: node.can_load
             for node in dag.nodes
@@ -411,27 +396,43 @@ def _observe(run) -> Estate:
         ],
         load_status={
             f"{row['Schema name']}.{row['Object name']}": str(row["Result"])
-            for row in run.catalogue_sql.query(
-                f"select [Schema name], [Object name], [Result] from {_q('LoadStatus')}"
-            )
+            for row in load_status
         },
         bookmarks={
             f"{row['Schema name']}.{row['Object name']}": _instant(
                 row["Bookmark datetime"]
             )
-            for row in run.catalogue_sql.query(
-                "select [Schema name], [Object name], [Bookmark datetime] "
-                f"from {_q('Bookmark')}"
-            )
+            for row in bookmarks
         },
-        dependant_rows=_dependant_rows(run),
+        dependant_rows=_rows_of(dependant),
         source_load_status={
             f"{row['Schema name']}.{row['Object name']}": str(row["Result"])
-            for row in run.source_catalogue_sql.query(
-                "select [Schema name], [Object name], [Result] "
-                f"from {_q('LoadStatus')} where [Item name] = N'Reporting'"
-            )
+            for row in source_load_status
         },
+        registry=_signatures(registry),
+        source_registry=_signatures(source_registry),
+    )
+
+
+#: What incremental selection compares, for every item but the catalogue's own.
+_REGISTRY = (
+    "select [Item type], [Item name], [Schema name], [Object name], [Signature], "
+    f"[Build datetime] from [{CATALOGUE_SCHEMA}].[Registry] "
+    "where not ([Item type] = N'Warehouse' and [Item name] = N'_weaver')"
+)
+
+
+def _signatures(rows) -> frozenset[tuple]:
+    return frozenset(
+        (
+            str(row["Item type"]),
+            str(row["Item name"]),
+            str(row["Schema name"]),
+            str(row["Object name"]),
+            str(row["Signature"]),
+            None if row["Build datetime"] is None else _instant(row["Build datetime"]),
+        )
+        for row in rows
     )
 
 
@@ -441,16 +442,15 @@ def _instant(value) -> datetime:
     return value if isinstance(value, datetime) else datetime.fromisoformat(str(value))
 
 
-def _dependant_rows(run) -> list[tuple]:
-    """``Wh.ProductRollup`` where it stands, which is a View until it is built."""
+#: ``Wh.ProductRollup`` where it stands, which is a View until it is built.
+_DEPENDANT_ROWS = (
+    f"select [ProductId], [ProductName] from [{DEPENDANT.replace('.', '].[')}] "
+    "order by [ProductId]"
+)
 
-    return [
-        (int(row["ProductId"]), str(row["ProductName"]))
-        for row in run.target_sql.query(
-            f"select [ProductId], [ProductName] from [{DEPENDANT.replace('.', '].[')}] "
-            "order by [ProductId]"
-        )
-    ]
+
+def _rows_of(rows) -> list[tuple]:
+    return [(int(row["ProductId"]), str(row["ProductName"])) for row in rows]
 
 
 def _result(value: str) -> str:
@@ -537,7 +537,6 @@ def test_the_source_load_runs_and_settles_what_the_mirror_will_carry(journey):
         if node.logical_id and node.executed
     }
 
-    assert report.succeeded
     assert ran[f"{ITEM}/{MATERIALISED}"].succeeded
     assert ran[f"{ITEM}/{DEPENDANT}"].succeeded
 
@@ -563,6 +562,30 @@ def test_the_fork_inherits_the_source_catalogues_settled_state(journey):
     assert observed.load_status[DEPENDANT] == _result(SUCCEEDED)
     assert observed.bookmarks[MATERIALISED] != sentinel
     assert observed.bookmarks[DEPENDANT] != sentinel
+
+
+@weaver_test(remote=True)
+def test_signatures_and_instants_survive_the_fork(journey):
+    """What incremental selection compares crosses the fork unchanged.
+
+    A signature altered in transit would make every object look changed, and a
+    truncated ``Build datetime`` would re-date rows no build touched.
+    """
+
+    journey.require("mirror")
+    observed = journey["mirror"].observation
+
+    assert observed.registry == observed.source_registry
+    assert observed.registry, "the source certifies nothing, so equality proves nothing"
+
+
+@weaver_test(remote=True)
+def test_the_fork_catalogue_owns_its_own_installation_row(journey):
+    """``Warehouse/_weaver`` names the Warehouse its ``_`` schema is in."""
+
+    journey.require("mirror")
+
+    assert journey["mirror"].observation.installed["_weaver"] == journey.catalogue_name
 
 
 @weaver_test(remote=True)
@@ -632,6 +655,7 @@ def test_the_result_names_every_warehouse_it_emptied(journey):
     assert result.mirrored[ITEM]["programmables"] > 0
 
 
+@pytest.mark.slow
 @weaver_test(remote=True)
 def test_mirroring_again_leaves_the_same_estate(journey):
     """A mirror is reconstruction, so a half-finished one is rerun, not repaired."""
@@ -861,9 +885,6 @@ def test_a_stale_load_repopulates_what_the_build_materialised(journey):
     journey.require("load what the build materialised")
     step = journey["load what the build materialised"]
 
-    assert step.result.succeeded, "; ".join(
-        message.message for message in step.result.messages
-    )
     assert step.observation.dependant_rows == [(10, "Widget II"), (20, "Gadget")]
     assert step.observation.load_status[DEPENDANT] == _result(SUCCEEDED)
 

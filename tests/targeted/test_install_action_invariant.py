@@ -1,26 +1,17 @@
-"""Every InstallAction kind has a test that executes it, or is deferred.
+"""An inventory of which Fabric test exercises each InstallAction kind.
 
-The list below is the checklist, and it is legible from the terminal:
+Legible from the terminal:
 
 ```text
 pytest --collect-only -q tests/targeted/test_install_action_invariant.py
 ```
 
-Each parametrised case reads ``[<kind>-<the test that executes it>]``. Each InstallAction kind names the test that runs it
-against a real engine and inspects what it made, and adding a kind without
-adding that test fails here, naming what is missing rather than leaving it to be
-noticed.
+Each covered kind names a Fabric test whose build emits that kind and which
+inspects what it made. A kind with no such test is listed as uncovered with
+the reason and its local coverage. A new kind fails here until it is placed.
 
-Two things this does not do.
-
-It does not check that the named test passes, or that it asserts anything
-useful. A test's own claim is its business; this only holds the estate to having
-one per kind.
-
-And it does not scan for tests by pattern. A convention that hopes every
-kind is covered is the state this replaces, the point is a written list someone
-had to change on purpose, so that deferring a kind is a decision with a name
-attached rather than an omission.
+This is an inventory, not execution evidence: it checks that a named test
+exists, not that it runs the kind or passes.
 """
 
 from __future__ import annotations
@@ -36,37 +27,32 @@ from weaver.build_bundle import models
 REPOSITORY = pathlib.Path(__file__).resolve().parents[2]
 TESTS = REPOSITORY / "tests"
 
-#: Why a kind has no execution test yet. A deferral is a claim about the future,
-#: so it carries a reason and is as visible as a covered kind.
-DEFERRED = {
-    "write_file": "load semantics land in a later branch; the executor is covered by test_actions_delta_install.py",
-    "delete_file": "load semantics land in a later branch; the executor is covered by test_actions_delta_install.py",
-    "build_procedure": "generated load procedures land in a later branch",
-    "drop_procedure": "generated load procedures land in a later branch",
-}
-
-#: Kinds whose Delta-side execution needs a real Lakehouse and is still waiting
-#: for the test that gives it one. Recorded here rather than dropped,
-#: because a checklist that lost an entry would read as covered.
-AWAITING_FABRIC = {
-    "build_folder": "the Delta-side folder execution test needs a real Lakehouse",
-    "drop_folder": "as above",
-    "drop_table": "the rebuild drop needs a real Delta table to clear",
-    "drop_view": "as above",
-    "drop_shortcut": (
-        "unpicking a pointer needs a real OneLake shortcut, and the claim worth "
-        "making about it is that the source survives, which belongs beside the "
-        "rest of tests/fabric/test_shortcut_safety_primitive.py"
+#: Kinds no Fabric test runs and inspects, with where they are covered locally.
+UNCOVERED = {
+    "delete_file": (
+        "emitted only for a deployed module nothing claims, and no Fabric test "
+        "removes a declaration; the executor is in test_actions_delta_install.py"
+    ),
+    "drop_procedure": (
+        "emitted only for a procedure nothing claims, and no Fabric test removes "
+        "a declaration; planning is in test_load_plan_install.py"
+    ),
+    "build_folder": (
+        "the acceptance journey builds folders and reads them only through a "
+        "load; the executor is in test_folder_executor_boundary.py"
+    ),
+    "drop_folder": (
+        "no Fabric test changes an owned folder; the executor is in "
+        "test_folder_executor_boundary.py"
     ),
 }
 
-#: Kinds that change a target, and the test that executes each. A kind appearing
-#: on both physical sides needs one test per side: the executors differ, and so
-#: does what "the object is what it should be" means.
+#: Kinds that change a target, and a Fabric test that runs and inspects each.
+#: ``drop_table`` is proved on the Lakehouse side only.
 COVERED = {
-    "create_schema": ("test_create_schema_action_creates_the_schema_in_the_warehouse",),
-    "build_table": ("test_build_table_action_is_accepted_by_fabric",),
-    "build_view": ("test_build_view_action_creates_a_view_over_the_table_it_reads",),
+    "create_schema": ("test_a_built_warehouse_reads_back_as_the_fixture_predicts",),
+    "build_table": ("test_a_built_table_uses_the_declared_types",),
+    "build_view": ("test_a_built_warehouse_reads_back_as_the_fixture_predicts",),
     "create_shortcut": (
         "test_the_shortcut_exists_as_a_onelake_shortcut",
         "test_a_warehouse_shortcut_is_a_view_over_the_bound_lakehouse",
@@ -78,6 +64,13 @@ COVERED = {
     "refresh_sql_endpoint": (
         "test_each_mutated_lakehouse_had_its_endpoint_refreshed_for_real",
     ),
+    "write_file": ("test_a_build_here_rewrites_this_items_runtime_module_alone",),
+    "build_procedure": (
+        "test_the_source_load_runs_and_settles_what_the_mirror_will_carry",
+    ),
+    "drop_table": ("test_a_declaration_change_rebuilds_exactly_what_it_must",),
+    "drop_view": ("test_the_changed_object_becomes_a_local_table",),
+    "drop_shortcut": ("test_the_changed_object_stops_being_a_shortcut",),
 }
 
 #: Kinds that write the catalogue rather than the estate. They are covered as a
@@ -122,28 +115,18 @@ def test_the_product_defines_action_kinds_to_check():
 def test_every_action_kind_is_covered_or_deliberately_deferred():
     """The checklist itself. A new kind must be placed before this passes."""
 
-    placed = set(COVERED) | set(DEFERRED) | set(AWAITING_FABRIC) | CATALOGUE_KINDS
+    placed = set(COVERED) | set(UNCOVERED) | CATALOGUE_KINDS
     unplaced = declared_kinds() - placed
 
     assert not unplaced, (
-        "these action kinds are neither covered by an execution test nor "
-        f"deferred with a reason: {sorted(unplaced)}"
+        "these action kinds are neither covered by a Fabric test nor listed as "
+        f"uncovered: {sorted(unplaced)}"
     )
 
 
 @weaver_test()
-def test_no_kind_is_both_covered_and_deferred():
-    """A deferral that is also covered means one of the two is stale."""
-
-    assert not set(COVERED) & set(DEFERRED)
-    assert not set(COVERED) & set(AWAITING_FABRIC)
-
-
-@weaver_test()
-def test_every_kind_awaiting_fabric_says_why():
-    """A gap with no reason is indistinguishable from an oversight."""
-
-    assert all(reason.strip() for reason in AWAITING_FABRIC.values())
+def test_no_kind_is_both_covered_and_uncovered():
+    assert not set(COVERED) & set(UNCOVERED)
 
 
 @pytest.mark.parametrize(
@@ -167,12 +150,6 @@ def test_the_named_execution_test_exists(kind: str, test_name: str):
     ]
 
     assert found, f"{kind}: no test named {test_name} exists"
-
-
-@weaver_test()
-def test_every_deferral_says_why():
-    for kind, reason in DEFERRED.items():
-        assert reason and len(reason) > 20, kind
 
 
 @weaver_test()

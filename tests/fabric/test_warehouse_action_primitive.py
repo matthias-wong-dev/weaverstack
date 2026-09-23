@@ -1,9 +1,8 @@
 """Warehouse build actions executed over TDS against a real Fabric engine.
 
-Each assertion here is about the action seam: the rendered action reached its
-executor and created or removed the intended object. The declared physical
-shape and inventory-reader fidelity are separate primitive and binding claims,
-kept in adjacent modules over the same session-scoped estate.
+The shared `warehouse_primitive_estate` fixture fails if any action it runs
+fails, and the adjacent modules read back what those actions created. What
+stays here is prune: the action that removes an object nothing declares.
 """
 
 from __future__ import annotations
@@ -11,37 +10,6 @@ from __future__ import annotations
 from support.weaver_test import weaver_test
 
 from weaver.build_bundle.prune import read_warehouse_inventory
-
-
-@weaver_test(remote=True, resources={"tds"})
-def test_create_schema_action_creates_the_schema_in_the_warehouse(
-    warehouse_primitive_estate,
-):
-    rows = warehouse_primitive_estate.warehouse.executor.query(
-        "select name from sys.schemas where name = N'DWG'"
-    )
-
-    assert [str(row["name"]) for row in rows] == ["DWG"]
-
-
-@weaver_test(remote=True, resources={"tds"})
-def test_build_table_action_is_accepted_by_fabric(warehouse_primitive_estate):
-    rows = warehouse_primitive_estate.warehouse.executor.query(
-        "select count(*) as n from [DWG].[Customer]"
-    )
-
-    assert rows[0]["n"] == 0
-
-
-@weaver_test(remote=True, resources={"tds"})
-def test_build_view_action_creates_a_view_over_the_table_it_reads(
-    warehouse_primitive_estate,
-):
-    rows = warehouse_primitive_estate.warehouse.executor.query(
-        "select count(*) as n from [DWG].[ActiveCustomer]"
-    )
-
-    assert rows[0]["n"] == 0
 
 
 @weaver_test(remote=True, resources={"tds"})

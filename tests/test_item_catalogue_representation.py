@@ -283,11 +283,6 @@ def test_registry_merge_is_last_and_item_scoped(tmp_path):
 # --- reading a catalogue of an older shape -------------------------------------
 
 
-class _Absent(Exception):
-    def getErrorClass(self):  # noqa: N802 - Spark's own spelling
-        return "TABLE_OR_VIEW_NOT_FOUND"
-
-
 class _FakeCatalogue:
     """The narrowest thing ``read_catalogue_state`` will accept.
 

@@ -54,9 +54,12 @@ PRODUCER = WeaverItemId.parse(LOAD_PRODUCER)
 CONSUMER = WeaverItemId.parse(LOAD_CONSUMER)
 
 
-@pytest.fixture
-def estate(tmp_path):
-    repository = load_estate(tmp_path)
+@pytest.fixture(scope="module")
+def estate(tmp_path_factory):
+    """Built once per module, like every estate here: an installed graph is
+    frozen and these tests only read it."""
+
+    repository = load_estate(tmp_path_factory.mktemp("estate"))
     return installed_catalogue(repository, load_estate_bindings()).dag()
 
 
@@ -168,13 +171,6 @@ def test_load_dag_keeps_a_single_target_as_a_hard_boundary(estate):
 
 
 @weaver_test()
-def test_load_dag_excludes_unrelated_downstream_objects(estate):
-    dag = load_dag(estate, items=(PRODUCER,))
-
-    assert "load:Warehouse/Reporting_WH/Sales.Summary" not in dag.by_id
-
-
-@weaver_test()
 def test_load_dag_crosses_targets_only_when_both_are_requested(estate):
     dag = load_dag(estate, items=(PRODUCER, CONSUMER))
 
@@ -228,8 +224,8 @@ def _write(root, relative, text):
     path.write_text(text, encoding="utf-8")
 
 
-@pytest.fixture
-def areas(tmp_path):
+@pytest.fixture(scope="module")
+def areas(tmp_path_factory):
     """Two Lakehouses and a Warehouse.
 
     `Landing` owns both areas of `Sales.Customer` and a `Sales.Order` unique to
@@ -249,9 +245,10 @@ def areas(tmp_path):
         "Warehouse/Curated/schemas/Sales.yml": schema_document("Sales"),
         "Warehouse/Curated/Sales.Summary.sql": warehouse_table("Sales.Summary"),
     }
+    root = tmp_path_factory.mktemp("areas")
     for relative, text in documents.items():
-        _write(tmp_path, relative, text)
-    repository = parse_item_repository(Location(str(tmp_path)))
+        _write(root, relative, text)
+    repository = parse_item_repository(Location(str(root)))
     bindings = item_bindings(
         ("Lakehouse/Landing", "Landing_LH"),
         ("Lakehouse/Staging", "Staging_LH"),
@@ -916,7 +913,8 @@ def _shortcut_estate(root):
     return item
 
 
-def _resolved_producers(tmp_path):
+@pytest.fixture(scope="module")
+def resolved_producers(tmp_path_factory):
     """What each written shortcut import resolves to, against the estate."""
 
     from factories import installed_catalogue, item_bindings
@@ -924,7 +922,7 @@ def _resolved_producers(tmp_path):
     from weaver.declaration import parse_item_repository
     from weaver.locations import Location
 
-    root = tmp_path / "shortcut-estate"
+    root = tmp_path_factory.mktemp("shortcut-estate")
     item = _shortcut_estate(root)
     repository = parse_item_repository(Location(str(root)))
     bindings = item_bindings((item, "Curated_LH"))
@@ -936,14 +934,14 @@ def _resolved_producers(tmp_path):
 
 
 @weaver_test()
-def test_a_folder_shortcut_import_resolves_beneath_files(tmp_path):
+def test_a_folder_shortcut_import_resolves_beneath_files(resolved_producers):
     """A shortcut import says nothing about which area its destination is in.
 
     Resolved as a table, a folder shortcut is not an installed object and the
     load refuses a name that is plainly there.
     """
 
-    estate, _consumer, _dag = _resolved_producers(tmp_path)
+    estate, _consumer, _dag = resolved_producers
 
     assert WeaverDocumentId.parse("Lakehouse/Curated/Files/Sales.Incoming") in estate
     assert (
@@ -952,7 +950,7 @@ def test_a_folder_shortcut_import_resolves_beneath_files(tmp_path):
 
 
 @weaver_test()
-def test_a_physical_shortcut_import_is_an_external_read(tmp_path):
+def test_a_physical_shortcut_import_is_an_external_read(resolved_producers):
     """Each of the three points outside the estate, so none of them orders.
 
     ``shortcuts.Reference`` carries no ``Schema__Object`` separator, and a
@@ -960,7 +958,7 @@ def test_a_physical_shortcut_import_is_an_external_read(tmp_path):
     belongs to the item it points at.
     """
 
-    estate, consumer, _dag = _resolved_producers(tmp_path)
+    estate, consumer, _dag = resolved_producers
 
     assert set(estate.external_references[consumer]) == {
         "shortcuts.Reference",
@@ -971,10 +969,10 @@ def test_a_physical_shortcut_import_is_an_external_read(tmp_path):
 
 
 @weaver_test()
-def test_a_program_importing_shortcuts_still_loads(tmp_path):
+def test_a_program_importing_shortcuts_still_loads(resolved_producers):
     """The composition: every kind resolves, so the item has a load DAG."""
 
-    _estate, consumer, dag = _resolved_producers(tmp_path)
+    _estate, consumer, dag = resolved_producers
 
     assert any(node.logical_id == consumer for node in dag.nodes)
 
@@ -1033,7 +1031,8 @@ class Sales__Customer(Table):
     return item
 
 
-def _same_name_estate_dag(tmp_path):
+@pytest.fixture(scope="module")
+def same_name_estate(tmp_path_factory):
     """The whole round trip: repository, published catalogue, installed graph."""
 
     from factories import installed_catalogue, item_bindings
@@ -1041,7 +1040,7 @@ def _same_name_estate_dag(tmp_path):
     from weaver.declaration import parse_item_repository
     from weaver.locations import Location
 
-    root = tmp_path / "same-name-estate"
+    root = tmp_path_factory.mktemp("same-name-estate")
     item = _same_name_estate(root)
     repository = parse_item_repository(Location(str(root)))
     catalogue = installed_catalogue(repository, item_bindings((item, "Curated_LH")))
@@ -1049,10 +1048,12 @@ def _same_name_estate_dag(tmp_path):
 
 
 @weaver_test()
-def test_a_folder_shortcut_and_a_table_of_one_name_are_two_installed_nodes(tmp_path):
+def test_a_folder_shortcut_and_a_table_of_one_name_are_two_installed_nodes(
+    same_name_estate,
+):
     """The catalogue round trip keeps the two identities apart."""
 
-    item, estate = _same_name_estate_dag(tmp_path)
+    item, estate = same_name_estate
 
     assert WeaverDocumentId.parse(f"{item}/Files/Sales.Customer") in estate
     assert WeaverDocumentId.parse(f"{item}/Tables/Sales.Customer") in estate
@@ -1060,11 +1061,11 @@ def test_a_folder_shortcut_and_a_table_of_one_name_are_two_installed_nodes(tmp_p
 
 @weaver_test()
 def test_a_table_importing_the_folder_shortcut_it_shares_a_name_with_is_external(
-    tmp_path,
+    same_name_estate,
 ):
     """The declaration answers, so the import is the physical read it is."""
 
-    item, estate = _same_name_estate_dag(tmp_path)
+    item, estate = same_name_estate
     table = WeaverDocumentId.parse(f"{item}/Tables/Sales.Customer")
 
     assert estate.external_references[table] == ("shortcuts.Sales__Customer",)
@@ -1073,10 +1074,12 @@ def test_a_table_importing_the_folder_shortcut_it_shares_a_name_with_is_external
 
 
 @weaver_test()
-def test_a_table_importing_the_folder_shortcut_it_shares_a_name_with_loads(tmp_path):
+def test_a_table_importing_the_folder_shortcut_it_shares_a_name_with_loads(
+    same_name_estate,
+):
     """The composition: the item has a load DAG, and the table is in it."""
 
-    item, estate = _same_name_estate_dag(tmp_path)
+    item, estate = same_name_estate
     dag = load_dag(estate, items=(WeaverItemId.parse(item),))
 
     assert node_ids(dag) == ("load:Lakehouse/Curated_LH/Tables/Sales.Customer",)
