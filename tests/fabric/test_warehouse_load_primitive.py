@@ -242,8 +242,9 @@ def _drop(estate: Estate) -> None:
     )
 
 
-def _reset(estate: Estate) -> None:
-    """Empty the target and its evidence, without rebuilding either.
+def _reset(estate: Estate, rows=()) -> None:
+    """Empty the target and its evidence, without rebuilding either, and seed
+    the source with ``rows`` in the same batch.
 
     A sequence has to start from a known state, and dropping and recreating the
     table and procedure would be the obvious way to get one, and would put the
@@ -262,6 +263,7 @@ def _reset(estate: Estate) -> None:
             f"drop table [{SCHEMA}].[{name}{suffix}];"
             for suffix in ("_Reject", "_Upsert", "_Delete", "_Staging")
         )
+        + _insert_script(estate, rows)
     )
 
 
@@ -277,31 +279,23 @@ def _is_sentinel(at) -> bool:
     )
 
 
-def _bookmark(estate) -> object:
-    """This object's bookmark, as the catalogue holds it, or None."""
-
-    rows = estate.executor.query(
-        "select [Bookmark datetime] as at from [_].[Bookmark] "
-        f"where [Item type] = N'{ITEM.item_type}' "
-        f"and [Item name] = N'{ITEM.item_name}' "
-        f"and [Schema name] = N'{SCHEMA}' "
-        f"and [Object name] = N'{estate.object_name}';"
+def _insert_script(estate: Estate, rows) -> str:
+    if not rows:
+        return ""
+    values = ", ".join(
+        "(" + ", ".join("null" if v is None else f"'{v}'" for v in row) + ")"
+        for row in rows
     )
-    return rows[0]["at"] if rows else None
+    return (
+        f"\ninsert into [{SCHEMA}].[{estate.raw}] "
+        f"([Customer id], [Customer name]) values {values};"
+    )
 
 
 def _source_rows(estate: Estate, rows) -> None:
-    executor = estate.executor
-    executor.execute_script(f"delete from [{SCHEMA}].[{estate.raw}];")
-    if rows:
-        values = ", ".join(
-            "(" + ", ".join("null" if v is None else f"'{v}'" for v in row) + ")"
-            for row in rows
-        )
-        executor.execute_script(
-            f"insert into [{SCHEMA}].[{estate.raw}] "
-            f"([Customer id], [Customer name]) values {values};"
-        )
+    estate.executor.execute_script(
+        f"delete from [{SCHEMA}].[{estate.raw}];" + _insert_script(estate, rows)
+    )
 
 
 def _load(estate: Estate, *, fault_tolerant: bool, **policy: bool) -> LoadResult:
@@ -345,52 +339,6 @@ def _runner_mode(estate: Estate, *, item_name: str, object_name: str) -> None:
     )
 
 
-def _status(estate: Estate) -> dict | None:
-    """This object's row in ``_.LoadStatus``, as the catalogue holds it."""
-
-    rows = estate.executor.query(
-        "select [Result] as result, [Duration milliseconds] as duration "
-        "from [_].[LoadStatus] " + _identity_predicate(estate)
-    )
-    return dict(rows[0]) if rows else None
-
-
-def _statistics(estate: Estate) -> list:
-    """This object's statistics, oldest first.
-
-    ``_.LoadStatistic`` is appended, so a sequence that loads more than once
-    leaves more than one row and the order is what says which load is which.
-    """
-
-    rows = estate.executor.query(
-        "select [Rows read] as [read], [Rows inserted] as inserted, "
-        "[Rows updated] as updated, [Rows deleted] as deleted, "
-        "[Rows rejected] as rejected, "
-        "[Is reload] as reload, [Is static skip] as skip "
-        "from [_].[LoadStatistic] " + _identity_predicate(estate) + " "
-        "order by [Started datetime]"
-    )
-    return [dict(row) for row in rows]
-
-
-def _log(estate: Estate) -> list:
-    """This object's evidence rows.
-
-    Scoped by the object alone: ``_.Log`` records one crossing to one place, so
-    it carries the physical target rather than the logical item.
-    """
-
-    rows = estate.executor.query(
-        "select [Task type] as task, [Result] as result, [Target name] as target "
-        ", [Message] as message "
-        "from [_].[Log] "
-        f"where [Schema name] = N'{SCHEMA}' "
-        f"and [Object name] = N'{estate.object_name}' "
-        "order by [Started datetime]"
-    )
-    return [dict(row) for row in rows]
-
-
 def _identity_predicate(estate: Estate) -> str:
     return (
         f"where [Item type] = N'{ITEM.item_type}' "
@@ -400,21 +348,107 @@ def _identity_predicate(estate: Estate) -> str:
     )
 
 
-def _contents(estate: Estate):
-    rows = estate.executor.query(
-        f"select [Customer id], [Customer name] from [{SCHEMA}].[{estate.object_name}] "
-        "order by [Customer id];"
+#: What a sequence reads about the estate, each as its query and how its rows
+#: are shaped. ``statistics`` and ``log`` are appended, so they are oldest first
+#: and the order says which load is which. ``log`` is scoped by the object
+#: alone, because it records the physical target rather than the logical item.
+_READS = {
+    "bookmark": (
+        lambda estate: (
+            "select [Bookmark datetime] as at from [_].[Bookmark] "
+            + _identity_predicate(estate)
+        ),
+        lambda rows: rows[0]["at"] if rows else None,
+    ),
+    "status": (
+        lambda estate: (
+            "select [Result] as result, [Duration milliseconds] as duration "
+            "from [_].[LoadStatus] " + _identity_predicate(estate)
+        ),
+        lambda rows: rows[0] if rows else None,
+    ),
+    "statistics": (
+        lambda estate: (
+            "select [Rows read] as [read], [Rows inserted] as inserted, "
+            "[Rows updated] as updated, [Rows deleted] as deleted, "
+            "[Rows rejected] as rejected, "
+            "[Is reload] as reload, [Is static skip] as skip "
+            "from [_].[LoadStatistic] "
+            + _identity_predicate(estate)
+            + " order by [Started datetime]"
+        ),
+        lambda rows: rows,
+    ),
+    "log": (
+        lambda estate: (
+            "select [Task type] as task, [Result] as result, "
+            "[Target name] as target, [Message] as message from [_].[Log] "
+            f"where [Schema name] = N'{SCHEMA}' "
+            f"and [Object name] = N'{estate.object_name}' "
+            "order by [Started datetime]"
+        ),
+        lambda rows: rows,
+    ),
+    "contents": (
+        lambda estate: (
+            "select [Customer id], [Customer name] "
+            f"from [{SCHEMA}].[{estate.object_name}] order by [Customer id]"
+        ),
+        lambda rows: [(row["Customer id"], row["Customer name"]) for row in rows],
+    ),
+    "leftovers": (
+        lambda estate: (
+            "select count(*) as n from sys.tables "
+            f"where schema_id = schema_id(N'{SCHEMA}') "
+            f"and name like '{estate.object_name}[_]%'"
+        ),
+        lambda rows: rows[0]["n"],
+    ),
+}
+
+
+def _read(estate: Estate, *names: str, **queries: str) -> dict:
+    """Everything asked about one moment, in one round trip.
+
+    ``names`` are entries of ``_READS``; ``queries`` are ad hoc selects whose rows
+    come back as dictionaries.
+    """
+
+    asked = [(name, *_READS[name]) for name in names]
+    asked += [
+        (name, lambda _estate, sql=sql: sql, list) for name, sql in queries.items()
+    ]
+    sets = estate.executor.query_result_sets(
+        ";\n".join(query(estate) for _name, query, _shape in asked) + ";"
     )
-    return [(row["Customer id"], row["Customer name"]) for row in rows]
+    return {
+        name: shape([dict(row) for row in rows])
+        for (name, _query, shape), rows in zip(asked, sets, strict=True)
+    }
+
+
+def _bookmark(estate: Estate):
+    return _read(estate, "bookmark")["bookmark"]
+
+
+def _status(estate: Estate) -> dict | None:
+    return _read(estate, "status")["status"]
+
+
+def _statistics(estate: Estate) -> list:
+    return _read(estate, "statistics")["statistics"]
+
+
+def _log(estate: Estate) -> list:
+    return _read(estate, "log")["log"]
+
+
+def _contents(estate: Estate):
+    return _read(estate, "contents")["contents"]
 
 
 def _leftovers(estate: Estate) -> int:
-    rows = estate.executor.query(
-        f"select count(*) as n from sys.tables "
-        f"where schema_id = schema_id(N'{SCHEMA}') "
-        f"and name like '{estate.object_name}[_]%';"
-    )
-    return rows[0]["n"]
+    return _read(estate, "leftovers")["leftovers"]
 
 
 @dataclass(frozen=True)
@@ -443,39 +477,49 @@ def _ordinary(estate):
     three loads instead of five, and on a Warehouse that is a minute.
     """
 
-    _reset(estate)
-
-    _source_rows(estate, CLEAN)
+    _reset(estate, CLEAN)
     seeded = _load(estate, fault_tolerant=False)
-    identities = estate.executor.query(
-        f"select count(*) as n, count(distinct [Customer key]) as distinct_keys "
-        f"from [{SCHEMA}].[{estate.object_name}];"
-    )[0]
-    procedures = estate.executor.query(
-        f"select name from sys.procedures where name = N'Load {SCHEMA}.{OBJECT}';"
+    seen = _read(
+        estate,
+        "contents",
+        "leftovers",
+        identities=(
+            "select count(*) as n, count(distinct [Customer key]) as distinct_keys "
+            f"from [{SCHEMA}].[{estate.object_name}]"
+        ),
+        procedures=(
+            f"select name from sys.procedures where name = N'Load {SCHEMA}.{OBJECT}'"
+        ),
     )
+    (identities,) = seen["identities"]
     first = Ran(
         result=seeded,
-        contents=_contents(estate),
+        contents=seen["contents"],
         extra={
             "rows": identities["n"],
             "distinct_keys": identities["distinct_keys"],
-            "leftovers": _leftovers(estate),
-            "procedures": [str(row["name"]) for row in procedures],
+            "leftovers": seen["leftovers"],
+            "procedures": [str(row["name"]) for row in seen["procedures"]],
         },
     )
 
     _source_rows(estate, CHANGED)
     updated = _load(estate, fault_tolerant=False)
-    audit = estate.executor.query(
-        f"select [Customer id], case when [Row insert datetime] = "
-        f"[Row update datetime] then 1 else 0 end as untouched "
-        f"from [{SCHEMA}].[{estate.object_name}] order by [Customer id];"
+    seen = _read(
+        estate,
+        "contents",
+        audit=(
+            "select [Customer id], case when [Row insert datetime] = "
+            "[Row update datetime] then 1 else 0 end as untouched "
+            f"from [{SCHEMA}].[{estate.object_name}] order by [Customer id]"
+        ),
     )
     second = Ran(
         result=updated,
-        contents=_contents(estate),
-        extra={"audit": [(row["Customer id"], row["untouched"]) for row in audit]},
+        contents=seen["contents"],
+        extra={
+            "audit": [(row["Customer id"], row["untouched"]) for row in seen["audit"]]
+        },
     )
 
     _source_rows(estate, SHRUNK)
@@ -514,8 +558,7 @@ def test_the_ordinary_load_lifecycle(estate):
 def _refused(estate):
     """A clean load, then an intolerant one over a source that rejects."""
 
-    _reset(estate)
-    _source_rows(estate, CLEAN)
+    _reset(estate, CLEAN)
     _load(estate, fault_tolerant=False)
 
     _source_rows(estate, REJECTABLE)
@@ -540,20 +583,23 @@ def test_an_intolerant_run_with_rejects_raises_and_leaves_the_target_untouched(e
 def _tolerated(estate):
     """One tolerant load over a rejecting source, and the evidence it kept."""
 
-    _reset(estate)
-    _source_rows(estate, REJECTABLE)
+    _reset(estate, REJECTABLE)
     result = _load(estate, fault_tolerant=True)
 
     # Read here because the reject table is this run's evidence, and the next
     # sequence's `_reset` takes it away.
-    reasons = estate.executor.query(
-        f"select distinct [{REJECTION_REASON}] from "
-        f"[{SCHEMA}].[{estate.object_name}_Reject];"
+    seen = _read(
+        estate,
+        "contents",
+        reasons=(
+            f"select distinct [{REJECTION_REASON}] from "
+            f"[{SCHEMA}].[{estate.object_name}_Reject]"
+        ),
     )
     return Ran(
         result=result,
-        contents=_contents(estate),
-        extra={"reasons": {str(row[REJECTION_REASON]) for row in reasons}},
+        contents=seen["contents"],
+        extra={"reasons": {str(row[REJECTION_REASON]) for row in seen["reasons"]}},
     )
 
 
@@ -588,27 +634,19 @@ def _static_run(static_estate):
     primitive alone, a Static object would seed itself on every call.
     """
 
-    _reset(static_estate)
-    _source_rows(static_estate, CLEAN)
+    _reset(static_estate, CLEAN)
     _standalone(static_estate)
-    seeded = {
-        "contents": _contents(static_estate),
-        "statistics": _statistics(static_estate),
-        "bookmark": _bookmark(static_estate),
-    }
+    seeded = _read(static_estate, "contents", "statistics", "bookmark")
 
     _source_rows(static_estate, [("c9", "Different")])
     _standalone(static_estate)
+    seen = _read(
+        static_estate, "contents", "status", "statistics", "leftovers", "bookmark"
+    )
     return Ran(
         result=None,
-        contents=_contents(static_estate),
-        extra={
-            "seeded": seeded,
-            "status": _status(static_estate),
-            "statistics": _statistics(static_estate),
-            "leftovers": _leftovers(static_estate),
-            "bookmark": _bookmark(static_estate),
-        },
+        contents=seen.pop("contents"),
+        extra={"seeded": seeded, **seen},
     )
 
 
@@ -620,16 +658,16 @@ def test_the_objects_own_procedure_records_nothing(estate):
     advances the bookmark to.
     """
 
-    _reset(estate)
-    _source_rows(estate, CLEAN)
+    _reset(estate, CLEAN)
 
     result = _load(estate, fault_tolerant=False)
+    seen = _read(estate, "bookmark", "status", "log")
 
     assert result.succeeded is True
     assert result.bookmark_datetime is not None
-    assert _bookmark(estate) is None
-    assert _status(estate) is None
-    assert _log(estate) == []
+    assert seen["bookmark"] is None
+    assert seen["status"] is None
+    assert seen["log"] == []
 
 
 @weaver_test(remote=True, resources={"tds"})
@@ -642,20 +680,20 @@ def test_the_entry_point_records_a_clean_load_through_the_views(estate):
     INSERT there and accepts a MERGE's, which is why every write is one.
     """
 
-    _reset(estate)
-    _source_rows(estate, CLEAN)
+    _reset(estate, CLEAN)
 
     _standalone(estate)
+    seen = _read(estate, "bookmark", "status", "log", "statistics")
 
-    assert _bookmark(estate) is not None
-    assert _status(estate)["result"] == "Succeeded"
-    (logged,) = _log(estate)
+    assert seen["bookmark"] is not None
+    assert seen["status"]["result"] == "Succeeded"
+    (logged,) = seen["log"]
     assert logged["task"] == "load"
     assert logged["result"] == "Succeeded"
     # The Warehouse the procedure ran in, taken from the connection rather than
     # baked into the generated statement.
     assert logged["target"]
-    (statistic,) = _statistics(estate)
+    (statistic,) = seen["statistics"]
     assert statistic["read"] == len(CLEAN)
     assert statistic["reload"] is False
     assert statistic["skip"] is False
@@ -671,8 +709,7 @@ def test_a_supplied_item_name_records_against_that_item(estate):
 
     from sql_support import PROCEDURE_ITEM
 
-    _reset(estate)
-    _source_rows(estate, CLEAN)
+    _reset(estate, CLEAN)
 
     _runner_mode(
         estate,
@@ -704,37 +741,37 @@ def test_an_unknown_object_is_refused_before_anything_is_recorded(estate):
 def test_a_second_clean_load_moves_the_bookmark_on(estate):
     """The row is updated in place, which is the half an insert cannot prove."""
 
-    _reset(estate)
-    _source_rows(estate, CLEAN)
+    _reset(estate, CLEAN)
     _standalone(estate)
     first = _bookmark(estate)
 
     _source_rows(estate, CHANGED)
     _standalone(estate)
-    second = _bookmark(estate)
+    seen = _read(estate, "bookmark", "status", "statistics")
+    second = seen["bookmark"]
 
     assert first is not None and second is not None
     assert second > first
     # And the status is one row per object, updated rather than accumulated,
     # while the statistics accumulate.
-    assert _status(estate)["result"] == "Succeeded"
-    assert len(_statistics(estate)) == 2
+    assert seen["status"]["result"] == "Succeeded"
+    assert len(seen["statistics"]) == 2
 
 
 @weaver_test(remote=True, resources={"tds"})
 def test_a_load_that_rejected_rows_is_rejected_and_keeps_its_bookmark(estate):
     """It has not read its window, whether or not it was told to tolerate them."""
 
-    _reset(estate)
-    _source_rows(estate, CLEAN)
+    _reset(estate, CLEAN)
     _standalone(estate)
     clean = _bookmark(estate)
 
     _source_rows(estate, REJECTABLE)
     _standalone(estate, fault_tolerant=True)
+    seen = _read(estate, "bookmark", "status")
 
-    assert _bookmark(estate) == clean
-    assert _status(estate)["result"] == "Rejected"
+    assert seen["bookmark"] == clean
+    assert seen["status"]["result"] == "Rejected"
 
 
 @weaver_test(remote=True, resources={"tds"})
@@ -748,18 +785,18 @@ def test_a_refusal_is_recorded_and_then_raised_to_the_caller(estate):
 
     from weaver.sql.errors import SqlError
 
-    _reset(estate)
-    _source_rows(estate, REJECTABLE)
+    _reset(estate, REJECTABLE)
 
     with pytest.raises((SqlError, Exception)) as raised:
         _standalone(estate, fault_tolerant=False)
+    seen = _read(estate, "status", "log", "bookmark")
 
     assert "rejected" in str(raised.value).casefold()
     # Weaver's own refusal ran under Weaver's control and produced an
     # unacceptable result, so it is Failed rather than Error.
-    assert _status(estate)["result"] == "Failed"
-    assert _log(estate)[0]["result"] == "Failed"
-    assert _bookmark(estate) is None
+    assert seen["status"]["result"] == "Failed"
+    assert seen["log"][0]["result"] == "Failed"
+    assert seen["bookmark"] is None
 
 
 @weaver_test(remote=True, resources={"tds"})
@@ -774,11 +811,9 @@ def test_a_refusal_through_the_entry_point_records_what_it_counted(estate):
 
     from weaver.sql.errors import SqlError
 
-    _reset(estate)
-    _source_rows(estate, CLEAN)
+    _reset(estate, CLEAN)
     _standalone(estate)
-    loaded = _contents(estate)
-    clean = _bookmark(estate)
+    before = _read(estate, "contents", "bookmark")
 
     _source_rows(estate, REJECTABLE)
     # The same refusal as the orchestrated path settles, so what the entry
@@ -787,11 +822,12 @@ def test_a_refusal_through_the_entry_point_records_what_it_counted(estate):
 
     with pytest.raises((SqlError, Exception)) as raised:
         _standalone(estate, fault_tolerant=False)
+    seen = _read(estate, "statistics", "log", "status", "contents", "bookmark")
 
-    statistic = _statistics(estate)[-1]
-    logged = _log(estate)[-1]
+    statistic = seen["statistics"][-1]
+    logged = seen["log"][-1]
     assert "rejected" in str(raised.value).casefold()
-    assert _status(estate)["result"] == "Failed"
+    assert seen["status"]["result"] == "Failed"
     assert logged["result"] == "Failed"
     assert "rejected" in str(logged["message"]).casefold()
     # What the gate had already counted, rather than the zeroes a lost output
@@ -807,16 +843,15 @@ def test_a_refusal_through_the_entry_point_records_what_it_counted(estate):
         0,
     )
     # Refused before writing, and a refusal reads no window it can record.
-    assert _contents(estate) == loaded
-    assert _bookmark(estate) == clean
+    assert seen["contents"] == before["contents"]
+    assert seen["bookmark"] == before["bookmark"]
 
 
 @weaver_test(remote=True, resources={"tds"})
 def test_a_tolerated_rejection_is_an_answer_rather_than_a_failure(estate):
     """It returned rather than threw, so the call returns too."""
 
-    _reset(estate)
-    _source_rows(estate, REJECTABLE)
+    _reset(estate, REJECTABLE)
 
     _standalone(estate, fault_tolerant=True)
 
@@ -975,21 +1010,22 @@ def _drop_wide(estate: WideEstate) -> None:
     estate.executor.execute_script("\n".join(statements))
 
 
-def _reset_wide(estate: WideEstate) -> None:
+def _reset_wide(estate: WideEstate, rows=()) -> None:
+    """Empty the target and its evidence, and seed the source in the same batch."""
+
     name = estate.object_name
     statements = [
         f"delete from [{SCHEMA}].[{name}];",
-        f"delete from [{SCHEMA}].[{estate.raw}];",
         forget_runtime_state(SCHEMA, name),
     ]
-    if estate.retires:
-        statements.append(f"delete from [{SCHEMA}].[{estate.retire}];")
     statements += [
         f"if object_id(N'{SCHEMA}.{name}{suffix}', N'U') is not null "
         f"drop table [{SCHEMA}].[{name}{suffix}];"
         for suffix in ("_Reject", "_Upsert", "_Delete", "_Staging")
     ]
-    estate.executor.execute_script("\n".join(statements))
+    estate.executor.execute_script(
+        "\n".join(statements) + "\n" + _wide_rows_script(estate, rows)
+    )
 
 
 def _literal(value) -> str:
@@ -1001,6 +1037,12 @@ def _literal(value) -> str:
 
 
 def _wide_rows(estate: WideEstate, rows, *, retire=()) -> None:
+    estate.executor.execute_script(_wide_rows_script(estate, rows, retire=retire))
+
+
+def _wide_rows_script(estate: WideEstate, rows, *, retire=()) -> str:
+    """Replace the source, and the keys to retire, with these."""
+
     columns = ", ".join(f"[{column}]" for column in WIDE_COLUMNS)
     statements = [f"delete from [{SCHEMA}].[{estate.raw}];"]
     if estate.retires:
@@ -1017,41 +1059,57 @@ def _wide_rows(estate: WideEstate, rows, *, retire=()) -> None:
         statements.append(
             f"insert into [{SCHEMA}].[{estate.retire}] ([Customer id]) values {keys};"
         )
-    estate.executor.execute_script("\n".join(statements))
-
-
-def _wide_contents(estate: WideEstate):
-    rows = estate.executor.query(
-        f"select [Customer id], [Customer name], [Email], [Region id], "
-        f"[External ref] from [{SCHEMA}].[{estate.object_name}] "
-        "order by [Customer id];"
-    )
-    return [tuple(row[column] for column in WIDE_COLUMNS) for row in rows]
+    return "\n".join(statements)
 
 
 def _by_key(rows) -> dict:
     return {row[0]: row for row in rows}
 
 
-def _signatures(estate: WideEstate) -> dict:
-    rows = estate.executor.query(
-        f"select [Customer id], [Row signature] from "
-        f"[{SCHEMA}].[{estate.object_name}] order by [Customer id];"
-    )
-    return {str(row["Customer id"]): bytes(row["Row signature"]) for row in rows}
+_READS.update(
+    wide_contents=(
+        lambda estate: (
+            "select [Customer id], [Customer name], [Email], [Region id], "
+            f"[External ref] from [{SCHEMA}].[{estate.object_name}] order by [Customer id]"
+        ),
+        lambda rows: [tuple(row[column] for column in WIDE_COLUMNS) for row in rows],
+    ),
+    signatures=(
+        lambda estate: (
+            "select [Customer id], [Row signature] from "
+            f"[{SCHEMA}].[{estate.object_name}] order by [Customer id]"
+        ),
+        lambda rows: {
+            str(row["Customer id"]): bytes(row["Row signature"]) for row in rows
+        },
+    ),
+    reject_reasons=(
+        lambda estate: (
+            f"select [Customer id], [{REJECTION_REASON}] from "
+            f"[{SCHEMA}].[{estate.object_name}_Reject]"
+        ),
+        lambda rows: {
+            (None if row["Customer id"] is None else str(row["Customer id"])): str(
+                row[REJECTION_REASON]
+            )
+            for row in rows
+        },
+    ),
+    stamps=(
+        lambda estate: (
+            "select [Customer id], [Row insert datetime] as inserted, "
+            f"[Row update datetime] as updated from [{SCHEMA}].[{estate.object_name}] "
+            "order by [Customer id]"
+        ),
+        lambda rows: {
+            str(row["Customer id"]): (row["inserted"], row["updated"]) for row in rows
+        },
+    ),
+)
 
 
-def _reject_reasons(estate: WideEstate) -> dict:
-    rows = estate.executor.query(
-        f"select [Customer id], [{REJECTION_REASON}] from "
-        f"[{SCHEMA}].[{estate.object_name}_Reject];"
-    )
-    return {
-        (None if row["Customer id"] is None else str(row["Customer id"])): str(
-            row[REJECTION_REASON]
-        )
-        for row in rows
-    }
+def _wide_contents(estate: WideEstate):
+    return _read(estate, "wide_contents")["wide_contents"]
 
 
 @pytest.fixture(scope="module")
@@ -1116,17 +1174,13 @@ def _constrained_run(estate):
     previous load had already produced.
     """
 
-    _reset_wide(estate)
-
-    _wide_rows(estate, REFUSABLE)
+    _reset_wide(estate, REFUSABLE)
     refused = _load(estate, fault_tolerant=True)
+    seen = _read(estate, "wide_contents", "reject_reasons", "signatures")
     first = Ran(
         result=refused,
-        contents=_wide_contents(estate),
-        extra={
-            "reasons": _reject_reasons(estate),
-            "signatures": _signatures(estate),
-        },
+        contents=seen["wide_contents"],
+        extra={"reasons": seen["reject_reasons"], "signatures": seen["signatures"]},
     )
 
     # The accepted rows, restaged exactly as they were loaded. An unchanged source
@@ -1134,10 +1188,11 @@ def _constrained_run(estate):
     accepted = first.contents
     _wide_rows(estate, accepted)
     unchanged = _load(estate, fault_tolerant=False)
+    seen = _read(estate, "wide_contents", "signatures", "leftovers")
     second = Ran(
         result=unchanged,
-        contents=_wide_contents(estate),
-        extra={"signatures": _signatures(estate), "leftovers": _leftovers(estate)},
+        contents=seen["wide_contents"],
+        extra={"signatures": seen["signatures"], "leftovers": seen["leftovers"]},
     )
 
     changed = [
@@ -1145,10 +1200,11 @@ def _constrained_run(estate):
     ]
     _wide_rows(estate, changed)
     updated = _load(estate, fault_tolerant=False)
+    seen = _read(estate, "wide_contents", "signatures")
     third = Ran(
         result=updated,
-        contents=_wide_contents(estate),
-        extra={"signatures": _signatures(estate)},
+        contents=seen["wide_contents"],
+        extra={"signatures": seen["signatures"]},
     )
 
     return SimpleNamespace(refused=first, unchanged=second, updated=third)
@@ -1230,8 +1286,7 @@ SEED = [
 
 
 def _seed_merge(estate):
-    _reset_wide(estate)
-    _wide_rows(estate, SEED)
+    _reset_wide(estate, SEED)
     return _load(estate, fault_tolerant=False)
 
 
@@ -1278,14 +1333,7 @@ def test_a_key_the_source_still_produces_is_not_retired(merge_estate):
     """
 
     _seed_merge(merge_estate)
-    before = merge_estate.executor.query(
-        f"select [Customer id], [Row insert datetime] as inserted, "
-        f"[Row update datetime] as updated from [{SCHEMA}].[{MERGE_OBJECT}] "
-        "order by [Customer id];"
-    )
-    stamps = {
-        str(row["Customer id"]): (row["inserted"], row["updated"]) for row in before
-    }
+    stamps = _read(merge_estate, "stamps")["stamps"]
 
     _wide_rows(
         merge_estate,
@@ -1296,13 +1344,9 @@ def test_a_key_the_source_still_produces_is_not_retired(merge_estate):
         retire=["c2", "c3", "c4"],  # c4 is claimed and not staged, so it goes
     )
     result = _load(merge_estate, fault_tolerant=False)
-    contents = _by_key(_wide_contents(merge_estate))
-    after = merge_estate.executor.query(
-        f"select [Customer id], [Row insert datetime] as inserted, "
-        f"[Row update datetime] as updated from [{SCHEMA}].[{MERGE_OBJECT}] "
-        "order by [Customer id];"
-    )
-    now = {str(row["Customer id"]): (row["inserted"], row["updated"]) for row in after}
+    seen = _read(merge_estate, "wide_contents", "stamps")
+    contents = _by_key(seen["wide_contents"])
+    now = seen["stamps"]
 
     assert result.succeeded is True
     assert (result.rows_deleted, result.rows_inserted, result.rows_updated) == (1, 0, 1)
@@ -1527,50 +1571,44 @@ def _reload_run(estate):
     about at the moment it happened.
     """
 
-    _reset(estate)
-
-    _source_rows(estate, CLEAN)
+    _reset(estate, CLEAN)
     _standalone(estate)
-    seeded = {"contents": _contents(estate), "bookmark": _bookmark(estate)}
+    seeded = _read(estate, "contents", "bookmark")
 
     # An ordinary incremental run: the body sees the two rows already there and
     # produces only the third.
     _source_rows(estate, GROWN)
     _standalone(estate)
-    grown = {
-        "contents": _contents(estate),
-        "statistics": _statistics(estate)[-1],
-        "bookmark": _bookmark(estate),
-    }
+    grown = _latest(_read(estate, "contents", "statistics", "bookmark"))
 
     # The same source, reloaded. An emptied target makes the body produce all
     # three; a target still holding them would make it produce none.
     _reload(estate)
-    reloaded = {
-        "contents": _contents(estate),
-        "statistics": _statistics(estate)[-1],
-        "status": _status(estate),
-        "bookmark": _bookmark(estate),
-    }
+    reloaded = _latest(_read(estate, "contents", "statistics", "status", "bookmark"))
 
     # A reload that cannot settle. The row with no key is refused, and the run
     # is intolerant, so the procedure raises after the target was emptied.
     _source_rows(estate, GROWN + [(None, "NoKey")])
     with pytest.raises(Exception) as raised:
         _reload(estate)
+    seen = _latest(_read(estate, "contents", "status", "statistics", "bookmark"))
     return Ran(
         result=None,
-        contents=_contents(estate),
+        contents=seen.pop("contents"),
         extra={
             "seeded": seeded,
             "grown": grown,
             "reloaded": reloaded,
             "refusal": str(raised.value),
-            "status": _status(estate),
-            "statistics": _statistics(estate)[-1],
-            "bookmark": _bookmark(estate),
+            **seen,
         },
     )
+
+
+def _latest(seen: dict) -> dict:
+    """The same reading, with only the newest statistic."""
+
+    return {**seen, "statistics": seen["statistics"][-1]}
 
 
 @weaver_test(remote=True, resources={"tds"})
@@ -1629,11 +1667,9 @@ def _static_reload_run(estate):
     ordinary load reports a successful load of nothing over an empty table.
     """
 
-    _reset(estate)
-
-    _source_rows(estate, CLEAN)
+    _reset(estate, CLEAN)
     _standalone(estate)
-    seeded = {"contents": _contents(estate), "bookmark": _bookmark(estate)}
+    seeded = _read(estate, "contents", "bookmark")
 
     # A reload that cannot settle: the target is emptied, the blank key is
     # refused, and the intolerant run raises.
@@ -1641,24 +1677,18 @@ def _static_reload_run(estate):
     with pytest.raises(Exception) as raised:
         _reload(estate)
     failed = {
-        "contents": _contents(estate),
-        "bookmark": _bookmark(estate),
-        "status": _status(estate),
+        **_read(estate, "contents", "bookmark", "status"),
         "refusal": str(raised.value),
     }
 
     # The ordinary load that follows. Nothing here says reload.
     _source_rows(estate, CLEAN)
     _standalone(estate)
+    seen = _latest(_read(estate, "contents", "statistics", "bookmark"))
     return Ran(
         result=None,
-        contents=_contents(estate),
-        extra={
-            "seeded": seeded,
-            "failed": failed,
-            "statistics": _statistics(estate)[-1],
-            "bookmark": _bookmark(estate),
-        },
+        contents=seen.pop("contents"),
+        extra={"seeded": seeded, "failed": failed, **seen},
     )
 
 
@@ -1702,8 +1732,7 @@ def test_a_thrown_refusal_returns_no_output_values_at_all(estate):
     counts from a thrown call is therefore not possible here.
     """
 
-    _reset(estate)
-    _source_rows(estate, REJECTABLE)
+    _reset(estate, REJECTABLE)
 
     # The final result set, because the procedure's own statements come first.
     captured = estate.executor.query_result_sets(
@@ -1736,8 +1765,7 @@ def test_a_returned_refusal_carries_the_counts_it_settled(estate):
     rejects, and it still says how many rows it read and set aside.
     """
 
-    _reset(estate)
-    _source_rows(estate, CLEAN)
+    _reset(estate, CLEAN)
     _load(estate, fault_tolerant=False, return_refusal=True)
     loaded = _contents(estate)
 
