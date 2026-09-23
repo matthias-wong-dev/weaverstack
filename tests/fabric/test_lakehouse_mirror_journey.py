@@ -53,24 +53,27 @@ RUNTIME_ROOT = "/".join(RUNTIME_TREE)
 
 @dataclass(frozen=True)
 class Estate:
-    """What the estate holds at one moment, read after one transition."""
+    """What the estate holds at one moment, read after one transition.
+
+    Each transition reads only what its claims ask of it; the rest stay None.
+    """
 
     #: ``path/name`` to source path, for every shortcut the mirror holds.
-    shortcuts: dict[str, str]
+    shortcuts: dict[str, str] | None = None
     #: Relation names Spark reports in the item's own schema.
-    relations: frozenset[str]
+    relations: frozenset[str] | None = None
     #: ``Schema.Object`` to physical type, from ``_.Mirror``.
-    borrowed: dict[str, str]
+    borrowed: dict[str, str] | None = None
     #: Item name to target name, from ``_.Installation``.
-    installed: dict[str, str]
+    installed: dict[str, str] | None = None
     #: Whether each data node has a load to dispatch, from the installed graph.
-    loadable: dict[str, bool]
+    loadable: dict[str, bool] | None = None
     #: Rows the source still holds, which no build in this journey may touch.
-    source_rows: int
+    source_rows: int | None = None
     #: Deployed file to digest under ``Files/_/Load``, keyed by ``source`` and
     #: ``target``. A digest of each side at one moment is what separates a local
     #: copy from a shortcut: writes through a shortcut move both.
-    runtime: dict[str, dict[str, str]]
+    runtime: dict[str, dict[str, str]] | None = None
 
 
 # --- the journey --------------------------------------------------------------
@@ -127,7 +130,7 @@ def journey(
     run.step(
         "mirror again",
         lambda: _mirror(run, into_mirror, fabric_catalogue),
-        observe=lambda: _observe(run),
+        observe=lambda: _observe(run, {"shortcuts", "borrowed", "relations"}),
     )
     run.health_config = _forked_config(run, tmp_path_factory.mktemp("lh-health"))
     run.step(
@@ -167,7 +170,7 @@ def journey(
                 catalogue=f"Warehouse/{run.catalogue_name}",
             )
         ),
-        observe=lambda: _observe(run),
+        observe=lambda: _observe(run, {"shortcuts", "borrowed", "source_rows"}),
     )
     run.step("change one declaration", lambda: _change(estate))
     run.step(
@@ -265,57 +268,69 @@ def _runtime_tree(run, name: str) -> dict[str, str]:
     }
 
 
-def _observe(run) -> Estate:
-    """The estate as this transition left it."""
+#: Everything an observation can read.
+EVERYTHING = frozenset(
+    ("shortcuts", "relations", "borrowed", "installed", "loadable", "source_rows")
+    + ("runtime",)
+)
+
+
+def _observe(run, wanted=EVERYTHING) -> Estate:
+    """What this transition's claims read of the estate it left."""
 
     from weaver.catalogue.state import catalogue_for
 
     resolver = run.session.resolver(run.workspace)
-    destination = resolver.spark_destination(ItemRef(run.target_name))
-    source = resolver.spark_destination(ItemRef(run.source_name))
-    with catalogue_for(run.session, run.forked) as catalogue:
-        dag = catalogue.dag()
-    return Estate(
-        shortcuts={
+    seen: dict = {}
+    if "shortcuts" in wanted:
+        seen["shortcuts"] = {
             each.qualified: each.target_path or ""
             for each in resolver.onelake_shortcuts(ItemRef(run.target_name))
-        },
-        relations=frozenset(
+        }
+    if "relations" in wanted:
+        destination = resolver.spark_destination(ItemRef(run.target_name))
+        seen["relations"] = frozenset(
             str(row["tableName"])
             for row in _spark(
                 run, f"SHOW TABLES IN {destination.qualified_schema('DWG')}"
             )
-        ),
-        borrowed={
+        )
+    if {"borrowed", "installed"} & wanted:
+        borrowed, installed = run.catalogue_sql.query_result_sets(
+            "select [Schema name], [Object name], [Physical type] from "
+            f"[{CATALOGUE_SCHEMA}].[{MIRROR_TABLE.name}] "
+            "where [Item type] = N'Lakehouse';\n"
+            "select [Item name], [Target name] from "
+            f"[{CATALOGUE_SCHEMA}].[Installation] where [Item type] = N'Lakehouse';"
+        )
+        seen["borrowed"] = {
             f"{row['Schema name']}.{row['Object name']}": str(row["Physical type"])
-            for row in run.catalogue_sql.query(
-                "select [Schema name], [Object name], [Physical type] from "
-                f"[{CATALOGUE_SCHEMA}].[{MIRROR_TABLE.name}] "
-                "where [Item type] = N'Lakehouse'"
-            )
-        },
-        installed={
-            str(row["Item name"]): str(row["Target name"])
-            for row in run.catalogue_sql.query(
-                "select [Item name], [Target name] from "
-                f"[{CATALOGUE_SCHEMA}].[Installation] where [Item type] = N'Lakehouse'"
-            )
-        },
-        loadable={
+            for row in borrowed
+        }
+        seen["installed"] = {
+            str(row["Item name"]): str(row["Target name"]) for row in installed
+        }
+    if "loadable" in wanted:
+        with catalogue_for(run.session, run.forked) as catalogue:
+            dag = catalogue.dag()
+        seen["loadable"] = {
             node.load_name: node.can_load
             for node in dag.nodes
             if str(node.item) == ITEM and node.load_name
-        },
-        source_rows=int(
+        }
+    if "source_rows" in wanted:
+        source = resolver.spark_destination(ItemRef(run.source_name))
+        seen["source_rows"] = int(
             _spark(
                 run, f"SELECT count(*) as n FROM {source.qualify('DWG', 'Customer')}"
             )[0]["n"]
-        ),
-        runtime={
+        )
+    if "runtime" in wanted:
+        seen["runtime"] = {
             "source": _runtime_tree(run, run.source_name),
             "target": _runtime_tree(run, run.target_name),
-        },
-    )
+        }
+    return Estate(**seen)
 
 
 # --- what the mirror stood up -------------------------------------------------
