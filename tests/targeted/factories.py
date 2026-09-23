@@ -552,6 +552,30 @@ def installed_catalogue(
     )
 
 
+def built_catalogue(repository, bindings: ItemBindings) -> Catalogue:
+    """The catalogue a successful build of this estate leaves behind.
+
+    Composed from the two functions the build itself uses. ``materialised``
+    names every projected table, because reconciliation may only raise a claim
+    against a table that is there.
+    """
+
+    from weaver.build_bundle.catalogue_actions import desired_catalogue
+    from weaver.build_bundle.planner import certifiable_identities
+    from weaver.catalogue.tables import PROJECTED_TABLES
+
+    by_item = {binding.item: binding for binding in bindings.entries}
+    state = desired_catalogue(
+        repository,
+        certifiable_identities(repository, by_item),
+        {binding.item: binding.to_bound_target() for binding in bindings.entries},
+    )
+    return Catalogue(
+        rows=state.rows,
+        materialised=frozenset(table.name for table in PROJECTED_TABLES),
+    )
+
+
 # --- physical state ---------------------------------------------------------
 
 
@@ -1258,6 +1282,12 @@ def build_action(
         payload=payload,
         payload_sha256=payload_sha256,
     )
+
+
+def plan_actions(bundle) -> list:
+    """Every action in a bundle's plan, in plan order."""
+
+    return [action for _sequence, _batch, action in bundle.plan.actions()]
 
 
 # --- execution ----------------------------------------------------------------

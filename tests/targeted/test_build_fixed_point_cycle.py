@@ -31,6 +31,7 @@ from factories import (
     ITEM,
     WAREHOUSE_ITEM,
     FixtureInventory,
+    built_catalogue,
     full_estate,
     item_bindings,
     item_id,
@@ -42,11 +43,10 @@ from weaver.build_bundle import (
     WarehouseBinding,
     generate_item_build_bundle,
 )
-from weaver.build_bundle.catalogue_actions import desired_catalogue
 from weaver.build_bundle.planner import certifiable_identities
 from weaver.build_bundle.shortcuts import ResolvedShortcutSource
 from weaver.catalogue.state import Catalogue
-from weaver.catalogue.tables import PROJECTED_TABLES, STANDARD_SURFACE_TABLES
+from weaver.catalogue.tables import STANDARD_SURFACE_TABLES
 from weaver.locations import Location
 from weaver.spark import FabricSparkTarget
 from weaver.store import FilesystemStore
@@ -98,23 +98,7 @@ def installed_catalogue(repository) -> Catalogue:
     from what a build actually writes without the drift showing up here.
     """
 
-    bindings = _bindings()
-    by_item = {binding.item: binding for binding in bindings.entries}
-    target_by_item = {
-        binding.item: binding.to_bound_target() for binding in bindings.entries
-    }
-    state = desired_catalogue(
-        repository,
-        certifiable_identities(repository, by_item),
-        target_by_item,
-    )
-    # Every catalogue table physically exists once a build has run, the built-in
-    # item creates them all. Saying so matters: reconciliation may only raise a
-    # claim against a table that is there.
-    return Catalogue(
-        rows=state.rows,
-        materialised=frozenset(table.name for table in PROJECTED_TABLES),
-    )
+    return built_catalogue(repository, _bindings())
 
 
 #: Where each of the catalogue's runtime tables sits, as a build resolves them
@@ -326,7 +310,6 @@ def test_an_object_dropped_and_rebuilt_is_published_again(estate, tmp_path):
     """
 
     from weaver.build_bundle.catalogue_actions import collect_claims
-    from weaver.build_bundle.planner import certifiable_identities
     from weaver.catalogue.tables import REGISTRY
 
     state = installed_catalogue(estate)
@@ -410,7 +393,6 @@ def test_the_claim_view_only_ever_removes_rows(estate):
     """A narrowing, so the worst a mistake can do is publish something twice."""
 
     from weaver.build_bundle.catalogue_actions import collect_claims
-    from weaver.build_bundle.planner import certifiable_identities
     from weaver.catalogue.claims import without_claims
 
     state = installed_catalogue(estate)
