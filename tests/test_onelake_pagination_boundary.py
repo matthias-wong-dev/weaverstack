@@ -11,11 +11,12 @@ from support.weaver_test import weaver_test
 
 from weaver.fabric.onelake import OneLakeDfsClient
 from weaver.locations import Location
+from weaver.store import StoreNotFoundError
 
 
 class _Response:
-    def __init__(self, headers, paths):
-        self.status_code = 200
+    def __init__(self, headers, paths, *, status_code=200):
+        self.status_code = status_code
         self.headers = headers
         self._paths = paths
         self.content = b"{}"
@@ -24,11 +25,11 @@ class _Response:
         return {"paths": self._paths}
 
 
-def _store(monkeypatch, headers, paths):
+def _store(monkeypatch, headers, paths, *, status_code=200):
     store = OneLakeDfsClient(token="fake-token")
 
     def fake_request(method, url, **kwargs):
-        return _Response(headers, paths)
+        return _Response(headers, paths, status_code=status_code)
 
     monkeypatch.setattr(store, "_request", fake_request)
     return store
@@ -55,4 +56,12 @@ def test_a_continuation_token_fails_loudly(monkeypatch):
         paths=[{"name": "lh.Lakehouse/Files/Tables/a.csv", "contentLength": "10"}],
     )
     with pytest.raises(NotImplementedError, match="pagination is not implemented"):
+        store.list(Location("https://onelake.dfs.fabric.microsoft.com/ws/lh/Files"))
+
+
+@weaver_test()
+def test_a_missing_listing_is_identified_as_not_found(monkeypatch):
+    store = _store(monkeypatch, headers={}, paths=[], status_code=404)
+
+    with pytest.raises(StoreNotFoundError):
         store.list(Location("https://onelake.dfs.fabric.microsoft.com/ws/lh/Files"))

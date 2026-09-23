@@ -25,13 +25,18 @@ from weaver.build_bundle import (
     persist_bundle_archive,
     timestamped_archive_name,
 )
-from weaver.build_bundle.prune import TargetInventory, read_lakehouse_inventory
+from weaver.build_bundle.prune import (
+    TargetInventory,
+    _child_dirs,
+    read_lakehouse_inventory,
+)
+from weaver.build_bundle.targets import BoundTarget
 from weaver.catalogue.state import Catalogue
 from weaver.declaration import parse_item_repository
 from weaver.declaration.model import WeaverItemId
 from weaver.errors import BuildError
 from weaver.locations import Location
-from weaver.store import FilesystemStore
+from weaver.store import FilesystemStore, StoreError, StoreNotFoundError
 from weaver.targets import ItemRef
 
 
@@ -334,6 +339,154 @@ def test_inventory_does_not_claim_objects_presented_by_a_schema_shortcut(tmp_pat
 
     assert set(inventory.schemas) == {"Reference", "Source"}
     assert inventory.tables == ("Source.Customer",)
+
+
+@weaver_test()
+def test_inventory_does_not_recheck_directories_returned_by_a_parent_listing(tmp_path):
+    workspace = given_workspace(catalogue="Warehouse/Control")
+    resolver = given_resolver(
+        workspace=workspace,
+        lakehouses=("Weaver", "Raw_Dev"),
+        root=tmp_path,
+    )
+    inner = FilesystemStore()
+    tables = resolver.tables_root(ItemRef("Raw_Dev"))
+    files = resolver.files_root(ItemRef("Raw_Dev"))
+    table_schema = tables / "Source"
+    folder_schema = files / "Exports"
+    inner.make_directory(table_schema / "Customer")
+    inner.make_directory(folder_schema / "Daily")
+
+    class CountingInventoryStore(CountingStore):
+        def __init__(self):
+            super().__init__()
+            self.delegate = inner
+            self.exists_calls = []
+            self.directory_calls = []
+
+        def exists(self, location):
+            self.exists_calls.append(location)
+            return inner.exists(location)
+
+        def is_directory(self, location):
+            self.directory_calls.append(location)
+            return inner.is_directory(location)
+
+    store = CountingInventoryStore()
+    inventory = read_lakehouse_inventory(
+        _bindings().entries[0].to_bound_target(),
+        resolver=resolver,
+        store=store,
+    )
+
+    assert inventory.tables == ("Source.Customer",)
+    assert inventory.folders == ("Exports.Daily",)
+    assert table_schema not in store.exists_calls
+    assert table_schema not in store.directory_calls
+    assert folder_schema not in store.exists_calls
+    assert folder_schema not in store.directory_calls
+
+
+@weaver_test()
+def test_a_listed_directory_that_disappears_has_no_children():
+    class Disappeared(CountingStore):
+        def list(self, location, *, recursive=False):
+            raise StoreNotFoundError(f"missing: {location.value}")
+
+    assert (
+        _child_dirs(
+            Disappeared(),
+            Location("onelake://workspace/lakehouse/Tables/Source"),
+            known_directory=True,
+        )
+        == []
+    )
+
+
+@weaver_test()
+def test_a_listed_directory_propagates_other_storage_errors():
+    class Unavailable(CountingStore):
+        def list(self, location, *, recursive=False):
+            raise StoreError("authentication failed")
+
+    with pytest.raises(StoreError, match="authentication failed"):
+        _child_dirs(
+            Unavailable(),
+            Location("onelake://workspace/lakehouse/Tables/Source"),
+            known_directory=True,
+        )
+
+
+@weaver_test()
+def test_an_unknown_directory_keeps_its_existence_check():
+    root = Location("onelake://workspace/lakehouse/Tables/Source")
+
+    class Missing(CountingStore):
+        def __init__(self):
+            super().__init__()
+            self.exists_calls = []
+
+        def exists(self, location):
+            self.exists_calls.append(location)
+            return False
+
+        def is_directory(self, location) -> bool:
+            raise AssertionError("a missing location has no type to inspect")
+
+        def list(self, location, *, recursive=False) -> list:
+            raise AssertionError("a missing location must not be listed")
+
+    store = Missing()
+    assert _child_dirs(store, root) == []
+    assert store.exists_calls == [root]
+
+
+@weaver_test()
+def test_a_catalogue_recovered_schema_keeps_its_existence_check(tmp_path):
+    workspace = given_workspace(catalogue="Warehouse/Control")
+    resolver = given_resolver(
+        workspace=workspace,
+        lakehouses=("Weaver", "Control"),
+        root=tmp_path,
+    )
+    inner = FilesystemStore()
+    tables = resolver.tables_root(ItemRef("Control"))
+    files = resolver.files_root(ItemRef("Control"))
+    inner.make_directory(tables)
+    inner.make_directory(files)
+
+    class Catalogue:
+        def schema_exists(self, schema):
+            return schema == "_"
+
+        def views(self, schema):
+            return ()
+
+    class CountingInventoryStore(CountingStore):
+        def __init__(self):
+            super().__init__()
+            self.delegate = inner
+            self.exists_calls = []
+
+        def exists(self, location):
+            self.exists_calls.append(location)
+            return inner.exists(location)
+
+    store = CountingInventoryStore()
+    inventory = read_lakehouse_inventory(
+        BoundTarget(
+            id="control",
+            kind="lakehouse",
+            item_id="Control",
+            logical_item_name="_weaver",
+        ),
+        resolver=resolver,
+        store=store,
+        catalogue=Catalogue(),
+    )
+
+    assert inventory.schemas == ("_",)
+    assert tables / "_" in store.exists_calls
 
 
 @weaver_test()

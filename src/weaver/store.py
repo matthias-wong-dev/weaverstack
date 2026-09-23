@@ -21,6 +21,10 @@ class StoreError(WeaverError):
     pass
 
 
+class StoreNotFoundError(StoreError):
+    """A store operation confirmed that its location does not exist."""
+
+
 @dataclass(frozen=True)
 class Entry:
     """A listed item with metadata for comparison without reading it."""
@@ -81,7 +85,7 @@ class FilesystemStore:
     def list(self, location: Location, *, recursive: bool = False) -> list[Entry]:
         root = self._local(location)
         if not root.exists():
-            raise StoreError(f"Cannot list missing location {location.value}.")
+            raise StoreNotFoundError(f"Cannot list missing location {location.value}.")
         if not root.is_dir():
             raise StoreError(f"Cannot list file {location.value}.")
         paths = sorted(root.rglob("*") if recursive else root.glob("*"))

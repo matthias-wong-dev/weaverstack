@@ -27,7 +27,7 @@ from ..declaration.source import SourceDocument
 from ..errors import BuildError
 from ..etl import LOAD_ROOT, item_runtime_artefacts
 from ..resolution import TABLES_AREA
-from ..store import Store
+from ..store import Store, StoreNotFoundError
 from ..targets import ItemRef
 from ..workspaces import CLI_AREA
 from .changes import (
@@ -255,8 +255,8 @@ def read_lakehouse_inventory(
     reserved_schemas = set(_RESERVED_SCHEMAS)
     if control_item:
         reserved_schemas.discard(CATALOGUE_SCHEMA)
-    schemas = tuple(
-        entry.name
+    table_schema_entries = tuple(
+        entry
         for entry in _child_dirs(store, tables_root)
         if (
             entry.name.casefold() == CATALOGUE_SCHEMA.casefold()
@@ -264,6 +264,8 @@ def read_lakehouse_inventory(
             else entry.name.casefold() not in reserved_schemas
         )
     )
+    schemas = tuple(entry.name for entry in table_schema_entries)
+    listed_schemas = {entry.name.casefold() for entry in table_schema_entries}
     if (
         control_item
         and catalogue is not None
@@ -277,7 +279,11 @@ def read_lakehouse_inventory(
         f"{schema}.{entry.name}"
         for schema in schemas
         if schema.casefold() not in shortcut_schemas
-        for entry in _child_dirs(store, tables_root / schema)
+        for entry in _child_dirs(
+            store,
+            tables_root / schema,
+            known_directory=schema.casefold() in listed_schemas,
+        )
     )
     # The control item's Files area also holds working directories that are not
     # Folder objects. Inventory only its declared ``_`` area.
@@ -293,7 +299,7 @@ def read_lakehouse_inventory(
     folders = tuple(
         f"{entry.name}.{child.name}"
         for entry in folder_schema_entries
-        for child in _child_dirs(store, entry.location)
+        for child in _child_dirs(store, entry.location, known_directory=True)
     )
     views: tuple[str, ...] = ()
     if catalogue is not None:
@@ -831,10 +837,15 @@ def _prune_folder_action(target, resource: str) -> InstallAction:
     )
 
 
-def _child_dirs(store: Store, root) -> list:
-    if not store.exists(root) or not store.is_directory(root):
+def _child_dirs(store: Store, root, *, known_directory: bool = False) -> list:
+    if not known_directory and (not store.exists(root) or not store.is_directory(root)):
         return []
+    try:
+        entries = store.list(root)
+    except StoreNotFoundError:
+        if known_directory:
+            return []
+        raise
     return sorted(
-        (entry for entry in store.list(root) if entry.is_directory),
-        key=lambda e: e.name,
+        (entry for entry in entries if entry.is_directory), key=lambda e: e.name
     )

@@ -10,7 +10,7 @@ from urllib.parse import quote, urlencode
 
 from ..errors import CommandError
 from ..locations import Location
-from ..store import Entry, StoreError
+from ..store import Entry, StoreError, StoreNotFoundError
 from .auth import STORAGE_SCOPE, token_source
 from .client import ONELAKE_DFS, _response_message
 
@@ -170,7 +170,7 @@ class OneLakeDfsClient:
         )
         response = self._request("GET", url, expected=(200, 404))
         if response.status_code == 404:
-            raise StoreError(
+            raise StoreNotFoundError(
                 f"cannot list a location that does not exist: {location}",
                 executor="OneLake",
             )
