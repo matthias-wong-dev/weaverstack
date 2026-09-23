@@ -129,6 +129,7 @@ def test_a_rerun_converges(estate, tmp_path, rest_session):
     assert CREATED not in {outcome.status for outcome in second.resources}
 
 
+@pytest.mark.slow
 @weaver_test(remote=True, resources={"rest", "tds"})
 def test_a_generated_warehouse_project_builds_loads_and_tests(
     fabric_workspace,
