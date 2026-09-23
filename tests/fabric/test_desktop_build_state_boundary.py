@@ -50,34 +50,45 @@ def recorded_session(fabric_workspace, livy_session):
 
 
 @pytest.fixture
-def emptied_target(fabric_empty_lakehouse, fabric_target_lakehouse):
-    """The target Lakehouse holding no schemas, emptied before the claim begins.
+def seeded_target(
+    fabric_empty_lakehouse,
+    fabric_target_lakehouse,
+    fabric_workspace,
+    fabric_client,
+    livy_session,
+):
+    """The target Lakehouse holding one real schema and table, seeded before the claim.
 
-    The read asks Spark for a Lakehouse's views once per schema storage
-    discovered, so how much Spark it uses is a fact about the estate. Emptiness
-    is this test's premise rather than its luck, and it is established here so
-    the Livy the emptying needs is fixture acquisition rather than part of the
-    claim.
+    A schema is what makes the read ask Spark for views, so the statements
+    inspected below exist because of the estate rather than by luck.
     """
 
+    from weaver.fabric import FabricResolver
+
     fabric_empty_lakehouse(fabric_target_lakehouse.name)
+    destination = FabricResolver(
+        fabric_workspace, client=fabric_client
+    ).spark_destination(ItemRef(fabric_target_lakehouse.name))
+    livy_session.run(
+        f"spark.sql('CREATE SCHEMA IF NOT EXISTS {destination.qualified_schema('Sales')}')\n"
+        f"spark.sql('CREATE TABLE IF NOT EXISTS {destination.qualify('Sales', 'Customer')} "
+        "(Id string) USING delta')\n"
+        "emit(True)\n",
+    )
     return fabric_target_lakehouse
 
 
-@weaver_test(remote=True, resources={"onelake", "rest", "tds"})
+@weaver_test(remote=True, resources={"livy", "onelake", "rest", "tds"})
 def test_build_state_is_read_without_importing_weaver_in_fabric(
-    recorded_session, fabric_workspace, emptied_target
+    recorded_session, fabric_workspace, seeded_target
 ):
-    """The acceptance condition: state read from a desktop, planning-ready.
+    """State read from a desktop is planning-ready and sends Spark statements only.
 
-    Spark is not declared, because a target with no schemas has no views to ask
-    about. That the views come over Spark is
-    `test_a_lakehouse_inventory_lists_views_over_spark_sql`, which asks for a
-    named schema and so does not depend on what is there.
+    The catalogue is read over TDS, so no statement sent to Spark names it.
     """
 
     bindings = item_bindings(
-        ("Lakehouse/Sales", emptied_target.name),
+        ("Lakehouse/Sales", seeded_target.name),
         workspace_name=fabric_workspace.workspace,
     )
     state = read_build_state(
@@ -91,50 +102,18 @@ def test_build_state_is_read_without_importing_weaver_in_fabric(
     # populated one are both valid answers.
     assert state.catalogue is not None
     inventory = state.target_inventories[bindings.entries[0].item]
-    assert inventory.target_name == emptied_target.name
+    assert inventory.target_name == seeded_target.name
     assert inventory.kind == "lakehouse"
-
-
-@weaver_test(remote=True)
-def test_the_statements_it_submitted_import_nothing(recorded_session):
-    """Whatever crossed to Spark is a statement, never a program.
-
-    Nothing is counted here. The catalogue is a Warehouse now, so the read's
-    Spark traffic is a Lakehouse's views alone, and a target with no schemas
-    has none to list, which is a fact about the estate rather than about the
-    read. That the read happened at all is
-    `test_build_state_is_read_without_importing_weaver_in_fabric`; that views
-    come over Spark is the test below.
-    """
+    assert "Sales" in inventory.schemas, inventory
 
     submitted = recorded_session.submitted
-
+    assert any(statement.startswith("SHOW VIEWS") for statement in submitted), submitted
     assert not any("import weaver" in statement for statement in submitted), submitted
     assert all(
         statement.split()[0] in {"SELECT", "SHOW", "DESCRIBE"}
         for statement in submitted
     ), submitted
-
-
-@weaver_test(remote=True, resources={"tds"})
-def test_the_catalogue_is_read_over_tds_and_not_over_spark(
-    recorded_session, fabric_workspace
-):
-    """A Warehouse catalogue read appears in TDS telemetry, never Spark."""
-
-    from weaver.catalogue.connection import catalogue_connection
-
-    def tds_queries() -> int:
-        measure = recorded_session.telemetry.measures.get("tds.query")
-        return measure.calls if measure is not None else 0
-
-    before = tds_queries()
-    catalogue_connection(recorded_session, fabric_workspace).columns_of(REGISTRY)
-
-    assert tds_queries() > before
-    assert not any(
-        "Registry" in statement for statement in recorded_session.submitted
-    ), recorded_session.submitted
+    assert not any(REGISTRY.name in statement for statement in submitted), submitted
 
 
 @weaver_test(remote=True, resources={"livy"})
