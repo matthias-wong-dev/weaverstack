@@ -248,6 +248,17 @@ class ThinEstate:
         )
 
 
+def report_node(report, outcome: str):
+    """The one report node whose logical id ends in ``.outcome``."""
+
+    for node in report.nodes:
+        if node.logical_id.endswith(f".{outcome}"):
+            return node
+    raise AssertionError(
+        f"{outcome} is not in {[node.logical_id for node in report.nodes]}"
+    )
+
+
 def thin_estate(
     root: Path,
     *,

@@ -604,37 +604,6 @@ def test_both_items_of_one_build_are_one_intent(estate):
     assert [one.table for one in establishment].count(BOOKMARK.name) == 1
 
 
-def _two_items() -> Catalogue:
-    """A catalogue holding one bookmark row for each of two items."""
-
-    return Catalogue(
-        {
-            item_id(ITEM): {
-                "Bookmark": (
-                    {
-                        "item_type": "Lakehouse",
-                        "item_name": "Sales",
-                        "schema_name": "Tables/DWG",
-                        "object_name": "Customer",
-                        "bookmark_datetime": LOADED_AT,
-                    },
-                )
-            },
-            item_id(WAREHOUSE_ITEM): {
-                "Bookmark": (
-                    {
-                        "item_type": "Warehouse",
-                        "item_name": "Reporting",
-                        "schema_name": "Rpt",
-                        "object_name": "Customer",
-                        "bookmark_datetime": LOADED_AT,
-                    },
-                )
-            },
-        }
-    )
-
-
 # --- it is never dropped -------------------------------------------------------
 
 

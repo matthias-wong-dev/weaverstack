@@ -1,2 +1,0 @@
-logical:
-  Warehouse/Reporting/Rpt.PortableCustomer: Lakehouse/Raw/Tables/DWG.Customer
