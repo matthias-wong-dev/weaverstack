@@ -48,11 +48,14 @@ from typing import Any
 import pytest
 from sql_support import (
     PROCEDURE_ITEM,
+    WORKING_TABLES,
+    drop_load_script,
+    drop_tables,
     entry_point_script,
     forget_installations,
     forget_runtime_state,
-    install_runtime_references,
-    record_installation,
+    literal,
+    prepare_hand_installed,
 )
 from support.weaver_test import weaver_test
 
@@ -144,12 +147,7 @@ def _install(
         _source(object_name, static=static, strict=strict).encode("utf-8"),
         WAREHOUSE,
     )
-    executor.execute_script(
-        f"if schema_id(N'{SCHEMA}') is null exec('create schema [{SCHEMA}]');"
-        "if schema_id(N'_') is null exec('create schema [_]');"
-    )
-    install_runtime_references(executor, catalogue)
-    record_installation(executor)
+    prepare_hand_installed(executor, SCHEMA, catalogue)
     estate = Estate(executor, object_name)
     _drop(estate)
     executor.execute_script(
@@ -162,6 +160,22 @@ def _install(
     # nothing: `exec _.[Load]` is what runs it by hand and writes the record.
     executor.execute_script(entry_point_script("Load"))
     return estate
+
+
+def _module_estate(
+    install, drop, warehouse, workspace, initialise_catalogue, object_name, **options
+):
+    """Install one estate for a module, and remove it and its Installation row after."""
+
+    initialise_catalogue()
+    built = install(
+        warehouse.executor, object_name, workspace.catalogue_item.name, **options
+    )
+    yield built
+    drop(built)
+    # Only at teardown: `drop` also runs during setup, and the Installation row
+    # this estate needs is written before it.
+    forget_installations(built.executor)
 
 
 @pytest.fixture(scope="module")
@@ -177,18 +191,15 @@ def estate(clean_disposable_warehouse, fabric_workspace, fabric_initialise_catal
     another module's wipe may have taken the whole `_` schema with it.
     """
 
-    fabric_initialise_catalogue()
-    built = _install(
-        clean_disposable_warehouse.executor,
+    yield from _module_estate(
+        _install,
+        _drop,
+        clean_disposable_warehouse,
+        fabric_workspace,
+        fabric_initialise_catalogue,
         OBJECT,
-        fabric_workspace.catalogue_item.name,
         static=False,
     )
-    yield built
-    _drop(built)
-    # Only at teardown: `_drop` also runs during setup, and the Installation row
-    # this estate needs is written before it.
-    forget_installations(built.executor)
 
 
 @pytest.fixture(scope="module")
@@ -197,16 +208,15 @@ def static_estate(
 ):
     """The same table declared static, under a name of its own."""
 
-    fabric_initialise_catalogue()
-    built = _install(
-        clean_disposable_warehouse.executor,
+    yield from _module_estate(
+        _install,
+        _drop,
+        clean_disposable_warehouse,
+        fabric_workspace,
+        fabric_initialise_catalogue,
         STATIC_OBJECT,
-        fabric_workspace.catalogue_item.name,
         static=True,
     )
-    yield built
-    _drop(built)
-    forget_installations(built.executor)
 
 
 @pytest.fixture(scope="module")
@@ -215,30 +225,21 @@ def strict_estate(
 ):
     """The same table under thresholds a two-row change can breach."""
 
-    fabric_initialise_catalogue()
-    built = _install(
-        clean_disposable_warehouse.executor,
+    yield from _module_estate(
+        _install,
+        _drop,
+        clean_disposable_warehouse,
+        fabric_workspace,
+        fabric_initialise_catalogue,
         STRICT_OBJECT,
-        fabric_workspace.catalogue_item.name,
         static=False,
         strict=True,
     )
-    yield built
-    _drop(built)
-    forget_installations(built.executor)
 
 
 def _drop(estate: Estate) -> None:
-    name = estate.object_name
     estate.executor.execute_script(
-        f"drop procedure if exists [_].[Load {SCHEMA}.{name}];\n"
-        + "\n".join(
-            f"if object_id(N'{SCHEMA}.{name}{suffix}', N'U') is not null "
-            f"drop table [{SCHEMA}].[{name}{suffix}];"
-            for suffix in ("_Reject", "_Upsert", "_Delete", "_Staging", "")
-        )
-        + f"\nif object_id(N'{SCHEMA}.{estate.raw}', N'U') is not null "
-        f"drop table [{SCHEMA}].[{estate.raw}];"
+        drop_load_script(SCHEMA, estate.object_name, also=("Raw",))
     )
 
 
@@ -258,11 +259,7 @@ def _reset(estate: Estate, rows=()) -> None:
         f"delete from [{SCHEMA}].[{name}];\n"
         f"delete from [{SCHEMA}].[{estate.raw}];\n"
         + forget_runtime_state(SCHEMA, name)
-        + "\n".join(
-            f"if object_id(N'{SCHEMA}.{name}{suffix}', N'U') is not null "
-            f"drop table [{SCHEMA}].[{name}{suffix}];"
-            for suffix in ("_Reject", "_Upsert", "_Delete", "_Staging")
-        )
+        + "\n".join(drop_tables(SCHEMA, name, WORKING_TABLES))
         + _insert_script(estate, rows)
     )
 
@@ -435,20 +432,8 @@ def _status(estate: Estate) -> dict | None:
     return _read(estate, "status")["status"]
 
 
-def _statistics(estate: Estate) -> list:
-    return _read(estate, "statistics")["statistics"]
-
-
-def _log(estate: Estate) -> list:
-    return _read(estate, "log")["log"]
-
-
 def _contents(estate: Estate):
     return _read(estate, "contents")["contents"]
-
-
-def _leftovers(estate: Estate) -> int:
-    return _read(estate, "leftovers")["leftovers"]
 
 
 @dataclass(frozen=True)
@@ -980,12 +965,7 @@ def _install_wide(
         _wide_source(object_name, incremental=incremental).encode("utf-8"),
         WAREHOUSE,
     )
-    executor.execute_script(
-        f"if schema_id(N'{SCHEMA}') is null exec('create schema [{SCHEMA}]');"
-        "if schema_id(N'_') is null exec('create schema [_]');"
-    )
-    install_runtime_references(executor, catalogue)
-    record_installation(executor)
+    prepare_hand_installed(executor, SCHEMA, catalogue)
     estate = WideEstate(executor, object_name, retires=incremental)
     _drop_wide(estate)
     executor.execute_script(f"create table [{SCHEMA}].[{estate.raw}] ({WIDE_RAW_DDL});")
@@ -1000,14 +980,9 @@ def _install_wide(
 
 
 def _drop_wide(estate: WideEstate) -> None:
-    name = estate.object_name
-    statements = [f"drop procedure if exists [_].[Load {SCHEMA}.{name}];"]
-    statements += [
-        f"if object_id(N'{SCHEMA}.{name}{suffix}', N'U') is not null "
-        f"drop table [{SCHEMA}].[{name}{suffix}];"
-        for suffix in ("_Reject", "_Upsert", "_Delete", "_Staging", "", "Raw", "Retire")
-    ]
-    estate.executor.execute_script("\n".join(statements))
+    estate.executor.execute_script(
+        drop_load_script(SCHEMA, estate.object_name, also=("Raw", "Retire"))
+    )
 
 
 def _reset_wide(estate: WideEstate, rows=()) -> None:
@@ -1018,22 +993,10 @@ def _reset_wide(estate: WideEstate, rows=()) -> None:
         f"delete from [{SCHEMA}].[{name}];",
         forget_runtime_state(SCHEMA, name),
     ]
-    statements += [
-        f"if object_id(N'{SCHEMA}.{name}{suffix}', N'U') is not null "
-        f"drop table [{SCHEMA}].[{name}{suffix}];"
-        for suffix in ("_Reject", "_Upsert", "_Delete", "_Staging")
-    ]
+    statements += drop_tables(SCHEMA, name, WORKING_TABLES)
     estate.executor.execute_script(
         "\n".join(statements) + "\n" + _wide_rows_script(estate, rows)
     )
-
-
-def _literal(value) -> str:
-    if value is None:
-        return "null"
-    if isinstance(value, int):
-        return str(value)
-    return "'" + str(value).replace("'", "''") + "'"
 
 
 def _wide_rows(estate: WideEstate, rows, *, retire=()) -> None:
@@ -1049,13 +1012,13 @@ def _wide_rows_script(estate: WideEstate, rows, *, retire=()) -> str:
         statements.append(f"delete from [{SCHEMA}].[{estate.retire}];")
     if rows:
         values = ", ".join(
-            "(" + ", ".join(_literal(value) for value in row) + ")" for row in rows
+            "(" + ", ".join(literal(value) for value in row) + ")" for row in rows
         )
         statements.append(
             f"insert into [{SCHEMA}].[{estate.raw}] ({columns}) values {values};"
         )
     if retire:
-        keys = ", ".join(f"({_literal(key)})" for key in retire)
+        keys = ", ".join(f"({literal(key)})" for key in retire)
         statements.append(
             f"insert into [{SCHEMA}].[{estate.retire}] ([Customer id]) values {keys};"
         )
@@ -1116,32 +1079,30 @@ def _wide_contents(estate: WideEstate):
 def constrained_estate(
     clean_disposable_warehouse, fabric_workspace, fabric_initialise_catalogue
 ):
-    fabric_initialise_catalogue()
-    built = _install_wide(
-        clean_disposable_warehouse.executor,
+    yield from _module_estate(
+        _install_wide,
+        _drop_wide,
+        clean_disposable_warehouse,
+        fabric_workspace,
+        fabric_initialise_catalogue,
         CONSTRAINED_OBJECT,
-        fabric_workspace.catalogue_item.name,
         incremental=False,
     )
-    yield built
-    _drop_wide(built)
-    forget_installations(built.executor)
 
 
 @pytest.fixture(scope="module")
 def merge_estate(
     clean_disposable_warehouse, fabric_workspace, fabric_initialise_catalogue
 ):
-    fabric_initialise_catalogue()
-    built = _install_wide(
-        clean_disposable_warehouse.executor,
+    yield from _module_estate(
+        _install_wide,
+        _drop_wide,
+        clean_disposable_warehouse,
+        fabric_workspace,
+        fabric_initialise_catalogue,
         MERGE_OBJECT,
-        fabric_workspace.catalogue_item.name,
         incremental=True,
     )
-    yield built
-    _drop_wide(built)
-    forget_installations(built.executor)
 
 
 # --- recoverable refusals -----------------------------------------------------
@@ -1511,12 +1472,7 @@ def _reload_document(object_name: str, body: str):
 
 
 def _install_reload(executor, object_name: str, catalogue: str) -> Estate:
-    executor.execute_script(
-        f"if schema_id(N'{SCHEMA}') is null exec('create schema [{SCHEMA}]');"
-        "if schema_id(N'_') is null exec('create schema [_]');"
-    )
-    install_runtime_references(executor, catalogue)
-    record_installation(executor)
+    prepare_hand_installed(executor, SCHEMA, catalogue)
     estate = Estate(executor, object_name)
     _drop(estate)
     executor.execute_script(
@@ -1543,15 +1499,14 @@ def reload_estate(
 ):
     """A target-dependent incremental table, under a name of its own."""
 
-    fabric_initialise_catalogue()
-    built = _install_reload(
-        clean_disposable_warehouse.executor,
+    yield from _module_estate(
+        _install_reload,
+        _drop,
+        clean_disposable_warehouse,
+        fabric_workspace,
+        fabric_initialise_catalogue,
         RELOAD_OBJECT,
-        fabric_workspace.catalogue_item.name,
     )
-    yield built
-    _drop(built)
-    forget_installations(built.executor)
 
 
 def _reload(estate: Estate, *, fault_tolerant: bool = False) -> None:

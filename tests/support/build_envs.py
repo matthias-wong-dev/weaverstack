@@ -144,11 +144,6 @@ class SesFixture:
 #: hard-codes a path and both transports draw the same source.
 BUILD_FIXTURE = SesFixture(_FIXTURES / "build-lakehouse-item", ("Lakehouse/Raw",))
 SQL_TABLE_FIXTURE = SesFixture(_FIXTURES / "sql-table-build-item", ("Lakehouse/Sales",))
-#: Three documents and nothing else, two Python tables and a Python folder, so
-#: an authored-object test builds the smallest thing that has one of each.
-AUTHORED_OBJECTS_FIXTURE = SesFixture(
-    _FIXTURES / "authored-objects-item", ("Lakehouse/Sales",)
-)
 MIXED_ESTATE_FIXTURE = SesFixture(_FIXTURES / "mixed-estate-item", ("Lakehouse/Sales",))
 WAREHOUSE_ESTATE_FIXTURE = SesFixture(
     _FIXTURES / "warehouse-estate-item", ("Warehouse/Reporting",)
@@ -159,9 +154,7 @@ WAREHOUSE_ESTATE_FIXTURE = SesFixture(
 #: Its logical name matters as much as its content. The catalogue is keyed by
 #: logical item, the physical target is never identity, so two fixtures naming
 #: the same item describe the same registered objects, and building one makes
-#: the other's rows look rebuilt. ``BUILD_FIXTURE`` declared ``Lakehouse/Raw``,
-#: which is exactly what the shortcut fixtures declare; this one does not collide
-#: with anything.
+#: the other's rows look rebuilt.
 #:
 #: It carries one of each shape a Lakehouse build has to handle, so a single
 #: estate can answer for all of them: a Folder, two Python tables (the second
@@ -185,25 +178,6 @@ LAKEHOUSE_JOURNEY_FIXTURE = SesFixture(
 CROSS_ITEM_JOURNEY_FIXTURE = SesFixture(
     _FIXTURES / "cross-item-journey", ("Lakehouse/Sales", "Warehouse/Reporting")
 )
-#: The same estate under its own logical item names, for the desktop journey.
-#: Identity rather than content is what it needs: the two journeys drive the
-#: same documents from opposite positions, and sharing item names would make
-#: each look to the catalogue like a rebuild of the other.
-DESKTOP_JOURNEY_NAMES = {
-    "Lakehouse/Sales": "Lakehouse/Stock",
-    "Warehouse/Reporting": "Warehouse/Analysis",
-}
-#: A producer and the consumer that shortcuts it, in two Lakehouses, the one
-#: thing a single destination cannot express, since a shortcut needs something to
-#: point across to.
-CROSS_ITEM_SHORTCUT_FIXTURE = SesFixture(
-    _FIXTURES / "cross-item-shortcut",
-    ("Lakehouse/Raw", "Lakehouse/Curated"),
-    lakehouse_names={
-        "Lakehouse/Raw": "Producer_LH",
-        "Lakehouse/Curated": "Consumer_LH",
-    },
-)
 
 
 #: The acceptance estate: a realistic architecture, from the foreign workspace
@@ -220,11 +194,4 @@ ACCEPTANCE_FIXTURE = SesFixture(
         "Warehouse/Serving",
         "Lakehouse/Published",
     ),
-)
-
-#: What ``substituted`` resolves in the acceptance estate.
-ACCEPTANCE_TOKENS = (
-    "EXTERNAL_WORKSPACE",
-    "EXTERNAL_LAKEHOUSE",
-    "EXTERNAL_WAREHOUSE",
 )

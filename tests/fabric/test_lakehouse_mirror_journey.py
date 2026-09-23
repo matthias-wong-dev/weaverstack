@@ -20,6 +20,7 @@ from dataclasses import dataclass, replace
 from typing import Any
 
 import pytest
+from mirror_support import forked_config
 from support.acceptance import Acceptance
 from support.build_envs import LAKEHOUSE_JOURNEY_FIXTURE
 from support.weaver_test import register_session, weaver_test
@@ -89,6 +90,7 @@ def journey(
     fabric_initialise_catalogue,
     weaver_session,
     tmp_path_factory,
+    request,
 ):
     """One estate: built, loaded, mirrored, validated, rebuilt, materialised."""
 
@@ -110,15 +112,15 @@ def journey(
         WarehouseTarget(ItemRef(run.catalogue_name)), workspace=fabric_workspace
     )
     into_mirror = [f"{ITEM}=Lakehouse/{run.target_name}"]
+    # Steps whose only readers run with --runslow.
+    release = request.config.getoption("--runslow")
 
     run.step(
         "build the source",
-        lambda: _built(
-            weaver.build(
-                str(estate.path),
-                items=[f"{ITEM}=Lakehouse/{run.source_name}"],
-                session=weaver_session,
-            )
+        lambda: weaver.build(
+            str(estate.path),
+            items=[f"{ITEM}=Lakehouse/{run.source_name}"],
+            session=weaver_session,
         ),
     )
     run.step("load the source", lambda: weaver.load([ITEM], session=weaver_session))
@@ -127,31 +129,33 @@ def journey(
         lambda: _mirror(run, into_mirror, fabric_catalogue),
         observe=lambda: _observe(run),
     )
-    run.step(
-        "mirror again",
-        lambda: _mirror(run, into_mirror, fabric_catalogue),
-        observe=lambda: _observe(run, {"shortcuts", "borrowed", "relations"}),
-    )
-    run.health_config = _forked_config(run, tmp_path_factory.mktemp("lh-health"))
+    if release:
+        run.step(
+            "mirror again",
+            lambda: _mirror(run, into_mirror, fabric_catalogue),
+            observe=lambda: _observe(run, {"shortcuts", "borrowed", "relations"}),
+        )
+    run.health_config = forked_config(run, tmp_path_factory.mktemp("lh-health"))
     run.step(
         "report health over the mirror",
         lambda: weaver.health(
             [ITEM], session=weaver_session, workspace_config=run.health_config
         ),
     )
-    # The item declares a Folder, and reload covers tables. A second
-    # ordinary load re-dates every status row, which is the lifecycle movement
-    # the fork has to see.
-    run.step(
-        "load the source again",
-        lambda: weaver.load([ITEM], session=weaver_session),
-    )
-    run.step(
-        "report health after the source advanced",
-        lambda: weaver.health(
-            [ITEM], session=weaver_session, workspace_config=run.health_config
-        ),
-    )
+    if release:
+        # The item declares a Folder, and reload covers tables. A second
+        # ordinary load re-dates every status row, which is the lifecycle
+        # movement the fork has to see.
+        run.step(
+            "load the source again",
+            lambda: weaver.load([ITEM], session=weaver_session),
+        )
+        run.step(
+            "report health after the source advanced",
+            lambda: weaver.health(
+                [ITEM], session=weaver_session, workspace_config=run.health_config
+            ),
+        )
     run.step(
         "validate the mirror",
         lambda: weaver.test(
@@ -162,26 +166,22 @@ def journey(
     )
     run.step(
         "build with nothing changed",
-        lambda: _built(
-            weaver.build(
-                str(estate.path),
-                items=into_mirror,
-                session=weaver_session,
-                catalogue=f"Warehouse/{run.catalogue_name}",
-            )
+        lambda: weaver.build(
+            str(estate.path),
+            items=into_mirror,
+            session=weaver_session,
+            catalogue=f"Warehouse/{run.catalogue_name}",
         ),
         observe=lambda: _observe(run, {"shortcuts", "borrowed", "source_rows"}),
     )
     run.step("change one declaration", lambda: _change(estate))
     run.step(
         "build the changed declaration",
-        lambda: _built(
-            weaver.build(
-                str(estate.path),
-                items=into_mirror,
-                session=weaver_session,
-                catalogue=f"Warehouse/{run.catalogue_name}",
-            )
+        lambda: weaver.build(
+            str(estate.path),
+            items=into_mirror,
+            session=weaver_session,
+            catalogue=f"Warehouse/{run.catalogue_name}",
         ),
         observe=lambda: _observe(run),
     )
@@ -192,27 +192,6 @@ def journey(
 # --- driving it ---------------------------------------------------------------
 
 
-def _forked_config(run, directory):
-    """A workspace configuration naming the fork and the catalogue it mirrors.
-
-    ``mirror:`` reaches a Workspace from configuration alone, and it is what
-    tells health where a mirrored object's load state is recorded.
-    """
-
-    path = directory / "workspace-config.yml"
-    path.write_text(
-        "\n".join(
-            (
-                f"workspace: {run.workspace.workspace}",
-                f"catalogue: Warehouse/{run.catalogue_name}",
-                f"mirror: Warehouse/{run.source_catalogue_name}",
-            )
-        ),
-        encoding="utf-8",
-    )
-    return path
-
-
 def _mirror(run, items, source_catalogue) -> Any:
     return weaver.mirror(
         items,
@@ -221,12 +200,6 @@ def _mirror(run, items, source_catalogue) -> Any:
         catalogue=f"Warehouse/{run.catalogue_name}",
         mirror=f"Warehouse/{source_catalogue.name}",
     )
-
-
-def _built(result):
-    if not result.succeeded:
-        raise AssertionError("; ".join(f.describe() for f in result.errors))
-    return result
 
 
 def _change(estate) -> None:
@@ -474,6 +447,7 @@ def test_the_mirrored_lakehouse_runs_its_installed_validations(journey):
     assert {node.status for node in report.nodes} == {"passed"}
 
 
+@pytest.mark.slow
 @weaver_test(remote=True)
 def test_mirroring_again_leaves_the_same_estate(journey):
     """A mirror is reconstruction, so a half-finished one is rerun, not repaired."""
@@ -615,6 +589,7 @@ def test_health_reads_the_mirror_and_calls_the_build_green(journey):
     assert report.load.subjects > 0
 
 
+@pytest.mark.slow
 @weaver_test(remote=True)
 def test_a_load_at_the_source_reaches_the_forks_report(journey):
     """The fork ran nothing, and the lifecycle its mirrored objects carry moved.

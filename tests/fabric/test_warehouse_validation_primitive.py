@@ -27,8 +27,7 @@ from sql_support import (
     entry_point_script,
     forget_installations,
     forget_runtime_state,
-    install_runtime_references,
-    record_installation,
+    prepare_hand_installed,
 )
 from support.weaver_test import weaver_test
 
@@ -119,12 +118,7 @@ def estate(clean_disposable_warehouse, fabric_workspace, fabric_initialise_catal
 
     fabric_initialise_catalogue()
     executor = clean_disposable_warehouse.executor
-    executor.execute_script(
-        f"if schema_id(N'{SCHEMA}') is null exec('create schema [{SCHEMA}]');"
-        "if schema_id(N'_') is null exec('create schema [_]');"
-    )
-    install_runtime_references(executor, fabric_workspace.catalogue_item.name)
-    record_installation(executor)
+    prepare_hand_installed(executor, SCHEMA, fabric_workspace.catalogue_item.name)
     _drop(executor)
     for table in ("ValidationExpected", "ValidationActual"):
         executor.execute_script(

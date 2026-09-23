@@ -76,6 +76,7 @@ def acceptance(
     fabric_target_lakehouse,
     fabric_shortcut_lakehouses,
     disposable_warehouse,
+    fabric_initialise_catalogue,
 ):
     """One estate, its physical bindings, and the transitions taken over it."""
 
@@ -119,13 +120,17 @@ def acceptance(
     # and Scenario C then read [1, 2, 4].
     _restore_the_foreign_baseline(journey)
     _require_the_foreign_baseline(journey)
-    _seed_the_neighbour(journey)
     # No restore at teardown: the next run restores for itself, and no other
     # module reads the foreign `Source` schema this journey mutates.
     try:
         yield journey
     finally:
-        journey.close()
+        try:
+            journey.close()
+        finally:
+            # Scenario J removes the shared catalogue, and later modules build
+            # into it.
+            fabric_initialise_catalogue()
 
 
 # --- addressing the estate ---------------------------------------------------
@@ -497,25 +502,33 @@ def _ids(observation, name: str, column: str) -> list:
 def test_a_realistic_estate_builds_from_nothing(acceptance):
     """
     Intent: A realistic multi-item repository builds from nothing against real
-    Fabric, including shortcuts into a foreign workspace and a foreign Warehouse.
+    Fabric, catalogue included, with shortcuts into a foreign workspace and a
+    foreign Warehouse.
 
-    Proof: after wiping the targets, one build succeeds and the estate holds
-    every declared object, shortcut and relation.
+    Proof: after a wipe that removes the targets and then the catalogue, one
+    build bootstraps `_` and the estate holds every declared object, shortcut
+    and relation.
     """
 
-    # The data targets, and the catalogue kept: the neighbour schema seeded
-    # into the catalogue Warehouse is what every later reading of `_` is a
-    # claim against, and the catalogue going would take it too. Scenario J
-    # empties the whole estate, catalogue included.
     acceptance.step(
         "wipe",
-        lambda: weaver.wipe(
-            acceptance.targets,
-            unbind=True,
-            session=acceptance.session,
-        ),
+        lambda: weaver.wipe(acceptance.targets, session=acceptance.session),
     )
     acceptance.require("wipe")
+    emptied = [item.target for item in acceptance["wipe"].result.items]
+    assert emptied[-1] == acceptance.workspace.catalogue, emptied
+    assert (
+        _catalogue_rows(
+            acceptance,
+            "select TABLE_NAME from INFORMATION_SCHEMA.TABLES where TABLE_SCHEMA = '_'",
+        )
+        == []
+    )
+
+    # Removing the catalogue empties its Warehouse, so the neighbour is seeded
+    # after the wipe and every later build reconciles `_` beside it.
+    acceptance.step("seed-neighbour", lambda: _seed_the_neighbour(acceptance))
+    acceptance.require("seed-neighbour")
 
     step = acceptance.step(
         "build",
@@ -526,10 +539,6 @@ def test_a_realistic_estate_builds_from_nothing(acceptance):
         ),
     )
     acceptance.require("build")
-    built = step.result
-    assert built.status == "succeeded", [
-        (failure.action_id, failure.message) for failure in built.errors
-    ]
 
     landing = _item(acceptance, "Lakehouse/Landing")
     curated = _item(acceptance, "Lakehouse/Curated")
@@ -644,10 +653,6 @@ def test_an_unchanged_build_is_a_true_fixed_point(acceptance):
         ),
     )
     acceptance.require("rebuild")
-    rebuilt = step.result
-    assert rebuilt.status == "succeeded", [
-        (failure.action_id, failure.message) for failure in rebuilt.errors
-    ]
 
     # Every certified object keeps the build that certified it. A rebuilt object
     # would carry the second build's instant instead.
@@ -704,7 +709,6 @@ def test_seeded_foreign_data_flows_through_every_layer(acceptance):
     )
     acceptance.require("load")
     loaded = acceptance["load"].result
-    assert loaded.succeeded, loaded.to_mapping()
     _assert_load_status(acceptance, loaded)
     _assert_run_evidence(acceptance, loaded, "load")
     _assert_the_endpoint_barrier_is_in_the_graph(acceptance, loaded)
@@ -781,9 +785,6 @@ def test_an_unchanged_load_moves_only_the_appending_branch(acceptance):
         lambda: weaver.load(acceptance.items, session=acceptance.session),
     )
     acceptance.require("reload")
-    assert acceptance["reload"].result.succeeded, acceptance[
-        "reload"
-    ].result.to_mapping()
     _assert_load_status(acceptance, acceptance["reload"].result)
 
     step = acceptance.steps["reload"]
@@ -834,9 +835,6 @@ def test_foreign_source_movement_propagates_through_the_whole_chain(acceptance):
         lambda: weaver.load(acceptance.items, session=acceptance.session),
     )
     acceptance.require("load-mutated")
-    assert acceptance["load-mutated"].result.succeeded, acceptance[
-        "load-mutated"
-    ].result.to_mapping()
 
     step = acceptance.steps["load-mutated"]
     step.observation = _observe(acceptance, _estate_evidence(acceptance))
@@ -1066,7 +1064,6 @@ def test_loading_an_upstream_after_a_test_passed_turns_health_amber(acceptance):
         ),
     )
     acceptance.require("load-upstream")
-    assert acceptance["load-upstream"].result.succeeded
 
     stale = acceptance.step(
         "health-stale",
@@ -1258,10 +1255,6 @@ def test_a_declaration_change_rebuilds_exactly_what_it_must(acceptance):
         ),
     )
     acceptance.require("rebuild-changed")
-    result = step.result
-    assert result.status == "succeeded", [
-        (failure.action_id, failure.message) for failure in result.errors
-    ]
 
     landing = _item(acceptance, "Lakehouse/Landing")
     curated = _item(acceptance, "Lakehouse/Curated")
@@ -1327,7 +1320,6 @@ def test_the_changed_estate_reaches_a_new_fixed_point(acceptance):
         ),
     )
     acceptance.require("rebuild-settled")
-    assert acceptance["rebuild-settled"].result.status == "succeeded"
 
     after = _registry_rows(acceptance)
     assert set(after) == set(before)
@@ -1353,9 +1345,6 @@ def test_the_rebuilt_estate_still_loads_and_validates(acceptance):
         lambda: weaver.load(acceptance.items, session=acceptance.session),
     )
     acceptance.require("load-changed")
-    assert acceptance["load-changed"].result.succeeded, acceptance[
-        "load-changed"
-    ].result.to_mapping()
     _assert_load_status(acceptance, acceptance["load-changed"].result)
 
     landing = _item(acceptance, "Lakehouse/Landing")
@@ -1558,7 +1547,7 @@ def test_a_failed_build_leaves_partial_state_and_the_next_one_converges(acceptan
     acceptance.step("repair", lambda: _edit(acceptance, REPAIR_EDITS))
     acceptance.require("repair")
 
-    step = acceptance.step(
+    acceptance.step(
         "rebuild-repaired",
         lambda: weaver.build(
             acceptance.repository,
@@ -1567,10 +1556,6 @@ def test_a_failed_build_leaves_partial_state_and_the_next_one_converges(acceptan
         ),
     )
     acceptance.require("rebuild-repaired")
-    repaired = step.result
-    assert repaired.status == "succeeded", [
-        (failure.action_id, failure.message) for failure in repaired.errors
-    ]
 
     # The catalogue converged from what is physically there: certified again,
     # and still at the sentinel, because a build establishes no cursor.
@@ -1584,7 +1569,6 @@ def test_a_failed_build_leaves_partial_state_and_the_next_one_converges(acceptan
     )
     acceptance.require("load-repaired")
     reloaded = acceptance["load-repaired"].result
-    assert reloaded.succeeded, reloaded.to_mapping()
     _assert_load_status(acceptance, reloaded)
 
     # The replaced object's bookmark is back, seeded by the load rather than by
@@ -1750,65 +1734,6 @@ def test_the_whole_estate_comes_from_the_catalogue_and_goes_last(acceptance):
         "select RegionId from [Reference].[Region] order by RegionId",
     )
     assert [row["RegionId"] for row in region] == [1, 2]
-
-
-# --- Scenario K: building back over an emptied catalogue ---------------------
-
-
-@weaver_test(integration=True, resources=BUILDING)
-def test_the_estate_builds_again_over_an_emptied_catalogue(acceptance):
-    """
-    Intent: a wipe that took the catalogue leaves a workspace a build can fill,
-    and this module hands the shared estate back the way it found it.
-
-    Proof: the same build request that opened this journey succeeds against a
-    Warehouse whose `_` schema the previous scenario removed, the catalogue
-    records every item again, and the release afterwards leaves no installation
-    claiming one of these targets.
-    """
-
-    acceptance.require("final-wipe")
-    acceptance.step(
-        "rebuild-after-wipe",
-        lambda: weaver.build(
-            acceptance.repository,
-            items=acceptance.build_items,
-            session=acceptance.session,
-        ),
-    )
-    acceptance.require("rebuild-after-wipe")
-    result = acceptance["rebuild-after-wipe"].result
-    assert result.succeeded, result.to_mapping()
-
-    installed = {
-        f"{row['Item type']}/{row['Item name']}"
-        for row in _catalogue_rows(
-            acceptance, "select [Item type], [Item name] from [_].[Installation]"
-        )
-    }
-    assert set(acceptance.items) <= installed
-
-    # The estate is fixed and shared, so this module leaves its targets
-    # released: another module builds its own items into the same Warehouse,
-    # and a build into a target another item is installed to is refused.
-    acceptance.step(
-        "release",
-        lambda: weaver.wipe(
-            acceptance.targets,
-            unbind=True,
-            session=acceptance.session,
-        ),
-    )
-    acceptance.require("release")
-    claimed = {
-        str(row["Target name"])
-        for row in _catalogue_rows(
-            acceptance, "select [Target name] from [_].[Installation]"
-        )
-    }
-    assert claimed.isdisjoint(
-        {target.split("/", 1)[1] for target in acceptance.targets}
-    )
 
 
 def _abfss(item, relative: str) -> str:

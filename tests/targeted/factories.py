@@ -23,17 +23,12 @@ from typing import Mapping
 from support.workspaces import WORKSPACE
 
 from weaver.build_bundle import (
-    BuildBatch,
-    BuildPlan,
     InstallAction,
     ItemBinding,
     ItemBindings,
     LakehouseBinding,
     WarehouseBinding,
-    compute_bundle_id,
-    write_bundle,
 )
-from weaver.build_bundle.bundle import SUPPORTED_FORMAT_VERSION
 from weaver.build_bundle.prune import TargetInventory
 from weaver.build_bundle.targets import BoundTarget
 from weaver.catalogue.builtin import BUILTIN_ITEM
@@ -59,7 +54,6 @@ from weaver.etl import (
     load_schemas,
 )
 from weaver.locations import Location
-from weaver.store import FilesystemStore
 from weaver.targets import ItemRef
 
 #: Neutral names, per the environment-neutrality rule: no product, workspace or
@@ -555,6 +549,30 @@ def installed_catalogue(
     return Catalogue(
         rows=rows,
         writer=Recording() if session is None else writer_for(session),
+    )
+
+
+def built_catalogue(repository, bindings: ItemBindings) -> Catalogue:
+    """The catalogue a successful build of this estate leaves behind.
+
+    Composed from the two functions the build itself uses. ``materialised``
+    names every projected table, because reconciliation may only raise a claim
+    against a table that is there.
+    """
+
+    from weaver.build_bundle.catalogue_actions import desired_catalogue
+    from weaver.build_bundle.planner import certifiable_identities
+    from weaver.catalogue.tables import PROJECTED_TABLES
+
+    by_item = {binding.item: binding for binding in bindings.entries}
+    state = desired_catalogue(
+        repository,
+        certifiable_identities(repository, by_item),
+        {binding.item: binding.to_bound_target() for binding in bindings.entries},
+    )
+    return Catalogue(
+        rows=state.rows,
+        materialised=frozenset(table.name for table in PROJECTED_TABLES),
     )
 
 
@@ -1266,60 +1284,10 @@ def build_action(
     )
 
 
-def single_action_bundle(
-    location: Location,
-    *,
-    store: FilesystemStore,
-    action: InstallAction,
-    payload: bytes | None = None,
-    target: BoundTarget | None = None,
-    description: str = "one action",
-):
-    """The smallest valid bundle: one target, one sequence, one batch, one action.
+def plan_actions(bundle) -> list:
+    """Every action in a bundle's plan, in plan order."""
 
-    Installer claims, sequencing, failure semantics, reporting, payload loading,
-    are about the installer, not about whatever repository happened to produce
-    a bundle. Generating a real one to test them makes the planner a dependency
-    of every installer failure.
-    """
-
-    from support.bundles import given_execution, with_catalogue
-
-    target = target or bound_target()
-    payloads = {}
-    if payload is not None and action.payload is not None:
-        payloads[action.payload] = payload
-    targets = with_catalogue((target,))
-    sequences = (
-        _sequence(description=description, target_id=target.id, action=action),
-    )
-    plan = BuildPlan(
-        format_version=SUPPORTED_FORMAT_VERSION,
-        bundle_id="",
-        repository_name="weaver_items",
-        repository_signature="repository-signature",
-        targets=targets,
-        sequences=sequences,
-        execution=given_execution(targets, sequences),
-    )
-    plan = _with_identity(plan)
-    return write_bundle(location, plan=plan, payloads=payloads, store=store)
-
-
-def _sequence(*, description: str, target_id: str, action: InstallAction):
-    from weaver.build_bundle.models import BuildSequence
-
-    return BuildSequence(
-        number=1,
-        description=description,
-        batches=(BuildBatch(id="batch-1", target_id=target_id, actions=(action,)),),
-    )
-
-
-def _with_identity(plan: BuildPlan) -> BuildPlan:
-    from dataclasses import replace
-
-    return replace(plan, bundle_id=compute_bundle_id(plan))
+    return [action for _sequence, _batch, action in bundle.plan.actions()]
 
 
 # --- execution ----------------------------------------------------------------

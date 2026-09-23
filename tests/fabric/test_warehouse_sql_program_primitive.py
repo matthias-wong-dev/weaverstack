@@ -30,8 +30,10 @@ from types import SimpleNamespace
 import pytest
 from sql_support import (
     PROCEDURE_ITEM,
+    drop_load_script,
     forget_runtime_state,
-    install_runtime_references,
+    literal,
+    prepare_hand_installed,
 )
 from support.weaver_test import weaver_test
 
@@ -147,14 +149,7 @@ def _document(name: str, source: str):
 
 
 def _drop_object(executor, name: str) -> None:
-    executor.execute_script(
-        f"drop procedure if exists [_].[Load {SCHEMA}.{name}];\n"
-        + "\n".join(
-            f"if object_id(N'{SCHEMA}.{name}{suffix}', N'U') is not null "
-            f"drop table [{SCHEMA}].[{name}{suffix}];"
-            for suffix in ("_Reject", "_Upsert", "_Delete", "_Staging", "")
-        )
-    )
+    executor.execute_script(drop_load_script(SCHEMA, name))
 
 
 @pytest.fixture(scope="module")
@@ -173,11 +168,9 @@ def warehouse(
 
     fabric_initialise_catalogue()
     executor = clean_disposable_warehouse.executor
-    executor.execute_script(
-        f"if schema_id(N'{SCHEMA}') is null exec('create schema [{SCHEMA}]');"
-        "if schema_id(N'_') is null exec('create schema [_]');"
+    prepare_hand_installed(
+        executor, SCHEMA, fabric_workspace.catalogue_item.name, record=False
     )
-    install_runtime_references(executor, fabric_workspace.catalogue_item.name)
     for table, columns in (
         (
             "ProgramCustomer",
@@ -217,19 +210,10 @@ def _rows(executor, table: str, columns: str, values: list[tuple]) -> None:
     if not values:
         return
     literals = ", ".join(
-        "(" + ", ".join("null" if v is None else _literal(v) for v in row) + ")"
-        for row in values
+        "(" + ", ".join(literal(v) for v in row) + ")" for row in values
     )
     executor.execute_script(
         f"insert into [{SCHEMA}].[{table}] ({columns}) values {literals};"
-    )
-
-
-def _literal(value) -> str:
-    return (
-        str(value)
-        if isinstance(value, int)
-        else "'" + str(value).replace("'", "''") + "'"
     )
 
 
