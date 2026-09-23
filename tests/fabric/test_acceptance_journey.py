@@ -517,6 +517,13 @@ def test_a_realistic_estate_builds_from_nothing(acceptance):
     acceptance.require("wipe")
     emptied = [item.target for item in acceptance["wipe"].result.items]
     assert emptied[-1] == acceptance.workspace.catalogue, emptied
+    assert (
+        _catalogue_rows(
+            acceptance,
+            "select TABLE_NAME from INFORMATION_SCHEMA.TABLES where TABLE_SCHEMA = '_'",
+        )
+        == []
+    )
 
     # Removing the catalogue empties its Warehouse, so the neighbour is seeded
     # after the wipe and every later build reconciles `_` beside it.
