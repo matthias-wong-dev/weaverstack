@@ -339,8 +339,8 @@ def _loaded(report):
 def _seed(sql) -> None:
     """One row at the source, so reading through the mirror proves something."""
 
-    sql.execute("delete from [Wh].[Product];")
     sql.execute(
+        "delete from [Wh].[Product];\n"
         "insert into [Wh].[Product] ([ProductId], [ProductName], [Row signature], "
         "[Row insert datetime], [Row update datetime], [Row delete datetime]) "
         f"values ({SENTINEL[0]}, N'{SENTINEL[1]}', "
@@ -375,30 +375,39 @@ def _change(estate) -> None:
     path.write_text(changed, encoding="utf-8")
 
 
+def _asked(sql, *queries: str) -> list[list[dict]]:
+    """Several reads of one Warehouse, in one round trip."""
+
+    return [
+        [dict(row) for row in rows]
+        for rows in sql.query_result_sets(";\n".join(queries) + ";")
+    ]
+
+
 def _observe(run) -> Estate:
-    """The estate as this transition left it."""
+    """The estate as this transition left it, one round trip per Warehouse."""
 
     from weaver.catalogue.state import catalogue_for
 
     with catalogue_for(run.session, run.forked) as catalogue:
         dag = catalogue.dag()
+    objects, dependant = _asked(run.target_sql, _OBJECTS, _DEPENDANT_ROWS)
+    borrowed, installed, load_status, bookmarks = _asked(
+        run.catalogue_sql,
+        "select [Schema name], [Object name], [Physical type] "
+        f"from {_q(MIRROR_TABLE.name)}",
+        "select [Item name], [Target name] from [_].[Installation]",
+        f"select [Schema name], [Object name], [Result] from {_q('LoadStatus')}",
+        "select [Schema name], [Object name], [Bookmark datetime] "
+        f"from {_q('Bookmark')}",
+    )
     return Estate(
-        objects={
-            f"{row['s']}.{row['n']}": str(row["t"]).strip()
-            for row in run.target_sql.query(_OBJECTS)
-        },
+        objects={f"{row['s']}.{row['n']}": str(row["t"]).strip() for row in objects},
         borrowed={
             f"{row['Schema name']}.{row['Object name']}": str(row["Physical type"])
-            for row in run.catalogue_sql.query(
-                f"select [Schema name], [Object name], [Physical type] from {_q(MIRROR_TABLE.name)}"
-            )
+            for row in borrowed
         },
-        installed={
-            str(row["Item name"]): str(row["Target name"])
-            for row in run.catalogue_sql.query(
-                "select [Item name], [Target name] from [_].[Installation]"
-            )
-        },
+        installed={str(row["Item name"]): str(row["Target name"]) for row in installed},
         loadable={
             node.load_name: node.can_load
             for node in dag.nodes
@@ -412,20 +421,15 @@ def _observe(run) -> Estate:
         ],
         load_status={
             f"{row['Schema name']}.{row['Object name']}": str(row["Result"])
-            for row in run.catalogue_sql.query(
-                f"select [Schema name], [Object name], [Result] from {_q('LoadStatus')}"
-            )
+            for row in load_status
         },
         bookmarks={
             f"{row['Schema name']}.{row['Object name']}": _instant(
                 row["Bookmark datetime"]
             )
-            for row in run.catalogue_sql.query(
-                "select [Schema name], [Object name], [Bookmark datetime] "
-                f"from {_q('Bookmark')}"
-            )
+            for row in bookmarks
         },
-        dependant_rows=_dependant_rows(run),
+        dependant_rows=_rows_of(dependant),
         source_load_status={
             f"{row['Schema name']}.{row['Object name']}": str(row["Result"])
             for row in run.source_catalogue_sql.query(
@@ -442,16 +446,15 @@ def _instant(value) -> datetime:
     return value if isinstance(value, datetime) else datetime.fromisoformat(str(value))
 
 
-def _dependant_rows(run) -> list[tuple]:
-    """``Wh.ProductRollup`` where it stands, which is a View until it is built."""
+#: ``Wh.ProductRollup`` where it stands, which is a View until it is built.
+_DEPENDANT_ROWS = (
+    f"select [ProductId], [ProductName] from [{DEPENDANT.replace('.', '].[')}] "
+    "order by [ProductId]"
+)
 
-    return [
-        (int(row["ProductId"]), str(row["ProductName"]))
-        for row in run.target_sql.query(
-            f"select [ProductId], [ProductName] from [{DEPENDANT.replace('.', '].[')}] "
-            "order by [ProductId]"
-        )
-    ]
+
+def _rows_of(rows) -> list[tuple]:
+    return [(int(row["ProductId"]), str(row["ProductName"])) for row in rows]
 
 
 def _result(value: str) -> str:
