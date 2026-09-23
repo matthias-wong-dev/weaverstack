@@ -139,6 +139,10 @@ class Estate:
     #: ``Schema.Object`` to its ``_.LoadStatus`` result in the catalogue the
     #: mirror borrows from, which is where the inherited state comes from.
     source_load_status: dict[str, str]
+    #: Every ``_.Registry`` identity with its signature and build instant, from
+    #: the fork catalogue and from its source, without the catalogue's own rows.
+    registry: frozenset[tuple]
+    source_registry: frozenset[tuple]
 
 
 # --- the journey --------------------------------------------------------------
@@ -154,6 +158,7 @@ def journey(
     session_disposable_warehouse,
     warehouse_session,
     tmp_path_factory,
+    request,
 ):
     """One estate: built, mirrored, validated, rebuilt, then materialised."""
 
@@ -183,6 +188,8 @@ def journey(
     run.forked = replace(fabric_workspace, catalogue=f"Warehouse/{run.catalogue_name}")
     run.session = warehouse_session
     into_mirror = [f"{ITEM}=Warehouse/{run.target_name}"]
+    # Steps whose only readers run with --runslow.
+    release = request.config.getoption("--runslow")
 
     run.step(
         "build the source",
@@ -211,17 +218,18 @@ def journey(
         ),
         observe=lambda: _observe(run),
     )
-    run.step(
-        "mirror again",
-        lambda: weaver.mirror(
-            into_mirror,
-            session=warehouse_session,
-            workspace=fabric_workspace.workspace,
-            catalogue=f"Warehouse/{run.catalogue_name}",
-            mirror=f"Warehouse/{fabric_catalogue.name}",
-        ),
-        observe=lambda: _observe(run),
-    )
+    if release:
+        run.step(
+            "mirror again",
+            lambda: weaver.mirror(
+                into_mirror,
+                session=warehouse_session,
+                workspace=fabric_workspace.workspace,
+                catalogue=f"Warehouse/{run.catalogue_name}",
+                mirror=f"Warehouse/{fabric_catalogue.name}",
+            ),
+            observe=lambda: _observe(run),
+        )
     run.step("read a source change through the mirror", lambda: _read_through(run))
     run.step(
         "report health over the mirror",
@@ -352,7 +360,7 @@ def _observe(run) -> Estate:
     with catalogue_for(run.session, run.forked) as catalogue:
         dag = catalogue.dag()
     objects, dependant = _asked(run.target_sql, _OBJECTS, _DEPENDANT_ROWS)
-    borrowed, installed, load_status, bookmarks = _asked(
+    borrowed, installed, load_status, bookmarks, registry = _asked(
         run.catalogue_sql,
         "select [Schema name], [Object name], [Physical type] "
         f"from {_q(MIRROR_TABLE.name)}",
@@ -360,6 +368,13 @@ def _observe(run) -> Estate:
         f"select [Schema name], [Object name], [Result] from {_q('LoadStatus')}",
         "select [Schema name], [Object name], [Bookmark datetime] "
         f"from {_q('Bookmark')}",
+        _REGISTRY,
+    )
+    source_load_status, source_registry = _asked(
+        run.source_catalogue_sql,
+        "select [Schema name], [Object name], [Result] "
+        f"from {_q('LoadStatus')} where [Item name] = N'Reporting'",
+        _REGISTRY,
     )
     return Estate(
         objects={f"{row['s']}.{row['n']}": str(row["t"]).strip() for row in objects},
@@ -392,11 +407,32 @@ def _observe(run) -> Estate:
         dependant_rows=_rows_of(dependant),
         source_load_status={
             f"{row['Schema name']}.{row['Object name']}": str(row["Result"])
-            for row in run.source_catalogue_sql.query(
-                "select [Schema name], [Object name], [Result] "
-                f"from {_q('LoadStatus')} where [Item name] = N'Reporting'"
-            )
+            for row in source_load_status
         },
+        registry=_signatures(registry),
+        source_registry=_signatures(source_registry),
+    )
+
+
+#: What incremental selection compares, for every item but the catalogue's own.
+_REGISTRY = (
+    "select [Item type], [Item name], [Schema name], [Object name], [Signature], "
+    f"[Build datetime] from [{CATALOGUE_SCHEMA}].[Registry] "
+    "where not ([Item type] = N'Warehouse' and [Item name] = N'_weaver')"
+)
+
+
+def _signatures(rows) -> frozenset[tuple]:
+    return frozenset(
+        (
+            str(row["Item type"]),
+            str(row["Item name"]),
+            str(row["Schema name"]),
+            str(row["Object name"]),
+            str(row["Signature"]),
+            None if row["Build datetime"] is None else _instant(row["Build datetime"]),
+        )
+        for row in rows
     )
 
 
@@ -529,6 +565,30 @@ def test_the_fork_inherits_the_source_catalogues_settled_state(journey):
 
 
 @weaver_test(remote=True)
+def test_signatures_and_instants_survive_the_fork(journey):
+    """What incremental selection compares crosses the fork unchanged.
+
+    A signature altered in transit would make every object look changed, and a
+    truncated ``Build datetime`` would re-date rows no build touched.
+    """
+
+    journey.require("mirror")
+    observed = journey["mirror"].observation
+
+    assert observed.registry == observed.source_registry
+    assert observed.registry, "the source certifies nothing, so equality proves nothing"
+
+
+@weaver_test(remote=True)
+def test_the_fork_catalogue_owns_its_own_installation_row(journey):
+    """``Warehouse/_weaver`` names the Warehouse its ``_`` schema is in."""
+
+    journey.require("mirror")
+
+    assert journey["mirror"].observation.installed["_weaver"] == journey.catalogue_name
+
+
+@weaver_test(remote=True)
 def test_the_catalogues_own_tables_are_never_borrowed(journey):
     """``_`` is Weaver's own state, so the target gets real views over it."""
 
@@ -595,6 +655,7 @@ def test_the_result_names_every_warehouse_it_emptied(journey):
     assert result.mirrored[ITEM]["programmables"] > 0
 
 
+@pytest.mark.slow
 @weaver_test(remote=True)
 def test_mirroring_again_leaves_the_same_estate(journey):
     """A mirror is reconstruction, so a half-finished one is rerun, not repaired."""
