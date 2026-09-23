@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import pytest
+from sql_support import warehouse_sql
 from support.build_envs import WAREHOUSE_ESTATE_FIXTURE
 from support.weaver_test import register_session, weaver_test
 
@@ -32,7 +33,6 @@ from weaver.catalogue.tables import (
     REGISTRY,
 )
 from weaver.catalogue.tsql import identifier, literal
-from weaver.targets import ItemRef, WarehouseTarget
 
 #: Rows the destination catalogue writes about itself. Its own build published
 #: them, naming the Warehouse its ``_`` schema is in, so they are held apart
@@ -95,15 +95,15 @@ def forked(
     )
     return Forked(
         result=result,
-        source_sql=_sql(warehouse_session, fabric_workspace, fabric_catalogue.name),
-        sql=_sql(warehouse_session, fabric_workspace, fabric_fork_catalogue.name),
+        source_sql=warehouse_sql(
+            warehouse_session, fabric_workspace, fabric_catalogue.name
+        ),
+        sql=warehouse_sql(
+            warehouse_session, fabric_workspace, fabric_fork_catalogue.name
+        ),
         source_name=fabric_catalogue.name,
         destination_name=fabric_fork_catalogue.name,
     )
-
-
-def _sql(session, workspace, name: str):
-    return session.sql_executor(WarehouseTarget(ItemRef(name)), workspace=workspace)
 
 
 def _counts(sql, tables, *, where: str = "1 = 1") -> dict[str, int]:

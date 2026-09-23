@@ -20,6 +20,7 @@ from dataclasses import dataclass, replace
 from typing import Any
 
 import pytest
+from mirror_support import forked_config
 from support.acceptance import Acceptance
 from support.build_envs import LAKEHOUSE_JOURNEY_FIXTURE
 from support.weaver_test import register_session, weaver_test
@@ -130,7 +131,7 @@ def journey(
         lambda: _mirror(run, into_mirror, fabric_catalogue),
         observe=lambda: _observe(run, {"shortcuts", "borrowed", "relations"}),
     )
-    run.health_config = _forked_config(run, tmp_path_factory.mktemp("lh-health"))
+    run.health_config = forked_config(run, tmp_path_factory.mktemp("lh-health"))
     run.step(
         "report health over the mirror",
         lambda: weaver.health(
@@ -184,27 +185,6 @@ def journey(
 
 
 # --- driving it ---------------------------------------------------------------
-
-
-def _forked_config(run, directory):
-    """A workspace configuration naming the fork and the catalogue it mirrors.
-
-    ``mirror:`` reaches a Workspace from configuration alone, and it is what
-    tells health where a mirrored object's load state is recorded.
-    """
-
-    path = directory / "workspace-config.yml"
-    path.write_text(
-        "\n".join(
-            (
-                f"workspace: {run.workspace.workspace}",
-                f"catalogue: Warehouse/{run.catalogue_name}",
-                f"mirror: Warehouse/{run.source_catalogue_name}",
-            )
-        ),
-        encoding="utf-8",
-    )
-    return path
 
 
 def _mirror(run, items, source_catalogue) -> Any:

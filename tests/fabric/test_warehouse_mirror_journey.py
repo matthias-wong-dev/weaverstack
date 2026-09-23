@@ -18,6 +18,8 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 
 import pytest
+from mirror_support import forked_config
+from sql_support import warehouse_sql
 from support.acceptance import Acceptance
 from support.build_envs import WAREHOUSE_ESTATE_FIXTURE
 from support.weaver_test import register_session, weaver_test
@@ -31,7 +33,6 @@ from weaver.catalogue.tables import (
 )
 from weaver.catalogue.tables import LOAD_STATUS as LOAD_STATUS_TABLE
 from weaver.catalogue.tables import MIRROR as MIRROR_TABLE
-from weaver.targets import ItemRef, WarehouseTarget
 
 ITEM = "Warehouse/Reporting"
 
@@ -171,10 +172,12 @@ def journey(
     run.catalogue_name = fabric_fork_catalogue.name
     run.source_catalogue_name = fabric_catalogue.name
     run.workspace = fabric_workspace
-    run.source_sql = _sql(warehouse_session, fabric_workspace, run.source_name)
-    run.target_sql = _sql(warehouse_session, fabric_workspace, run.target_name)
-    run.catalogue_sql = _sql(warehouse_session, fabric_workspace, run.catalogue_name)
-    run.source_catalogue_sql = _sql(
+    run.source_sql = warehouse_sql(warehouse_session, fabric_workspace, run.source_name)
+    run.target_sql = warehouse_sql(warehouse_session, fabric_workspace, run.target_name)
+    run.catalogue_sql = warehouse_sql(
+        warehouse_session, fabric_workspace, run.catalogue_name
+    )
+    run.source_catalogue_sql = warehouse_sql(
         warehouse_session, fabric_workspace, run.source_catalogue_name
     )
     run.forked = replace(fabric_workspace, catalogue=f"Warehouse/{run.catalogue_name}")
@@ -225,7 +228,7 @@ def journey(
         lambda: weaver.health(
             [ITEM],
             session=warehouse_session,
-            workspace_config=_forked_config(run, tmp_path_factory.mktemp("wh-health")),
+            workspace_config=forked_config(run, tmp_path_factory.mktemp("wh-health")),
         ),
     )
     run.step(
@@ -258,7 +261,7 @@ def journey(
         ),
         observe=lambda: _observe(run),
     )
-    run.loading_config = _forked_config(run, tmp_path_factory.mktemp("wh-load"))
+    run.loading_config = forked_config(run, tmp_path_factory.mktemp("wh-load"))
     run.step(
         "select a stale load",
         lambda: weaver.load(
@@ -285,31 +288,6 @@ def journey(
 
 
 # --- driving it ---------------------------------------------------------------
-
-
-def _forked_config(run, directory):
-    """A workspace configuration naming the fork and the catalogue it mirrors.
-
-    ``mirror:`` reaches a Workspace from configuration alone, and it is what
-    tells health where a mirrored object's load state is recorded.
-    """
-
-    path = directory / "workspace-config.yml"
-    path.write_text(
-        "\n".join(
-            (
-                f"workspace: {run.workspace.workspace}",
-                f"catalogue: Warehouse/{run.catalogue_name}",
-                f"mirror: Warehouse/{run.source_catalogue_name}",
-            )
-        ),
-        encoding="utf-8",
-    )
-    return path
-
-
-def _sql(session, workspace, name: str):
-    return session.sql_executor(WarehouseTarget(ItemRef(name)), workspace=workspace)
 
 
 def _write(estate, relative: str, text: str) -> None:

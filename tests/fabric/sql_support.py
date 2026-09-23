@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from weaver.sql import SqlExecutor
+from weaver.targets import ItemRef, WarehouseTarget
 
 
 @dataclass(frozen=True, order=True)
@@ -23,6 +24,12 @@ class CatalogObject:
 #: keyed by it, its bookmark row carries the Registry's four-part identity, so
 #: a test names it rather than leaving it to a default.
 PROCEDURE_ITEM = ("Warehouse", "Reporting")
+
+
+def warehouse_sql(session, workspace, name: str) -> SqlExecutor:
+    """The session's SQL executor for the Warehouse called ``name``."""
+
+    return session.sql_executor(WarehouseTarget(ItemRef(name)), workspace=workspace)
 
 
 def entry_point_script(name: str) -> str:

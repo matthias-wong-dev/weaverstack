@@ -29,7 +29,7 @@ become two.
 from __future__ import annotations
 
 import pytest
-from support.thin import JUDGEMENTS, thin_estate
+from support.thin import JUDGEMENTS, report_node, thin_estate
 from support.weaver_test import weaver_test
 
 from weaver.operations.test import run_test
@@ -95,7 +95,7 @@ def test_every_declared_validation_is_reached(report):
 def test_a_validation_that_agrees_passes(report):
     """Both sides empty, so there is nothing missing and nothing unexpected."""
 
-    node = _node(report, "Agrees")
+    node = report_node(report, "Agrees")
 
     assert node.status == "passed"
     assert node.result.missing_count == 0
@@ -106,7 +106,7 @@ def test_a_validation_that_agrees_passes(report):
 def test_a_disagreement_is_a_failure_carrying_what_it_found(report):
     """Counted on both sides, because which side differs is what gets acted on."""
 
-    node = _node(report, "Disagrees")
+    node = report_node(report, "Disagrees")
 
     assert node.status == "failed"
     assert node.result.missing_count == 1
@@ -122,7 +122,7 @@ def test_a_validation_that_could_not_run_is_invalid_rather_than_failed(report):
     passed wrong in the other, so it is neither.
     """
 
-    node = _node(report, "Unreadable")
+    node = report_node(report, "Unreadable")
 
     assert node.status == "invalid"
     assert node.status != "failed"
@@ -132,14 +132,5 @@ def test_a_validation_that_could_not_run_is_invalid_rather_than_failed(report):
 def test_one_unreadable_validation_does_not_invalidate_the_others(report):
     """Each node is settled on its own evidence."""
 
-    assert _node(report, "Agrees").status == "passed"
-    assert _node(report, "Disagrees").status == "failed"
-
-
-def _node(report, outcome: str):
-    for node in report.nodes:
-        if node.logical_id.endswith(f".{outcome}"):
-            return node
-    raise AssertionError(
-        f"{outcome} is not in {[node.logical_id for node in report.nodes]}"
-    )
+    assert report_node(report, "Agrees").status == "passed"
+    assert report_node(report, "Disagrees").status == "failed"
