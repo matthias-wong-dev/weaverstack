@@ -36,9 +36,6 @@ from weaver.lakehouse import Lakehouse
 from weaver.objects import Folder, Table
 from weaver.spark import FabricSparkTarget
 
-#: What the clear submits, as the Delta runtime spells it.
-CLEAR = "DELETE FROM `Demo`.`Sales_LH`.`DWG`.`Customer`"
-
 
 class _Spark:
     """A session that records statements and models one thing: the target's rows.

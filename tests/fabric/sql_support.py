@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from weaver.sql import SqlExecutor
+from weaver.targets import ItemRef, WarehouseTarget
 
 
 @dataclass(frozen=True, order=True)
@@ -23,6 +24,12 @@ class CatalogObject:
 #: keyed by it, its bookmark row carries the Registry's four-part identity, so
 #: a test names it rather than leaving it to a default.
 PROCEDURE_ITEM = ("Warehouse", "Reporting")
+
+
+def warehouse_sql(session, workspace, name: str) -> SqlExecutor:
+    """The session's SQL executor for the Warehouse called ``name``."""
+
+    return session.sql_executor(WarehouseTarget(ItemRef(name)), workspace=workspace)
 
 
 def entry_point_script(name: str) -> str:
@@ -106,6 +113,57 @@ def forget_installations(executor: SqlExecutor) -> None:
     executor.execute_script(
         "delete from [_].[Installation] where [Target name] = db_name();"
     )
+
+
+def prepare_hand_installed(
+    executor: SqlExecutor, schema: str, catalogue: str, *, record: bool = True
+) -> None:
+    """Give this Warehouse what a build would before objects are installed by hand.
+
+    ``record`` writes the Installation row the entry points resolve through.
+    """
+
+    executor.execute_script(
+        f"if schema_id(N'{schema}') is null exec('create schema [{schema}]');"
+    )
+    install_runtime_references(executor, catalogue)
+    if record:
+        record_installation(executor)
+
+
+#: The working tables a Warehouse load creates beside its target.
+WORKING_TABLES = ("_Reject", "_Upsert", "_Delete", "_Staging")
+
+
+def drop_tables(schema: str, name: str, suffixes) -> list[str]:
+    """Statements dropping ``name`` plus each suffix, where the table exists."""
+
+    return [
+        f"if object_id(N'{schema}.{name}{suffix}', N'U') is not null "
+        f"drop table [{schema}].[{name}{suffix}];"
+        for suffix in suffixes
+    ]
+
+
+def drop_load_script(schema: str, name: str, *, also=()) -> str:
+    """Drop an object's load procedure, working tables, the object, then ``also``."""
+
+    return "\n".join(
+        [
+            f"drop procedure if exists [_].[Load {schema}.{name}];",
+            *drop_tables(schema, name, (*WORKING_TABLES, "", *also)),
+        ]
+    )
+
+
+def literal(value) -> str:
+    """A T-SQL literal for a test value."""
+
+    if value is None:
+        return "null"
+    if isinstance(value, int):
+        return str(value)
+    return "'" + str(value).replace("'", "''") + "'"
 
 
 def forget_runtime_state(schema: str, name: str) -> str:

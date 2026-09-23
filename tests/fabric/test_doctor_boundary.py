@@ -2,11 +2,13 @@
 
 import json
 
+import pytest
 from support.weaver_test import weaver_test
 
 from weaver.operations.doctor import doctor
 
 
+@pytest.mark.slow
 @weaver_test(remote=True, resources={"rest", "onelake", "tds", "livy"})
 def test_doctor_starts_environment_less_spark_and_probes_discovered_items(
     fabric_workspace, rest_session, exclusive_livy_slot, tmp_path, monkeypatch

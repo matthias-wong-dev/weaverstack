@@ -18,15 +18,14 @@ The second half reads the catalogue such a build leaves and asks what
 from __future__ import annotations
 
 import json
-from dataclasses import replace
 from pathlib import Path
 
 import pytest
 from factories import (
-    FixtureInventory,
+    built_catalogue,
     catalogue_inventory,
-    item_bindings,
     item_id,
+    plan_actions,
     schema_document,
     warehouse_table,
 )
@@ -34,36 +33,33 @@ from support.weaver_test import weaver_test
 from support.workspaces import WORKSPACE
 from test_health_representation import REPORTING, YESTERDAY, _Estate, at
 from test_load_stale_selection_boundary import stale_plan
+from warehouse_mirror import (
+    ITEM,
+    SOURCE_TARGET,
+    batch_statements,
+    mirror_bindings,
+    mirror_inventory,
+    mirror_object,
+    with_borrowed,
+)
 
 from weaver.build_bundle import WarehouseBinding, generate_item_build_bundle
-from weaver.build_bundle.catalogue_actions import (
-    DEREGISTER_MIRROR_SLUG,
-    desired_catalogue,
-)
-from weaver.build_bundle.planner import certifiable_identities
+from weaver.build_bundle.catalogue_actions import DEREGISTER_MIRROR_SLUG
 from weaver.catalogue.builtin import BUILTIN_ITEM
 from weaver.catalogue.state import Catalogue, reconcile_catalogue_state
 from weaver.catalogue.tables import (
     BOOKMARK,
     BOOKMARK_SENTINEL_TEXT,
     LOAD_STATUS,
-    MIRROR,
     PENDING,
-    PROJECTED_TABLES,
 )
 from weaver.declaration import parse_item_repository
-from weaver.declaration.metadata import ObjectId
-from weaver.declaration.model import WeaverDocumentId, WeaverItemId
+from weaver.declaration.model import WeaverItemId
 from weaver.health import assess_load
 from weaver.load_plan import load_dag
 from weaver.locations import Location
 from weaver.store import FilesystemStore
 from weaver.targets import ItemRef
-
-ITEM = "Warehouse/Model"
-#: The Warehouse the mirror was built in, and the one it borrows rows from.
-TARGET = "Model_Dev"
-SOURCE_TARGET = "Model"
 
 #: Borrowed to begin with: the changed root, its dependants, and an unrelated one.
 BORROWED = ("Aggregate", "Reference", "Report", "Source")
@@ -104,50 +100,6 @@ def _estate(root: Path, *, source: str = "select cast(1 as int) as SourceId"):
     return parse_item_repository(Location(str(root)))
 
 
-def _object(name: str) -> WeaverDocumentId:
-    return WeaverDocumentId(item_id(ITEM), ObjectId("Sales", name))
-
-
-def _bindings():
-    return item_bindings((ITEM, TARGET))
-
-
-def _installed(repository) -> Catalogue:
-    """The catalogue a successful build of this estate leaves behind."""
-
-    bindings = _bindings()
-    by_item = {binding.item: binding for binding in bindings.entries}
-    state = desired_catalogue(
-        repository,
-        certifiable_identities(repository, by_item),
-        {binding.item: binding.to_bound_target() for binding in bindings.entries},
-    )
-    return Catalogue(
-        rows=state.rows,
-        materialised=frozenset(table.name for table in PROJECTED_TABLES),
-    )
-
-
-def _borrowing(catalogue: Catalogue, *names: str) -> Catalogue:
-    item = item_id(ITEM)
-    rows = {each: dict(tables) for each, tables in catalogue.rows.items()}
-    rows[item][MIRROR.name] = tuple(
-        {
-            "item_type": item.item_type,
-            "item_name": item.item_name,
-            "schema_name": "Sales",
-            "object_name": name,
-            "source_workspace_name": WORKSPACE,
-            "source_target_name": SOURCE_TARGET,
-            "source_schema_name": "Sales",
-            "source_object_name": name,
-            "physical_type": "view",
-        }
-        for name in names
-    )
-    return Catalogue(rows=rows, materialised=catalogue.materialised | {MIRROR.name})
-
-
 def _settled(catalogue: Catalogue, *names: str) -> Catalogue:
     """The runtime state a mirror copies in: every object loaded and settled."""
 
@@ -156,34 +108,15 @@ def _settled(catalogue: Catalogue, *names: str) -> Catalogue:
     item = item_id(ITEM)
     rows = {each: dict(tables) for each, tables in catalogue.rows.items()}
     rows[item][LOAD_STATUS.name] = tuple(
-        load_status_row(_object(name), result="succeeded", completed_at=at(1))
+        load_status_row(mirror_object(name), result="succeeded", completed_at=at(1))
         for name in names
     )
     rows[item][BOOKMARK.name] = tuple(
-        bookmark_row_for(_object(name), at(1)) for name in names
+        bookmark_row_for(mirror_object(name), at(1)) for name in names
     )
     return Catalogue(
         rows=rows,
         materialised=catalogue.materialised | {LOAD_STATUS.name, BOOKMARK.name},
-    )
-
-
-def _inventory(repository, *, borrowed: tuple[str, ...] = BORROWED):
-    """The Warehouse as a mirror leaves it: a View at each borrowed address."""
-
-    bound = {b.item: b.to_bound_target() for b in _bindings().entries}
-    inventory = FixtureInventory.from_repository(
-        repository,
-        item=ITEM,
-        target_id=bound[item_id(ITEM)].id,
-        kind="warehouse",
-        target_name=TARGET,
-    )
-    names = {f"Sales.{name}" for name in borrowed}
-    return replace(
-        inventory,
-        tables=tuple(name for name in inventory.tables if name not in names),
-        views=tuple(sorted(set(inventory.views) | names)),
     )
 
 
@@ -195,7 +128,7 @@ def _build(repository, output: Path, *, catalogue, inventory):
     reconciliation = reconcile_catalogue_state(catalogue, inventories=inventories)
     return generate_item_build_bundle(
         repository,
-        bindings=_bindings(),
+        bindings=mirror_bindings(),
         output=Location(str(output)),
         store=FilesystemStore(),
         target_inventories=inventories,
@@ -216,18 +149,12 @@ def rebuilt(tmp_path):
     return _build(
         changed,
         tmp_path / "bundle",
-        catalogue=_settled(_borrowing(_installed(installed), *BORROWED), *BORROWED),
-        inventory=_inventory(installed),
+        catalogue=_settled(
+            with_borrowed(built_catalogue(installed, mirror_bindings()), *BORROWED),
+            *BORROWED,
+        ),
+        inventory=mirror_inventory(installed, borrowed=BORROWED),
     )
-
-
-def _actions(bundle):
-    return [action for _sequence, _batch, action in bundle.plan.actions()]
-
-
-def _statements(bundle, action) -> str:
-    content = FilesystemStore().read(bundle.location.join(*action.payload.split("/")))
-    return "\n".join(json.loads(content.decode("utf-8")))
 
 
 def _established(bundle, table) -> dict[str, dict]:
@@ -253,12 +180,12 @@ def test_a_changed_source_carries_its_borrowed_dependants_into_the_build(rebuilt
     descendants = {str(identity) for identity in selection.impact.impacted_descendants}
     selected = {str(identity) for identity in selection.selected_for_build}
 
-    assert str(_object("Source")) in changed
-    assert str(_object("Aggregate")) in descendants
-    assert str(_object("Report")) in descendants
-    assert str(_object("Aggregate")) in selected
-    assert str(_object("Report")) in selected
-    assert str(_object("Reference")) not in selected
+    assert str(mirror_object("Source")) in changed
+    assert str(mirror_object("Aggregate")) in descendants
+    assert str(mirror_object("Report")) in descendants
+    assert str(mirror_object("Aggregate")) in selected
+    assert str(mirror_object("Report")) in selected
+    assert str(mirror_object("Reference")) not in selected
 
 
 # --- runtime-state intent -----------------------------------------------------
@@ -289,7 +216,7 @@ def test_an_untouched_borrowed_object_keeps_the_state_it_borrows(rebuilt):
 def test_runtime_state_is_established_before_the_first_physical_action(rebuilt):
     """A failed build must not leave settled state over a dropped table."""
 
-    kinds = [action.kind for action in _actions(rebuilt)]
+    kinds = [action.kind for action in plan_actions(rebuilt)]
     physical = [
         position
         for position, kind in enumerate(kinds)
@@ -330,7 +257,7 @@ def test_only_the_objects_this_build_materialises_stop_being_borrowed(rebuilt):
     ((_number, _batch, action),) = [
         each for each in rebuilt.plan.actions() if each[2].id == DEREGISTER_MIRROR_SLUG
     ]
-    statements = _statements(rebuilt, action)
+    statements = batch_statements(rebuilt, action)
 
     assert "N'Source'" in statements
     assert "N'Aggregate'" in statements
@@ -340,8 +267,8 @@ def test_only_the_objects_this_build_materialises_stop_being_borrowed(rebuilt):
 
 @weaver_test()
 def test_the_mirror_row_goes_only_after_the_local_table_is_built(rebuilt):
-    ordered = [action.id for action in _actions(rebuilt)]
-    kinds = {action.id: action.kind for action in _actions(rebuilt)}
+    ordered = [action.id for action in plan_actions(rebuilt)]
+    kinds = {action.id: action.kind for action in plan_actions(rebuilt)}
 
     at_deregistration = ordered.index(DEREGISTER_MIRROR_SLUG)
     built = [

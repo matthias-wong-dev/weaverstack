@@ -512,6 +512,25 @@ def test_weaver_catalogue_is_a_generated_builtin_item(tmp_path):
 
 
 @weaver_test()
+def test_every_parse_composes_the_same_unchanged_builtin_catalogue(tmp_path):
+    """The built-in item is parsed once per process and shared by every parse."""
+
+    from weaver.declaration.repository import _catalogue_part
+
+    shared = _catalogue_part()
+    held = dict(shared.documents)
+
+    first = parse_item_repository(Location(str(_estate(tmp_path / "first"))))
+    second = parse_item_repository(Location(str(_estate(tmp_path / "second"))))
+
+    assert _catalogue_part() is shared
+    assert shared.documents == held
+    assert {identity: first.source_documents[identity] for identity in held} == {
+        identity: second.source_documents[identity] for identity in held
+    }
+
+
+@weaver_test()
 def test_generated_weaver_item_is_composed_without_mutating_authored_tree(tmp_path):
     root = _estate(tmp_path)
     location = Location(str(root))
