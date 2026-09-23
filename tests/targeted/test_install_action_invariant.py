@@ -50,9 +50,9 @@ UNCOVERED = {
 #: Kinds that change a target, and a Fabric test that runs and inspects each.
 #: ``drop_table`` is proved on the Lakehouse side only.
 COVERED = {
-    "create_schema": ("test_create_schema_action_creates_the_schema_in_the_warehouse",),
-    "build_table": ("test_build_table_action_is_accepted_by_fabric",),
-    "build_view": ("test_build_view_action_creates_a_view_over_the_table_it_reads",),
+    "create_schema": ("test_a_built_warehouse_reads_back_as_the_fixture_predicts",),
+    "build_table": ("test_a_built_table_uses_the_declared_types",),
+    "build_view": ("test_a_built_warehouse_reads_back_as_the_fixture_predicts",),
     "create_shortcut": (
         "test_the_shortcut_exists_as_a_onelake_shortcut",
         "test_a_warehouse_shortcut_is_a_view_over_the_bound_lakehouse",
@@ -66,7 +66,7 @@ COVERED = {
     ),
     "write_file": ("test_a_build_here_rewrites_this_items_runtime_module_alone",),
     "build_procedure": (
-        "test_a_generated_load_reads_the_catalogue_through_a_consumer_warehouse_view",
+        "test_the_source_load_runs_and_settles_what_the_mirror_will_carry",
     ),
     "drop_table": ("test_a_declaration_change_rebuilds_exactly_what_it_must",),
     "drop_view": ("test_the_changed_object_becomes_a_local_table",),
