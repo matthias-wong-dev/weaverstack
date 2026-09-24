@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import pytest
 from support.weaver_test import weaver_test
-
-from tools.benchmark_wide_estate import (
+from support.wide_estate_benchmark import (
     WideEstateSpec,
     benchmark_estate,
     descendants,
