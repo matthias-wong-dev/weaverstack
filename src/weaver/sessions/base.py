@@ -291,6 +291,22 @@ class Session(ABC):
         """
 
     @abstractmethod
+    def execute_spark_sql_actions(
+        self,
+        actions: Sequence[tuple[str, str]],
+        *,
+        exact_case: bool = False,
+        workspace: Workspace | None = None,
+        timeout: float | None = None,
+    ) -> list[dict[str, Any]]:
+        """Run labelled statements serially and return one outcome per label.
+
+        A statement failure is an outcome, not a reason to skip later statements.
+        Transport or program failures still raise because no complete outcome set
+        exists.
+        """
+
+    @abstractmethod
     def execute_spark_sql_batch(
         self,
         statements: Sequence[str],
@@ -751,6 +767,32 @@ def run_spark_statements(spark: Any, statements: Sequence[str]) -> list[dict]:
     return [row.asDict() for row in spark.sql(statements[-1]).collect()]
 
 
+def run_labelled_spark_statements(
+    spark: Any, actions: Sequence[tuple[str, str]]
+) -> list[dict[str, Any]]:
+    """Run every labelled statement and retain each success or failure."""
+
+    origin = time.monotonic()
+    outcomes: list[dict[str, Any]] = []
+    for label, statement in actions:
+        started = time.monotonic()
+        try:
+            spark.sql(statement)
+        except Exception as error:  # each action keeps its own failure evidence
+            outcome = {
+                "label": label,
+                "succeeded": False,
+                "error_type": type(error).__name__,
+                "error_message": str(error),
+            }
+        else:
+            outcome = {"label": label, "succeeded": True}
+        outcome["started_after_seconds"] = started - origin
+        outcome["duration_seconds"] = time.monotonic() - started
+        outcomes.append(outcome)
+    return outcomes
+
+
 __all__ = [
     "ACROSS_BOUNDARY",
     "IN_SESSION",
@@ -761,6 +803,7 @@ __all__ = [
     "ReportingFrame",
     "Session",
     "WorkspaceScope",
+    "run_labelled_spark_statements",
     "run_spark_statements",
     "workspace_context",
 ]

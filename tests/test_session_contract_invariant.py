@@ -26,6 +26,7 @@ HOSTS = (ConsoleSession, NotebookSession, TestSession)
 CAPABILITIES = (
     "create_delta_table",
     "execute_python",
+    "execute_spark_sql_actions",
     "execute_spark_sql_batch",
     "execute_tsql",
     "query_tsql",

@@ -23,6 +23,7 @@ from support.weaver_test import weaver_test
 
 from weaver.sessions.console import ConsoleScope, ConsoleSession
 from weaver.sessions.notebook import NotebookSession
+from weaver.sessions.testing import TestSession
 from weaver.workspaces import Workspace
 
 CASE_KEY = "spark.sql.caseSensitive"
@@ -167,6 +168,78 @@ def test_one_statement_is_one_submission_too(desktop):
     session.execute_spark_sql("SELECT 1")
 
     assert len(livy.submitted) == 1
+
+
+@weaver_test()
+def test_labelled_actions_that_cross_share_one_submission(desktop):
+    outcomes = [
+        {
+            "label": "first",
+            "succeeded": True,
+            "started_after_seconds": 0.0,
+            "duration_seconds": 0.01,
+        },
+        {
+            "label": "second",
+            "succeeded": True,
+            "started_after_seconds": 0.01,
+            "duration_seconds": 0.02,
+        },
+    ]
+    session, livy = desktop(payload=outcomes)
+
+    answered = session.execute_spark_sql_actions(
+        [("first", "CREATE VIEW first AS SELECT 1"), ("second", "DROP VIEW second")],
+        exact_case=True,
+    )
+
+    assert answered == outcomes
+    assert len(livy.submitted) == 1
+    submitted = livy.submitted[0]
+    assert "('first', 'CREATE VIEW first AS SELECT 1')" in submitted
+    assert "('second', 'DROP VIEW second')" in submitted
+    assert "except Exception as _error" in submitted
+    assert "_exact = True" in submitted
+
+
+@weaver_test()
+def test_labelled_actions_report_each_failure_without_stopping_siblings(notebook):
+    class _OneFailure(_Spark):
+        def sql(self, statement):
+            result = super().sql(statement)
+            if statement == "BROKEN":
+                raise RuntimeError("analysis failed")
+            return result
+
+    spark = _OneFailure()
+    session = notebook(spark)
+
+    outcomes = session.execute_spark_sql_actions(
+        [("before", "SELECT 1"), ("broken", "BROKEN"), ("after", "SELECT 2")],
+        exact_case=True,
+    )
+
+    assert spark.statements == ["SELECT 1", "BROKEN", "SELECT 2"]
+    assert [outcome["label"] for outcome in outcomes] == [
+        "before",
+        "broken",
+        "after",
+    ]
+    assert [outcome["succeeded"] for outcome in outcomes] == [True, False, True]
+    assert outcomes[1]["error_type"] == "RuntimeError"
+    assert outcomes[1]["error_message"] == "analysis failed"
+    assert all(outcome["started_after_seconds"] >= 0 for outcome in outcomes)
+    assert all(outcome["duration_seconds"] >= 0 for outcome in outcomes)
+    assert spark.conf.values[CASE_KEY] == "false"
+
+
+@weaver_test()
+def test_test_session_exposes_labelled_action_statements_as_spark_sql():
+    session = TestSession(workspace=Workspace(workspace="Weaver"))
+
+    session.execute_spark_sql_actions([("first", "SELECT 1"), ("second", "SELECT 2")])
+
+    assert session.spark_sql == ("SELECT 1", "SELECT 2")
 
 
 @weaver_test()

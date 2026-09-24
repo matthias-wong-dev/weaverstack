@@ -11,7 +11,7 @@ resources; it does not decide where a frozen bundle installs.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Mapping
 
 from ..errors import InstallError
@@ -25,6 +25,7 @@ from .executors.base import (
     ResolvedTarget,
     SkippedExecution,
 )
+from .executors.spark_sql import SparkSqlExecutor
 from .models import BuildBatch, BuildSequence, InstallAction
 from .report import (
     FAILED,
@@ -136,6 +137,19 @@ class Installer:
         def run(statements, *, exact_case: bool = False):
             return session.execute_spark_sql_batch(
                 statements, exact_case=exact_case, workspace=workspace
+            )
+
+        return run
+
+    def spark_sql_actions(self):
+        """Run labelled Spark actions in one Session-owned submission."""
+
+        session = self.session
+        workspace = self.workspace
+
+        def run(actions, *, exact_case: bool = False):
+            return session.execute_spark_sql_actions(
+                actions, exact_case=exact_case, workspace=workspace
             )
 
         return run
@@ -294,10 +308,149 @@ def _run_batch(
 ) -> list[ActionResult]:
     """Run a batch serially in stable manifest order."""
 
-    return [
-        _run_action(action, batch, context, bundle, installer)
-        for action in batch.actions
-    ]
+    results: list[ActionResult] = []
+    spark_actions: list[InstallAction] = []
+    spark_executor = installer.executors.get("spark_sql")
+    can_batch_spark = isinstance(spark_executor, SparkSqlExecutor)
+
+    def flush_spark() -> None:
+        if not spark_actions:
+            return
+        if len(spark_actions) == 1 or not can_batch_spark:
+            results.extend(
+                _run_action(action, batch, context, bundle, installer)
+                for action in spark_actions
+            )
+        else:
+            assert isinstance(spark_executor, SparkSqlExecutor)
+            results.extend(
+                _run_spark_actions(
+                    tuple(spark_actions),
+                    batch,
+                    context,
+                    bundle,
+                    installer,
+                    spark_executor,
+                )
+            )
+        spark_actions.clear()
+
+    for action in batch.actions:
+        if action.executor == "spark_sql":
+            spark_actions.append(action)
+            continue
+        flush_spark()
+        results.append(_run_action(action, batch, context, bundle, installer))
+    flush_spark()
+    return results
+
+
+def _run_spark_actions(
+    actions: tuple[InstallAction, ...],
+    batch: BuildBatch,
+    context: InstallationContext,
+    bundle: BuildBundle,
+    installer: "Installer",
+    executor: SparkSqlExecutor,
+) -> list[ActionResult]:
+    """Run consecutive Spark SQL actions through one labelled submission."""
+
+    store = bundle.store or installer.store
+    prepared: list[tuple[InstallAction, str]] = []
+    results: dict[str, ActionResult] = {}
+    for action in actions:
+        started = _now()
+        try:
+            payload = (
+                None
+                if action.payload is None
+                else store.read(bundle.location.join(*action.payload.split("/")))
+            )
+            statement = executor.statement(action, payload)
+        except Exception as exc:
+            results[action.id] = _failed(action, batch.target_id, started, exc)
+        else:
+            prepared.append((action, statement))
+
+    if prepared:
+        submitted_at = _now()
+        try:
+            outcomes = installer.spark_sql_actions()(
+                [(action.id, statement) for action, statement in prepared],
+                exact_case=True,
+            )
+            indexed = _validated_spark_outcomes(outcomes, prepared)
+        except Exception as exc:
+            for action, _statement in prepared:
+                results[action.id] = _failed(action, batch.target_id, submitted_at, exc)
+        else:
+            for action, statement in prepared:
+                outcome = indexed[action.id]
+                started = submitted_at + timedelta(
+                    seconds=outcome["started_after_seconds"]
+                )
+                finished = started + timedelta(seconds=outcome["duration_seconds"])
+                if outcome["succeeded"]:
+                    results[action.id] = ActionResult(
+                        action_id=action.id,
+                        resource_node_id=action.resource_node_id,
+                        source_path=action.source_path,
+                        target_id=batch.target_id,
+                        executor=action.executor,
+                        status=SUCCEEDED,
+                        started_at=started,
+                        finished_at=finished,
+                        duration_seconds=outcome["duration_seconds"],
+                        details=executor.details(statement, context),
+                    )
+                else:
+                    results[action.id] = ActionResult(
+                        action_id=action.id,
+                        resource_node_id=action.resource_node_id,
+                        source_path=action.source_path,
+                        target_id=batch.target_id,
+                        executor=action.executor,
+                        status=FAILED,
+                        started_at=started,
+                        finished_at=finished,
+                        duration_seconds=outcome["duration_seconds"],
+                        error_type=outcome["error_type"],
+                        error_message=outcome["error_message"],
+                    )
+
+    return [results[action.id] for action in actions]
+
+
+def _validated_spark_outcomes(outcomes, prepared) -> dict[str, dict]:
+    expected = [action.id for action, _statement in prepared]
+    if not isinstance(outcomes, list) or len(outcomes) != len(expected):
+        raise InstallError("labelled Spark action results are incomplete")
+    indexed: dict[str, dict] = {}
+    for expected_label, outcome in zip(expected, outcomes, strict=True):
+        if not isinstance(outcome, dict) or outcome.get("label") != expected_label:
+            raise InstallError("labelled Spark action results are out of order")
+        succeeded = outcome.get("succeeded")
+        started = outcome.get("started_after_seconds")
+        duration = outcome.get("duration_seconds")
+        if (
+            not isinstance(succeeded, bool)
+            or not isinstance(started, (int, float))
+            or not isinstance(duration, (int, float))
+            or started < 0
+            or duration < 0
+        ):
+            raise InstallError(
+                f"labelled Spark action {expected_label!r} returned an invalid outcome"
+            )
+        if not succeeded and (
+            not isinstance(outcome.get("error_type"), str)
+            or not isinstance(outcome.get("error_message"), str)
+        ):
+            raise InstallError(
+                f"labelled Spark action {expected_label!r} returned no error"
+            )
+        indexed[expected_label] = outcome
+    return indexed
 
 
 def _run_sequence(
