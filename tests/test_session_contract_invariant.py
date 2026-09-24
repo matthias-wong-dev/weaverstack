@@ -10,6 +10,7 @@ did not catch it.
 from __future__ import annotations
 
 import inspect
+from typing import Any, cast
 
 import pytest
 from support.weaver_test import weaver_test
@@ -117,3 +118,26 @@ def test_the_test_host_records_the_delta_table_specification():
         "identity_column": "Customer key",
         "column_mapping": True,
     }
+
+
+@weaver_test()
+def test_a_legacy_session_can_inherit_the_labelled_action_fallback():
+    class LegacySession:
+        def __init__(self):
+            self.statements = []
+
+        def execute_spark_sql(self, statement, **_kwargs):
+            self.statements.append(statement)
+            if statement == "BROKEN":
+                raise RuntimeError("bad statement")
+
+    legacy = LegacySession()
+
+    outcomes = Session.execute_spark_sql_actions(
+        cast(Any, legacy),
+        [("before", "SELECT 1"), ("broken", "BROKEN"), ("after", "SELECT 2")],
+    )
+
+    assert legacy.statements == ["SELECT 1", "BROKEN", "SELECT 2"]
+    assert [outcome["succeeded"] for outcome in outcomes] == [True, False, True]
+    assert outcomes[1]["error_type"] == "RuntimeError"

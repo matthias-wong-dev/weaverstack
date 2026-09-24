@@ -84,6 +84,7 @@ class _Livy:
 
     def __init__(self, payload=None):
         self.submitted: list[str] = []
+        self.kwargs: list[dict] = []
         self._payload = [] if payload is None else payload
 
     def run(self, code, **kwargs):
@@ -92,6 +93,7 @@ class _Livy:
 
             return SimpleNamespace(returned=True, payload=__version__)
         self.submitted.append(code)
+        self.kwargs.append(kwargs)
         return SimpleNamespace(returned=True, payload=self._payload)
 
     def start(self):
@@ -200,6 +202,41 @@ def test_labelled_actions_that_cross_share_one_submission(desktop):
     assert "('second', 'DROP VIEW second')" in submitted
     assert "except Exception as _error" in submitted
     assert "_exact = True" in submitted
+
+
+@weaver_test()
+def test_a_labelled_submission_disables_transport_retries(desktop):
+    session, livy = desktop([])
+
+    session.execute_spark_sql_actions([("a1", "SELECT 1"), ("a2", "SELECT 2")])
+
+    assert livy.kwargs == [{"retry_submission": False}]
+
+
+@weaver_test()
+def test_the_desktop_program_runs_siblings_and_restores_exact_case(desktop):
+    session, livy = desktop([])
+    session.execute_spark_sql_actions(
+        [("before", "SELECT 1"), ("broken", "BROKEN"), ("after", "SELECT 2")],
+        exact_case=True,
+    )
+    emitted = []
+
+    class OneFailure(_Spark):
+        def sql(self, statement):
+            result = super().sql(statement)
+            if statement == "BROKEN":
+                raise RuntimeError("analysis failed")
+            return result
+
+    spark = OneFailure()
+    exec(livy.submitted[0], {"spark": spark, "emit": emitted.append})
+
+    assert spark.statements == ["SELECT 1", "BROKEN", "SELECT 2"]
+    assert [outcome["succeeded"] for outcome in emitted[0]] == [True, False, True]
+    assert emitted[0][1]["error_type"] == "RuntimeError"
+    assert emitted[0][1]["error_message"] == "analysis failed"
+    assert spark.conf.values[CASE_KEY] == "false"
 
 
 @weaver_test()

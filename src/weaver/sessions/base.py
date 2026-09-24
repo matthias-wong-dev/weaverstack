@@ -290,7 +290,6 @@ class Session(ABC):
         returns the result. A NotebookSession calls the in-process form directly.
         """
 
-    @abstractmethod
     def execute_spark_sql_actions(
         self,
         actions: Sequence[tuple[str, str]],
@@ -305,6 +304,31 @@ class Session(ABC):
         Transport or program failures still raise because no complete outcome set
         exists.
         """
+
+        origin = time.monotonic()
+        outcomes: list[dict[str, Any]] = []
+        for label, statement in actions:
+            started = time.monotonic()
+            try:
+                self.execute_spark_sql(
+                    statement,
+                    exact_case=exact_case,
+                    workspace=workspace,
+                    timeout=timeout,
+                )
+            except Exception as error:
+                outcome = {
+                    "label": label,
+                    "succeeded": False,
+                    "error_type": type(error).__name__,
+                    "error_message": str(error),
+                }
+            else:
+                outcome = {"label": label, "succeeded": True}
+            outcome["started_after_seconds"] = started - origin
+            outcome["duration_seconds"] = time.monotonic() - started
+            outcomes.append(outcome)
+        return outcomes
 
     @abstractmethod
     def execute_spark_sql_batch(

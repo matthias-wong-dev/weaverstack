@@ -477,7 +477,11 @@ class ConsoleSession(Session):
         )
         livy = self._foreground_livy(scope)
         return scope.livy_run(
-            source, name="spark_sql_actions", timeout=timeout, livy=livy
+            source,
+            name="spark_sql_actions",
+            timeout=timeout,
+            livy=livy,
+            retry_submission=False,
         )
 
     def _foreground_livy(self, scope: "ConsoleScope"):
@@ -763,6 +767,7 @@ class ConsoleScope(WorkspaceScope):
         name: str,
         timeout: float | None = None,
         livy=None,
+        retry_submission: bool = True,
     ):
         """Submit one statement to this scope's Livy session and return its payload.
 
@@ -780,6 +785,8 @@ class ConsoleScope(WorkspaceScope):
             livy = self.livy.get()
         with self.telemetry.external("livy", name):
             kwargs = {} if timeout is None else {"timeout": timeout}
+            if not retry_submission:
+                kwargs["retry_submission"] = False
             try:
                 result = livy.run(source, **kwargs)
             except LivyStatementError as exc:

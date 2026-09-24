@@ -6,10 +6,12 @@ returned value is told from printed output, verified without a workspace.
 
 from __future__ import annotations
 
+import pytest
 from support.weaver_test import weaver_test
 
 from weaver.fabric.livy import (
     RESULT_PREFIX,
+    LivyError,
     LivySessionInfo,
     StatementResult,
     _payload,
@@ -49,6 +51,38 @@ def test_the_last_returned_value_wins():
 @weaver_test()
 def test_malformed_json_is_not_a_result():
     assert _payload(f"{RESULT_PREFIX}not json\n") is None
+
+
+@weaver_test()
+def test_a_non_retryable_statement_submission_is_posted_once(monkeypatch):
+    from weaver.fabric import livy
+
+    class Refused:
+        status_code = 503
+        content = b"unavailable"
+        headers = {}
+        text = "unavailable"
+
+        @staticmethod
+        def json():
+            raise ValueError("not json")
+
+    calls = []
+
+    def send(method, url, **kwargs):
+        calls.append((method, url))
+        return Refused()
+
+    monkeypatch.setattr(livy, "send", send)
+    session = livy.LivySession("ws", "lh", token="t", poll_interval=0)
+    session.session_url = f"{session.base}/7"
+
+    with pytest.raises(LivyError, match="503"):
+        session.run("print('once')", retry_submission=False)
+
+    assert [call for call in calls if call[0] == "POST"] == [
+        ("POST", f"{session.session_url}/statements")
+    ]
 
 
 class _CollectionClient:
