@@ -2,10 +2,18 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
+from functools import lru_cache
+from typing import Any
 
 import sqlparse
 from sqlparse import tokens as T
+from sqlparse.sql import Statement
+
+SQL_PARSE_CACHE_SIZE = 4096
+_SQL_PARSE_CACHE: ContextVar[Any] = ContextVar("weaver_sql_parse_cache", default=None)
 
 
 @dataclass(frozen=True)
@@ -42,6 +50,31 @@ class SqlStatement:
         """
 
         return first_keyword(self.text)
+
+
+def parse_sql(sql_text: str) -> tuple[Statement, ...]:
+    """Parse SQL, reusing a read-only token tree inside a declared scope."""
+
+    cache = _SQL_PARSE_CACHE.get()
+    if cache is None:
+        return tuple(sqlparse.parse(sql_text))
+    return cache(sql_text)
+
+
+@contextmanager
+def sql_parse_cache():
+    """Bound parsed token-tree reuse to one repository read."""
+
+    @lru_cache(maxsize=SQL_PARSE_CACHE_SIZE)
+    def cache(sql_text: str) -> tuple[Statement, ...]:
+        return tuple(sqlparse.parse(sql_text))
+
+    token = _SQL_PARSE_CACHE.set(cache)
+    try:
+        yield cache
+    finally:
+        cache.cache_clear()
+        _SQL_PARSE_CACHE.reset(token)
 
 
 def parse_statements(sql_text: str) -> tuple[SqlStatement, ...]:
@@ -114,7 +147,7 @@ def flatten_with_offsets(sql_text: str) -> list[SqlToken]:
     offset = 0
     depth = 0
 
-    for statement in sqlparse.parse(sql_text):
+    for statement in parse_sql(sql_text):
         for token in statement.flatten():
             value = token.value
             token_depth = depth
@@ -177,7 +210,9 @@ __all__ = [
     "first_keyword",
     "flatten_with_offsets",
     "is_only_trivia",
+    "parse_sql",
     "parse_statements",
+    "sql_parse_cache",
     "split_statements",
     "strip_terminator",
     "unterminated",

@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 from ..errors import DiscoveryError, MetadataError
 from ..objects import BASE_CLASS_NAMES, BASE_CLASSES
 from ..signatures import implementation_signature
+from ..sql_statements import parse_sql
 from .dependencies import (
     PythonImport,
     RelationReference,
@@ -726,14 +727,13 @@ def analyse_sql(body: str) -> SqlAnalysis:
     not decide whether Weaver can build it.
     """
 
-    import sqlparse
     from sqlparse.engine import grouping
 
     grouping.MAX_GROUPING_TOKENS = None
 
     statements = [
         statement
-        for statement in sqlparse.parse(body)
+        for statement in parse_sql(body)
         if str(statement).strip() and not _is_only_comments(statement)
     ]
 
