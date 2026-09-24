@@ -10,9 +10,17 @@ Every case here is one a naive ``str.split(";")`` gets wrong.
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
+
 import pytest
+import sqlparse
 from support.weaver_test import weaver_test
 
+import weaver.sql_statements as sql_statements
+from weaver.declaration.dependencies import locate_sql_references
+from weaver.declaration.source import analyse_sql
+from weaver.declaration.sql_shaping import query_spans
 from weaver.sql_statements import (
     first_keyword,
     is_only_trivia,
@@ -170,6 +178,113 @@ def test_a_statement_carries_its_own_leading_keyword():
     )
 
     assert (setup.keyword, query.keyword) == ("CREATE", "WITH")
+
+
+@weaver_test()
+def test_sql_consumers_reuse_one_parse_for_identical_text(monkeypatch):
+    body = "select p.Id from [ParseCacheProbe].[Parent] as p where p.Active = 1"
+    original = sqlparse.parse
+    parsed = []
+
+    def counting_parse(sql, *args, **kwargs):
+        parsed.append(sql)
+        return original(sql, *args, **kwargs)
+
+    monkeypatch.setattr(sqlparse, "parse", counting_parse)
+
+    with sql_statements.sql_parse_cache():
+        assert analyse_sql(body).statement_count == 1
+        assert locate_sql_references(body)
+        assert query_spans(body)
+    assert parsed.count(body) == 1
+
+
+@weaver_test()
+def test_a_parse_scope_releases_its_cached_token_trees():
+    with sql_statements.sql_parse_cache() as cache:
+        sql_statements.parse_sql("select 'parse-scope-contract'")
+        assert cache.cache_info().currsize == 1
+        assert cache.cache_info().maxsize == sql_statements.SQL_PARSE_CACHE_SIZE
+
+    assert cache.cache_info().currsize == 0
+
+
+@weaver_test()
+def test_sql_text_is_not_cached_outside_a_parse_scope(monkeypatch):
+    body = "select 'outside-parse-scope-contract'"
+    original = sqlparse.parse
+    parsed = []
+
+    def counting_parse(sql, *args, **kwargs):
+        parsed.append(sql)
+        return original(sql, *args, **kwargs)
+
+    monkeypatch.setattr(sqlparse, "parse", counting_parse)
+
+    sql_statements.parse_sql(body)
+    sql_statements.parse_sql(body)
+
+    assert parsed.count(body) == 2
+
+
+@weaver_test()
+def test_nested_parse_scopes_keep_their_own_entries(monkeypatch):
+    body = "select 'nested-parse-scope-contract'"
+    original = sqlparse.parse
+    parsed = []
+
+    def counting_parse(sql, *args, **kwargs):
+        parsed.append(sql)
+        return original(sql, *args, **kwargs)
+
+    monkeypatch.setattr(sqlparse, "parse", counting_parse)
+
+    with sql_statements.sql_parse_cache():
+        sql_statements.parse_sql(body)
+        with sql_statements.sql_parse_cache():
+            sql_statements.parse_sql(body)
+            sql_statements.parse_sql(body)
+        sql_statements.parse_sql(body)
+
+    assert parsed.count(body) == 2
+
+
+@weaver_test()
+def test_concurrent_parse_scopes_do_not_share_entries(monkeypatch):
+    body = "select 'concurrent-parse-scope-contract'"
+    original = sqlparse.parse
+    parsed = []
+    barrier = Barrier(2)
+
+    def counting_parse(sql, *args, **kwargs):
+        parsed.append(sql)
+        return original(sql, *args, **kwargs)
+
+    def parse_twice_in_one_scope():
+        with sql_statements.sql_parse_cache():
+            barrier.wait()
+            sql_statements.parse_sql(body)
+            sql_statements.parse_sql(body)
+            barrier.wait()
+
+    monkeypatch.setattr(sqlparse, "parse", counting_parse)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [executor.submit(parse_twice_in_one_scope) for _ in range(2)]
+        for future in futures:
+            future.result()
+
+    assert parsed.count(body) == 2
+
+
+@weaver_test()
+def test_a_parse_scope_releases_entries_after_an_exception():
+    with pytest.raises(RuntimeError, match="scope failed"):
+        with sql_statements.sql_parse_cache() as cache:
+            sql_statements.parse_sql("select 'exception-parse-scope-contract'")
+            raise RuntimeError("scope failed")
+
+    assert cache.cache_info().currsize == 0
 
 
 # --- offsets ------------------------------------------------------------------

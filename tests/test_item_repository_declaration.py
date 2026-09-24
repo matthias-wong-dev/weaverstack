@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import sqlparse
 from support.weaver_test import weaver_test
 
 from weaver.catalogue.tables import (
@@ -14,6 +15,7 @@ from weaver.catalogue.tables import (
 )
 from weaver.declaration import parse_item_repository
 from weaver.declaration.model import WeaverDocumentId, WeaverItemId, WeaverSchemaId
+from weaver.declaration.source import analyse_sql
 from weaver.errors import DiscoveryError, MetadataError
 from weaver.locations import Location
 
@@ -878,3 +880,37 @@ def test_a_warehouse_has_no_areas(tmp_path):
 
     with pytest.raises(DiscoveryError, match="Tables/ belongs to a Lakehouse item"):
         parse_item_repository(Location(str(root)))
+
+
+@weaver_test()
+def test_a_repository_read_reuses_and_releases_its_sql_parse_cache(
+    tmp_path, monkeypatch
+):
+    root = tmp_path / "project"
+    _write(root, "Warehouse/Reporting/schemas/Sales.yml", _schema("Sales"))
+    _write(
+        root,
+        "Warehouse/Reporting/Sales.Customer.sql",
+        _warehouse_table("Sales.Customer"),
+    )
+    original = sqlparse.parse
+    parsed = []
+
+    def counting_parse(sql, *args, **kwargs):
+        parsed.append(sql)
+        return original(sql, *args, **kwargs)
+
+    monkeypatch.setattr(sqlparse, "parse", counting_parse)
+
+    repository = parse_item_repository(Location(str(root)))
+    authored_body = next(
+        source.sql_body
+        for identity, source in repository.source_documents.items()
+        if str(identity) == "Warehouse/Reporting/Sales.Customer"
+    )
+    assert parsed.count(authored_body) == 1
+
+    analyse_sql(authored_body)
+    analyse_sql(authored_body)
+
+    assert parsed.count(authored_body) == 3
