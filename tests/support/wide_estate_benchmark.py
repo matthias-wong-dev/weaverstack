@@ -15,6 +15,7 @@ from typing import Iterable
 GENERATOR_VERSION = 1
 NODES_PER_BRANCH = 25
 ITEM = "Lakehouse/Benchmark"
+WAREHOUSE_ITEM = "Warehouse/Benchmark"
 SCHEMA = "Scale"
 
 
@@ -24,18 +25,35 @@ class WideEstateSpec:
 
     branches: int = 10
     seed: int = 20260924
+    engine: str = "lakehouse"
 
     def __post_init__(self) -> None:
         if self.branches < 1:
             raise ValueError("branches must be positive")
+        if self.engine not in {"lakehouse", "warehouse"}:
+            raise ValueError("engine must be 'lakehouse' or 'warehouse'")
+
+    @property
+    def item(self) -> str:
+        return ITEM if self.engine == "lakehouse" else WAREHOUSE_ITEM
 
     @classmethod
-    def from_objects(cls, objects: int, *, seed: int = 20260924) -> "WideEstateSpec":
+    def from_objects(
+        cls,
+        objects: int,
+        *,
+        seed: int = 20260924,
+        engine: str = "lakehouse",
+    ) -> "WideEstateSpec":
         if objects < 2 * NODES_PER_BRANCH:
             raise ValueError("a benchmark needs at least 50 objects in two branches")
         if objects % NODES_PER_BRANCH:
             raise ValueError(f"objects must be divisible by {NODES_PER_BRANCH}")
-        return cls(branches=objects // NODES_PER_BRANCH, seed=seed)
+        return cls(
+            branches=objects // NODES_PER_BRANCH,
+            seed=seed,
+            engine=engine,
+        )
 
 
 @dataclass(frozen=True)
@@ -97,19 +115,26 @@ class EstateTopology:
         }
 
 
-def _identity(branch: int, role: str) -> str:
-    return f"{ITEM}/Tables/{SCHEMA}.B{branch:03d}{role}"
+def _identity(branch: int, role: str, *, item: str = ITEM) -> str:
+    area = "/Tables" if item.startswith("Lakehouse/") else ""
+    return f"{item}{area}/{SCHEMA}.B{branch:03d}{role}"
 
 
-def _node(branch: int, role: str, kind: str, *parents: str) -> EstateNode:
+def _node(
+    branch: int,
+    role: str,
+    kind: str,
+    *parents: str,
+    item: str = ITEM,
+) -> EstateNode:
     object_id = f"{SCHEMA}.B{branch:03d}{role}"
     return EstateNode(
-        identity=f"{ITEM}/Tables/{object_id}",
+        identity=_identity(branch, role, item=item),
         object_id=object_id,
         kind=kind,
         branch=branch,
         role=role,
-        dependencies=tuple(_identity(branch, parent) for parent in parents),
+        dependencies=tuple(_identity(branch, parent, item=item) for parent in parents),
     )
 
 
@@ -117,17 +142,21 @@ def make_topology(spec: WideEstateSpec) -> EstateTopology:
     """Build repeated 25-node motifs with no cross-branch edges."""
 
     nodes: list[EstateNode] = []
+
+    def node(branch: int, role: str, kind: str, *parents: str) -> EstateNode:
+        return _node(branch, role, kind, *parents, item=spec.item)
+
     for branch in range(spec.branches):
-        nodes.append(_node(branch, "Root", "table"))
+        nodes.append(node(branch, "Root", "table"))
 
         parent = "Root"
         for index in range(5):
             role = f"Chain{index:02d}"
-            nodes.append(_node(branch, role, "view", parent))
+            nodes.append(node(branch, role, "view", parent))
             parent = role
 
         for index in range(10):
-            nodes.append(_node(branch, f"Fan{index:02d}", "view", "Root"))
+            nodes.append(node(branch, f"Fan{index:02d}", "view", "Root"))
 
         base_groups = ((0, 1, 2), (3, 4, 5), (6, 7), (8, 9))
         offset = (spec.seed + branch) % 10
@@ -136,7 +165,7 @@ def make_topology(spec: WideEstateSpec) -> EstateTopology:
         )
         for index, group in enumerate(groups):
             nodes.append(
-                _node(
+                node(
                     branch,
                     f"Merge{index:02d}",
                     "view",
@@ -145,7 +174,7 @@ def make_topology(spec: WideEstateSpec) -> EstateTopology:
             )
 
         nodes.append(
-            _node(
+            node(
                 branch,
                 "Bridge",
                 "view",
@@ -154,7 +183,7 @@ def make_topology(spec: WideEstateSpec) -> EstateTopology:
             )
         )
         for index in range(4):
-            nodes.append(_node(branch, f"Leaf{index:02d}", "view", "Bridge"))
+            nodes.append(node(branch, f"Leaf{index:02d}", "view", "Bridge"))
 
     return EstateTopology(spec=spec, nodes=tuple(nodes))
 
@@ -203,6 +232,18 @@ class {class_name}(Table):
 '''
 
 
+def _warehouse_table_source(node: EstateNode) -> str:
+    return f"""\
+/*
+Table ID: {node.object_id}
+Description: A synthetic scale benchmark root.
+Lineage: Generated benchmark input.
+Primary key: EntityId
+*/
+select cast(1 as bigint) as EntityId
+"""
+
+
 def _view_source(node: EstateNode) -> str:
     dependencies = "\n".join(
         f"  - {dependency.rsplit('/', 1)[-1]}" for dependency in node.dependencies
@@ -225,20 +266,31 @@ def write_estate(root: Path, topology: EstateTopology) -> None:
     root = Path(root)
     if root.exists() and any(root.iterdir()):
         raise ValueError(f"estate directory is not empty: {root}")
-    schema_path = root / ITEM / "schemas" / f"{SCHEMA}.yml"
+    item_root = root / topology.spec.item
+    schema_path = item_root / "schemas" / f"{SCHEMA}.yml"
     schema_path.parent.mkdir(parents=True, exist_ok=True)
     schema_path.write_text(_schema_source(), encoding="utf-8")
-    tables = root / ITEM / "Tables"
-    tables.mkdir(parents=True, exist_ok=True)
+    objects = item_root / "Tables" if topology.spec.engine == "lakehouse" else item_root
+    objects.mkdir(parents=True, exist_ok=True)
     for node in topology.nodes:
-        suffix = ".py" if node.kind == "table" else ".sql"
+        suffix = (
+            ".py"
+            if node.kind == "table" and topology.spec.engine == "lakehouse"
+            else ".sql"
+        )
         filename = (
             node.object_id.replace(".", "__", 1)
-            if node.kind == "table"
+            if node.kind == "table" and topology.spec.engine == "lakehouse"
             else node.object_id
         )
-        source = _table_source(node) if node.kind == "table" else _view_source(node)
-        (tables / f"{filename}{suffix}").write_text(source, encoding="utf-8")
+        source = (
+            _table_source(node)
+            if node.kind == "table" and topology.spec.engine == "lakehouse"
+            else _warehouse_table_source(node)
+            if node.kind == "table"
+            else _view_source(node)
+        )
+        (objects / f"{filename}{suffix}").write_text(source, encoding="utf-8")
 
 
 def parse_generated_estate(root: Path):
@@ -328,12 +380,15 @@ def benchmark_estate(root: Path, spec: WideEstateSpec) -> dict:
     scenarios = (
         ("full_cold_build", (), True),
         ("unchanged_build", (), False),
-        ("leaf_change", (_identity(0, "Leaf00"),), False),
-        ("mid_graph_change", (_identity(0, "Chain02"),), False),
-        ("high_fan_out_change", (_identity(0, "Root"),), False),
+        ("leaf_change", (_identity(0, "Leaf00", item=spec.item),), False),
+        ("mid_graph_change", (_identity(0, "Chain02", item=spec.item),), False),
+        ("high_fan_out_change", (_identity(0, "Root", item=spec.item),), False),
         (
             "independent_branch_changes",
-            (_identity(0, "Leaf00"), _identity(1, "Root")),
+            (
+                _identity(0, "Leaf00", item=spec.item),
+                _identity(1, "Root", item=spec.item),
+            ),
             False,
         ),
     )
@@ -427,6 +482,7 @@ def benchmark_estate(root: Path, spec: WideEstateSpec) -> dict:
         "generator": {
             "version": GENERATOR_VERSION,
             "seed": spec.seed,
+            "engine": spec.engine,
             "nodes_per_branch": NODES_PER_BRANCH,
         },
         "topology": {**topology.statistics(), **topology.distributions()},
@@ -447,13 +503,20 @@ def _arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--objects", type=int, default=250)
     parser.add_argument("--seed", type=int, default=20260924)
+    parser.add_argument(
+        "--engine", choices=("lakehouse", "warehouse"), default="lakehouse"
+    )
     parser.add_argument("--estate-dir", type=Path)
     parser.add_argument("--output", type=Path)
     return parser.parse_args()
 
 
 def _run(arguments: argparse.Namespace) -> dict:
-    spec = WideEstateSpec.from_objects(arguments.objects, seed=arguments.seed)
+    spec = WideEstateSpec.from_objects(
+        arguments.objects,
+        seed=arguments.seed,
+        engine=arguments.engine,
+    )
     if arguments.estate_dir is not None:
         return benchmark_estate(arguments.estate_dir, spec)
     with tempfile.TemporaryDirectory(prefix="weaver-wide-estate-") as directory:

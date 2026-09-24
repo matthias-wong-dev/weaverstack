@@ -133,6 +133,42 @@ def test_required_scale_estates_compose(tmp_path, objects):
 
 
 @weaver_test()
+def test_a_warehouse_estate_uses_tsql_documents_and_warehouse_identities(tmp_path):
+    spec = WideEstateSpec.from_objects(50, engine="warehouse")
+    topology = make_topology(spec)
+
+    write_estate(tmp_path, topology)
+    repository = parse_generated_estate(tmp_path)
+
+    assert topology.identities[0] == "Warehouse/Benchmark/Scale.B000Root"
+    graph = repository.dependency_graph
+    assert graph is not None
+    assert set(topology.identities) <= set(graph.nodes)
+    assert (tmp_path / "Warehouse/Benchmark/Scale.B000Root.sql").is_file()
+    assert not (tmp_path / "Warehouse/Benchmark/Tables").exists()
+    assert not list((tmp_path / "Warehouse/Benchmark").glob("*.py"))
+
+
+@pytest.mark.parametrize("objects", [250, 1000])
+@weaver_test()
+def test_required_warehouse_scale_estates_compose(tmp_path, objects):
+    result = benchmark_estate(
+        tmp_path, WideEstateSpec.from_objects(objects, engine="warehouse")
+    )
+
+    assert result["generator"]["engine"] == "warehouse"
+    assert result["topology"]["objects"] == objects
+    assert result["topology_oracle_matches_repository"] is True
+    assert result["all_scenarios_match"] is True
+
+
+@weaver_test()
+def test_an_unknown_benchmark_engine_is_refused():
+    with pytest.raises(ValueError, match="engine"):
+        WideEstateSpec(branches=2, engine="kusto")
+
+
+@weaver_test()
 def test_a_wrong_impact_is_rejected_before_benchmark_evidence(monkeypatch, tmp_path):
     from weaver.build_bundle.incremental import Impact
 
