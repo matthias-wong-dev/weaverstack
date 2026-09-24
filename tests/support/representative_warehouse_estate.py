@@ -218,7 +218,8 @@ _LOCAL_DEPENDENCIES = {
 
 
 def _item(motif: int) -> str:
-    return f"Warehouse/Representative{motif:03d}"
+    item_number = 0 if motif == 0 else 1
+    return f"Warehouse/Representative{item_number:03d}"
 
 
 def _object(motif: int, role: str) -> str:
@@ -272,15 +273,21 @@ def make_representative_oracle(
 
     for motif in range(spec.motifs):
         bridge = motif % MOTIFS_PER_COMPONENT != 0
-        shortcut = _shortcut_identity(motif) if bridge else None
+        bridge_reference = None
+        if bridge:
+            bridge_reference = (
+                _shortcut_identity(motif)
+                if motif == 1
+                else _identity(motif - 1, "TerminalSummary")
+            )
 
         def add(role: str, kind: str, sql_shape: str) -> None:
             references = tuple(
                 _identity(motif, dependency)
                 for dependency in _LOCAL_DEPENDENCIES.get(role, ())
             )
-            if role == "Joined" and shortcut is not None:
-                references += (shortcut,)
+            if role == "Joined" and bridge_reference is not None:
+                references += (bridge_reference,)
             object_id = _object(motif, role)
             directory = (
                 "tests/"
@@ -320,7 +327,7 @@ def make_representative_oracle(
                 (motif, "SourceAdjustment", adjustment_rows),
             )
         )
-        if bridge:
+        if motif == 1:
             shortcuts.append(
                 RepresentativeShortcut(
                     source=_identity(motif - 1, "TerminalSummary"),
@@ -397,7 +404,7 @@ def _sql_body(node: RepresentativeNode, rows) -> str:
         if len(node.references) == 3:
             upstream_select = "coalesce(u.TotalAmount, cast(0 as decimal(18, 2)))"
             upstream_join = (
-                f"\nleft join {_sql_name(f'{SCHEMA}.UpstreamSummary')} as u"
+                f"\nleft join {_sql_name(_object_id(node.references[-1]))} as u"
                 " on u.GroupKey = e.GroupKey"
             )
         return f"""select
@@ -759,6 +766,7 @@ def qualify_representative_estate(
         )
 
     counts = oracle.kind_counts
+    declarations_by_item = Counter(_item_of(node.identity) for node in oracle.nodes)
     shortcut_census = [
         {
             "kind": shortcut.kind,
@@ -778,8 +786,8 @@ def qualify_representative_estate(
         "declarations": {"total": len(oracle.nodes), "by_kind": counts},
         "items": {
             "engine": {"warehouse": len(oracle.nodes)},
-            "count": spec.motifs,
-            "declarations_each": DECLARATIONS_PER_MOTIF,
+            "count": len(declarations_by_item),
+            "declarations_by_item": dict(sorted(declarations_by_item.items())),
         },
         "validations": {
             "total": counts["test"] + counts["assumption"],

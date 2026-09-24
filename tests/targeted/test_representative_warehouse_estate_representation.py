@@ -234,21 +234,21 @@ def test_every_non_root_body_physically_reads_its_oracle_dependencies(tmp_path):
 
 
 @pytest.mark.parametrize(
-    ("declarations", "expected", "shortcuts", "components"),
+    ("declarations", "expected", "components", "main_declarations"),
     [
-        (50, {"table": 28, "view": 12, "test": 6, "assumption": 4}, 1, 1),
-        (250, {"table": 140, "view": 60, "test": 30, "assumption": 20}, 8, 2),
+        (50, {"table": 28, "view": 12, "test": 6, "assumption": 4}, 1, 25),
+        (250, {"table": 140, "view": 60, "test": 30, "assumption": 20}, 2, 225),
         (
             1000,
             {"table": 560, "view": 240, "test": 120, "assumption": 80},
-            32,
             8,
+            975,
         ),
     ],
 )
 @weaver_test()
 def test_required_scales_match_the_independent_oracle_exactly(
-    tmp_path, declarations, expected, shortcuts, components
+    tmp_path, declarations, expected, components, main_declarations
 ):
     result = qualify_representative_estate(
         tmp_path,
@@ -259,8 +259,11 @@ def test_required_scales_match_the_independent_oracle_exactly(
     assert result["declarations"] == {"total": declarations, "by_kind": expected}
     assert result["items"] == {
         "engine": {"warehouse": declarations},
-        "count": declarations // 25,
-        "declarations_each": 25,
+        "count": 2,
+        "declarations_by_item": {
+            "Warehouse/Representative000": 25,
+            "Warehouse/Representative001": main_declarations,
+        },
     }
     assert result["validations"] == {
         "total": expected["test"] + expected["assumption"],
@@ -268,8 +271,12 @@ def test_required_scales_match_the_independent_oracle_exactly(
         "assumption": expected["assumption"],
         "executed": 0,
     }
-    assert result["shortcuts"]["count"] == shortcuts
-    assert result["shortcuts"]["consumed"] == shortcuts
+    assert result["shortcuts"]["count"] == 1
+    assert result["shortcuts"]["consumed"] == 1
+    assert {
+        (shortcut["source_item"], shortcut["destination_item"])
+        for shortcut in result["shortcuts"]["census"]
+    } == {("Warehouse/Representative000", "Warehouse/Representative001")}
     assert result["graph"]["connected_components"] == components
     assert result["graph"]["maximum_depth"] >= 7
     assert result["graph"]["maximum_fan_in"] == 3
