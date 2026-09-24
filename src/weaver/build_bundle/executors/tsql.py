@@ -14,24 +14,30 @@ from .base import InstallationContext
 class TSqlExecutor:
     name = "tsql"
 
+    def statement(self, action: InstallAction, payload: bytes | None) -> str:
+        if payload is None:
+            raise InstallError(f"tsql action {action.id!r} has no payload")
+        return payload.decode("utf-8")
+
+    def details(self, script: str) -> dict[str, Any]:
+        return {
+            "statement_first_line": script.splitlines()[0] if script.strip() else ""
+        }
+
     def execute(
         self,
         action: InstallAction,
         payload: bytes | None,
         context: InstallationContext,
     ) -> dict[str, Any] | None:
-        if payload is None:
-            raise InstallError(f"tsql action {action.id!r} has no payload")
         if context.sql is None:
             raise InstallError(
                 f"tsql action {action.id!r} needs a SQL executor but none was "
                 "provided. A Warehouse install must supply one"
             )
-        script = payload.decode("utf-8")
+        script = self.statement(action, payload)
         context.sql.execute_script(script)
-        return {
-            "statement_first_line": script.splitlines()[0] if script.strip() else ""
-        }
+        return self.details(script)
 
 
 class TSqlBatchExecutor:

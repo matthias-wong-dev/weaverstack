@@ -39,6 +39,7 @@ from weaver.build_bundle.execution import (
     execution_workspace,
 )
 from weaver.build_bundle.executors.spark_sql import SparkSqlExecutor
+from weaver.build_bundle.executors.tsql import TSqlExecutor
 from weaver.build_bundle.workflow import persist_bundle_archive
 from weaver.errors import BuildError, CommandError
 from weaver.locations import Location
@@ -94,7 +95,10 @@ def _session(workspace):
 
 
 def _action(name: str, executor: str = "spark_sql") -> InstallAction:
-    extension = ".spark.sql" if executor == "spark_sql" else ".sql"
+    extension = {
+        "spark_sql": ".spark.sql",
+        "tsql_batch": ".tsql-batch.json",
+    }.get(executor, ".sql")
     return InstallAction(
         id=name,
         kind="materialise",
@@ -154,6 +158,19 @@ def _spark_bundle(
         targets=targets,
         actions=(_action("a1"),) if actions is None else actions,
         **kwargs,
+    )
+
+
+def _warehouse_bundle(tmp_path, *, actions):
+    execution = BundleExecution(
+        workspace_name="Sales",
+        catalogue_target_id=CATALOGUE_TARGET.id,
+    )
+    return _written(
+        tmp_path,
+        execution=execution,
+        targets=(CATALOGUE_TARGET,),
+        actions=actions,
     )
 
 
@@ -263,6 +280,212 @@ def test_consecutive_spark_actions_cross_as_one_labelled_submission(tmp_path):
         ("a3", "select 2"),
     ]
     assert not [call for call in session.calls if call.kind == "spark_sql"]
+
+
+@weaver_test()
+def test_consecutive_tsql_actions_cross_as_one_labelled_submission(tmp_path):
+    bundle = _warehouse_bundle(
+        tmp_path,
+        actions=(
+            _action("a1", executor="tsql"),
+            _action("a2", executor="tsql"),
+            _action("a3", executor="tsql"),
+        ),
+    )
+    session = _session(ELSEWHERE)
+
+    class LabelledSql:
+        def __init__(self):
+            self.calls = []
+
+        def execute_script_actions(self, actions):
+            self.calls.append(actions)
+            return [
+                {
+                    "label": label,
+                    "succeeded": True,
+                    "started_after_seconds": float(index),
+                    "duration_seconds": 0.25,
+                }
+                for index, (label, _statement) in enumerate(actions)
+            ]
+
+    sql = LabelledSql()
+    session.sql_executor = lambda *_args, **_kwargs: sql
+
+    report = Installer(
+        session,
+        executors={"tsql": TSqlExecutor()},
+    ).install(bundle)
+
+    assert report.succeeded
+    assert [result.status for result in report.action_results()] == [
+        "succeeded",
+        "succeeded",
+        "succeeded",
+    ]
+    assert sql.calls == [
+        [("a1", "select 0\n"), ("a2", "select 1\n"), ("a3", "select 2\n")]
+    ]
+
+
+@weaver_test()
+def test_incomplete_labelled_tsql_results_fail_every_submitted_action(tmp_path):
+    bundle = _warehouse_bundle(
+        tmp_path,
+        actions=(
+            _action("a1", executor="tsql"),
+            _action("a2", executor="tsql"),
+        ),
+    )
+    session = _session(ELSEWHERE)
+
+    class IncompleteSql:
+        def execute_script_actions(self, _actions):
+            return [
+                {
+                    "label": "a1",
+                    "succeeded": True,
+                    "started_after_seconds": 0.0,
+                    "duration_seconds": 0.25,
+                }
+            ]
+
+    setattr(session, "sql_executor", lambda *_args, **_kwargs: IncompleteSql())
+
+    report = Installer(
+        session,
+        executors={"tsql": TSqlExecutor()},
+    ).install(bundle)
+
+    assert not report.succeeded
+    results = list(report.action_results())
+    assert [result.status for result in results] == ["failed", "failed"]
+    assert {result.error_message for result in results} == {
+        "labelled T-SQL action results are incomplete"
+    }
+
+
+@weaver_test()
+def test_a_labelled_tsql_failure_remains_failed_while_siblings_run(tmp_path):
+    bundle = _warehouse_bundle(
+        tmp_path,
+        actions=tuple(_action(f"a{index}", executor="tsql") for index in range(1, 4)),
+    )
+    session = _session(ELSEWHERE)
+
+    class LabelledSql:
+        def execute_script_actions(self, _actions):
+            return [
+                {
+                    "label": "a1",
+                    "succeeded": True,
+                    "started_after_seconds": 0.0,
+                    "duration_seconds": 0.25,
+                },
+                {
+                    "label": "a2",
+                    "succeeded": False,
+                    "started_after_seconds": 0.25,
+                    "duration_seconds": 0.5,
+                    "error_type": "TSqlError 208",
+                    "error_message": "missing object",
+                },
+                {
+                    "label": "a3",
+                    "succeeded": True,
+                    "started_after_seconds": 0.75,
+                    "duration_seconds": 0.125,
+                },
+            ]
+
+    setattr(session, "sql_executor", lambda *_args, **_kwargs: LabelledSql())
+
+    report = Installer(
+        session,
+        executors={"tsql": TSqlExecutor()},
+    ).install(bundle)
+
+    assert not report.succeeded
+    results = list(report.action_results())
+    assert [result.status for result in results] == ["succeeded", "failed", "succeeded"]
+    assert [result.duration_seconds for result in results] == [0.25, 0.5, 0.125]
+    assert results[1].error_type == "TSqlError 208"
+    assert results[1].error_message == "missing object"
+
+
+@weaver_test()
+def test_a_custom_tsql_executor_keeps_its_execute_contract(tmp_path):
+    bundle = _warehouse_bundle(
+        tmp_path,
+        actions=tuple(_action(f"a{index}", executor="tsql") for index in range(1, 3)),
+    )
+    session = _session(ELSEWHERE)
+
+    class CustomTSqlExecutor(TSqlExecutor):
+        def __init__(self):
+            self.calls = []
+
+        def execute(self, action, payload, context):
+            self.calls.append(action.id)
+            return {"custom": action.id}
+
+    custom = CustomTSqlExecutor()
+    report = Installer(session, executors={"tsql": custom}).install(bundle)
+
+    assert report.succeeded
+    assert custom.calls == ["a1", "a2"]
+    assert [result.details for result in report.action_results()] == [
+        {"custom": "a1"},
+        {"custom": "a2"},
+    ]
+
+
+@weaver_test()
+def test_tsql_groups_do_not_cross_an_intervening_executor(tmp_path):
+    bundle = _warehouse_bundle(
+        tmp_path,
+        actions=(
+            _action("a1", executor="tsql"),
+            _action("a2", executor="tsql"),
+            _action("middle", executor="tsql_batch"),
+            _action("a3", executor="tsql"),
+            _action("a4", executor="tsql"),
+        ),
+    )
+    session = _session(ELSEWHERE)
+
+    class LabelledSql:
+        def __init__(self):
+            self.calls = []
+
+        def execute_script_actions(self, actions):
+            self.calls.append(actions)
+            return [
+                {
+                    "label": label,
+                    "succeeded": True,
+                    "started_after_seconds": index * 0.1,
+                    "duration_seconds": 0.1,
+                }
+                for index, (label, _statement) in enumerate(actions)
+            ]
+
+    sql = LabelledSql()
+    setattr(session, "sql_executor", lambda *_args, **_kwargs: sql)
+    middle = Recorder("tsql_batch")
+
+    report = Installer(
+        session,
+        executors={"tsql": TSqlExecutor(), "tsql_batch": middle},
+    ).install(bundle)
+
+    assert report.succeeded
+    assert middle.calls == ["middle"]
+    assert [[label for label, _statement in call] for call in sql.calls] == [
+        ["a1", "a2"],
+        ["a3", "a4"],
+    ]
 
 
 @weaver_test()

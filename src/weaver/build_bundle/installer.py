@@ -27,6 +27,7 @@ from .executors.base import (
     SkippedExecution,
 )
 from .executors.spark_sql import SparkSqlExecutor
+from .executors.tsql import TSqlExecutor
 from .models import BuildBatch, BuildSequence, InstallAction
 from .report import (
     FAILED,
@@ -311,8 +312,11 @@ def _run_batch(
 
     results: list[ActionResult] = []
     spark_actions: list[InstallAction] = []
+    tsql_actions: list[InstallAction] = []
     spark_executor = installer.executors.get("spark_sql")
+    tsql_executor = installer.executors.get("tsql")
     can_batch_spark = type(spark_executor) is SparkSqlExecutor
+    can_batch_tsql = type(tsql_executor) is TSqlExecutor
 
     def flush_spark() -> None:
         if not spark_actions:
@@ -336,13 +340,42 @@ def _run_batch(
             )
         spark_actions.clear()
 
+    def flush_tsql() -> None:
+        if not tsql_actions:
+            return
+        if len(tsql_actions) == 1 or not can_batch_tsql:
+            results.extend(
+                _run_action(action, batch, context, bundle, installer)
+                for action in tsql_actions
+            )
+        else:
+            assert isinstance(tsql_executor, TSqlExecutor)
+            results.extend(
+                _run_tsql_actions(
+                    tuple(tsql_actions),
+                    batch,
+                    context,
+                    bundle,
+                    installer,
+                    tsql_executor,
+                )
+            )
+        tsql_actions.clear()
+
     for action in batch.actions:
         if action.executor == "spark_sql":
+            flush_tsql()
             spark_actions.append(action)
             continue
+        if action.executor == "tsql":
+            flush_spark()
+            tsql_actions.append(action)
+            continue
         flush_spark()
+        flush_tsql()
         results.append(_run_action(action, batch, context, bundle, installer))
     flush_spark()
+    flush_tsql()
     return results
 
 
@@ -381,7 +414,7 @@ def _run_spark_actions(
                 [(action.id, statement) for action, statement, _details in prepared],
                 exact_case=True,
             )
-            indexed = _validated_spark_outcomes(outcomes, prepared)
+            indexed = _validated_action_outcomes(outcomes, prepared, name="Spark")
             completed: dict[str, ActionResult] = {}
             for action, _statement, details in prepared:
                 outcome = indexed[action.id]
@@ -425,14 +458,92 @@ def _run_spark_actions(
     return [results[action.id] for action in actions]
 
 
-def _validated_spark_outcomes(outcomes, prepared) -> dict[str, dict]:
+def _run_tsql_actions(
+    actions: tuple[InstallAction, ...],
+    batch: BuildBatch,
+    context: InstallationContext,
+    bundle: BuildBundle,
+    installer: "Installer",
+    executor: TSqlExecutor,
+) -> list[ActionResult]:
+    """Run consecutive T-SQL actions through one labelled submission."""
+
+    store = bundle.store or installer.store
+    prepared: list[tuple[InstallAction, str, dict[str, Any]]] = []
+    results: dict[str, ActionResult] = {}
+    for action in actions:
+        started = _now()
+        try:
+            payload = (
+                None
+                if action.payload is None
+                else store.read(bundle.location.join(*action.payload.split("/")))
+            )
+            statement = executor.statement(action, payload)
+            details = executor.details(statement)
+        except Exception as exc:
+            results[action.id] = _failed(action, batch.target_id, started, exc)
+        else:
+            prepared.append((action, statement, details))
+
+    if prepared:
+        submitted_at = _now()
+        try:
+            outcomes = context.sql.execute_script_actions(
+                [(action.id, statement) for action, statement, _details in prepared]
+            )
+            indexed = _validated_action_outcomes(outcomes, prepared, name="T-SQL")
+            completed: dict[str, ActionResult] = {}
+            for action, _statement, details in prepared:
+                outcome = indexed[action.id]
+                started = submitted_at + timedelta(
+                    seconds=outcome["started_after_seconds"]
+                )
+                finished = started + timedelta(seconds=outcome["duration_seconds"])
+                if outcome["succeeded"]:
+                    completed[action.id] = ActionResult(
+                        action_id=action.id,
+                        resource_node_id=action.resource_node_id,
+                        source_path=action.source_path,
+                        target_id=batch.target_id,
+                        executor=action.executor,
+                        status=SUCCEEDED,
+                        started_at=started,
+                        finished_at=finished,
+                        duration_seconds=outcome["duration_seconds"],
+                        details=details,
+                    )
+                else:
+                    completed[action.id] = ActionResult(
+                        action_id=action.id,
+                        resource_node_id=action.resource_node_id,
+                        source_path=action.source_path,
+                        target_id=batch.target_id,
+                        executor=action.executor,
+                        status=FAILED,
+                        started_at=started,
+                        finished_at=finished,
+                        duration_seconds=outcome["duration_seconds"],
+                        error_type=outcome["error_type"],
+                        error_message=outcome["error_message"],
+                    )
+        except Exception as exc:
+            for action, _statement, _details in prepared:
+                results[action.id] = _failed(action, batch.target_id, submitted_at, exc)
+        else:
+            results.update(completed)
+
+    return [results[action.id] for action in actions]
+
+
+def _validated_action_outcomes(outcomes, prepared, *, name: str) -> dict[str, dict]:
     expected = [action.id for action, _statement, _details in prepared]
     if not isinstance(outcomes, list) or len(outcomes) != len(expected):
-        raise InstallError("labelled Spark action results are incomplete")
+        raise InstallError(f"labelled {name} action results are incomplete")
     indexed: dict[str, dict] = {}
     for expected_label, outcome in zip(expected, outcomes, strict=True):
         if not isinstance(outcome, dict) or outcome.get("label") != expected_label:
-            raise InstallError("labelled Spark action results are out of order")
+            raise InstallError(f"labelled {name} action results are out of order")
         succeeded = outcome.get("succeeded")
         started = outcome.get("started_after_seconds")
         duration = outcome.get("duration_seconds")
@@ -450,14 +561,14 @@ def _validated_spark_outcomes(outcomes, prepared) -> dict[str, dict]:
             or duration > timedelta.max.total_seconds()
         ):
             raise InstallError(
-                f"labelled Spark action {expected_label!r} returned an invalid outcome"
+                f"labelled {name} action {expected_label!r} returned an invalid outcome"
             )
         if not succeeded and (
             not isinstance(outcome.get("error_type"), str)
             or not isinstance(outcome.get("error_message"), str)
         ):
             raise InstallError(
-                f"labelled Spark action {expected_label!r} returned no error"
+                f"labelled {name} action {expected_label!r} returned no error"
             )
         indexed[expected_label] = outcome
     return indexed

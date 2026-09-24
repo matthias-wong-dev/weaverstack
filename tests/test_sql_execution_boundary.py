@@ -109,6 +109,116 @@ def test_query_returns_dictionaries_and_commits():
     assert connection.commits == 1
 
 
+@weaver_test()
+def test_labelled_scripts_run_in_one_batch_and_return_one_outcome_each():
+    cursor = MultiSetCursor(
+        [
+            (
+                [("authored result",)],
+                ["value"],
+            ),
+            (
+                [
+                    (
+                        "first",
+                        True,
+                        0.0,
+                        0.25,
+                        None,
+                        None,
+                        "weaver-labelled-tsql-v1",
+                    )
+                ],
+                [
+                    "label",
+                    "succeeded",
+                    "started_after_seconds",
+                    "duration_seconds",
+                    "error_type",
+                    "error_message",
+                    "__weaver_action_outcome",
+                ],
+            ),
+            (
+                [
+                    (
+                        "second",
+                        False,
+                        0.25,
+                        0.1,
+                        "TSqlError 208",
+                        "missing",
+                        "weaver-labelled-tsql-v1",
+                    )
+                ],
+                [
+                    "label",
+                    "succeeded",
+                    "started_after_seconds",
+                    "duration_seconds",
+                    "error_type",
+                    "error_message",
+                    "__weaver_action_outcome",
+                ],
+            ),
+        ]
+    )
+    connection = Connection(cursor)
+    executor, _ = _executor([connection])
+
+    outcomes = executor.execute_script_actions(
+        [
+            ("first", "create table [x] ([value] nvarchar(10) default N'one');"),
+            ("second", "select * from [missing];"),
+        ]
+    )
+
+    assert outcomes == [
+        {
+            "label": "first",
+            "succeeded": True,
+            "started_after_seconds": 0.0,
+            "duration_seconds": 0.25,
+            "error_type": None,
+            "error_message": None,
+        },
+        {
+            "label": "second",
+            "succeeded": False,
+            "started_after_seconds": 0.25,
+            "duration_seconds": 0.1,
+            "error_type": "TSqlError 208",
+            "error_message": "missing",
+        },
+    ]
+    assert len(cursor.calls) == 1
+    assert connection.commits == 1
+    batch, parameters = cursor.calls[0]
+    assert parameters is None
+    assert "exec sys.sp_executesql N'create table [x]" in batch
+    assert "default N''one''" in batch
+    assert "exec sys.sp_executesql N'select * from [missing];'" in batch
+    assert "weaver-labelled-tsql-v1" in batch
+
+
+@weaver_test()
+def test_labelled_scripts_reject_missing_outcome_rows():
+    cursor = MultiSetCursor(
+        [
+            (
+                [("an authored result",)],
+                ["value"],
+            )
+        ]
+    )
+    executor, _ = _executor([Connection(cursor)])
+
+    with pytest.raises(
+        SqlExecutionError, match="labelled T-SQL action results are incomplete"
+    ):
+        executor.execute_script_actions([("first", "select 1;")])
+
+
 # --- calling a procedure for its outputs ---------------------------------------
 
 

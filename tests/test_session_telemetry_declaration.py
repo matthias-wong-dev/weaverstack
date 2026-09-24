@@ -64,6 +64,7 @@ def test_a_session_sql_executor_records_every_tds_operation():
     from unittest.mock import Mock
 
     backing = Mock()
+    backing.execute_script_actions.return_value = []
     backing.query.return_value = []
     backing.query_result_sets.return_value = ()
     backing.call_procedure.return_value = {}
@@ -72,6 +73,7 @@ def test_a_session_sql_executor_records_every_tds_operation():
 
     executor.execute("delete from T")
     executor.execute_script("create table T (x int)")
+    executor.execute_script_actions([("table", "create table T (x int)")])
     executor.query("select * from T")
     executor.query_result_sets("select 1; select 2")
     executor.call_procedure("p", outputs=(("n", "int"),))
@@ -80,6 +82,7 @@ def test_a_session_sql_executor_records_every_tds_operation():
     assert [event.operation for event in telemetry.events()] == [
         "execute",
         "execute_script",
+        "execute_script_actions",
         "query",
         "query_result_sets",
         "call_procedure",

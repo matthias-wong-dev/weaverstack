@@ -29,6 +29,10 @@ class SqlExecutor(Protocol):
 
     def execute_script(self, script: str) -> None: ...
 
+    def execute_script_actions(
+        self, actions: Sequence[tuple[str, str]]
+    ) -> list[SqlRow]: ...
+
     def query(
         self, statement: str, parameters: Sequence[object] | None = None
     ) -> Sequence[SqlRow]: ...
@@ -68,6 +72,33 @@ class PooledSqlExecutor:
 
     def execute_script(self, script: str) -> None:
         self._run(script, parameters=None, query=False, drain=True)
+
+    def execute_script_actions(
+        self, actions: Sequence[tuple[str, str]]
+    ) -> list[SqlRow]:
+        """Run labelled scripts serially in one crossing and return their outcomes."""
+
+        ordered = [(str(label), str(script)) for label, script in actions]
+        if not ordered:
+            return []
+        sets = self._run(
+            _labelled_script_batch(ordered),
+            parameters=None,
+            query=True,
+            drain=False,
+            all_result_sets=True,
+        )
+        outcomes = []
+        for rows in sets:
+            if len(rows) != 1:
+                continue
+            row = dict(rows[0])
+            if row.pop(_ACTION_OUTCOME_COLUMN, None) != _ACTION_OUTCOME_MARKER:
+                continue
+            outcomes.append(row)
+        if len(outcomes) != len(ordered):
+            raise SqlExecutionError("labelled T-SQL action results are incomplete")
+        return outcomes
 
     def query(
         self, statement: str, parameters: Sequence[object] | None = None
@@ -236,6 +267,59 @@ def _output_parameter_batch(
     projection = ", ".join(f"@weaver_out_{name} as {name}" for name, _type in outputs)
     call = f"exec {procedure}\n    " + "\n  , ".join(arguments) + ";"
     return f"{declares}\n\n{call}\n\nselect {projection};"
+
+
+_ACTION_OUTCOME_COLUMN = "__weaver_action_outcome"
+_ACTION_OUTCOME_MARKER = "weaver-labelled-tsql-v1"
+
+
+def _unicode_literal(value: str) -> str:
+    return "N'" + value.replace("'", "''") + "'"
+
+
+def _labelled_script_batch(actions: Sequence[tuple[str, str]]) -> str:
+    parts = [
+        "set nocount on;",
+        "declare @weaver_batch_started datetime2(7) = sysutcdatetime();",
+        "declare @weaver_action_started datetime2(7);",
+    ]
+    for label, script in actions:
+        common = (
+            f"{_unicode_literal(label)} as [label], ",
+            "convert(float, datediff_big(microsecond, @weaver_batch_started, "
+            "@weaver_action_started)) / 1000000.0 as [started_after_seconds], ",
+            "convert(float, datediff_big(microsecond, @weaver_action_started, "
+            "sysutcdatetime())) / 1000000.0 as [duration_seconds], ",
+        )
+        parts.extend(
+            [
+                "set @weaver_action_started = sysutcdatetime();",
+                "begin try",
+                f"  exec sys.sp_executesql {_unicode_literal(script)};",
+                "  select "
+                + common[0]
+                + "cast(1 as bit) as [succeeded], "
+                + common[1]
+                + common[2]
+                + "cast(null as nvarchar(128)) as [error_type], "
+                + "cast(null as nvarchar(4000)) as [error_message], "
+                + f"{_unicode_literal(_ACTION_OUTCOME_MARKER)} as "
+                + f"[{_ACTION_OUTCOME_COLUMN}];",
+                "end try",
+                "begin catch",
+                "  select "
+                + common[0]
+                + "cast(0 as bit) as [succeeded], "
+                + common[1]
+                + common[2]
+                + "concat(N'TSqlError ', error_number()) as [error_type], "
+                + "cast(error_message() as nvarchar(4000)) as [error_message], "
+                + f"{_unicode_literal(_ACTION_OUTCOME_MARKER)} as "
+                + f"[{_ACTION_OUTCOME_COLUMN}];",
+                "end catch;",
+            ]
+        )
+    return "\n".join(parts)
 
 
 def _rows(cursor) -> list[SqlRow]:

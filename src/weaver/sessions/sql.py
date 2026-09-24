@@ -24,6 +24,12 @@ class SessionSqlExecutor:
         with self._telemetry.external("tds", "execute_script"):
             self._executor.execute_script(script)
 
+    def execute_script_actions(
+        self, actions: Sequence[tuple[str, str]]
+    ) -> list[SqlRow]:
+        with self._telemetry.external("tds", "execute_script_actions"):
+            return self._executor.execute_script_actions(actions)
+
     def query(
         self, statement: str, parameters: Sequence[object] | None = None
     ) -> Sequence[SqlRow]:
