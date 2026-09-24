@@ -302,29 +302,26 @@ class Session(ABC):
 
         A statement failure is an outcome, not a reason to skip later statements.
         Transport or program failures still raise because no complete outcome set
-        exists.
+        exists. This fallback cannot classify an exception from
+        :meth:`execute_spark_sql`, so it propagates the exception. Hosts that can
+        identify statement failures override this method and retain them as
+        outcomes.
+
+        ``timeout`` is the allowance for each action. A host that places several
+        actions in one remote submission preserves the aggregate allowance.
         """
 
         origin = time.monotonic()
         outcomes: list[dict[str, Any]] = []
         for label, statement in actions:
             started = time.monotonic()
-            try:
-                self.execute_spark_sql(
-                    statement,
-                    exact_case=exact_case,
-                    workspace=workspace,
-                    timeout=timeout,
-                )
-            except Exception as error:
-                outcome = {
-                    "label": label,
-                    "succeeded": False,
-                    "error_type": type(error).__name__,
-                    "error_message": str(error),
-                }
-            else:
-                outcome = {"label": label, "succeeded": True}
+            self.execute_spark_sql(
+                statement,
+                exact_case=exact_case,
+                workspace=workspace,
+                timeout=timeout,
+            )
+            outcome = {"label": label, "succeeded": True}
             outcome["started_after_seconds"] = started - origin
             outcome["duration_seconds"] = time.monotonic() - started
             outcomes.append(outcome)

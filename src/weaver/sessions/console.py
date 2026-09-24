@@ -436,11 +436,20 @@ class ConsoleSession(Session):
         workspace: Workspace | None = None,
         timeout: float | None = None,
     ) -> list[dict[str, Any]]:
-        """Run labelled actions in one submission with explicit outcomes."""
+        """Run labelled actions in one submission with explicit outcomes.
+
+        ``timeout`` remains an allowance per action. The Livy submission gets the
+        sum of those allowances so batching does not narrow the serial timeout
+        boundary.
+        """
 
         ordered = list(actions)
         if not ordered:
             return []
+        from ..fabric.livy import DEFAULT_STATEMENT_TIMEOUT
+
+        per_action_timeout = DEFAULT_STATEMENT_TIMEOUT if timeout is None else timeout
+        batch_timeout = per_action_timeout * len(ordered)
         scope = self.scope(workspace)
         source = (
             "import time as _time\n"
@@ -479,7 +488,7 @@ class ConsoleSession(Session):
         return scope.livy_run(
             source,
             name="spark_sql_actions",
-            timeout=timeout,
+            timeout=batch_timeout,
             livy=livy,
             retry_submission=False,
         )
