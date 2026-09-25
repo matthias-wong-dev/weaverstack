@@ -38,6 +38,7 @@ from weaver.build_bundle.execution import (
     execution_spark_home,
     execution_workspace,
 )
+from weaver.build_bundle.executors.spark_sql import SparkSqlExecutor
 from weaver.build_bundle.workflow import persist_bundle_archive
 from weaver.errors import BuildError, CommandError
 from weaver.locations import Location
@@ -137,7 +138,9 @@ def _written(tmp_path, *, execution, targets, actions, name="bundle"):
     return write_bundle(location, plan=plan, payloads=payloads, store=FilesystemStore())
 
 
-def _spark_bundle(tmp_path, *, environment=None, workspace_name="Sales", **kwargs):
+def _spark_bundle(
+    tmp_path, *, environment=None, workspace_name="Sales", actions=None, **kwargs
+):
     targets = (HOME, OTHER, CATALOGUE_TARGET)
     execution = BundleExecution(
         workspace_name=workspace_name,
@@ -149,7 +152,7 @@ def _spark_bundle(tmp_path, *, environment=None, workspace_name="Sales", **kwarg
         tmp_path,
         execution=execution,
         targets=targets,
-        actions=(_action("a1"),),
+        actions=(_action("a1"),) if actions is None else actions,
         **kwargs,
     )
 
@@ -234,6 +237,302 @@ def test_the_public_operation_reuses_a_session_and_routes_by_the_manifest(tmp_pa
     assert not session.closed
     (recorded,) = [call for call in session.calls if call.kind == "spark_sql"]
     assert recorded.workspace == "Sales"
+
+
+@weaver_test()
+def test_consecutive_spark_actions_cross_as_one_labelled_submission(tmp_path):
+    bundle = _spark_bundle(
+        tmp_path,
+        actions=(_action("a1"), _action("a2"), _action("a3")),
+    )
+    session = _session(ELSEWHERE)
+
+    report = Installer(session).install(bundle)
+
+    assert report.succeeded
+    assert [result.status for result in report.action_results()] == [
+        "succeeded",
+        "succeeded",
+        "succeeded",
+    ]
+    (recorded,) = [call for call in session.calls if call.kind == "spark_sql_actions"]
+    assert recorded.workspace == "Sales"
+    assert recorded.body == [
+        ("a1", "select 0"),
+        ("a2", "select 1"),
+        ("a3", "select 2"),
+    ]
+    assert not [call for call in session.calls if call.kind == "spark_sql"]
+
+
+@weaver_test()
+def test_a_labelled_spark_failure_remains_failed_while_siblings_run(tmp_path):
+    bundle = _spark_bundle(
+        tmp_path,
+        actions=(_action("a1"), _action("a2"), _action("a3")),
+    )
+    session = _session(ELSEWHERE)
+
+    def outcomes(actions, **_kwargs):
+        return [
+            {
+                "label": label,
+                "succeeded": label != "a2",
+                "started_after_seconds": float(index),
+                "duration_seconds": 0.25,
+                **(
+                    {"error_type": "AnalysisException", "error_message": "bad view"}
+                    if label == "a2"
+                    else {}
+                ),
+            }
+            for index, (label, _statement) in enumerate(actions)
+        ]
+
+    session.execute_spark_sql_actions = outcomes
+
+    report = Installer(session).install(bundle)
+
+    assert not report.succeeded
+    results = list(report.action_results())
+    assert [result.status for result in results] == [
+        "succeeded",
+        "failed",
+        "succeeded",
+    ]
+    assert results[1].error_type == "AnalysisException"
+    assert results[1].error_message == "bad view"
+    assert results[1].duration_seconds == 0.25
+
+
+@weaver_test()
+def test_a_custom_spark_executor_keeps_its_execute_contract(tmp_path):
+    bundle = _spark_bundle(
+        tmp_path,
+        actions=(_action("a1"), _action("a2")),
+    )
+    session = _session(ELSEWHERE)
+
+    class GuardedSparkExecutor(SparkSqlExecutor):
+        def __init__(self):
+            self.calls = []
+
+        def execute(self, action, payload, context):
+            self.calls.append(action.id)
+            return {"authorised": action.id}
+
+    executor = GuardedSparkExecutor()
+    report = Installer(session, executors={"spark_sql": executor}).install(bundle)
+
+    assert report.succeeded
+    assert executor.calls == ["a1", "a2"]
+    assert not [call for call in session.calls if call.kind == "spark_sql_actions"]
+
+
+@weaver_test()
+def test_spark_groups_do_not_cross_an_intervening_executor(tmp_path):
+    bundle = _spark_bundle(
+        tmp_path,
+        actions=(
+            _action("a1"),
+            _action("t1", executor="tsql"),
+            _action("a2"),
+            _action("a3"),
+        ),
+    )
+    session = _session(ELSEWHERE)
+    calls = []
+    original_spark = session.execute_spark_sql
+    original_actions = session.execute_spark_sql_actions
+
+    def spark(statement, **kwargs):
+        calls.append(("spark", statement))
+        return original_spark(statement, **kwargs)
+
+    def spark_actions(actions, **kwargs):
+        calls.append(("spark_actions", [label for label, _ in actions]))
+        return original_actions(actions, **kwargs)
+
+    class OrderedTsql(Recorder):
+        def execute(self, action, payload, context):
+            calls.append(("tsql", action.id))
+            return super().execute(action, payload, context)
+
+    session.execute_spark_sql = spark
+    session.execute_spark_sql_actions = spark_actions
+    report = Installer(
+        session,
+        executors={"spark_sql": SparkSqlExecutor(), "tsql": OrderedTsql("tsql")},
+    ).install(bundle)
+
+    assert report.succeeded
+    assert calls == [
+        ("spark", "select 0"),
+        ("tsql", "t1"),
+        ("spark_actions", ["a2", "a3"]),
+    ]
+
+
+@pytest.mark.parametrize(
+    "outcomes",
+    [
+        [
+            {
+                "label": "a1",
+                "succeeded": True,
+                "started_after_seconds": 0.0,
+                "duration_seconds": 0.1,
+            }
+        ],
+        [
+            {
+                "label": "a2",
+                "succeeded": True,
+                "started_after_seconds": 0.0,
+                "duration_seconds": 0.1,
+            },
+            {
+                "label": "a1",
+                "succeeded": True,
+                "started_after_seconds": 0.1,
+                "duration_seconds": 0.1,
+            },
+        ],
+        [
+            {
+                "label": "a1",
+                "succeeded": True,
+                "started_after_seconds": False,
+                "duration_seconds": 0.1,
+            },
+            {
+                "label": "a2",
+                "succeeded": True,
+                "started_after_seconds": 0.1,
+                "duration_seconds": 0.1,
+            },
+        ],
+        [
+            {
+                "label": "a1",
+                "succeeded": True,
+                "started_after_seconds": float("nan"),
+                "duration_seconds": 0.1,
+            },
+            {
+                "label": "a2",
+                "succeeded": True,
+                "started_after_seconds": 0.1,
+                "duration_seconds": 0.1,
+            },
+        ],
+        [
+            {
+                "label": "a1",
+                "succeeded": True,
+                "started_after_seconds": 0.0,
+                "duration_seconds": float("inf"),
+            },
+            {
+                "label": "a2",
+                "succeeded": True,
+                "started_after_seconds": 0.1,
+                "duration_seconds": 0.1,
+            },
+        ],
+        [
+            {
+                "label": "a1",
+                "succeeded": True,
+                "started_after_seconds": 1e20,
+                "duration_seconds": 0.1,
+            },
+            {
+                "label": "a2",
+                "succeeded": True,
+                "started_after_seconds": 0.1,
+                "duration_seconds": 0.1,
+            },
+        ],
+        [
+            {
+                "label": "a1",
+                "succeeded": False,
+                "started_after_seconds": 0.0,
+                "duration_seconds": 0.1,
+            },
+            {
+                "label": "a2",
+                "succeeded": True,
+                "started_after_seconds": 0.1,
+                "duration_seconds": 0.1,
+            },
+        ],
+    ],
+)
+@weaver_test()
+def test_invalid_labelled_outcomes_fail_every_prepared_action(tmp_path, outcomes):
+    bundle = _spark_bundle(
+        tmp_path,
+        actions=(_action("a1"), _action("a2")),
+    )
+    session = _session(ELSEWHERE)
+    session.execute_spark_sql_actions = lambda *_args, **_kwargs: outcomes
+
+    report = Installer(session).install(bundle)
+
+    results = list(report.action_results())
+    assert not report.succeeded
+    assert [result.action_id for result in results] == ["a1", "a2"]
+    assert [result.status for result in results] == ["failed", "failed"]
+    assert all(result.error_type == "InstallError" for result in results)
+
+
+@weaver_test()
+def test_transport_failure_fails_every_prepared_action(tmp_path):
+    bundle = _spark_bundle(
+        tmp_path,
+        actions=(_action("a1"), _action("a2")),
+    )
+    session = _session(ELSEWHERE)
+
+    def failed_submission(*_args, **_kwargs):
+        raise RuntimeError("submission outcome is unknown")
+
+    session.execute_spark_sql_actions = failed_submission
+
+    report = Installer(session).install(bundle)
+
+    results = list(report.action_results())
+    assert not report.succeeded
+    assert [result.action_id for result in results] == ["a1", "a2"]
+    assert [result.status for result in results] == ["failed", "failed"]
+    assert all(result.error_type == "RuntimeError" for result in results)
+    assert all(
+        result.error_message == "submission outcome is unknown" for result in results
+    )
+
+
+@weaver_test()
+def test_missing_spark_destination_is_refused_before_batch_submission(tmp_path):
+    execution = BundleExecution(
+        workspace_name="Sales",
+        catalogue_target_id=CATALOGUE_TARGET.id,
+        spark_home_target_id=HOME.id,
+    )
+    bundle = _written(
+        tmp_path,
+        execution=execution,
+        targets=(CATALOGUE_TARGET, HOME),
+        actions=(_action("a1"), _action("a2")),
+    )
+    session = _session(ELSEWHERE)
+
+    report = Installer(session).install(bundle)
+
+    assert not report.succeeded
+    assert [result.status for result in report.action_results()] == ["failed", "failed"]
+    assert not [call for call in session.calls if call.kind == "spark_sql_actions"]
 
 
 # --- an incompatible live resource fails before the first action ---------------

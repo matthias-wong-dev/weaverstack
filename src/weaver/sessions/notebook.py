@@ -116,6 +116,27 @@ class NotebookSession(Session):
             with exact_identifier_case(spark, enabled=exact_case):
                 return run_spark_statements(spark, ordered)
 
+    def execute_spark_sql_actions(
+        self,
+        actions: Sequence[tuple[str, str]],
+        *,
+        exact_case: bool = False,
+        workspace: Workspace | None = None,
+        timeout: float | None = None,
+    ) -> list[dict[str, Any]]:
+        """Run labelled actions serially under one identifier-case scope."""
+
+        ordered = list(actions)
+        if not ordered:
+            return []
+        from ..build_bundle.executors.spark_case import exact_identifier_case
+        from .base import run_labelled_spark_statements
+
+        spark = self.scope(workspace).spark()
+        with self.telemetry.timing("spark.sql_actions"):
+            with exact_identifier_case(spark, enabled=exact_case):
+                return run_labelled_spark_statements(spark, ordered)
+
     def execute_tsql(
         self,
         statement: str,

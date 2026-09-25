@@ -7,7 +7,7 @@ from typing import Any
 
 from ..errors import CommandError
 from ..locations import Location
-from ..store import Entry, StoreError
+from ..store import Entry, StoreError, StoreNotFoundError
 
 #: notebookutils.fs.head reads up to this many bytes. Bundle files are tiny; this
 #: ceiling is only a guard against an unexpectedly large one.
@@ -59,7 +59,9 @@ class FabricStore:
     def list(self, location: Location, *, recursive: bool = False) -> list[Entry]:
         path = self._path(location)
         if not self.fs.exists(path):
-            raise StoreError(f"cannot list a location that does not exist: {path}")
+            raise StoreNotFoundError(
+                f"cannot list a location that does not exist: {path}"
+            )
 
         entries = self._list_once(location)
         if not recursive:

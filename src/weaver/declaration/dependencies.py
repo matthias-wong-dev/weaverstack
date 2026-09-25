@@ -8,6 +8,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from ..sql_statements import parse_sql
 from .metadata import ObjectId
 
 _TOKENS = None
@@ -421,12 +422,10 @@ def _skip_space(sql_text: str, start: int) -> int:
 
 
 def _flatten(sql_text: str) -> list[_FlatToken]:
-    import sqlparse
-
     flat: list[_FlatToken] = []
     offset = 0
     depth = 0
-    for statement in sqlparse.parse(sql_text):
+    for statement in parse_sql(sql_text):
         for token in statement.flatten():
             value = token.value
             token_depth = depth

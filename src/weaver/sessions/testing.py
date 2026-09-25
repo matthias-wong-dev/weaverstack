@@ -78,12 +78,13 @@ class TestSession(Session):
 
     @property
     def spark_sql(self) -> tuple[str, ...]:
-        return tuple(
-            statement
-            for call in self.calls
-            if call.kind == "spark_sql"
-            for statement in call.body
-        )
+        statements: list[str] = []
+        for call in self.calls:
+            if call.kind == "spark_sql":
+                statements.extend(call.body)
+            elif call.kind == "spark_sql_actions":
+                statements.extend(statement for _label, statement in call.body)
+        return tuple(statements)
 
     @property
     def tsql(self) -> tuple[str, ...]:
@@ -163,6 +164,32 @@ class TestSession(Session):
             "spark_sql", body, workspace, exact_case=exact_case, timeout=timeout
         )
         return self._answer(self._spark_answers, body)
+
+    def execute_spark_sql_actions(
+        self,
+        actions: Sequence[tuple[str, str]],
+        *,
+        exact_case: bool = False,
+        workspace: Workspace | None = None,
+        timeout: float | None = None,
+    ) -> list[dict[str, Any]]:
+        body = [(str(label), str(statement)) for label, statement in actions]
+        self._record(
+            "spark_sql_actions",
+            body,
+            workspace,
+            exact_case=exact_case,
+            timeout=timeout,
+        )
+        return [
+            {
+                "label": label,
+                "succeeded": True,
+                "started_after_seconds": 0.0,
+                "duration_seconds": 0.0,
+            }
+            for label, _statement in body
+        ]
 
     def execute_tsql(
         self,

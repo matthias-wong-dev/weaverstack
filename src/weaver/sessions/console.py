@@ -428,6 +428,71 @@ class ConsoleSession(Session):
         livy = self._foreground_livy(scope)
         return scope.livy_run(source, name="spark_sql", timeout=timeout, livy=livy)
 
+    def execute_spark_sql_actions(
+        self,
+        actions: Sequence[tuple[str, str]],
+        *,
+        exact_case: bool = False,
+        workspace: Workspace | None = None,
+        timeout: float | None = None,
+    ) -> list[dict[str, Any]]:
+        """Run labelled actions in one submission with explicit outcomes.
+
+        ``timeout`` remains an allowance per action. The Livy submission gets the
+        sum of those allowances so batching does not narrow the serial timeout
+        boundary.
+        """
+
+        ordered = list(actions)
+        if not ordered:
+            return []
+        from ..fabric.livy import DEFAULT_STATEMENT_TIMEOUT
+
+        per_action_timeout = DEFAULT_STATEMENT_TIMEOUT if timeout is None else timeout
+        batch_timeout = per_action_timeout * len(ordered)
+        scope = self.scope(workspace)
+        source = (
+            "import time as _time\n"
+            f"_actions = {ordered!r}\n"
+            f"_exact = {bool(exact_case)!r}\n"
+            "_key = 'spark.sql.caseSensitive'\n"
+            "_previous = spark.conf.get(_key) if _exact else None\n"
+            "_restore = _exact and str(_previous).lower() != 'true'\n"
+            "_results = []\n"
+            "_origin = _time.monotonic()\n"
+            "if _restore:\n"
+            "    spark.conf.set(_key, 'true')\n"
+            "try:\n"
+            "    for _label, _statement in _actions:\n"
+            "        _started = _time.monotonic()\n"
+            "        try:\n"
+            "            spark.sql(_statement)\n"
+            "        except Exception as _error:\n"
+            "            _outcome = {\n"
+            "                'label': _label,\n"
+            "                'succeeded': False,\n"
+            "                'error_type': type(_error).__name__,\n"
+            "                'error_message': str(_error),\n"
+            "            }\n"
+            "        else:\n"
+            "            _outcome = {'label': _label, 'succeeded': True}\n"
+            "        _outcome['started_after_seconds'] = _started - _origin\n"
+            "        _outcome['duration_seconds'] = _time.monotonic() - _started\n"
+            "        _results.append(_outcome)\n"
+            "finally:\n"
+            "    if _restore:\n"
+            "        spark.conf.set(_key, _previous)\n"
+            "emit(_results)\n"
+        )
+        livy = self._foreground_livy(scope)
+        return scope.livy_run(
+            source,
+            name="spark_sql_actions",
+            timeout=batch_timeout,
+            livy=livy,
+            retry_submission=False,
+        )
+
     def _foreground_livy(self, scope: "ConsoleScope"):
         if scope.livy is None:
             raise CommandError("No Livy session is available for this workspace.")
@@ -711,6 +776,7 @@ class ConsoleScope(WorkspaceScope):
         name: str,
         timeout: float | None = None,
         livy=None,
+        retry_submission: bool = True,
     ):
         """Submit one statement to this scope's Livy session and return its payload.
 
@@ -728,6 +794,8 @@ class ConsoleScope(WorkspaceScope):
             livy = self.livy.get()
         with self.telemetry.external("livy", name):
             kwargs = {} if timeout is None else {"timeout": timeout}
+            if not retry_submission:
+                kwargs["retry_submission"] = False
             try:
                 result = livy.run(source, **kwargs)
             except LivyStatementError as exc:

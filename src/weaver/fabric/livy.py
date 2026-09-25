@@ -221,6 +221,8 @@ def _call(
     token: str,
     payload: Any = None,
     expected: tuple[int, ...] = (200, 201, 202),
+    *,
+    retry_transient: bool = True,
 ) -> dict:
     import requests
 
@@ -242,7 +244,11 @@ def _call(
             raise LivyError(f"{method} {url} could not be reached: {exc}") from exc
         if response.status_code in expected:
             return response.json() if response.content else {}
-        if response.status_code in TRANSIENT_STATUSES and attempt < CONNECTION_ATTEMPTS:
+        if (
+            retry_transient
+            and response.status_code in TRANSIENT_STATUSES
+            and attempt < CONNECTION_ATTEMPTS
+        ):
             time.sleep(retry_delay(response, attempt))
             continue
         raise LivyError(
@@ -401,7 +407,11 @@ class LivySession:
         raise LivyError(f"Livy session did not reach {wanted!r} within {int(timeout)}s")
 
     def run(
-        self, code: str, *, timeout: float = DEFAULT_STATEMENT_TIMEOUT
+        self,
+        code: str,
+        *,
+        timeout: float = DEFAULT_STATEMENT_TIMEOUT,
+        retry_submission: bool = True,
     ) -> StatementResult:
         """Run code in the session and return what it printed.
 
@@ -418,6 +428,7 @@ class LivySession:
             f"{self.session_url}/statements",
             self.token,
             {"code": code, "kind": "pyspark"},
+            retry_transient=retry_submission,
         )
         statement_url = f"{self.session_url}/statements/{submitted['id']}"
 

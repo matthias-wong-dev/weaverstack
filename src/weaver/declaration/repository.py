@@ -19,6 +19,7 @@ from typing import Iterable, Mapping, TypeVar
 
 from ..errors import DiscoveryError
 from ..locations import Location
+from ..sql_statements import sql_parse_cache
 from ..store import FilesystemStore, Store
 from .dependencies import PythonImport
 from .item_dependencies import resolve_item_dependencies
@@ -272,20 +273,21 @@ def parse_item_repository(
     if not store.is_directory(root):
         raise DiscoveryError(f"source is not a directory: {root}")
 
-    authored = _read_authored_repository(root, store)
-    merged = merge_repository(
-        _catalogue_part(),
-        authored,
-        *_standard_parts(authored),
-        _generated_content(authored),
-    )
-    repository = compose_repository(merged, root=root, store=store)
-    # Imported here rather than at module scope: raw metadata parsing must not
-    # pull in the catalogue, which reads the metadata module itself.
-    from ..catalogue.capacity import validate_repository_capacity
+    with sql_parse_cache():
+        authored = _read_authored_repository(root, store)
+        merged = merge_repository(
+            _catalogue_part(),
+            authored,
+            *_standard_parts(authored),
+            _generated_content(authored),
+        )
+        repository = compose_repository(merged, root=root, store=store)
+        # Keep this import local so raw metadata parsing does not pull in the
+        # catalogue, which reads the metadata module itself.
+        from ..catalogue.capacity import validate_repository_capacity
 
-    validate_repository_capacity(repository)
-    return repository
+        validate_repository_capacity(repository)
+        return repository
 
 
 def read_repository_fragment(
