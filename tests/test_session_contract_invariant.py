@@ -121,7 +121,7 @@ def test_the_test_host_records_the_delta_table_specification():
 
 
 @weaver_test()
-def test_a_legacy_session_can_inherit_the_labelled_action_fallback():
+def test_a_legacy_session_labelled_action_fallback_fails_closed():
     class LegacySession:
         def __init__(self):
             self.statements = []
@@ -129,15 +129,14 @@ def test_a_legacy_session_can_inherit_the_labelled_action_fallback():
         def execute_spark_sql(self, statement, **_kwargs):
             self.statements.append(statement)
             if statement == "BROKEN":
-                raise RuntimeError("bad statement")
+                raise RuntimeError("submission outcome is unknown")
 
     legacy = LegacySession()
 
-    outcomes = Session.execute_spark_sql_actions(
-        cast(Any, legacy),
-        [("before", "SELECT 1"), ("broken", "BROKEN"), ("after", "SELECT 2")],
-    )
+    with pytest.raises(RuntimeError, match="submission outcome is unknown"):
+        Session.execute_spark_sql_actions(
+            cast(Any, legacy),
+            [("before", "SELECT 1"), ("broken", "BROKEN"), ("after", "SELECT 2")],
+        )
 
-    assert legacy.statements == ["SELECT 1", "BROKEN", "SELECT 2"]
-    assert [outcome["succeeded"] for outcome in outcomes] == [True, False, True]
-    assert outcomes[1]["error_type"] == "RuntimeError"
+    assert legacy.statements == ["SELECT 1", "BROKEN"]

@@ -21,6 +21,7 @@ from types import SimpleNamespace
 import pytest
 from support.weaver_test import weaver_test
 
+from weaver.fabric.livy import DEFAULT_STATEMENT_TIMEOUT
 from weaver.sessions.console import ConsoleScope, ConsoleSession
 from weaver.sessions.notebook import NotebookSession
 from weaver.sessions.testing import TestSession
@@ -210,7 +211,33 @@ def test_a_labelled_submission_disables_transport_retries(desktop):
 
     session.execute_spark_sql_actions([("a1", "SELECT 1"), ("a2", "SELECT 2")])
 
-    assert livy.kwargs == [{"retry_submission": False}]
+    assert livy.kwargs[0]["retry_submission"] is False
+
+
+@weaver_test()
+def test_a_labelled_submission_aggregates_the_default_action_timeout(desktop):
+    session, livy = desktop([])
+
+    session.execute_spark_sql_actions([("a1", "SELECT 1"), ("a2", "SELECT 2")])
+
+    assert livy.kwargs == [
+        {
+            "timeout": 2 * DEFAULT_STATEMENT_TIMEOUT,
+            "retry_submission": False,
+        }
+    ]
+
+
+@weaver_test()
+def test_a_labelled_submission_aggregates_an_explicit_action_timeout(desktop):
+    session, livy = desktop([])
+
+    session.execute_spark_sql_actions(
+        [("a1", "SELECT 1"), ("a2", "SELECT 2"), ("a3", "SELECT 3")],
+        timeout=12.5,
+    )
+
+    assert livy.kwargs == [{"timeout": 37.5, "retry_submission": False}]
 
 
 @weaver_test()
