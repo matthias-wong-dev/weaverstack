@@ -130,3 +130,50 @@ def test_profile_reads_the_complete_committed_log_before_accepting_a_table(tmp_p
         verify_delta_profile_v1(
             profile, read_delta_snapshot(FilesystemStore(), Location(str(tmp_path)))
         )
+
+
+@weaver_test()
+def test_feature_protocol_declares_non_null_invariants_and_conditional_variant():
+    identity = compile_delta_profile_v1(
+        (("Id", "bigint", True), ("Value", "string", False)),
+        identity_column="Id",
+    )
+    assert set(identity.protocol["writerFeatures"]) == {
+        "columnMapping",
+        "identityColumns",
+        "invariants",
+    }
+    assert set(identity.protocol["readerFeatures"]) == {"columnMapping"}
+
+    variant = compile_delta_profile_v1(
+        (("Id", "bigint", True), ("Payload", "variant", False))
+    )
+    assert set(variant.protocol["writerFeatures"]) == {
+        "columnMapping",
+        "variantType",
+        "invariants",
+    }
+    assert set(variant.protocol["readerFeatures"]) == {
+        "columnMapping",
+        "variantType",
+    }
+    nullable_variant = compile_delta_profile_v1((("Payload", "variant", False),))
+    assert "invariants" not in nullable_variant.protocol["writerFeatures"]
+
+
+@weaver_test()
+def test_generated_column_requires_feature_when_variant_raises_writer_to_seven():
+    profile = compile_delta_profile_v1(
+        (
+            ("Id", "bigint", True),
+            ("Twice", "bigint", False),
+            ("Payload", "variant", False),
+        ),
+        generated_columns={"Twice": "Id * 2"},
+    )
+    assert set(profile.protocol["writerFeatures"]) == {
+        "columnMapping",
+        "invariants",
+        "variantType",
+        "generatedColumns",
+    }

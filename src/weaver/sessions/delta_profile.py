@@ -148,6 +148,10 @@ def compile_delta_profile_v1(
             protocol["writerFeatures"].append("variantType")
         if identity_column is not None:
             protocol["writerFeatures"].append("identityColumns")
+        if any(not field["nullable"] for field in fields):
+            protocol["writerFeatures"].append("invariants")
+        if generated:
+            protocol["writerFeatures"].append("generatedColumns")
     configuration = {
         **_PROPERTIES,
         "delta.columnMapping.maxColumnId": str(len(fields)),
