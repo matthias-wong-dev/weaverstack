@@ -372,10 +372,13 @@ class ConsoleSession(Session):
         *,
         workspace: Workspace | None = None,
         timeout: float | None = None,
+        workers: int = 1,
     ) -> list[dict[str, Any]]:
         ordered = list(actions)
         if not ordered:
             return []
+        if workers not in (1, 2):
+            raise ValueError("Delta Table creation supports one or two workers")
         from ..fabric.livy import DEFAULT_STATEMENT_TIMEOUT
         from .delta_table import remote_delta_table_actions_program
 
@@ -383,7 +386,7 @@ class ConsoleSession(Session):
         scope = self.scope(workspace)
         livy = self._foreground_livy(scope)
         return scope.livy_run(
-            remote_delta_table_actions_program(ordered),
+            remote_delta_table_actions_program(ordered, workers=workers),
             name="delta_table_actions",
             timeout=allowance * len(ordered),
             livy=livy,

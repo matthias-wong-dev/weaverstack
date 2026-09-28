@@ -87,40 +87,19 @@ class NotebookSession(Session):
         *,
         workspace: Workspace | None = None,
         timeout: float | None = None,
+        workers: int = 1,
     ) -> list[dict[str, Any]]:
-        from .delta_table import create_delta_table_in_session
+        from .delta_table import create_delta_table_actions_in_session
 
         del timeout  # Native Spark runs on the attached session.
         ordered = list(actions)
         if not ordered:
             return []
         spark = self.spark(workspace)
-        origin = time.monotonic()
-        outcomes = []
         with self.telemetry.timing("spark.delta_table_actions"):
-            for label, qualified, columns, identity, mapping in ordered:
-                started = time.monotonic()
-                try:
-                    create_delta_table_in_session(
-                        spark,
-                        qualified,
-                        columns,
-                        identity_column=identity,
-                        column_mapping=mapping,
-                    )
-                except Exception as exc:
-                    outcome = {
-                        "label": label,
-                        "succeeded": False,
-                        "error_type": type(exc).__name__,
-                        "error_message": str(exc),
-                    }
-                else:
-                    outcome = {"label": label, "succeeded": True}
-                outcome["started_after_seconds"] = started - origin
-                outcome["duration_seconds"] = time.monotonic() - started
-                outcomes.append(outcome)
-        return outcomes
+            return create_delta_table_actions_in_session(
+                spark, ordered, workers=workers
+            )
 
     def execute_python(
         self,

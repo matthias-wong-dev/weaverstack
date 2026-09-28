@@ -282,8 +282,11 @@ class Session(ABC):
         *,
         workspace: Workspace | None = None,
         timeout: float | None = None,
+        workers: int = 1,
     ) -> list[dict[str, Any]]:
-        """Create labelled Tables serially; an unclassified failure stops the batch."""
+        """Create labelled Tables serially by default; stop on uncertain failure."""
+        if workers not in (1, 2):
+            raise ValueError("Delta Table creation supports one or two workers")
         origin = time.monotonic()
         outcomes = []
         for label, qualified_name, columns, identity_column, column_mapping in actions:

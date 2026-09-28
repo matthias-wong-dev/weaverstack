@@ -399,5 +399,76 @@ def test_console_program_names_the_target_when_identity_is_unsupported(delta_mod
 
     with pytest.raises(RuntimeError, match="Customer Order.*IdentityGenerator"):
         exec(source, {"spark": spark, "emit": lambda _value: None})
-
     assert _DeltaTable.builders == []
+
+
+@weaver_test()
+def test_console_two_lane_delta_program_drains_failed_sibling_in_manifest_order(
+    delta_module, monkeypatch
+):
+    import threading
+
+    from weaver.sessions.delta_table import remote_delta_table_actions_program
+
+    barrier = threading.Barrier(2)
+    seen = []
+
+    def execute(self):
+        assert self.spark.conf.get(CASE_KEY) == "true"
+        seen.append(threading.get_ident())
+        barrier.wait(timeout=3)
+        if any(call == ("tableName", TARGET) for call in self.calls):
+            raise RuntimeError("broken create")
+
+    monkeypatch.setattr(_Builder, "execute", execute)
+    spark = SimpleNamespace(conf=_Conf())
+    emitted = []
+    source = remote_delta_table_actions_program(
+        [
+            ("broken", TARGET, COLUMNS[1:], None, True),
+            ("sibling", TARGET + "Two", COLUMNS[1:], None, True),
+        ],
+        workers=2,
+    )
+    exec(source, {"spark": spark, "emit": emitted.append})
+
+    assert [o["label"] for o in emitted[0]] == ["broken", "sibling"]
+    assert [o["succeeded"] for o in emitted[0]] == [False, True]
+    assert emitted[0][0]["error_message"] == "broken create"
+    assert len(set(seen)) == 2
+    assert spark.conf.get(CASE_KEY) == "false"
+
+
+@weaver_test()
+def test_notebook_two_lane_delta_actions_drains_failed_sibling(
+    notebook, delta_module, monkeypatch
+):
+    import threading
+
+    barrier = threading.Barrier(2)
+    seen = []
+
+    def execute(self):
+        assert self.spark.conf.get(CASE_KEY) == "true"
+        seen.append(threading.get_ident())
+        barrier.wait(timeout=3)
+        if any(call == ("tableName", TARGET) for call in self.calls):
+            raise RuntimeError("broken create")
+
+    monkeypatch.setattr(_Builder, "execute", execute)
+    spark = SimpleNamespace(conf=_Conf())
+    outcomes = notebook(spark).create_delta_table_actions(
+        [
+            ("broken", TARGET, COLUMNS[1:], None, True),
+            ("sibling", TARGET + "Two", COLUMNS[1:], None, True),
+        ],
+        workers=2,
+    )
+
+    assert [(o["label"], o["succeeded"]) for o in outcomes] == [
+        ("broken", False),
+        ("sibling", True),
+    ]
+    assert outcomes[0]["error_message"] == "broken create"
+    assert len(set(seen)) == 2
+    assert spark.conf.get(CASE_KEY) == "false"

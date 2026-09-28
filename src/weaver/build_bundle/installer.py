@@ -191,7 +191,9 @@ class Installer:
         workspace = self.workspace
 
         def create(actions):
-            return session.create_delta_table_actions(actions, workspace=workspace)
+            return session.create_delta_table_actions(
+                actions, workspace=workspace, workers=2 if len(actions) > 1 else 1
+            )
 
         return create
 
@@ -287,7 +289,7 @@ def _epoch(started: datetime) -> str:
 
 
 #: Fabric Warehouse snapshot isolation can abort concurrent DDL and DML that
-#: contend on catalogue metadata or rows, so actions within a batch are serial.
+#: contend on catalogue metadata or rows, so Warehouse actions stay serial.
 _WHY_SERIAL = "concurrent T-SQL deadlocked a real Warehouse; see the note above"
 
 
@@ -326,7 +328,7 @@ def _run_batch(
     bundle: BuildBundle,
     installer: "Installer",
 ) -> list[ActionResult]:
-    """Run a batch serially in stable manifest order."""
+    """Run manifest-ordered actions, draining adjacent Lakehouse Tables together."""
 
     results: list[ActionResult] = []
     spark_actions: list[InstallAction] = []

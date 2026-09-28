@@ -246,6 +246,7 @@ def test_adjacent_delta_tables_use_one_labelled_session_submission(tmp_path):
     assert len(calls) == 1
     assert [spec[0] for spec in calls[0][0]] == ["first", "second"]
     assert calls[0][1]["workspace"].workspace == "Sales"
+    assert calls[0][1]["workers"] == 2
     assert [spec[2][0] for spec in calls[0][0]] == [("Id", "bigint", True)] * 2
     assert not [call for call in session.calls if call.kind == "delta_table"]
 
