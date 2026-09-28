@@ -306,6 +306,37 @@ class Session(ABC):
             )
         return outcomes
 
+    def create_direct_delta_table(
+        self,
+        qualified_name: str,
+        columns: Sequence[Sequence[Any]],
+        *,
+        identity_column: str | None = None,
+        workspace: Workspace | None = None,
+    ) -> Any:
+        """Third-party Sessions retain their established Spark capability."""
+        return self.create_delta_table(
+            qualified_name,
+            columns,
+            identity_column=identity_column,
+            workspace=workspace,
+        )
+
+    def create_direct_delta_table_actions(
+        self,
+        actions: Sequence[tuple[str, str, Sequence[Sequence[Any]], str | None]],
+        *,
+        workspace: Workspace | None = None,
+    ) -> list[dict[str, Any]]:
+        """An unclassified third-party failure stops this serial fallback."""
+        return self.create_delta_table_actions(
+            [
+                (label, qualified, columns, identity, True)
+                for label, qualified, columns, identity in actions
+            ],
+            workspace=workspace,
+        )
+
     @abstractmethod
     def execute_python(
         self,

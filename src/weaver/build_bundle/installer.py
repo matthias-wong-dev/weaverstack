@@ -16,6 +16,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Mapping
 
 from ..errors import InstallError
+from ..sessions.direct_delta import direct_profile_supported
 from ..store import Store
 from ..targets import ItemRef
 from .bundle import BuildBundle, validate_bundle
@@ -192,6 +193,31 @@ class Installer:
 
         def create(actions):
             return session.create_delta_table_actions(actions, workspace=workspace)
+
+        return create
+
+    def direct_delta_table_creator(self):
+        session = self.session
+        workspace = self.workspace
+
+        def create(qualified_name, columns, *, identity_column=None):
+            return session.create_direct_delta_table(
+                qualified_name,
+                columns,
+                identity_column=identity_column,
+                workspace=workspace,
+            )
+
+        return create
+
+    def direct_delta_table_actions(self):
+        session = self.session
+        workspace = self.workspace
+
+        def create(actions):
+            return session.create_direct_delta_table_actions(
+                actions, workspace=workspace
+            )
 
         return create
 
@@ -478,6 +504,9 @@ def _run_table_actions(
                 context,
                 query_rows=shape_rows.get(action.id),
             )
+            direct_profile_supported(
+                specification[1], specification[2], specification[3]
+            )
         except Exception as exc:
             results[action.id] = _failed(action, batch.target_id, started, exc)
         else:
@@ -486,9 +515,25 @@ def _run_table_actions(
     if prepared:
         submitted_at = _now()
         try:
-            outcomes = installer.delta_table_actions()(
-                [(action.id, *specification) for action, specification, _ in prepared]
-            )
+            if all(
+                direct_profile_supported(
+                    specification[1], specification[2], specification[3]
+                )
+                for _action, specification, _details in prepared
+            ):
+                outcomes = installer.direct_delta_table_actions()(
+                    [
+                        (action.id, *specification[:3])
+                        for action, specification, _ in prepared
+                    ]
+                )
+            else:
+                outcomes = installer.delta_table_actions()(
+                    [
+                        (action.id, *specification)
+                        for action, specification, _ in prepared
+                    ]
+                )
             indexed = _validated_spark_outcomes(outcomes, prepared)
             completed: dict[str, ActionResult] = {}
             for action, _specification, details in prepared:
@@ -654,6 +699,7 @@ def _run_sequence(
             target = resolved[batch.target_id]
             context = InstallationContext(
                 create_delta_table=installer.delta_table_creator(),
+                create_direct_delta_table=installer.direct_delta_table_creator(),
                 spark_sql=installer.spark_sql(),
                 spark_sql_batch=installer.spark_sql_batch(),
                 resolver=installer.resolver,

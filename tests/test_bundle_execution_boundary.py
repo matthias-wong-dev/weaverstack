@@ -177,8 +177,9 @@ def _installed(bundle, session, *, executor="spark_sql"):
     return report, recorder
 
 
-def _table_bundle(tmp_path, actions, *, source_queries=None):
+def _table_bundle(tmp_path, actions, *, source_queries=None, column_types=None):
     source_queries = source_queries or {}
+    column_types = column_types or {}
     payloads = {
         action.id: (
             json.dumps(
@@ -186,7 +187,9 @@ def _table_bundle(tmp_path, actions, *, source_queries=None):
                     "object": f"`Sales`.`Sales_LH`.`Scale`.`{action.id}`",
                     "source_query": source_queries.get(action.id),
                     "identity_column": None,
-                    "declared_columns": [["Id", "bigint", True]],
+                    "declared_columns": [
+                        ["Id", column_types.get(action.id, "bigint"), True]
+                    ],
                     "references": [],
                     "audit_columns": [],
                     "column_mapping": True,
@@ -248,6 +251,75 @@ def test_adjacent_delta_tables_use_one_labelled_session_submission(tmp_path):
     assert calls[0][1]["workspace"].workspace == "Sales"
     assert [spec[2][0] for spec in calls[0][0]] == [("Id", "bigint", True)] * 2
     assert not [call for call in session.calls if call.kind == "delta_table"]
+
+
+@weaver_test()
+def test_scalar_table_batch_uses_direct_session_actions(tmp_path):
+    bundle = _table_bundle(
+        tmp_path,
+        (_action("first", "spark_table"), _action("second", "spark_table")),
+    )
+    session = _session(ELSEWHERE)
+    calls = []
+
+    def direct(actions, **kwargs):
+        calls.append((actions, kwargs))
+        return [
+            {
+                "label": action[0],
+                "succeeded": True,
+                "started_after_seconds": float(index),
+                "duration_seconds": 0.1,
+            }
+            for index, action in enumerate(actions)
+        ]
+
+    session.create_direct_delta_table_actions = direct
+    session.create_delta_table_actions = lambda *_args, **_kwargs: pytest.fail(
+        "Spark fallback"
+    )
+    report = Installer(session).install(bundle)
+    assert report.succeeded
+    assert [action.status for action in report.action_results()] == ["succeeded"] * 2
+    assert len(calls) == 1
+    assert [action[0] for action in calls[0][0]] == ["first", "second"]
+    assert calls[0][1]["workspace"].workspace == "Sales"
+
+
+@weaver_test()
+def test_variant_batch_refuses_that_action_and_keeps_ordinary_sibling(tmp_path):
+    bundle = _table_bundle(
+        tmp_path,
+        (_action("variant", "spark_table"), _action("ordinary", "spark_table")),
+        column_types={"variant": "variant"},
+    )
+    session = _session(ELSEWHERE)
+    submitted = []
+
+    def direct(actions, **_kwargs):
+        submitted.extend(actions)
+        return [
+            {
+                "label": action[0],
+                "succeeded": True,
+                "started_after_seconds": 0.0,
+                "duration_seconds": 0.1,
+            }
+            for action in actions
+        ]
+
+    session.create_direct_delta_table_actions = direct
+    session.create_delta_table_actions = lambda *_args, **_kwargs: pytest.fail(
+        "Spark fallback"
+    )
+    report = Installer(session).install(bundle)
+    assert [
+        (action.action_id, action.status) for action in report.action_results()
+    ] == [
+        ("variant", "failed"),
+        ("ordinary", "succeeded"),
+    ]
+    assert [action[0] for action in submitted] == ["ordinary"]
 
 
 @weaver_test()

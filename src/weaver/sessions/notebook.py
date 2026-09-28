@@ -59,6 +59,44 @@ class NotebookSession(Session):
 
     # --- execution capabilities ---------------------------------------------
 
+    def create_direct_delta_table(
+        self,
+        qualified_name: str,
+        columns: Sequence[Sequence[Any]],
+        *,
+        identity_column: str | None = None,
+        workspace: Workspace | None = None,
+    ) -> Any:
+        from notebookutils import credentials
+
+        from ..fabric.onelake import OneLakeDfsClient
+        from .direct_delta import create_bound_delta_table
+
+        scope = self.scope(workspace)
+        with self.telemetry.timing("onelake.delta_table"):
+            return create_bound_delta_table(
+                qualified_name=qualified_name,
+                columns=columns,
+                identity_column=identity_column,
+                resolver=scope.resolver,
+                store=OneLakeDfsClient(
+                    token=lambda: credentials.getToken("storage"),
+                    telemetry=self.telemetry,
+                ),
+            )
+
+    def create_direct_delta_table_actions(
+        self,
+        actions: Sequence[tuple[str, str, Sequence[Sequence[Any]], str | None]],
+        *,
+        workspace: Workspace | None = None,
+    ) -> list[dict[str, Any]]:
+        from .direct_delta import run_direct_delta_actions
+
+        return run_direct_delta_actions(
+            self.create_direct_delta_table, actions, workspace=workspace
+        )
+
     def create_delta_table(
         self,
         qualified_name: str,

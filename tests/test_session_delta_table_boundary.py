@@ -270,6 +270,91 @@ def test_console_submits_a_self_contained_serialised_creator(monkeypatch):
 
 
 @weaver_test()
+def test_console_direct_creation_does_not_acquire_livy(monkeypatch):
+    from weaver.sessions import direct_delta
+
+    captured = []
+    monkeypatch.setattr(
+        direct_delta,
+        "create_bound_delta_table",
+        lambda **kw: captured.append(kw) or "allocated",
+    )
+    monkeypatch.setattr(
+        ConsoleScope,
+        "resolver",
+        property(lambda self: "resolved"),
+    )
+    monkeypatch.setattr(
+        ConsoleScope,
+        "transport_store",
+        property(lambda self: "onelake"),
+    )
+    session = ConsoleSession(workspace=Workspace(workspace="Demo"), livy=_Livy())
+    assert (
+        session.create_direct_delta_table(
+            TARGET, COLUMNS, identity_column="Customer key"
+        )
+        == "allocated"
+    )
+    assert captured[0]["resolver"] == "resolved"
+    assert captured[0]["store"] == "onelake"
+    assert session.scope().livy.acquired is False
+
+
+@weaver_test()
+def test_notebook_direct_creation_uses_its_storage_identity(notebook, monkeypatch):
+    from weaver.sessions import direct_delta
+
+    captured = []
+    monkeypatch.setattr(
+        direct_delta,
+        "create_bound_delta_table",
+        lambda **kw: captured.append(kw) or "allocated",
+    )
+    credentials = SimpleNamespace(
+        getToken=lambda audience: "storage-token" if audience == "storage" else None
+    )
+    monkeypatch.setitem(
+        sys.modules, "notebookutils", SimpleNamespace(credentials=credentials)
+    )
+    session = notebook(SimpleNamespace(conf=_Conf()))
+    assert session.create_direct_delta_table(TARGET, COLUMNS) == "allocated"
+    assert captured[0]["store"].token == "storage-token"
+
+
+@weaver_test()
+@pytest.mark.parametrize("host", ("console", "notebook"))
+def test_direct_actions_keep_failed_sibling_and_order(host, notebook, monkeypatch):
+    if host == "console":
+        session = ConsoleSession(workspace=Workspace(workspace="Demo"), livy=_Livy())
+    else:
+        session = notebook(SimpleNamespace(conf=_Conf()))
+    calls = []
+
+    def create(qualified, columns, *, identity_column, workspace):
+        calls.append((qualified, columns, identity_column, workspace))
+        if qualified == TARGET:
+            raise ValueError("profile mismatch")
+        return "created"
+
+    monkeypatch.setattr(session, "create_direct_delta_table", create)
+    monkeypatch.setattr(
+        session,
+        "create_delta_table_actions",
+        lambda *_args, **_kwargs: pytest.fail("Spark fallback"),
+    )
+    actions = [
+        ("failed", TARGET, COLUMNS, "Customer key"),
+        ("sibling", TARGET + "Two", COLUMNS[1:], None),
+    ]
+    outcomes = session.create_direct_delta_table_actions(actions)
+    assert [outcome["label"] for outcome in outcomes] == ["failed", "sibling"]
+    assert [outcome["succeeded"] for outcome in outcomes] == [False, True]
+    assert outcomes[0]["error_message"] == "profile mismatch"
+    assert len(calls) == 2
+
+
+@weaver_test()
 def test_console_batches_delta_actions_in_one_submission_without_retry(
     monkeypatch, delta_module
 ):

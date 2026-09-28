@@ -39,13 +39,21 @@ class SparkTableExecutor:
     ) -> dict[str, Any] | None:
         specification, details = self.prepare(action, payload, context)
         qualified, physical, identity_name, column_mapping = specification
-        assert context.create_delta_table is not None
-        context.create_delta_table(
-            qualified,
-            physical,
-            identity_column=identity_name,
-            column_mapping=column_mapping,
-        )
+        from ...sessions.direct_delta import direct_profile_supported
+
+        direct = direct_profile_supported(physical, identity_name, column_mapping)
+        if direct and context.create_direct_delta_table is not None:
+            context.create_direct_delta_table(
+                qualified, physical, identity_column=identity_name
+            )
+        else:
+            assert context.create_delta_table is not None
+            context.create_delta_table(
+                qualified,
+                physical,
+                identity_column=identity_name,
+                column_mapping=column_mapping,
+            )
         return details
 
     def prepare(

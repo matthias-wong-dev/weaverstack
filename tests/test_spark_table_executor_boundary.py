@@ -15,6 +15,7 @@ declaration already has its shape and reaches Spark once.
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 
 import pytest
 from support.weaver_test import weaver_test
@@ -160,6 +161,44 @@ def _run(capability, payload: bytes, *, destination=DESTINATION):
 
 
 # --- what reaches Spark, and how often ----------------------------------------
+
+
+@weaver_test()
+def test_supported_scalar_table_creates_through_direct_session_capability():
+    capability = _Capability([])
+    direct = []
+    context = replace(
+        _context(capability, DESTINATION),
+        create_direct_delta_table=lambda qualified, columns, *, identity_column: (
+            direct.append((qualified, columns, identity_column))
+        ),
+    )
+    payload = _payload(
+        source_query=None,
+        schema_mode="declared",
+        declared_columns=[["CustomerId", "bigint", True]],
+    )
+    result = SparkTableExecutor().execute(_action(), payload, context)
+    assert result["object"] == CUSTOMER
+    assert direct and direct[0][0] == CUSTOMER
+    assert capability.creations == []
+
+
+@weaver_test()
+def test_variant_table_refuses_before_any_creation_capability():
+    capability = _Capability([])
+    context = replace(
+        _context(capability, DESTINATION),
+        create_direct_delta_table=lambda *_args, **_kwargs: pytest.fail("mutated"),
+    )
+    payload = _payload(
+        source_query=None,
+        schema_mode="declared",
+        declared_columns=[["Payload", "variant", False]],
+    )
+    with pytest.raises(ValueError, match="VARIANT.*not supported"):
+        SparkTableExecutor().execute(_action(), payload, context)
+    assert capability.creations == []
 
 
 @weaver_test()
