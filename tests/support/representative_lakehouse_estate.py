@@ -57,6 +57,15 @@ class RepresentativeDeclaration:
 
 
 @dataclass(frozen=True)
+class RepresentativeFolder:
+    identity: str
+    item: str
+    relative_path: str
+    motif: int
+    stream: str
+
+
+@dataclass(frozen=True)
 class RepresentativeShortcut:
     """One shortcut and every declaration that reads its destination."""
 
@@ -85,6 +94,7 @@ class RepresentativeLakehousePlan:
 
     spec: RepresentativeLakehouseSpec
     declarations: tuple[RepresentativeDeclaration, ...]
+    folders: tuple[RepresentativeFolder, ...]
     shortcuts: tuple[RepresentativeShortcut, ...]
 
     @property
@@ -98,16 +108,25 @@ class RepresentativeLakehousePlan:
     @property
     def graph_nodes(self) -> frozenset[str]:
         return frozenset(
-            (*self.identities, *(shortcut.destination for shortcut in self.shortcuts))
+            (
+                *self.identities,
+                *(folder.identity for folder in self.folders),
+                *(shortcut.destination for shortcut in self.shortcuts),
+            )
         )
 
     @property
     def ordinary_edges(self) -> tuple[tuple[str, str], ...]:
-        return tuple(
+        object_edges = tuple(
             (reference, node.identity)
             for node in self.declarations
             for reference in node.references
         )
+        folder_edges = tuple(
+            (folder.identity, _identity(folder.motif, f"Source{folder.stream}"))
+            for folder in self.folders
+        )
+        return object_edges + folder_edges
 
     @property
     def shortcut_edges(self) -> tuple[tuple[str, str], ...]:
@@ -134,13 +153,9 @@ _TABLE_ROLES = (
     "SourceAdjustment",
     "Joined",
     "Aggregate",
-)
-_VIEW_ROLES = (
-    "ActiveEntities",
     "EntityProjection",
     "AdjustmentProjection",
     "EnrichedEntities",
-    "UnifiedEntities",
     "GroupedEntities",
     "WindowedEntities",
     "RankedEntities",
@@ -148,6 +163,10 @@ _VIEW_ROLES = (
     "SharedSummary",
     "SummaryPositive",
     "SummaryAll",
+)
+_VIEW_ROLES = (
+    "ActiveEntities",
+    "UnifiedEntities",
     "SummaryUnion",
     "SummaryJoin",
     "TerminalSummary",
@@ -169,6 +188,12 @@ _PYTHON_ROLES = {
     "SourceEntity",
     "SourceAdjustment",
     "Joined",
+    "EntityProjection",
+    "AdjustmentProjection",
+    "EnrichedEntities",
+    "RankedEntities",
+    "AggregateProjection",
+    "SummaryAll",
     "AggregateReconciles",
     "JoinedMeasuresMatch",
     "NoOrphans",
@@ -263,8 +288,20 @@ def make_representative_lakehouse_plan(
     """Create deterministic declarations and a bounded-depth dependency graph."""
 
     declarations: list[RepresentativeDeclaration] = []
+    folders: list[RepresentativeFolder] = []
     shortcut_destination = _shortcut_destination()
     for motif in range(spec.motifs):
+        for stream in ("Entity", "Adjustment"):
+            object_id = _object(motif, f"{stream}Feed")
+            folders.append(
+                RepresentativeFolder(
+                    identity=f"{_item(motif)}/Files/{object_id}",
+                    item=_item(motif),
+                    relative_path=(f"{_item(motif)}/Files/{_class_name(object_id)}.py"),
+                    motif=motif,
+                    stream=stream,
+                )
+            )
         bridge_reference = None
         if motif and motif % MOTIFS_PER_COMPONENT:
             bridge_reference = (
@@ -309,6 +346,7 @@ def make_representative_lakehouse_plan(
     return RepresentativeLakehousePlan(
         spec=spec,
         declarations=tuple(declarations),
+        folders=tuple(folders),
         shortcuts=(shortcut,),
     )
 
@@ -336,12 +374,50 @@ def _schema_lines(role: str) -> tuple[str, ...]:
             "  ActiveFlag: boolean",
             "  ParentKey: long",
         )
-    if role == "Aggregate":
+    if role in {
+        "Aggregate",
+        "GroupedEntities",
+        "SharedSummary",
+        "SummaryPositive",
+        "SummaryAll",
+    }:
         return (
             "  MotifKey: integer",
             "  GroupKey: integer",
             "  TotalAmount: decimal(18, 2)",
             "  EntityCount: long",
+        )
+    columns = {
+        "EntityProjection": (
+            "  AdjustedAmount: decimal(18, 2)",
+            "  EffectiveAmount: decimal(18, 2)",
+        ),
+        "AdjustmentProjection": ("  AdjustmentAmount: decimal(18, 2)",),
+        "EnrichedEntities": ("  EnrichedAmount: decimal(18, 2)",),
+        "WindowedEntities": (
+            "  EnrichedAmount: decimal(18, 2)",
+            "  RunningAmount: decimal(18, 2)",
+            "  RankNumber: integer",
+        ),
+        "RankedEntities": (
+            "  EnrichedAmount: decimal(18, 2)",
+            "  RunningAmount: decimal(18, 2)",
+            "  RankNumber: integer",
+        ),
+        "AggregateProjection": (
+            "  TotalAmount: decimal(18, 2)",
+            "  EntityCount: long",
+            "  AverageAmount: decimal(18, 2)",
+        ),
+    }
+    if role == "AggregateProjection":
+        return ("  MotifKey: integer", "  GroupKey: integer", *columns[role])
+    if role in columns:
+        return (
+            "  MotifKey: integer",
+            "  EntityKey: long",
+            "  GroupKey: integer",
+            *columns[role],
         )
     raise ValueError(f"no table schema for role: {role}")
 
@@ -351,15 +427,26 @@ def _metadata_lines(node: RepresentativeDeclaration) -> list[str]:
         f"{node.kind.title()} ID: {node.object_id}",
         f"Description: Representative {node.role} benchmark declaration.",
     ]
-    if node.kind in {"table", "view"}:
+    if node.role in {"SourceEntity", "SourceAdjustment"}:
+        stream = "Entity" if node.role == "SourceEntity" else "Adjustment"
+        lines.append(f"Lineage: $Files/{_object(node.motif, f'{stream}Feed')}")
+    elif node.kind in {"table", "view"}:
         lines.append("Lineage: Representative benchmark data flow.")
     if node.references:
         lines.append("Dependencies:")
         lines.extend(f"  - {_object_id(reference)}" for reference in node.references)
-    else:
+    elif node.role not in {"SourceEntity", "SourceAdjustment"}:
         lines.append("Dependencies: []")
     if node.kind == "table":
-        primary = "EntityKey" if node.role != "Aggregate" else "GroupKey"
+        group_key_tables = {
+            "Aggregate",
+            "GroupedEntities",
+            "AggregateProjection",
+            "SharedSummary",
+            "SummaryPositive",
+            "SummaryAll",
+        }
+        primary = "GroupKey" if node.role in group_key_tables else "EntityKey"
         lines.extend((f"Primary key: {primary}", "Schema:", *_schema_lines(node.role)))
     if node.kind == "test":
         primary = "EntityKey" if node.role == "JoinedMeasuresMatch" else "GroupKey"
@@ -375,35 +462,58 @@ def _sql_header(node: RepresentativeDeclaration) -> str:
     return "/*\n" + "\n".join(_metadata_lines(node)) + "\n*/\n"
 
 
-def _root_rows(spec: RepresentativeLakehouseSpec, motif: int, stream: int) -> str:
+def _root_csv(spec: RepresentativeLakehouseSpec, motif: int, stream: int) -> str:
     rng = random.Random(spec.seed * 1_000_003 + motif * 101 + stream * 17)
-    rows = []
+    rows = ["MotifKey,EntityKey,GroupKey,Amount,ActiveFlag,ParentKey"]
     for offset in range(4):
         entity = motif * 100 + offset + 1
         group = motif * 10 + (offset % 2) + 1
         amount = 100 + rng.randrange(1, 80) + stream * 5
         active = "false" if offset == 3 else "true"
-        parent = "null" if offset == 0 else str(motif * 100 + 1)
-        rows.append(
-            "select "
-            f"{motif} as MotifKey, {entity}L as EntityKey, {group} as GroupKey, "
-            f"cast({amount}.00 as decimal(18, 2)) as Amount, "
-            f"{active} as ActiveFlag, cast({parent} as bigint) as ParentKey"
-        )
-    return "\nunion all\n".join(rows)
+        parent = "" if offset == 0 else str(motif * 100 + 1)
+        rows.append(f"{motif},{entity},{group},{amount}.00,{active},{parent}")
+    return "\n".join(rows) + "\n"
 
 
-def _root_table_source(
-    node: RepresentativeDeclaration, spec: RepresentativeLakehouseSpec, stream: int
-) -> str:
+def _folder_source(folder: RepresentativeFolder) -> str:
+    object_id = _object(folder.motif, f"{folder.stream}Feed")
+    class_name = _class_name(object_id)
+    csv_name = f"M{folder.motif:03d}{folder.stream}.csv"
+    return (
+        f'"""Folder ID: {object_id}\n'
+        f"Description: {folder.stream} source rows for the benchmark.\n"
+        "Lineage: Generated benchmark source data.\n"
+        'File key: "*.csv"\n"""\n'
+        "import shutil\nfrom pathlib import Path\n\nfrom weaver import Folder\n\n\n"
+        f"class {class_name}(Folder):\n"
+        "    def read(self):\n"
+        f'        source = Path(__file__).parent.parent / "lib" / "data" / "{csv_name}"\n'
+        "        with self.staging_folder() as staging:\n"
+        f'            shutil.copyfile(source, staging.path / "{csv_name}")\n'
+        "        return staging, []\n"
+    )
+
+
+def _root_table_source(node: RepresentativeDeclaration, stream: int) -> str:
     class_name = _class_name(node.object_id)
-    query = _root_rows(spec, node.motif, stream).replace('"', '\\"')
+    source_stream = "Entity" if stream == 0 else "Adjustment"
+    feed_name = _class_name(_object(node.motif, f"{source_stream}Feed"))
+    csv_name = f"M{node.motif:03d}{source_stream}.csv"
     return (
         _python_header(node)
+        + f"from Files.{feed_name} import {feed_name}\n\n"
         + "from weaver import Table\n\n\n"
         + f"class {class_name}(Table):\n"
         + "    def read(self):\n"
-        + f'        return self.spark.sql("""{query}""")\n'
+        + f'        source = f"{{{feed_name}(self).spark_path()}}/{csv_name}"\n'
+        + "        return self.spark.read.csv(source, header=True, inferSchema=False).selectExpr(\n"
+        + '            "cast(MotifKey as int) as MotifKey",\n'
+        + '            "cast(EntityKey as bigint) as EntityKey",\n'
+        + '            "cast(GroupKey as int) as GroupKey",\n'
+        + '            "cast(Amount as decimal(18, 2)) as Amount",\n'
+        + '            "cast(ActiveFlag as boolean) as ActiveFlag",\n'
+        + '            "cast(ParentKey as bigint) as ParentKey",\n'
+        + "        )\n"
     )
 
 
@@ -433,6 +543,69 @@ def _joined_table_source(node: RepresentativeDeclaration) -> str:
 
 def _qualified(reference: str) -> tuple[str, str]:
     return tuple(_object_id(reference).split(".", 1))  # type: ignore[return-value]
+
+
+def _python_table_source(node: RepresentativeDeclaration) -> str:
+    def upstream(index: int) -> str:
+        schema, name = _qualified(node.references[index])
+        return f'self.spark.table(self.lakehouse.qualify("{schema}", "{name}"))'
+
+    if node.role == "EntityProjection":
+        body = (
+            f"        return {upstream(0)}.selectExpr(\n"
+            '            "MotifKey", "EntityKey", "GroupKey",\n'
+            '            "cast(EffectiveAmount * cast(1.10 as decimal(4, 2)) '
+            'as decimal(18, 2)) as AdjustedAmount",\n'
+            '            "EffectiveAmount",\n'
+            "        )\n"
+        )
+    elif node.role == "AdjustmentProjection":
+        body = (
+            f"        return {upstream(0)}.selectExpr(\n"
+            '            "MotifKey", "EntityKey", "GroupKey",\n'
+            '            "cast(Amount as decimal(18, 2)) as AdjustmentAmount",\n'
+            "        )\n"
+        )
+    elif node.role == "EnrichedEntities":
+        body = (
+            f'        projection = {upstream(0)}.alias("p")\n'
+            f'        adjustment = {upstream(1)}.alias("a")\n'
+            "        return projection.join(\n"
+            "            adjustment, on=projection.EntityKey == adjustment.EntityKey\n"
+            "        ).selectExpr(\n"
+            '            "p.MotifKey", "p.EntityKey", "p.GroupKey",\n'
+            '            "cast(p.AdjustedAmount + a.AdjustmentAmount '
+            'as decimal(18, 2)) as EnrichedAmount",\n'
+            "        )\n"
+        )
+    elif node.role == "RankedEntities":
+        body = f'        return {upstream(0)}.where("RankNumber <= 3")\n'
+    elif node.role == "AggregateProjection":
+        body = (
+            f"        return {upstream(0)}.selectExpr(\n"
+            '            "MotifKey", "GroupKey", "TotalAmount", "EntityCount",\n'
+            '            "cast(TotalAmount / nullif(EntityCount, 0) '
+            'as decimal(18, 2)) as AverageAmount",\n'
+            "        )\n"
+        )
+    elif node.role == "SummaryAll":
+        body = (
+            f"        return {upstream(0)}.selectExpr(\n"
+            '            "MotifKey", "GroupKey",\n'
+            '            "cast(TotalAmount + cast(0 as decimal(18, 2)) '
+            'as decimal(18, 2)) as TotalAmount",\n'
+            '            "EntityCount",\n'
+            "        )\n"
+        )
+    else:
+        raise ValueError(f"no Python table source for role: {node.role}")
+    return (
+        _python_header(node)
+        + "from weaver import Table\n\n\n"
+        + f"class {_class_name(node.object_id)}(Table):\n"
+        + "    def read(self):\n"
+        + body
+    )
 
 
 def _aggregate_test_source(node: RepresentativeDeclaration) -> str:
@@ -578,9 +751,9 @@ join {name("UnifiedEntities")} as u on u.EntityKey = e.EntityKey
 group by e.MotifKey, e.GroupKey"""
     if node.role == "WindowedEntities":
         return f"""select MotifKey, EntityKey, GroupKey, EnrichedAmount,
-    sum(EnrichedAmount) over (
+    cast(sum(EnrichedAmount) over (
         partition by MotifKey, GroupKey order by EntityKey rows unbounded preceding
-    ) as RunningAmount,
+    ) as decimal(18, 2)) as RunningAmount,
     row_number() over (partition by MotifKey, GroupKey order by EntityKey) as RankNumber
 from {name("EnrichedEntities")}"""
     if node.role == "RankedEntities":
@@ -643,13 +816,15 @@ from {name("PublishedBridge")}"""
     raise ValueError(f"unknown SQL role: {node.role}")
 
 
-def _source(node: RepresentativeDeclaration, spec: RepresentativeLakehouseSpec) -> str:
+def _source(node: RepresentativeDeclaration) -> str:
     if node.role == "SourceEntity":
-        return _root_table_source(node, spec, 0)
+        return _root_table_source(node, 0)
     if node.role == "SourceAdjustment":
-        return _root_table_source(node, spec, 1)
+        return _root_table_source(node, 1)
     if node.role == "Joined":
         return _joined_table_source(node)
+    if node.kind == "table" and node.language == "python":
+        return _python_table_source(node)
     if node.role == "AggregateReconciles":
         return _aggregate_test_source(node)
     if node.role == "JoinedMeasuresMatch":
@@ -674,7 +849,19 @@ def write_representative_lakehouse_estate(
     for node in plan.declarations:
         path = root / node.relative_path
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(_source(node, plan.spec), encoding="utf-8")
+        path.write_text(_source(node), encoding="utf-8")
+
+    for folder in plan.folders:
+        path = root / folder.relative_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(_folder_source(folder), encoding="utf-8")
+        data = root / folder.item / "lib" / "data"
+        data.mkdir(parents=True, exist_ok=True)
+        name = f"M{folder.motif:03d}{folder.stream}.csv"
+        stream = 0 if folder.stream == "Entity" else 1
+        (data / name).write_text(
+            _root_csv(plan.spec, folder.motif, stream), encoding="utf-8"
+        )
 
     for shortcut in plan.shortcuts:
         variable = _class_name(_object_id(shortcut.destination))
@@ -766,7 +953,14 @@ def _repository_evidence(repository, plan: RepresentativeLakehousePlan) -> dict:
         identity: str(source.kind).casefold()
         for identity, source in actual_documents.items()
     }
+    expected_folders = {folder.identity for folder in plan.folders}
+    actual_folders = {
+        str(identity): source
+        for identity, source in repository.source_documents.items()
+        if "/Files/" in str(identity) and not str(identity).endswith("/Files/_.Load")
+    }
     expected_kinds = {node.identity: node.kind for node in plan.declarations}
+    expected_languages = {node.identity: node.language for node in plan.declarations}
 
     actual_graph_edges = {
         (edge.upstream, edge.downstream)
@@ -814,6 +1008,20 @@ def _repository_evidence(repository, plan: RepresentativeLakehousePlan) -> dict:
     matches = {
         "declaration_identities": actual_identities == expected_identities,
         "declaration_kinds": actual_kinds == expected_kinds,
+        "declaration_languages": {
+            identity: {"spark_sql": "sql", "python": "python"}[source.language]
+            for identity, source in actual_documents.items()
+        }
+        == expected_languages,
+        "folder_census": set(actual_folders) == expected_folders
+        and all(
+            source.kind.casefold() == "folder" for source in actual_folders.values()
+        )
+        and all(
+            (folder.identity, _identity(folder.motif, f"Source{folder.stream}"))
+            in actual_ordinary_edges
+            for folder in plan.folders
+        ),
         "ordinary_edges": actual_ordinary_edges == set(plan.ordinary_edges),
         "shortcut_edges": actual_shortcut_edges == expected_shortcut_edges,
         "graph_metrics": actual_metrics == plan.statistics,
@@ -833,7 +1041,17 @@ def _repository_evidence(repository, plan: RepresentativeLakehousePlan) -> dict:
             for shortcut in plan.shortcuts
         ),
     }
-    return {"matches": matches, "metrics": actual_metrics}
+    return {
+        "matches": matches,
+        "metrics": actual_metrics,
+        "consumed_folders": len(
+            {
+                upstream
+                for upstream, _downstream in actual_ordinary_edges
+                if upstream in expected_folders
+            }
+        ),
+    }
 
 
 def qualify_representative_lakehouse_estate(
@@ -854,6 +1072,10 @@ def qualify_representative_lakehouse_estate(
 
     counts = plan.kind_counts
     languages = Counter(node.language for node in plan.declarations)
+    by_kind_and_language: dict[str, dict[str, int]] = {}
+    for node in plan.declarations:
+        by_kind_and_language.setdefault(node.kind, {}).setdefault(node.language, 0)
+        by_kind_and_language[node.kind][node.language] += 1
     return {
         "profile": PROFILE,
         "generator": {"seed": spec.seed, "motifs": spec.motifs},
@@ -861,6 +1083,17 @@ def qualify_representative_lakehouse_estate(
             "total": len(plan.declarations),
             "by_kind": counts,
             "by_language": dict(sorted(languages.items())),
+            "by_kind_and_language": {
+                kind: dict(sorted(language_counts.items()))
+                for kind, language_counts in sorted(by_kind_and_language.items())
+            },
+        },
+        "folders": {
+            "count": len(plan.folders),
+            "by_item": dict(
+                sorted(Counter(folder.item for folder in plan.folders).items())
+            ),
+            "consumed": observed["consumed_folders"],
         },
         "items": {
             "engine": {"lakehouse": len(plan.declarations)},

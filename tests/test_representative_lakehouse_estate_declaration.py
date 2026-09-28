@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import csv
 from collections import Counter, defaultdict
 
 import pytest
@@ -31,13 +32,9 @@ _TABLE_ROLES = (
     "SourceAdjustment",
     "Joined",
     "Aggregate",
-)
-_VIEW_ROLES = (
-    "ActiveEntities",
     "EntityProjection",
     "AdjustmentProjection",
     "EnrichedEntities",
-    "UnifiedEntities",
     "GroupedEntities",
     "WindowedEntities",
     "RankedEntities",
@@ -45,6 +42,10 @@ _VIEW_ROLES = (
     "SharedSummary",
     "SummaryPositive",
     "SummaryAll",
+)
+_VIEW_ROLES = (
+    "ActiveEntities",
+    "UnifiedEntities",
     "SummaryUnion",
     "SummaryJoin",
     "TerminalSummary",
@@ -66,6 +67,12 @@ _PYTHON_ROLES = {
     "SourceEntity",
     "SourceAdjustment",
     "Joined",
+    "EntityProjection",
+    "AdjustmentProjection",
+    "EnrichedEntities",
+    "RankedEntities",
+    "AggregateProjection",
+    "SummaryAll",
     "AggregateReconciles",
     "JoinedMeasuresMatch",
     "NoOrphans",
@@ -119,6 +126,61 @@ def _expected_identities(motifs: int) -> set[str]:
     return {_identity(motif, role) for motif in range(motifs) for role in _ROLE_KIND}
 
 
+def _folder(motif: int, stream: str) -> str:
+    return f"{_item(motif)}/Files/Scale.M{motif:03d}{stream}Feed"
+
+
+@weaver_test()
+@pytest.mark.parametrize("declarations", [50, 250, 1_000])
+def test_folder_feeds_are_separate_authored_resources_consumed_by_python_tables(
+    tmp_path, declarations
+):
+    motifs = declarations // 25
+    plan = make_representative_lakehouse_plan(
+        RepresentativeLakehouseSpec.from_declarations(declarations)
+    )
+    expected = {
+        _folder(motif, stream)
+        for motif in range(motifs)
+        for stream in ("Entity", "Adjustment")
+    }
+    assert {folder.identity for folder in plan.folders} == expected
+    assert not expected.intersection(plan.identities)
+    assert len(plan.declarations) == declarations
+
+    write_representative_lakehouse_estate(tmp_path, plan)
+    repository = parse_representative_lakehouse_estate(tmp_path)
+    assert expected <= {str(identity) for identity in repository.source_documents}
+    actual_edges = {
+        (edge.upstream, edge.downstream) for edge in repository.dependency_graph.edges
+    }
+    assert {
+        (_folder(motif, stream), _identity(motif, f"Source{stream}"))
+        for motif in range(motifs)
+        for stream in ("Entity", "Adjustment")
+    } <= actual_edges
+    for motif in range(motifs):
+        for stream in ("Entity", "Adjustment"):
+            item = tmp_path / _item(motif)
+            name = f"Scale__M{motif:03d}{stream}Feed"
+            folder_source = (item / "Files" / f"{name}.py").read_text()
+            table_source = (
+                item / "Tables" / f"Scale__M{motif:03d}Source{stream}.py"
+            ).read_text()
+            assert "staging_folder()" in folder_source
+            assert f"from Files.{name} import {name}" in table_source
+            assert ".spark_path()" in table_source
+            with (item / "lib" / "data" / f"M{motif:03d}{stream}.csv").open(
+                newline="", encoding="utf-8"
+            ) as source:
+                rows = list(csv.DictReader(source))
+            assert len(rows) == 4
+            assert {row["MotifKey"] for row in rows} == {str(motif)}
+            assert {row["EntityKey"] for row in rows} == {
+                str(motif * 100 + offset + 1) for offset in range(4)
+            }
+
+
 def _expected_edges(motifs: int) -> set[tuple[str, str]]:
     edges = {
         (_identity(motif, dependency), _identity(motif, role))
@@ -128,6 +190,9 @@ def _expected_edges(motifs: int) -> set[tuple[str, str]]:
     }
     shortcut_destination = "Lakehouse/Representative001/Tables/Scale.UpstreamAggregate"
     edges.add((_identity(0, "Aggregate"), shortcut_destination))
+    for motif in range(motifs):
+        for stream in ("Entity", "Adjustment"):
+            edges.add((_folder(motif, stream), _identity(motif, f"Source{stream}")))
     for motif in range(1, motifs):
         if motif % 5 == 0:
             continue
@@ -201,14 +266,25 @@ def test_named_scales_have_exact_shape_and_fixed_two_lakehouse_topology(declarat
     assert len(plan.declarations) == declarations
     assert Counter(node.kind for node in plan.declarations) == Counter(
         {
-            "table": motifs * 4,
-            "view": motifs * 16,
+            "table": motifs * 14,
+            "view": motifs * 6,
             "test": motifs * 3,
             "assumption": motifs * 2,
         }
     )
     assert Counter(node.language for node in plan.declarations) == Counter(
-        {"python": motifs * 6, "sql": motifs * 19}
+        {"python": motifs * 12, "sql": motifs * 13}
+    )
+    assert Counter((node.kind, node.language) for node in plan.declarations) == Counter(
+        {
+            ("table", "python"): motifs * 9,
+            ("table", "sql"): motifs * 5,
+            ("view", "sql"): motifs * 6,
+            ("test", "python"): motifs * 2,
+            ("test", "sql"): motifs,
+            ("assumption", "python"): motifs,
+            ("assumption", "sql"): motifs,
+        }
     )
     assert Counter(node.item for node in plan.declarations) == Counter(
         {
@@ -265,6 +341,12 @@ def test_generated_validation_sources_encode_independent_compatible_relations(tm
         tmp_path
         / "Lakehouse/Representative001/tests/Scale.M001TerminalSummaryMatches.sql"
     ).read_text(encoding="utf-8")
+    windowed = (
+        tmp_path / "Lakehouse/Representative001/Tables/Scale.M001WindowedEntities.sql"
+    ).read_text(encoding="utf-8")
+    enriched = (
+        tmp_path / "Lakehouse/Representative001/Tables/Scale__M001EnrichedEntities.py"
+    ).read_text(encoding="utf-8")
 
     assert "as TotalAmount" in aggregate
     assert "as EntityCount" in aggregate
@@ -278,6 +360,11 @@ def test_generated_validation_sources_encode_independent_compatible_relations(tm
     assert "left join Scale.M001RankedEntities" in terminal
     assert "from Scale.M001PublishedBridge" in terminal
     assert "from Scale.M001TerminalSummary" not in terminal
+    assert "cast(sum(EnrichedAmount) over (" in windowed
+    assert "as decimal(18, 2)) as RunningAmount" in windowed
+    assert "from weaver import Table" in enriched
+    assert "projection.join(" in enriched
+    assert "as EnrichedAmount" in enriched
 
 
 @weaver_test()
@@ -333,10 +420,20 @@ def test_two_motif_cold_bundle_contains_the_independent_runtime_census(tmp_path)
     expected_runtime_resources.add(
         "Lakehouse/Representative001/file:_/Load/shortcuts.py"
     )
+    expected_runtime_resources.update(
+        f"{_item(motif)}/file:_/Load/lib/data/M{motif:03d}{stream}.csv"
+        for motif in range(2)
+        for stream in ("Entity", "Adjustment")
+    )
+    expected_runtime_resources.update(
+        f"{_item(motif)}/file:_/Load/Files/Scale__M{motif:03d}{stream}Feed.py"
+        for motif in range(2)
+        for stream in ("Entity", "Adjustment")
+    )
 
     assert bundle.plan.omitted_nodes == ()
     assert runtime_resources == expected_runtime_resources
-    assert len(runtime_resources) == 19
+    assert len(runtime_resources) == 47
     assert (
         sum(action.id == "shortcuts-Lakehouse--Representative001" for action in actions)
         == 1
@@ -350,29 +447,51 @@ def test_generated_repository_matches_an_independent_oracle(tmp_path, declaratio
     evidence = qualify_representative_lakehouse_estate(
         tmp_path, RepresentativeLakehouseSpec.from_declarations(declarations)
     )
-    expected_nodes = _expected_identities(motifs) | {
-        "Lakehouse/Representative001/Tables/Scale.UpstreamAggregate"
-    }
+    expected_nodes = (
+        _expected_identities(motifs)
+        | {"Lakehouse/Representative001/Tables/Scale.UpstreamAggregate"}
+        | {
+            _folder(motif, stream)
+            for motif in range(motifs)
+            for stream in ("Entity", "Adjustment")
+        }
+    )
     expected_edges = _expected_edges(motifs)
 
     assert evidence["declarations"] == {
         "total": declarations,
         "by_kind": {
             "assumption": motifs * 2,
-            "table": motifs * 4,
+            "table": motifs * 14,
             "test": motifs * 3,
-            "view": motifs * 16,
+            "view": motifs * 6,
         },
-        "by_language": {"python": motifs * 6, "sql": motifs * 19},
+        "by_language": {"python": motifs * 12, "sql": motifs * 13},
+        "by_kind_and_language": {
+            "assumption": {"python": motifs, "sql": motifs},
+            "table": {"python": motifs * 9, "sql": motifs * 5},
+            "test": {"python": motifs * 2, "sql": motifs},
+            "view": {"sql": motifs * 6},
+        },
     }
     assert evidence["graph"] == _graph_metrics(expected_nodes, expected_edges)
+    assert evidence["folders"] == {
+        "count": motifs * 2,
+        "by_item": {
+            "Lakehouse/Representative000": 2,
+            "Lakehouse/Representative001": motifs * 2 - 2,
+        },
+        "consumed": motifs * 2,
+    }
     assert evidence["oracle_matches_repository"] == {
         "declaration_identities": True,
         "declaration_kinds": True,
+        "declaration_languages": True,
         "ordinary_edges": True,
         "shortcut_edges": True,
         "graph_metrics": True,
         "item_engine_distribution": True,
         "validation_counts": True,
         "shortcut_census": True,
+        "folder_census": True,
     }
