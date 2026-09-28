@@ -579,7 +579,12 @@ def _python_table_source(node: RepresentativeDeclaration) -> str:
             "        )\n"
         )
     elif node.role == "RankedEntities":
-        body = f'        return {upstream(0)}.where("RankNumber <= 3")\n'
+        body = (
+            f'        return {upstream(0)}.where("RankNumber <= 3").select(\n'
+            '            "MotifKey", "EntityKey", "GroupKey",\n'
+            '            "EnrichedAmount", "RunningAmount", "RankNumber",\n'
+            "        )\n"
+        )
     elif node.role == "AggregateProjection":
         body = (
             f"        return {upstream(0)}.selectExpr(\n"
@@ -769,7 +774,10 @@ from {name("Aggregate")}"""
 from {name("GroupedEntities")} as g
 join {name("AggregateProjection")} as a on a.GroupKey = g.GroupKey"""
     if node.role == "SummaryPositive":
-        return f"select * from {name('SharedSummary')} where TotalAmount >= 0"
+        return (
+            "select MotifKey, GroupKey, TotalAmount, EntityCount "
+            f"from {name('SharedSummary')} where TotalAmount >= 0"
+        )
     if node.role == "SummaryAll":
         return f"""select MotifKey, GroupKey,
     cast(TotalAmount + cast(0 as decimal(18, 2)) as decimal(18, 2)) as TotalAmount,

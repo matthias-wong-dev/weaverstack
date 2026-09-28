@@ -347,6 +347,12 @@ def test_generated_validation_sources_encode_independent_compatible_relations(tm
     enriched = (
         tmp_path / "Lakehouse/Representative001/Tables/Scale__M001EnrichedEntities.py"
     ).read_text(encoding="utf-8")
+    summary_positive = (
+        tmp_path / "Lakehouse/Representative001/Tables/Scale.M001SummaryPositive.sql"
+    ).read_text(encoding="utf-8")
+    ranked = (
+        tmp_path / "Lakehouse/Representative001/Tables/Scale__M001RankedEntities.py"
+    ).read_text(encoding="utf-8")
 
     assert "as TotalAmount" in aggregate
     assert "as EntityCount" in aggregate
@@ -365,6 +371,11 @@ def test_generated_validation_sources_encode_independent_compatible_relations(tm
     assert "from weaver import Table" in enriched
     assert "projection.join(" in enriched
     assert "as EnrichedAmount" in enriched
+    assert "select MotifKey, GroupKey, TotalAmount, EntityCount" in summary_positive
+    assert "select *" not in summary_positive
+    assert '.where("RankNumber <= 3").select(' in ranked
+    assert '"MotifKey", "EntityKey", "GroupKey"' in ranked
+    assert '"EnrichedAmount", "RunningAmount", "RankNumber"' in ranked
 
 
 @weaver_test()
