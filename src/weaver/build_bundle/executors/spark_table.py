@@ -53,6 +53,8 @@ class SparkTableExecutor:
         action: InstallAction,
         payload: bytes | None,
         context: InstallationContext,
+        *,
+        query_rows: list[dict] | None = None,
     ) -> tuple[tuple, dict[str, Any]]:
         if payload is None:
             raise InstallError(f"spark_table action {action.id!r} has no payload")
@@ -100,6 +102,7 @@ class SparkTableExecutor:
                 context,
                 action=action,
                 qualified=qualified,
+                preloaded_rows=query_rows,
             )
             business_columns = validate_build_columns(
                 qualified,
@@ -136,6 +139,17 @@ class SparkTableExecutor:
         }
         return specification, details
 
+    def shape_request(
+        self, action: InstallAction, payload: bytes | None
+    ) -> list[str] | None:
+        if payload is None:
+            raise InstallError(f"spark_table action {action.id!r} has no payload")
+        instruction = json.loads(payload.decode("utf-8"))
+        query = instruction.get("source_query")
+        if query is None:
+            return None
+        return [*(instruction.get("setup") or ()), f"DESCRIBE QUERY {query}"]
+
     def _query_shape(
         self,
         statements: list[str],
@@ -143,16 +157,20 @@ class SparkTableExecutor:
         *,
         action: InstallAction,
         qualified: str,
+        preloaded_rows: list[dict] | None = None,
     ) -> tuple[tuple[str, ...], dict[str, str]]:
         """Read ordered output names and types, reporting shape failures here."""
 
-        try:
-            rows = context.spark_sql_batch(statements, exact_case=True)
-        except Exception as exc:
-            raise InstallError(
-                f"spark_table action {action.id!r} could not read the shape of "
-                f"the query behind {qualified}: {exc}"
-            ) from exc
+        if preloaded_rows is None:
+            try:
+                rows = context.spark_sql_batch(statements, exact_case=True)
+            except Exception as exc:
+                raise InstallError(
+                    f"spark_table action {action.id!r} could not read the shape of "
+                    f"the query behind {qualified}: {exc}"
+                ) from exc
+        else:
+            rows = preloaded_rows
 
         columns: list[str] = []
         types: dict[str, str] = {}

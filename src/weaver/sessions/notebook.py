@@ -158,6 +158,41 @@ class NotebookSession(Session):
             with exact_identifier_case(spark, enabled=exact_case):
                 return run_spark_statements(spark, ordered)
 
+    def describe_spark_query_actions(
+        self,
+        actions: Sequence[tuple[str, Sequence[str]]],
+        *,
+        workspace: Workspace | None = None,
+        timeout: float | None = None,
+    ) -> list[dict[str, Any]]:
+        ordered = list(actions)
+        if not ordered:
+            return []
+        from ..build_bundle.executors.spark_case import exact_identifier_case
+
+        spark = self.spark(workspace)
+        origin = time.monotonic()
+        outcomes: list[dict[str, Any]] = []
+        with self.telemetry.timing("spark.sql_query_shapes"):
+            with exact_identifier_case(spark, enabled=True):
+                for label, statements in ordered:
+                    started = time.monotonic()
+                    try:
+                        rows = run_spark_statements(spark, list(statements))
+                    except Exception as exc:
+                        outcome = {
+                            "label": label,
+                            "succeeded": False,
+                            "error_type": type(exc).__name__,
+                            "error_message": str(exc),
+                        }
+                    else:
+                        outcome = {"label": label, "succeeded": True, "rows": rows}
+                    outcome["started_after_seconds"] = started - origin
+                    outcome["duration_seconds"] = time.monotonic() - started
+                    outcomes.append(outcome)
+        return outcomes
+
     def execute_spark_sql_actions(
         self,
         actions: Sequence[tuple[str, str]],

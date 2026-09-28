@@ -27,6 +27,7 @@ HOSTS = (ConsoleSession, NotebookSession, TestSession)
 CAPABILITIES = (
     "create_delta_table",
     "create_delta_table_actions",
+    "describe_spark_query_actions",
     "execute_python",
     "execute_spark_sql_actions",
     "execute_spark_sql_batch",
@@ -77,6 +78,27 @@ def test_no_session_capability_is_left_unlisted():
         "Session declares capabilities this invariant does not compare: "
         + ", ".join(sorted(unlisted))
     )
+
+
+@weaver_test()
+def test_generic_query_shape_fallback_stops_on_an_unclassified_failure(monkeypatch):
+    from weaver.workspaces import Workspace
+
+    session = TestSession(workspace=Workspace(workspace="Demo"))
+    called = []
+
+    def describe(statements, **_kwargs):
+        called.append(statements[-1])
+        if statements[-1] == "BAD":
+            raise ConnectionError("uncertain remote result")
+        return [{"col_name": "Id", "data_type": "bigint"}]
+
+    monkeypatch.setattr(session, "execute_spark_sql_batch", describe)
+    with pytest.raises(ConnectionError, match="uncertain remote result"):
+        session.describe_spark_query_actions(
+            [("first", ["GOOD"]), ("second", ["BAD"]), ("third", ["UNTOUCHED"])]
+        )
+    assert called == ["GOOD", "BAD"]
 
 
 @weaver_test()

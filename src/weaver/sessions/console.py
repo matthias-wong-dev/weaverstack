@@ -452,6 +452,64 @@ class ConsoleSession(Session):
         livy = self._foreground_livy(scope)
         return scope.livy_run(source, name="spark_sql", timeout=timeout, livy=livy)
 
+    def describe_spark_query_actions(
+        self,
+        actions: Sequence[tuple[str, Sequence[str]]],
+        *,
+        workspace: Workspace | None = None,
+        timeout: float | None = None,
+    ) -> list[dict[str, Any]]:
+        """Read each labelled query shape in one ordered Livy submission."""
+        ordered = [(label, list(statements)) for label, statements in actions]
+        if not ordered:
+            return []
+        from ..fabric.livy import DEFAULT_STATEMENT_TIMEOUT
+
+        allowance = DEFAULT_STATEMENT_TIMEOUT if timeout is None else timeout
+        scope = self.scope(workspace)
+        assert isinstance(scope, ConsoleScope)
+        source = (
+            "import time as _time\n"
+            f"_actions = {ordered!r}\n"
+            "_key = 'spark.sql.caseSensitive'\n"
+            "_previous = spark.conf.get(_key)\n"
+            "_restore = str(_previous).lower() != 'true'\n"
+            "_results = []\n"
+            "_origin = _time.monotonic()\n"
+            "if _restore:\n"
+            "    spark.conf.set(_key, 'true')\n"
+            "try:\n"
+            "    for _label, _statements in _actions:\n"
+            "        _started = _time.monotonic()\n"
+            "        try:\n"
+            "            for _statement in _statements[:-1]:\n"
+            "                spark.sql(_statement)\n"
+            "            _rows = [row.asDict() for row in spark.sql(_statements[-1]).collect()]\n"
+            "        except Exception as _error:\n"
+            "            _outcome = {\n"
+            "                'label': _label, 'succeeded': False,\n"
+            "                'error_type': type(_error).__name__,\n"
+            "                'error_message': str(_error),\n"
+            "            }\n"
+            "        else:\n"
+            "            _outcome = {'label': _label, 'succeeded': True, 'rows': _rows}\n"
+            "        _outcome['started_after_seconds'] = _started - _origin\n"
+            "        _outcome['duration_seconds'] = _time.monotonic() - _started\n"
+            "        _results.append(_outcome)\n"
+            "finally:\n"
+            "    if _restore:\n"
+            "        spark.conf.set(_key, _previous)\n"
+            "emit(_results)\n"
+        )
+        livy = self._foreground_livy(scope)
+        return scope.livy_run(
+            source,
+            name="spark_sql_query_shapes",
+            timeout=allowance * len(ordered),
+            livy=livy,
+            retry_submission=False,
+        )
+
     def execute_spark_sql_actions(
         self,
         actions: Sequence[tuple[str, str]],

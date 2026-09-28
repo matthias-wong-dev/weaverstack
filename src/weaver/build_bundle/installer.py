@@ -156,6 +156,15 @@ class Installer:
 
         return run
 
+    def spark_query_shapes(self):
+        session = self.session
+        workspace = self.workspace
+
+        def describe(actions):
+            return session.describe_spark_query_actions(actions, workspace=workspace)
+
+        return describe
+
     def delta_table_creator(self):
         session = self.session
         workspace = self.workspace
@@ -400,6 +409,9 @@ def _run_table_actions(
     store = bundle.store or installer.store
     prepared: list[tuple[InstallAction, tuple, dict[str, Any]]] = []
     results: dict[str, ActionResult] = {}
+    payloads: dict[str, bytes | None] = {}
+    shape_requests: list[tuple[str, list[str]]] = []
+    by_id = {action.id: action for action in actions}
     for action in actions:
         started = _now()
         try:
@@ -408,7 +420,64 @@ def _run_table_actions(
                 if action.payload is None
                 else store.read(bundle.location.join(*action.payload.split("/")))
             )
-            specification, details = executor.prepare(action, payload, context)
+            shape_request = executor.shape_request(action, payload)
+        except Exception as exc:
+            results[action.id] = _failed(action, batch.target_id, started, exc)
+        else:
+            payloads[action.id] = payload
+            if shape_request is not None:
+                shape_requests.append((action.id, shape_request))
+
+    shape_rows: dict[str, list[dict]] = {}
+    if len(shape_requests) > 1:
+        started = _now()
+        try:
+            outcomes = installer.spark_query_shapes()(shape_requests)
+            indexed = _validated_spark_outcomes(
+                outcomes,
+                [
+                    (by_id[label], statements, {})
+                    for label, statements in shape_requests
+                ],
+            )
+            for label, _statements in shape_requests:
+                outcome = indexed[label]
+                if outcome["succeeded"]:
+                    rows = outcome.get("rows")
+                    if not isinstance(rows, list) or any(
+                        not isinstance(row, dict) for row in rows
+                    ):
+                        raise InstallError(
+                            f"labelled Spark query shape {label!r} returned invalid rows"
+                        )
+                    shape_rows[label] = rows
+        except Exception as exc:
+            for label, _statements in shape_requests:
+                results[label] = _failed(by_id[label], batch.target_id, started, exc)
+            shape_rows.clear()
+        else:
+            for label, _statements in shape_requests:
+                outcome = indexed[label]
+                if not outcome["succeeded"]:
+                    error = InstallError(
+                        f"spark_table action {label!r} could not read the query shape: "
+                        f"{outcome['error_type']}: {outcome['error_message']}"
+                    )
+                    results[label] = _failed(
+                        by_id[label], batch.target_id, started, error
+                    )
+
+    for action in actions:
+        if action.id in results:
+            continue
+        started = _now()
+        try:
+            specification, details = executor.prepare(
+                action,
+                payloads[action.id],
+                context,
+                query_rows=shape_rows.get(action.id),
+            )
         except Exception as exc:
             results[action.id] = _failed(action, batch.target_id, started, exc)
         else:

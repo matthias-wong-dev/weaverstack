@@ -357,6 +357,32 @@ class Session(ABC):
             outcomes.append(outcome)
         return outcomes
 
+    def describe_spark_query_actions(
+        self,
+        actions: Sequence[tuple[str, Sequence[str]]],
+        *,
+        workspace: Workspace | None = None,
+        timeout: float | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return labelled query-shape rows; propagate unclassified failures."""
+        origin = time.monotonic()
+        outcomes: list[dict[str, Any]] = []
+        for label, statements in actions:
+            started = time.monotonic()
+            rows = self.execute_spark_sql_batch(
+                statements, exact_case=True, workspace=workspace, timeout=timeout
+            )
+            outcomes.append(
+                {
+                    "label": label,
+                    "succeeded": True,
+                    "rows": rows,
+                    "started_after_seconds": started - origin,
+                    "duration_seconds": time.monotonic() - started,
+                }
+            )
+        return outcomes
+
     @abstractmethod
     def execute_spark_sql_batch(
         self,

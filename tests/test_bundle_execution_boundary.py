@@ -401,6 +401,178 @@ def test_delta_batches_do_not_cross_an_intervening_spark_sql_action(tmp_path):
     ]
 
 
+@pytest.mark.parametrize("outcome_kind", ["missing", "invalid_rows", "transport"])
+@weaver_test()
+def test_unclassified_shape_batch_fails_query_tables_conservatively(
+    tmp_path, outcome_kind, monkeypatch
+):
+    bundle = _table_bundle(
+        tmp_path,
+        tuple(_action(name, "spark_table") for name in ("first", "second", "plain")),
+        source_queries={"first": "select 1 as Id", "second": "select 2 as Id"},
+    )
+    session = _session(ELSEWHERE)
+    creates = []
+
+    def shapes(_requests, **_kwargs):
+        if outcome_kind == "transport":
+            raise ConnectionError("uncertain remote submission")
+        rows = [{"col_name": "Id", "data_type": "bigint"}]
+        first = {
+            "label": "first",
+            "succeeded": True,
+            "rows": rows,
+            "started_after_seconds": 0.0,
+            "duration_seconds": 0.1,
+        }
+        if outcome_kind == "missing":
+            return [first]
+        return [
+            first,
+            {
+                "label": "second",
+                "succeeded": True,
+                "rows": {"wrong": "shape"},
+                "started_after_seconds": 0.1,
+                "duration_seconds": 0.1,
+            },
+        ]
+
+    def delta(actions, **_kwargs):
+        creates.append([a[0] for a in actions])
+        return [
+            {
+                "label": "plain",
+                "succeeded": True,
+                "started_after_seconds": 0.0,
+                "duration_seconds": 0.1,
+            }
+        ]
+
+    monkeypatch.setattr(session, "describe_spark_query_actions", shapes)
+    session.create_delta_table_actions = delta
+    report = Installer(session).install(bundle)
+
+    assert not report.succeeded
+    assert [(r.action_id, r.status) for r in report.action_results()] == [
+        ("first", "failed"),
+        ("second", "failed"),
+        ("plain", "succeeded"),
+    ]
+    assert creates == [["plain"]]
+
+
+@weaver_test()
+def test_failed_shape_keeps_other_tables_eligible_for_create(tmp_path, monkeypatch):
+    bundle = _table_bundle(
+        tmp_path,
+        tuple(_action(name, "spark_table") for name in ("bad", "good", "python")),
+        source_queries={"bad": "select 1 as Id", "good": "select 2 as Id"},
+    )
+    session = _session(ELSEWHERE)
+    submissions = []
+
+    def shapes(requests, **_kwargs):
+        submissions.append(("shape", [label for label, _ in requests]))
+        return [
+            {
+                "label": "bad",
+                "succeeded": False,
+                "error_type": "AnalysisException",
+                "error_message": "bad query",
+                "started_after_seconds": 0.0,
+                "duration_seconds": 0.1,
+            },
+            {
+                "label": "good",
+                "succeeded": True,
+                "rows": [{"col_name": "Id", "data_type": "bigint"}],
+                "started_after_seconds": 0.1,
+                "duration_seconds": 0.1,
+            },
+        ]
+
+    def creates(actions, **_kwargs):
+        submissions.append(("create", [a[0] for a in actions]))
+        return [
+            {
+                "label": a[0],
+                "succeeded": True,
+                "started_after_seconds": float(i),
+                "duration_seconds": 0.1,
+            }
+            for i, a in enumerate(actions)
+        ]
+
+    monkeypatch.setattr(session, "describe_spark_query_actions", shapes)
+    session.create_delta_table_actions = creates
+    report = Installer(session).install(bundle)
+
+    assert not report.succeeded
+    assert [(r.action_id, r.status) for r in report.action_results()] == [
+        ("bad", "failed"),
+        ("good", "succeeded"),
+        ("python", "succeeded"),
+    ]
+    assert submissions == [("shape", ["bad", "good"]), ("create", ["good", "python"])]
+
+
+@weaver_test()
+def test_adjacent_sql_tables_share_one_labelled_shape_read_before_create(
+    tmp_path, monkeypatch
+):
+    bundle = _table_bundle(
+        tmp_path,
+        (_action("first", "spark_table"), _action("second", "spark_table")),
+        source_queries={"first": "select 1 as Id", "second": "select 2 as Id"},
+    )
+    session = _session(ELSEWHERE)
+    order = []
+
+    def individual(*_args, **_kwargs):
+        pytest.fail("shape reads must not cross individually")
+
+    def shapes(requests, **kwargs):
+        order.append(("shapes", requests, kwargs))
+        return [
+            {
+                "label": label,
+                "succeeded": True,
+                "rows": [{"col_name": "Id", "data_type": "bigint"}],
+                "started_after_seconds": float(i),
+                "duration_seconds": 0.1,
+            }
+            for i, (label, _statements) in enumerate(requests)
+        ]
+
+    def creates(actions, **_kwargs):
+        order.append(("creates", [action[0] for action in actions]))
+        return [
+            {
+                "label": a[0],
+                "succeeded": True,
+                "started_after_seconds": float(i),
+                "duration_seconds": 0.2,
+            }
+            for i, a in enumerate(actions)
+        ]
+
+    session.execute_spark_sql_batch = individual
+    monkeypatch.setattr(session, "describe_spark_query_actions", shapes)
+    session.create_delta_table_actions = creates
+    report = Installer(session).install(bundle)
+
+    assert report.succeeded
+    assert len(order) == 2
+    assert order[0][0] == "shapes"
+    assert order[0][1] == [
+        ("first", ["DESCRIBE QUERY select 1 as Id"]),
+        ("second", ["DESCRIBE QUERY select 2 as Id"]),
+    ]
+    assert order[0][2]["workspace"].workspace == "Sales"
+    assert order[1] == ("creates", ["first", "second"])
+
+
 @weaver_test()
 def test_a_sql_table_keeps_query_shape_validation_before_grouped_create(tmp_path):
     bundle = _table_bundle(
