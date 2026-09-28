@@ -811,6 +811,7 @@ def _mirror_lakehouse_item(
                 destination=destination,
                 location=resolver.lakehouse_spark_location(ItemRef(each.destination)),
                 spark_sql=_spark_sql(workspace, session=session),
+                spark_sql_probes=_spark_sql_probes(workspace, session=session),
             )
 
     wrapped = tuple(
@@ -847,6 +848,18 @@ def _spark_sql(workspace: Workspace, *, session):
     def run(statement: str, *, exact_case: bool = False):
         return session.execute_spark_sql(
             statement, exact_case=exact_case, workspace=workspace
+        )
+
+    return run
+
+
+def _spark_sql_probes(workspace: Workspace, *, session):
+    def run(probes, *, exact_case: bool = False, timeout: float | None = None):
+        return session.execute_spark_sql_probes(
+            probes,
+            exact_case=exact_case,
+            workspace=workspace,
+            timeout=timeout,
         )
 
     return run

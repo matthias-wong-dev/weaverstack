@@ -206,6 +206,76 @@ def test_labelled_actions_that_cross_share_one_submission(desktop):
 
 
 @weaver_test()
+def test_desktop_probe_program_forces_each_read_and_continues_after_failure(desktop):
+    session, livy = desktop([])
+    probes = [("relation", "SELECT 1"), ("missing", "SELECT 2"), ("delta", "SELECT 3")]
+    session.execute_spark_sql_probes(probes, exact_case=True)
+    emitted = []
+
+    class FailingCollect(_Spark):
+        def sql(self, statement):
+            frame = super().sql(statement)
+            if statement == "SELECT 2":
+
+                class BrokenFrame(_Frame):
+                    def collect(self):
+                        self._spark.collected.append(self._statement)
+                        raise RuntimeError("missing Delta path")
+
+                return BrokenFrame([], self, statement)
+            return frame
+
+    spark = FailingCollect()
+    exec(livy.submitted[0], {"spark": spark, "emit": emitted.append})
+
+    assert len(livy.submitted) == 1
+    assert spark.collected == ["SELECT 1", "SELECT 2", "SELECT 3"]
+    assert [outcome["succeeded"] for outcome in emitted[0]] == [True, False, True]
+    assert emitted[0][1]["error_message"] == "missing Delta path"
+    assert spark.conf.values[CASE_KEY] == "false"
+    assert livy.kwargs[0]["timeout"] == DEFAULT_STATEMENT_TIMEOUT
+
+
+@weaver_test()
+def test_a_probe_submission_uses_one_total_timeout(desktop):
+    session, livy = desktop([])
+    session.execute_spark_sql_probes(
+        [("relation", "SELECT 1"), ("path", "SELECT 2")], timeout=4.0
+    )
+    assert livy.kwargs[0]["timeout"] == 4.0
+
+
+@weaver_test()
+def test_desktop_probe_failures_remain_visible_without_double_counting_time(desktop):
+    answer = [
+        {"label": "relation", "succeeded": True, "duration_seconds": 0.1},
+        {
+            "label": "path",
+            "succeeded": False,
+            "duration_seconds": 0.2,
+            "error_type": "AnalysisException",
+            "error_message": "path not yet visible",
+        },
+    ]
+    session, _livy = desktop(answer)
+    assert (
+        session.execute_spark_sql_probes(
+            [("relation", "SELECT 1"), ("path", "SELECT 2")]
+        )
+        == answer
+    )
+    events = [
+        event
+        for event in session.telemetry.events()
+        if event.operation == "spark_sql_probe"
+    ]
+    assert [(event.failed, event.detail, event.seconds) for event in events] == [
+        (False, "relation", 0.0),
+        (True, "path: AnalysisException: path not yet visible", 0.0),
+    ]
+
+
+@weaver_test()
 def test_a_labelled_submission_disables_transport_retries(desktop):
     session, livy = desktop([])
 
@@ -295,6 +365,118 @@ def test_labelled_actions_report_each_failure_without_stopping_siblings(notebook
     assert all(outcome["started_after_seconds"] >= 0 for outcome in outcomes)
     assert all(outcome["duration_seconds"] >= 0 for outcome in outcomes)
     assert spark.conf.values[CASE_KEY] == "false"
+
+
+@weaver_test()
+def test_notebook_probes_collect_each_read_and_keep_siblings(notebook):
+    class LatePath(_Spark):
+        def sql(self, statement):
+            frame = super().sql(statement)
+            if statement == "SELECT 2":
+
+                class Missing(_Frame):
+                    def collect(self):
+                        self._spark.collected.append(self._statement)
+                        raise RuntimeError("Delta path pending")
+
+                return Missing([], self, statement)
+            return frame
+
+    spark = LatePath()
+    session = notebook(spark)
+    outcomes = session.execute_spark_sql_probes(
+        [("relation", "SELECT 1"), ("path", "SELECT 2"), ("sibling", "SELECT 3")],
+        exact_case=True,
+    )
+    assert spark.collected == ["SELECT 1", "SELECT 2", "SELECT 3"]
+    assert [one["succeeded"] for one in outcomes] == [True, False, True]
+    assert outcomes[1]["error_message"] == "Delta path pending"
+    assert [one["label"] for one in outcomes] == ["relation", "path", "sibling"]
+    assert [case for _statement, case in spark.executed] == ["true"] * 3
+    assert spark.conf.values[CASE_KEY] == "false"
+    assert session.telemetry.measures["spark.sql_probe"].failures == 1
+
+
+@weaver_test()
+def test_notebook_probe_deadline_rejects_late_success(notebook, monkeypatch):
+    import weaver.sessions.notebook as notebook_module
+
+    now = [0.0]
+    monkeypatch.setattr(notebook_module.time, "monotonic", lambda: now[0])
+
+    class SlowSpark(_Spark):
+        def sql(self, statement):
+            super().sql(statement)
+
+            class SlowFrame(_Frame):
+                def collect(self):
+                    now[0] = 2.0
+                    return super().collect()
+
+            return SlowFrame([], self, statement)
+
+    spark = SlowSpark()
+    session = notebook(spark)
+    with pytest.raises(TimeoutError, match="Spark probe deadline"):
+        session.execute_spark_sql_probes([("relation", "SELECT 1")], timeout=1.0)
+    assert spark.collected == ["SELECT 1"]
+
+
+@weaver_test()
+def test_test_session_records_one_probe_request_and_explicit_outcomes():
+    session = TestSession(workspace=Workspace(workspace="Weaver"))
+    answer = [
+        {"label": "relation", "succeeded": True},
+        {
+            "label": "path",
+            "succeeded": False,
+            "error_type": "AnalysisException",
+            "error_message": "not yet visible",
+        },
+    ]
+    session.answer_spark_sql_probes(answer)
+    observed = session.execute_spark_sql_probes(
+        [("relation", "SELECT 1"), ("path", "SELECT 2")], exact_case=True
+    )
+    assert observed == answer
+    assert session.spark_sql == ("SELECT 1", "SELECT 2")
+    assert [call.kind for call in session.calls] == ["spark_sql_probes"]
+    assert session.calls[0].detail["exact_case"] is True
+
+
+@weaver_test()
+def test_installer_routes_shortcut_probes_through_the_bound_session():
+    from weaver.build_bundle.installer import Installer
+
+    workspace = Workspace(workspace="Weaver")
+    session = TestSession(workspace=workspace)
+    installer = Installer(session).bind(workspace)
+    answer = [{"label": "relation", "succeeded": True}]
+    session.answer_spark_sql_probes(answer)
+
+    observed = installer.spark_sql_probes()([("relation", "SELECT 1")], exact_case=True)
+
+    assert observed == answer
+    assert session.calls[0].kind == "spark_sql_probes"
+    assert session.calls[0].workspace == "Weaver"
+
+
+@weaver_test()
+def test_mirror_shortcut_probe_uses_the_session_workspace():
+    from weaver.operations.mirror import _spark_sql_probes
+
+    workspace = Workspace(workspace="Weaver")
+    session = TestSession(workspace=workspace)
+    answer = [{"label": "path", "succeeded": True}]
+    session.answer_spark_sql_probes(answer)
+
+    result = _spark_sql_probes(workspace, session=session)(
+        [("path", "SELECT 1")], exact_case=True
+    )
+
+    assert result == answer
+    assert session.calls[0].kind == "spark_sql_probes"
+    assert session.calls[0].workspace == "Weaver"
 
 
 @weaver_test()

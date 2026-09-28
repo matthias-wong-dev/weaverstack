@@ -59,6 +59,7 @@ class TestSession(Session):
         self._executes_here = executes_here
         self.calls: list[RecordedCall] = []
         self._spark_answers: dict[str, Any] = {}
+        self._spark_probe_answers: list[list[dict[str, Any]]] = []
         self._tsql_answers: dict[str, Any] = {}
         self._python_answers: list[Any] = []
         self._default_rows: list[dict] = []
@@ -67,6 +68,9 @@ class TestSession(Session):
 
     def answer_spark_sql(self, statement: str, rows) -> None:
         self._spark_answers[statement.strip()] = rows
+
+    def answer_spark_sql_probes(self, outcomes: list[dict[str, Any]]) -> None:
+        self._spark_probe_answers.append(outcomes)
 
     def answer_tsql(self, statement: str, rows) -> None:
         self._tsql_answers[statement.strip()] = rows
@@ -82,7 +86,7 @@ class TestSession(Session):
         for call in self.calls:
             if call.kind == "spark_sql":
                 statements.extend(call.body)
-            elif call.kind == "spark_sql_actions":
+            elif call.kind in {"spark_sql_actions", "spark_sql_probes"}:
                 statements.extend(statement for _label, statement in call.body)
         return tuple(statements)
 
@@ -190,6 +194,26 @@ class TestSession(Session):
             }
             for label, _statement in body
         ]
+
+    def execute_spark_sql_probes(
+        self,
+        probes: Sequence[tuple[str, str]],
+        *,
+        exact_case: bool = False,
+        workspace: Workspace | None = None,
+        timeout: float | None = None,
+    ) -> list[dict[str, Any]]:
+        body = [(str(label), str(statement)) for label, statement in probes]
+        self._record(
+            "spark_sql_probes",
+            body,
+            workspace,
+            exact_case=exact_case,
+            timeout=timeout,
+        )
+        if self._spark_probe_answers:
+            return self._spark_probe_answers.pop(0)
+        return [{"label": label, "succeeded": True} for label, _ in body]
 
     def execute_tsql(
         self,

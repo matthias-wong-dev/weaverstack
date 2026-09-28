@@ -121,6 +121,52 @@ def test_the_test_host_records_the_delta_table_specification():
 
 
 @weaver_test()
+def test_a_legacy_session_probe_fallback_fails_closed():
+    class LegacySession:
+        def __init__(self):
+            self.statements = []
+
+        def execute_spark_sql(self, statement, **_kwargs):
+            self.statements.append(statement)
+            if statement == "BROKEN":
+                raise RuntimeError("probe outcome is unknown")
+
+    legacy = LegacySession()
+    with pytest.raises(RuntimeError, match="probe outcome is unknown"):
+        Session.execute_spark_sql_probes(
+            cast(Any, legacy),
+            [("before", "SELECT 1"), ("broken", "BROKEN"), ("after", "SELECT 2")],
+        )
+
+    assert legacy.statements == ["SELECT 1", "BROKEN"]
+
+
+@weaver_test()
+def test_a_legacy_probe_fallback_honours_the_total_timeout(monkeypatch):
+    import weaver.sessions.base as base_module
+
+    now = [0.0]
+    monkeypatch.setattr(base_module.time, "monotonic", lambda: now[0])
+
+    class LegacySession:
+        def __init__(self):
+            self.statements = []
+
+        def execute_spark_sql(self, statement, **_kwargs):
+            self.statements.append(statement)
+            now[0] = 2.0
+
+    legacy = LegacySession()
+    with pytest.raises(TimeoutError, match="Spark probe deadline"):
+        Session.execute_spark_sql_probes(
+            cast(Any, legacy),
+            [("first", "SELECT 1"), ("second", "SELECT 2")],
+            timeout=1.0,
+        )
+    assert legacy.statements == ["SELECT 1"]
+
+
+@weaver_test()
 def test_a_legacy_session_labelled_action_fallback_fails_closed():
     class LegacySession:
         def __init__(self):

@@ -493,6 +493,81 @@ class ConsoleSession(Session):
             retry_submission=False,
         )
 
+    def execute_spark_sql_probes(
+        self,
+        probes: Sequence[tuple[str, str]],
+        *,
+        exact_case: bool = False,
+        workspace: Workspace | None = None,
+        timeout: float | None = None,
+    ) -> list[dict[str, Any]]:
+        """Collect every read-only probe and return its labelled outcome."""
+        ordered = list(probes)
+        if not ordered:
+            return []
+        from ..fabric.livy import DEFAULT_STATEMENT_TIMEOUT
+
+        submission_timeout = DEFAULT_STATEMENT_TIMEOUT if timeout is None else timeout
+        scope = self.scope(workspace)
+        source = (
+            "import time as _time\n"
+            f"_probes = {ordered!r}\n"
+            f"_exact = {bool(exact_case)!r}\n"
+            "_key = 'spark.sql.caseSensitive'\n"
+            "_previous = spark.conf.get(_key) if _exact else None\n"
+            "_restore = _exact and str(_previous).lower() != 'true'\n"
+            "_results = []\n"
+            "_origin = _time.monotonic()\n"
+            "if _restore:\n"
+            "    spark.conf.set(_key, 'true')\n"
+            "try:\n"
+            "    for _label, _statement in _probes:\n"
+            "        _started = _time.monotonic()\n"
+            "        try:\n"
+            "            spark.sql(_statement).collect()\n"
+            "        except Exception as _error:\n"
+            "            _outcome = {\n"
+            "                'label': _label,\n"
+            "                'succeeded': False,\n"
+            "                'error_type': type(_error).__name__,\n"
+            "                'error_message': str(_error),\n"
+            "            }\n"
+            "        else:\n"
+            "            _outcome = {'label': _label, 'succeeded': True}\n"
+            "        _outcome['started_after_seconds'] = _started - _origin\n"
+            "        _outcome['duration_seconds'] = _time.monotonic() - _started\n"
+            "        _results.append(_outcome)\n"
+            "finally:\n"
+            "    if _restore:\n"
+            "        spark.conf.set(_key, _previous)\n"
+            "emit(_results)\n"
+        )
+        livy = self._foreground_livy(scope)
+        outcomes = scope.livy_run(
+            source,
+            name="spark_sql_probes",
+            timeout=submission_timeout,
+            livy=livy,
+            retry_submission=False,
+        )
+        for outcome in outcomes:
+            label = str(outcome.get("label", "<missing label>"))
+            failed = outcome.get("succeeded") is False
+            error = (
+                f": {outcome.get('error_type')}: {outcome.get('error_message')}"
+                if failed
+                else ""
+            )
+            # Probe duration is contained in the Livy submission's wall time.
+            self.telemetry.record_event(
+                "livy",
+                "spark_sql_probe",
+                0.0,
+                failed=failed,
+                detail=f"{label}{error}"[:500],
+            )
+        return outcomes
+
     def _foreground_livy(self, scope: "ConsoleScope"):
         if scope.livy is None:
             raise CommandError("No Livy session is available for this workspace.")

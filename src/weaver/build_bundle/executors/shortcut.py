@@ -34,6 +34,14 @@ NAME_RELEASE_TIMEOUT = 300.0
 NAME_RELEASE_POLL_INTERVAL = 3.0
 
 
+class ReadinessProbeFailure(RuntimeError):
+    """The error class reported by a remote read-only Spark probe."""
+
+    def __init__(self, error_type: str, message: str):
+        self.error_type = error_type
+        super().__init__(f"{error_type}: {message}")
+
+
 class ShortcutExecutor:
     name = "shortcut"
 
@@ -170,10 +178,13 @@ class ShortcutExecutor:
             destination=destination,
             location=location,
             spark_sql=context.spark_sql,
+            spark_sql_probes=context.spark_sql_probes,
         )
 
 
-def await_addressable(frozen, *, destination, location, spark_sql) -> float | None:
+def await_addressable(
+    frozen, *, destination, location, spark_sql, spark_sql_probes=None
+) -> float | None:
     """Wait until every table shortcut's relation and Delta path can be read.
 
     Metadata can appear before either consumer surface is ready. Mirror uses this
@@ -200,20 +211,70 @@ def await_addressable(frozen, *, destination, location, spark_sql) -> float | No
     deadline = started + ADDRESSABLE_TIMEOUT
     failure: Exception | None = None
     while pending:
-        for shortcut, surfaces in list(pending.items()):
-            for surface, address in list(surfaces.items()):
-                statement = (
+        if spark_sql_probes is None:
+            for shortcut, surfaces in list(pending.items()):
+                for surface, address in list(surfaces.items()):
+                    statement = (
+                        f"SELECT * FROM {address} LIMIT 0"
+                        if surface == "relation"
+                        else f"SELECT * FROM delta.`{address}` LIMIT 0"
+                    )
+                    try:
+                        spark_sql(statement, exact_case=True)
+                        del surfaces[surface]
+                    except Exception as exc:
+                        failure = exc
+                if not surfaces:
+                    del pending[shortcut]
+        else:
+            questions = [
+                (
+                    f"{shortcut}:{surface}",
                     f"SELECT * FROM {address} LIMIT 0"
                     if surface == "relation"
-                    else f"SELECT * FROM delta.`{address}` LIMIT 0"
+                    else f"SELECT * FROM delta.`{address}` LIMIT 0",
                 )
-                try:
-                    spark_sql(statement, exact_case=True)
-                    del surfaces[surface]
-                except Exception as exc:
-                    failure = exc
-            if not surfaces:
-                del pending[shortcut]
+                for shortcut, surfaces in pending.items()
+                for surface, address in surfaces.items()
+            ]
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise InstallError(
+                    f"Shortcut did not become readable within {ADDRESSABLE_TIMEOUT}s: "
+                    f"{sorted(pending)}; last error: {failure}"
+                ) from failure
+            outcomes = spark_sql_probes(questions, exact_case=True, timeout=remaining)
+            if not isinstance(outcomes, list) or len(outcomes) != len(questions):
+                raise InstallError(
+                    "shortcut readiness returned an incomplete probe set"
+                )
+            for (label, _statement), outcome in zip(questions, outcomes):
+                if not isinstance(outcome, dict) or outcome.get("label") != label:
+                    raise InstallError("shortcut readiness returned a mismatched probe")
+                if type(outcome.get("succeeded")) is not bool:
+                    raise InstallError(
+                        "shortcut readiness returned an invalid probe result"
+                    )
+            if time.monotonic() >= deadline:
+                raise InstallError(
+                    f"Shortcut did not become readable within {ADDRESSABLE_TIMEOUT}s: "
+                    f"{sorted(pending)}; last error: {failure}"
+                ) from failure
+            for (label, _statement), outcome in zip(questions, outcomes):
+                shortcut, surface = label.rsplit(":", 1)
+                if outcome["succeeded"]:
+                    del pending[shortcut][surface]
+                else:
+                    if not isinstance(outcome.get("error_type"), str):
+                        raise InstallError(
+                            "shortcut readiness returned no probe error type"
+                        )
+                    if not isinstance(outcome.get("error_message"), str):
+                        raise InstallError("shortcut readiness returned no probe error")
+                    failure = ReadinessProbeFailure(
+                        outcome["error_type"], outcome["error_message"]
+                    )
+            pending = {key: surfaces for key, surfaces in pending.items() if surfaces}
         if not pending:
             break
         if time.monotonic() >= deadline:

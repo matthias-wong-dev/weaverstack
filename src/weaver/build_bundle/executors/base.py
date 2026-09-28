@@ -49,6 +49,8 @@ class InstallationContext:
     spark_sql: Any = None
     #: Ordered Spark SQL statements in one submission and identifier-case scope.
     spark_sql_batch: Any = None
+    #: Ordered read-only Spark questions with one labelled outcome each.
+    spark_sql_probes: Any = None
     #: Strict Delta table creation through the Session-owned TableBuilder path.
     create_delta_table: Any = None
     targets: Mapping[str, ResolvedTarget] = field(default_factory=dict)

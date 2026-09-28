@@ -6,6 +6,7 @@ notebook runtime.
 
 from __future__ import annotations
 
+import time
 from typing import Any, Sequence
 
 from ..errors import CommandError
@@ -136,6 +137,52 @@ class NotebookSession(Session):
         with self.telemetry.timing("spark.sql_actions"):
             with exact_identifier_case(spark, enabled=exact_case):
                 return run_labelled_spark_statements(spark, ordered)
+
+    def execute_spark_sql_probes(
+        self,
+        probes: Sequence[tuple[str, str]],
+        *,
+        exact_case: bool = False,
+        workspace: Workspace | None = None,
+        timeout: float | None = None,
+    ) -> list[dict[str, Any]]:
+        ordered = list(probes)
+        if not ordered:
+            return []
+
+        from ..build_bundle.executors.spark_case import exact_identifier_case
+
+        spark = self.scope(workspace).spark()
+        outcomes = []
+        with self.telemetry.timing("spark.sql_probes"):
+            with exact_identifier_case(spark, enabled=exact_case):
+                origin = time.monotonic()
+                for label, statement in ordered:
+                    if timeout is not None and time.monotonic() - origin >= timeout:
+                        raise TimeoutError("Spark probe deadline expired")
+                    started = time.monotonic()
+                    try:
+                        spark.sql(statement).collect()
+                    except Exception as error:
+                        outcome = {
+                            "label": label,
+                            "succeeded": False,
+                            "error_type": type(error).__name__,
+                            "error_message": str(error),
+                        }
+                    else:
+                        outcome = {"label": label, "succeeded": True}
+                    outcome["started_after_seconds"] = started - origin
+                    outcome["duration_seconds"] = time.monotonic() - started
+                    outcomes.append(outcome)
+                    # Local Spark has no Livy crossing; keep probe failures in
+                    # the Session measure without adding duplicate wall time.
+                    self.telemetry.record(
+                        "spark.sql_probe", 0.0, failed=not outcome["succeeded"]
+                    )
+                    if timeout is not None and time.monotonic() - origin >= timeout:
+                        raise TimeoutError("Spark probe deadline expired")
+        return outcomes
 
     def execute_tsql(
         self,

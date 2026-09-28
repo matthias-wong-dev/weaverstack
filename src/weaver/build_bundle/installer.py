@@ -155,6 +155,20 @@ class Installer:
 
         return run
 
+    def spark_sql_probes(self):
+        session = self.session
+        workspace = self.workspace
+
+        def run(probes, *, exact_case: bool = False, timeout: float | None = None):
+            return session.execute_spark_sql_probes(
+                probes,
+                exact_case=exact_case,
+                workspace=workspace,
+                timeout=timeout,
+            )
+
+        return run
+
     def delta_table_creator(self):
         session = self.session
         workspace = self.workspace
@@ -481,6 +495,7 @@ def _run_sequence(
                 create_delta_table=installer.delta_table_creator(),
                 spark_sql=installer.spark_sql(),
                 spark_sql_batch=installer.spark_sql_batch(),
+                spark_sql_probes=installer.spark_sql_probes(),
                 resolver=installer.resolver,
                 store=installer.store,
                 target=target,

@@ -327,6 +327,46 @@ class Session(ABC):
             outcomes.append(outcome)
         return outcomes
 
+    def execute_spark_sql_probes(
+        self,
+        probes: Sequence[tuple[str, str]],
+        *,
+        exact_case: bool = False,
+        workspace: Workspace | None = None,
+        timeout: float | None = None,
+    ) -> list[dict[str, Any]]:
+        """Observe labelled read-only statements with a complete outcome set.
+
+        A host without statement-level error classification stops on an exception;
+        it cannot report an uncertain remote failure as a settled probe.
+        """
+        origin = time.monotonic()
+        outcomes: list[dict[str, Any]] = []
+        for label, statement in probes:
+            remaining = (
+                None if timeout is None else timeout - (time.monotonic() - origin)
+            )
+            if remaining is not None and remaining <= 0:
+                raise TimeoutError("Spark probe deadline expired")
+            started = time.monotonic()
+            self.execute_spark_sql(
+                statement,
+                exact_case=exact_case,
+                workspace=workspace,
+                timeout=remaining,
+            )
+            if timeout is not None and time.monotonic() - origin >= timeout:
+                raise TimeoutError("Spark probe deadline expired")
+            outcomes.append(
+                {
+                    "label": label,
+                    "succeeded": True,
+                    "started_after_seconds": started - origin,
+                    "duration_seconds": time.monotonic() - started,
+                }
+            )
+        return outcomes
+
     @abstractmethod
     def execute_spark_sql_batch(
         self,

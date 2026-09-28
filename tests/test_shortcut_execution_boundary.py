@@ -489,6 +489,143 @@ def test_one_action_creates_its_shortcuts_as_one_batch(tmp_path, monkeypatch):
 
 
 @weaver_test()
+def test_shortcut_readiness_collects_all_surfaces_in_one_round(tmp_path):
+    resolver = _ShortcutResolver()
+    rounds = []
+
+    def probe(actions, *, exact_case=False, timeout=None):
+        rounds.append((list(actions), exact_case))
+        return [{"label": label, "succeeded": True} for label, _statement in actions]
+
+    context = replace(
+        _addressable_context(
+            tmp_path,
+            lambda statement, *, exact_case=False: (_ for _ in ()).throw(
+                AssertionError("serial Spark read was used")
+            ),
+            resolver,
+        ),
+        spark_sql_probes=probe,
+    )
+    details = ShortcutExecutor().execute(_action(), _two_shortcuts(), context)
+
+    assert resolver.batches == [2]
+    assert len(rounds) == 1
+    actions, exact_case = rounds[0]
+    assert exact_case is True
+    assert len(actions) == 4
+    assert len({label for label, _statement in actions}) == 4
+    assert sum("FROM delta." in statement for _label, statement in actions) == 2
+    assert sum("FROM delta." not in statement for _label, statement in actions) == 2
+    assert "addressable_after_seconds" in details
+
+
+@weaver_test()
+def test_shortcut_readiness_retries_only_unreadable_surfaces(tmp_path, monkeypatch):
+    monkeypatch.setattr(shortcut_module, "ADDRESSABLE_POLL_INTERVAL", 0)
+    rounds = []
+
+    def probe(actions, *, exact_case=False, timeout=None):
+        rounds.append(list(actions))
+        return [
+            {
+                "label": label,
+                "succeeded": "FROM delta." not in statement or len(rounds) > 1,
+                **(
+                    {}
+                    if "FROM delta." not in statement or len(rounds) > 1
+                    else {"error_type": "AnalysisException", "error_message": "pending"}
+                ),
+            }
+            for label, statement in actions
+        ]
+
+    context = replace(
+        _addressable_context(tmp_path, _LateSpark(failures=0), _ShortcutResolver()),
+        spark_sql_probes=probe,
+    )
+    ShortcutExecutor().execute(_action(), _two_shortcuts(), context)
+
+    assert len(rounds) == 2
+    assert len(rounds[0]) == 4
+    assert len(rounds[1]) == 2
+    assert all("FROM delta." in statement for _label, statement in rounds[1])
+
+
+@weaver_test()
+def test_grouped_shortcut_readiness_rejects_late_success_and_limits_submission(
+    tmp_path, monkeypatch
+):
+    now = [0.0]
+    monkeypatch.setattr(shortcut_module.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(shortcut_module, "ADDRESSABLE_TIMEOUT", 1.0)
+    supplied = []
+
+    def probe(actions, *, exact_case=False, timeout=None):
+        supplied.append(timeout)
+        now[0] = 2.0
+        return [{"label": label, "succeeded": True} for label, _ in actions]
+
+    context = replace(
+        _addressable_context(tmp_path, _LateSpark(failures=0), _ShortcutResolver()),
+        spark_sql_probes=probe,
+    )
+    with pytest.raises(InstallError, match="did not become readable within"):
+        ShortcutExecutor().execute(_action(), _payload(), context)
+
+    assert supplied == [1.0]
+
+
+@weaver_test()
+def test_shortcut_timeout_retains_the_probe_error_classification(tmp_path, monkeypatch):
+    now = [0.0]
+    monkeypatch.setattr(shortcut_module.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(
+        shortcut_module.time, "sleep", lambda _seconds: now.__setitem__(0, 2.0)
+    )
+    monkeypatch.setattr(shortcut_module, "ADDRESSABLE_TIMEOUT", 1.0)
+
+    def probe(actions, *, exact_case=False, timeout=None):
+        return [
+            {
+                "label": label,
+                "succeeded": False,
+                "error_type": "AnalysisException",
+                "error_message": "path pending",
+            }
+            for label, _statement in actions
+        ]
+
+    context = replace(
+        _addressable_context(tmp_path, _LateSpark(failures=0), _ShortcutResolver()),
+        spark_sql_probes=probe,
+    )
+    with pytest.raises(InstallError, match="did not become readable") as error:
+        ShortcutExecutor().execute(_action(), _payload(), context)
+    assert getattr(error.value.__cause__, "error_type", None) == "AnalysisException"
+    assert "AnalysisException: path pending" in str(error.value.__cause__)
+
+
+@weaver_test()
+def test_shortcut_readiness_refuses_unclassified_probe_failure(tmp_path, monkeypatch):
+    monkeypatch.setattr(shortcut_module, "ADDRESSABLE_TIMEOUT", 1)
+    monkeypatch.setattr(shortcut_module, "ADDRESSABLE_POLL_INTERVAL", 0)
+
+    def probe(actions, *, exact_case=False, timeout=None):
+        return [
+            {"label": label, "succeeded": False, "error_message": "unclassified"}
+            for label, _statement in actions
+        ]
+
+    context = replace(
+        _addressable_context(tmp_path, _LateSpark(failures=0), _ShortcutResolver()),
+        spark_sql_probes=probe,
+    )
+    with pytest.raises(InstallError, match="no probe error type"):
+        ShortcutExecutor().execute(_action(), _payload(), context)
+
+
+@weaver_test()
 def test_a_batch_of_tsql_statements_runs_each_as_its_own_batch():
     """T-SQL refuses a CREATE VIEW that is not first in its batch."""
 
