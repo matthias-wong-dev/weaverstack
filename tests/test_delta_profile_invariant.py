@@ -144,6 +144,10 @@ def test_feature_protocol_declares_non_null_invariants_and_conditional_variant()
         "invariants",
     }
     assert set(identity.protocol["readerFeatures"]) == {"columnMapping"}
+    assert (
+        identity.schema["fields"][0]["metadata"]["delta.identity.allowExplicitInsert"]
+        is False
+    )
 
     variant = compile_delta_profile_v1(
         (("Id", "bigint", True), ("Payload", "variant", False))

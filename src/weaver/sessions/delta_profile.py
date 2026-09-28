@@ -121,7 +121,7 @@ def compile_delta_profile_v1(
                 {
                     "delta.identity.start": 1,
                     "delta.identity.step": 1,
-                    "delta.identity.allowExplicitInsert": "false",
+                    "delta.identity.allowExplicitInsert": False,
                 }
             )
         if name in generated:
