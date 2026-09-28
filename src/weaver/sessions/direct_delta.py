@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import re
 import time
-from importlib import metadata
+from importlib import import_module, metadata
 from typing import Callable, Sequence
 from uuid import uuid4
 
@@ -146,8 +146,10 @@ def create_staged_delta_table(
     if store.exists(stage) or store.exists(destination):
         raise ValueError("Delta Table stage or destination already exists")
 
-    from deltalake import DeltaTable, TableFeatures
-    from deltalake.schema import Schema
+    delta = import_module("deltalake")
+    DeltaTable = delta.DeltaTable
+    TableFeatures = delta.TableFeatures
+    Schema = import_module("deltalake.schema").Schema
 
     fields = [
         {
