@@ -27,6 +27,7 @@ from .executors.base import (
     SkippedExecution,
 )
 from .executors.spark_sql import SparkSqlExecutor
+from .executors.spark_table import SparkTableExecutor
 from .models import BuildBatch, BuildSequence, InstallAction
 from .report import (
     FAILED,
@@ -176,6 +177,15 @@ class Installer:
 
         return create
 
+    def delta_table_actions(self):
+        session = self.session
+        workspace = self.workspace
+
+        def create(actions):
+            return session.create_delta_table_actions(actions, workspace=workspace)
+
+        return create
+
     def sql_for(self, bound: BoundTarget) -> Any:
         """Return a deferred Warehouse connection, or ``None`` for a Lakehouse."""
 
@@ -313,6 +323,9 @@ def _run_batch(
     spark_actions: list[InstallAction] = []
     spark_executor = installer.executors.get("spark_sql")
     can_batch_spark = type(spark_executor) is SparkSqlExecutor
+    table_actions: list[InstallAction] = []
+    table_executor = installer.executors.get("spark_table")
+    can_batch_tables = type(table_executor) is SparkTableExecutor
 
     def flush_spark() -> None:
         if not spark_actions:
@@ -336,14 +349,107 @@ def _run_batch(
             )
         spark_actions.clear()
 
+    def flush_tables() -> None:
+        if not table_actions:
+            return
+        if len(table_actions) == 1 or not can_batch_tables:
+            results.extend(
+                _run_action(action, batch, context, bundle, installer)
+                for action in table_actions
+            )
+        else:
+            assert isinstance(table_executor, SparkTableExecutor)
+            results.extend(
+                _run_table_actions(
+                    tuple(table_actions),
+                    batch,
+                    context,
+                    bundle,
+                    installer,
+                    table_executor,
+                )
+            )
+        table_actions.clear()
+
     for action in batch.actions:
         if action.executor == "spark_sql":
+            flush_tables()
             spark_actions.append(action)
             continue
+        if action.executor == "spark_table":
+            flush_spark()
+            table_actions.append(action)
+            continue
         flush_spark()
+        flush_tables()
         results.append(_run_action(action, batch, context, bundle, installer))
     flush_spark()
+    flush_tables()
     return results
+
+
+def _run_table_actions(
+    actions: tuple[InstallAction, ...],
+    batch: BuildBatch,
+    context: InstallationContext,
+    bundle: BuildBundle,
+    installer: "Installer",
+    executor: SparkTableExecutor,
+) -> list[ActionResult]:
+    """Prepare adjacent Tables, then retain one result for each remote create."""
+    store = bundle.store or installer.store
+    prepared: list[tuple[InstallAction, tuple, dict[str, Any]]] = []
+    results: dict[str, ActionResult] = {}
+    for action in actions:
+        started = _now()
+        try:
+            payload = (
+                None
+                if action.payload is None
+                else store.read(bundle.location.join(*action.payload.split("/")))
+            )
+            specification, details = executor.prepare(action, payload, context)
+        except Exception as exc:
+            results[action.id] = _failed(action, batch.target_id, started, exc)
+        else:
+            prepared.append((action, specification, details))
+
+    if prepared:
+        submitted_at = _now()
+        try:
+            outcomes = installer.delta_table_actions()(
+                [(action.id, *specification) for action, specification, _ in prepared]
+            )
+            indexed = _validated_spark_outcomes(outcomes, prepared)
+            completed: dict[str, ActionResult] = {}
+            for action, _specification, details in prepared:
+                outcome = indexed[action.id]
+                started = submitted_at + timedelta(
+                    seconds=outcome["started_after_seconds"]
+                )
+                finished = started + timedelta(seconds=outcome["duration_seconds"])
+                completed[action.id] = ActionResult(
+                    action_id=action.id,
+                    resource_node_id=action.resource_node_id,
+                    source_path=action.source_path,
+                    target_id=batch.target_id,
+                    executor=action.executor,
+                    status=SUCCEEDED if outcome["succeeded"] else FAILED,
+                    started_at=started,
+                    finished_at=finished,
+                    duration_seconds=outcome["duration_seconds"],
+                    details=details if outcome["succeeded"] else None,
+                    error_type=None if outcome["succeeded"] else outcome["error_type"],
+                    error_message=None
+                    if outcome["succeeded"]
+                    else outcome["error_message"],
+                )
+        except Exception as exc:
+            for action, _specification, _details in prepared:
+                results[action.id] = _failed(action, batch.target_id, submitted_at, exc)
+        else:
+            results.update(completed)
+    return [results[action.id] for action in actions]
 
 
 def _run_spark_actions(

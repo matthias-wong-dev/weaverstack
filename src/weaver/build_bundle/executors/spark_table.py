@@ -37,6 +37,23 @@ class SparkTableExecutor:
         payload: bytes | None,
         context: InstallationContext,
     ) -> dict[str, Any] | None:
+        specification, details = self.prepare(action, payload, context)
+        qualified, physical, identity_name, column_mapping = specification
+        assert context.create_delta_table is not None
+        context.create_delta_table(
+            qualified,
+            physical,
+            identity_column=identity_name,
+            column_mapping=column_mapping,
+        )
+        return details
+
+    def prepare(
+        self,
+        action: InstallAction,
+        payload: bytes | None,
+        context: InstallationContext,
+    ) -> tuple[tuple, dict[str, Any]]:
         if payload is None:
             raise InstallError(f"spark_table action {action.id!r} has no payload")
         if context.create_delta_table is None:
@@ -106,18 +123,18 @@ class SparkTableExecutor:
             + [tuple(entry) for entry in instruction["audit_columns"]]
             + [tuple(entry) for entry in instruction.get("internal_columns") or ()]
         )
-
-        context.create_delta_table(
+        specification = (
             qualified,
             physical,
-            identity_column=identity_name,
-            column_mapping=instruction.get("column_mapping", True),
+            identity_name,
+            instruction.get("column_mapping", True),
         )
-        return {
+        details = {
             "object": qualified,
             "schema_mode": instruction["schema_mode"],
             "columns": [name for name, _type, _nn in physical],
         }
+        return specification, details
 
     def _query_shape(
         self,

@@ -26,6 +26,7 @@ HOSTS = (ConsoleSession, NotebookSession, TestSession)
 #: and a caller may pass the same arguments to any of them.
 CAPABILITIES = (
     "create_delta_table",
+    "create_delta_table_actions",
     "execute_python",
     "execute_spark_sql_actions",
     "execute_spark_sql_batch",
@@ -118,6 +119,35 @@ def test_the_test_host_records_the_delta_table_specification():
         "identity_column": "Customer key",
         "column_mapping": True,
     }
+
+
+@weaver_test()
+def test_the_test_host_records_each_labelled_delta_table_without_modelling_spark():
+    from weaver.workspaces import Workspace
+
+    session = TestSession(workspace=Workspace(workspace="Demo"))
+    outcomes = session.create_delta_table_actions(
+        [
+            (
+                "first",
+                "`Demo`.`Sales`.`DWG`.`One`",
+                (("Id", "bigint", True),),
+                None,
+                True,
+            ),
+            (
+                "second",
+                "`Demo`.`Sales`.`DWG`.`Two`",
+                (("Id", "bigint", True),),
+                None,
+                False,
+            ),
+        ]
+    )
+
+    assert [o["label"] for o in outcomes] == ["first", "second"]
+    assert [call.kind for call in session.calls] == ["delta_table", "delta_table"]
+    assert [call.body["column_mapping"] for call in session.calls] == [True, False]
 
 
 @weaver_test()

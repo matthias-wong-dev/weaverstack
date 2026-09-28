@@ -6,6 +6,7 @@ notebook runtime.
 
 from __future__ import annotations
 
+import time
 from typing import Any, Sequence
 
 from ..errors import CommandError
@@ -79,6 +80,47 @@ class NotebookSession(Session):
                 identity_column=identity_column,
                 column_mapping=column_mapping,
             )
+
+    def create_delta_table_actions(
+        self,
+        actions: Sequence[tuple[str, str, Sequence[Sequence[Any]], str | None, bool]],
+        *,
+        workspace: Workspace | None = None,
+        timeout: float | None = None,
+    ) -> list[dict[str, Any]]:
+        from .delta_table import create_delta_table_in_session
+
+        del timeout  # Native Spark runs on the attached session.
+        ordered = list(actions)
+        if not ordered:
+            return []
+        spark = self.spark(workspace)
+        origin = time.monotonic()
+        outcomes = []
+        with self.telemetry.timing("spark.delta_table_actions"):
+            for label, qualified, columns, identity, mapping in ordered:
+                started = time.monotonic()
+                try:
+                    create_delta_table_in_session(
+                        spark,
+                        qualified,
+                        columns,
+                        identity_column=identity,
+                        column_mapping=mapping,
+                    )
+                except Exception as exc:
+                    outcome = {
+                        "label": label,
+                        "succeeded": False,
+                        "error_type": type(exc).__name__,
+                        "error_message": str(exc),
+                    }
+                else:
+                    outcome = {"label": label, "succeeded": True}
+                outcome["started_after_seconds"] = started - origin
+                outcome["duration_seconds"] = time.monotonic() - started
+                outcomes.append(outcome)
+        return outcomes
 
     def execute_python(
         self,

@@ -366,6 +366,30 @@ class ConsoleSession(Session):
             livy=livy,
         )
 
+    def create_delta_table_actions(
+        self,
+        actions: Sequence[tuple[str, str, Sequence[Sequence[Any]], str | None, bool]],
+        *,
+        workspace: Workspace | None = None,
+        timeout: float | None = None,
+    ) -> list[dict[str, Any]]:
+        ordered = list(actions)
+        if not ordered:
+            return []
+        from ..fabric.livy import DEFAULT_STATEMENT_TIMEOUT
+        from .delta_table import remote_delta_table_actions_program
+
+        allowance = DEFAULT_STATEMENT_TIMEOUT if timeout is None else timeout
+        scope = self.scope(workspace)
+        livy = self._foreground_livy(scope)
+        return scope.livy_run(
+            remote_delta_table_actions_program(ordered),
+            name="delta_table_actions",
+            timeout=allowance * len(ordered),
+            livy=livy,
+            retry_submission=False,
+        )
+
     def execute_python(
         self,
         program: RemoteProgram,

@@ -276,6 +276,36 @@ class Session(ABC):
     ) -> Any:
         """Create one Delta table through this host's active Spark session."""
 
+    def create_delta_table_actions(
+        self,
+        actions: Sequence[tuple[str, str, Sequence[Sequence[Any]], str | None, bool]],
+        *,
+        workspace: Workspace | None = None,
+        timeout: float | None = None,
+    ) -> list[dict[str, Any]]:
+        """Create labelled Tables serially; an unclassified failure stops the batch."""
+        origin = time.monotonic()
+        outcomes = []
+        for label, qualified_name, columns, identity_column, column_mapping in actions:
+            started = time.monotonic()
+            self.create_delta_table(
+                qualified_name,
+                columns,
+                identity_column=identity_column,
+                column_mapping=column_mapping,
+                workspace=workspace,
+                timeout=timeout,
+            )
+            outcomes.append(
+                {
+                    "label": label,
+                    "succeeded": True,
+                    "started_after_seconds": started - origin,
+                    "duration_seconds": time.monotonic() - started,
+                }
+            )
+        return outcomes
+
     @abstractmethod
     def execute_python(
         self,
