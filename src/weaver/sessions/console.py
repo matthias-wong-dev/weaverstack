@@ -89,7 +89,7 @@ class ConsoleSession(Session):
         resolver: Any = None,
         progress: Any = None,
         credential: Any = None,
-        direct_delta_workers: int = 1,
+        direct_delta_workers: int = 16,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)

@@ -413,6 +413,13 @@ def test_console_routes_configured_delta_workers_without_spark(monkeypatch):
 
 
 @weaver_test()
+def test_console_uses_qualified_direct_delta_upload_bound_by_default():
+    session = ConsoleSession(workspace=Workspace(workspace="Demo"))
+    assert session.direct_delta_workers == 16
+    session.close()
+
+
+@weaver_test()
 def test_console_batches_delta_actions_in_one_submission_without_retry(
     monkeypatch, delta_module
 ):
