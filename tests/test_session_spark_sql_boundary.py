@@ -188,6 +188,38 @@ def test_query_shape_batch_keeps_default_allowance_per_query(desktop):
 
 
 @weaver_test()
+def test_view_output_schemas_share_one_spark_analysis_without_collecting_rows(desktop):
+    session, livy = desktop([])
+    session.describe_spark_view_queries(
+        [("first", "SELECT 1 AS Value"), ("bad", "BAD"),
+         ("last", "SELECT 2 AS Value")], timeout=12.5
+    )
+    assert len(livy.submitted) == 1
+    assert livy.kwargs == [{"timeout": 37.5, "retry_submission": False}]
+    expected = {"type": "struct", "fields": [
+        {"name": "Value", "type": "long", "nullable": False, "metadata": {}}
+    ]}
+    spark = _Spark()
+
+    def sql(statement):
+        assert spark.conf.get(CASE_KEY) == "true"
+        if statement == "BAD":
+            raise ValueError("invalid query")
+        return SimpleNamespace(schema=SimpleNamespace(jsonValue=lambda: expected))
+
+    spark.sql = sql
+    emitted = []
+    exec(compile(livy.submitted[0], "<view-shapes>", "exec"),
+         {"spark": spark, "emit": emitted.append})
+    assert [(one["label"], one["succeeded"]) for one in emitted[0]] == [
+        ("first", True), ("bad", False), ("last", True)
+    ]
+    assert emitted[0][0]["schema"] == emitted[0][2]["schema"] == expected
+    assert emitted[0][1]["error_message"] == "invalid query"
+    assert spark.conf.get(CASE_KEY) == "false"
+
+
+@weaver_test()
 def test_notebook_query_shapes_report_a_failure_without_losing_later_rows(notebook):
     spark = _Spark(
         {

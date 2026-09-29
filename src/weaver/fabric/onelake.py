@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+import zlib
 from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -50,6 +51,16 @@ class OneLakePath:
     workspace: str
     item: str
     relative: str
+
+
+@dataclass(frozen=True)
+class ViewFileSnapshot:
+    content: bytes
+    content_type: str
+    content_encoding: str
+    properties: str
+    content_length: int
+    etag: str
 
 
 def parse_onelake(location: Location, *, base_url: str = ONELAKE_DFS) -> OneLakePath:
@@ -256,6 +267,134 @@ class OneLakeDfsClient:
         )
         if response.headers.get("x-ms-continuation"):
             raise StoreError("Delta publication returned an incomplete rename")
+
+    def read_view_file(self, location: Location) -> ViewFileSnapshot:
+        """Read decoded View JSON and its stored-file headers together."""
+        url = self._url(location)
+        head = self._request("HEAD", url, expected=(200,))
+        try:
+            length = int(head.headers["Content-Length"])
+            etag = head.headers["ETag"]
+        except (KeyError, TypeError, ValueError) as exc:
+            raise StoreError("View file has incomplete OneLake headers") from exc
+        return ViewFileSnapshot(
+            content=self.read(location),
+            content_type=head.headers.get("Content-Type", ""),
+            content_encoding=head.headers.get("Content-Encoding", ""),
+            properties=head.headers.get("x-ms-properties", ""),
+            content_length=length,
+            etag=etag,
+        )
+
+    def publish_view_file(
+        self, stage: Location, destination: Location, decoded: bytes, *, properties: str
+    ) -> ViewFileSnapshot:
+        """Verify a private deflate file, then publish it without overwriting a View."""
+        stage = self._publication_location(stage)
+        destination = self._publication_location(destination)
+        source = parse_onelake(stage, base_url=self.base_url)
+        target = parse_onelake(destination, base_url=self.base_url)
+        if (
+            (source.workspace, source.item) != (target.workspace, target.item)
+            or not source.relative.startswith("Files/")
+            or not target.relative.startswith("Tables/")
+            or any(p in ("", ".", "..") for p in source.relative.split("/"))
+            or any(p in ("", ".", "..") for p in target.relative.split("/"))
+        ):
+            raise StoreError("View publication needs a private Files stage and bound Tables target")
+        if not isinstance(decoded, bytes) or not decoded or not properties:
+            raise StoreError("View publication needs verified JSON and View properties")
+        stage_url = self._url(stage)
+        destination_url = self._url(destination)
+        if self._request("HEAD", destination_url, expected=(200, 404)).status_code != 404:
+            raise StoreError("View destination already exists")
+        encoded = zlib.compress(decoded)
+        created = False
+        publishing = False
+        try:
+            self._request(
+                "PUT", f"{stage_url}?resource=file",
+                headers={
+                    "If-None-Match": "*", "x-ms-properties": properties,
+                    "x-ms-content-type": "application/json",
+                    "x-ms-content-encoding": "deflate",
+                },
+                expected=(201,),
+            )
+            created = True
+            self._request(
+                "PATCH", f"{stage_url}?action=append&position=0", data=encoded,
+                headers={"Content-Length": str(len(encoded))}, expected=(202,),
+            )
+            self._request(
+                "PATCH", f"{stage_url}?action=flush&position={len(encoded)}", expected=(200,),
+            )
+            before = self._request("HEAD", stage_url, expected=(200,))
+            self._request(
+                "PATCH", f"{stage_url}?action=setProperties",
+                headers={
+                    "If-Match": before.headers["ETag"],
+                    "x-ms-content-type": "application/json",
+                    "x-ms-content-encoding": "deflate",
+                    "x-ms-properties": properties,
+                },
+                expected=(200,),
+            )
+            snapshot = self.read_view_file(stage)
+            self._verify_view_snapshot(snapshot, decoded, encoded, properties)
+            if self._request("HEAD", destination_url, expected=(200, 404)).status_code != 404:
+                raise StoreError("View destination already exists")
+            source_path = "/".join(("", source.workspace, source.item, source.relative))
+            publishing = True
+            result = self._request(
+                "PUT", destination_url,
+                headers={
+                    "x-ms-rename-source": quote(source_path, safe="/"),
+                    "If-None-Match": "*", "x-ms-source-if-match": snapshot.etag,
+                },
+                expected=(201,),
+            )
+            if result.headers.get("x-ms-continuation"):
+                raise StoreError("View publication returned an incomplete rename")
+            final = self.read_view_file(destination)
+            self._verify_view_snapshot(final, decoded, encoded, properties)
+            if self._request("HEAD", stage_url, expected=(200, 404)).status_code != 404:
+                raise StoreError("View stage remained after publication")
+            return final
+        except Exception as exc:
+            if publishing:
+                try:
+                    final = self.read_view_file(destination)
+                    self._verify_view_snapshot(final, decoded, encoded, properties)
+                    if self._request("HEAD", stage_url, expected=(200, 404)).status_code == 404:
+                        return final
+                except Exception:
+                    pass
+                raise StoreError("View publication is uncertain; inspect its destination before retrying") from exc
+            if created:
+                try:
+                    current = self._request("HEAD", stage_url, expected=(200, 404))
+                    if current.status_code == 200:
+                        self._request("DELETE", stage_url,
+                                      headers={"If-Match": current.headers["ETag"]},
+                                      expected=(200, 202, 204))
+                except Exception as cleanup_error:
+                    raise StoreError("View private stage cleanup failed; inspect it before retrying") from cleanup_error
+            raise
+
+    @staticmethod
+    def _verify_view_snapshot(
+        snapshot: ViewFileSnapshot, decoded: bytes, encoded: bytes, properties: str
+    ) -> None:
+        if (
+            snapshot.content != decoded
+            or snapshot.content_type != "application/json"
+            or snapshot.content_encoding != "deflate"
+            or snapshot.properties != properties
+            or snapshot.content_length != len(encoded)
+            or not snapshot.etag
+        ):
+            raise StoreError("View file bytes or headers differ from the private draft")
 
     def _publication_location(self, location: Location) -> Location:
         if not location.value.startswith("abfss://"):

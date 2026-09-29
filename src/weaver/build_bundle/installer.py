@@ -29,7 +29,7 @@ from .executors.base import (
 )
 from .executors.spark_sql import SparkSqlExecutor
 from .executors.spark_table import SparkTableExecutor
-from .models import BuildBatch, BuildSequence, InstallAction
+from .models import BUILD_VIEW, BuildBatch, BuildSequence, InstallAction
 from .report import (
     FAILED,
     SKIPPED,
@@ -152,6 +152,17 @@ class Installer:
 
         def run(actions, *, exact_case: bool = False):
             return session.execute_spark_sql_actions(
+                actions, exact_case=exact_case, workspace=workspace
+            )
+
+        return run
+
+    def spark_view_actions(self):
+        session = self.session
+        workspace = self.workspace
+
+        def run(actions, *, exact_case: bool = False):
+            return session.create_spark_view_actions(
                 actions, exact_case=exact_case, workspace=workspace
             )
 
@@ -365,7 +376,10 @@ def _run_batch(
     def flush_spark() -> None:
         if not spark_actions:
             return
-        if len(spark_actions) == 1 or not can_batch_spark:
+        if (
+            not can_batch_spark
+            or (len(spark_actions) == 1 and spark_actions[0].kind != BUILD_VIEW)
+        ):
             results.extend(
                 _run_action(action, batch, context, bundle, installer)
                 for action in spark_actions
@@ -409,6 +423,8 @@ def _run_batch(
     for action in batch.actions:
         if action.executor == "spark_sql":
             flush_tables()
+            if spark_actions and (spark_actions[0].kind == BUILD_VIEW) != (action.kind == BUILD_VIEW):
+                flush_spark()
             spark_actions.append(action)
             continue
         if action.executor == "spark_table":
@@ -597,7 +613,12 @@ def _run_spark_actions(
     if prepared:
         submitted_at = _now()
         try:
-            outcomes = installer.spark_sql_actions()(
+            capability = (
+                installer.spark_view_actions()
+                if actions[0].kind == BUILD_VIEW
+                else installer.spark_sql_actions()
+            )
+            outcomes = capability(
                 [(action.id, statement) for action, statement, _details in prepared],
                 exact_case=True,
             )
@@ -609,6 +630,8 @@ def _run_spark_actions(
                     seconds=outcome["started_after_seconds"]
                 )
                 finished = started + timedelta(seconds=outcome["duration_seconds"])
+                if action.kind == BUILD_VIEW and isinstance(outcome.get("view_route"), str):
+                    details = {**details, "view_route": outcome["view_route"]}
                 if outcome["succeeded"]:
                     completed[action.id] = ActionResult(
                         action_id=action.id,
@@ -635,6 +658,7 @@ def _run_spark_actions(
                         duration_seconds=outcome["duration_seconds"],
                         error_type=outcome["error_type"],
                         error_message=outcome["error_message"],
+                        details=details,
                     )
         except Exception as exc:
             for action, _statement, _details in prepared:

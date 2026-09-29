@@ -388,6 +388,18 @@ class Session(ABC):
             outcomes.append(outcome)
         return outcomes
 
+    def create_spark_view_actions(
+        self,
+        actions: Sequence[tuple[str, str]],
+        *,
+        exact_case: bool = True,
+        workspace: Workspace | None = None,
+    ) -> list[dict[str, Any]]:
+        """Build Views with the supported Spark path unless the host qualifies another."""
+        return self.execute_spark_sql_actions(
+            actions, exact_case=exact_case, workspace=workspace
+        )
+
     def describe_spark_query_actions(
         self,
         actions: Sequence[tuple[str, Sequence[str]]],
