@@ -89,9 +89,14 @@ class ConsoleSession(Session):
         resolver: Any = None,
         progress: Any = None,
         credential: Any = None,
+        direct_delta_workers: int = 16,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
+        if type(direct_delta_workers) is not int or not 1 <= direct_delta_workers <= 16:
+            raise ValueError("direct Delta workers must be an integer from 1 to 16")
+        self.direct_delta_workers = direct_delta_workers
+        self._delta_resolution_lock = threading.Lock()
         from ..fabric.auth import checked_credential
 
         # Validate the supplied credential now; acquire its token lazily.
@@ -359,6 +364,7 @@ class ConsoleSession(Session):
                 resolver=scope.resolver,
                 store=scope.transport_store,
                 publish=scope.transport_store.rename_directory,
+                resolver_lock=self._delta_resolution_lock,
             )
 
     def create_direct_delta_table_actions(
@@ -369,8 +375,25 @@ class ConsoleSession(Session):
     ) -> list[dict[str, Any]]:
         from .direct_delta import run_direct_delta_actions
 
+        if self.direct_delta_workers > 1 and actions:
+            # Construct the shared scope before workers enter its lazy resources.
+            self.scope(workspace)
+        context = self.telemetry.capture_context()
+
+        def create(qualified, columns, *, identity_column, workspace):
+            with self.telemetry.use_context(context):
+                return self.create_direct_delta_table(
+                    qualified,
+                    columns,
+                    identity_column=identity_column,
+                    workspace=workspace,
+                )
+
         return run_direct_delta_actions(
-            self.create_direct_delta_table, actions, workspace=workspace
+            create,
+            actions,
+            workspace=workspace,
+            max_workers=self.direct_delta_workers,
         )
 
     def create_spark_view_actions(

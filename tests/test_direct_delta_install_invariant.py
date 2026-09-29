@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import threading
 import tomllib
 from pathlib import Path
 from types import SimpleNamespace
@@ -16,6 +17,7 @@ from weaver.sessions.direct_delta import (
     create_bound_delta_table,
     create_staged_delta_table,
     direct_profile_supported,
+    run_direct_delta_actions,
     table_identity,
 )
 from weaver.spark import FabricSparkTarget
@@ -270,6 +272,47 @@ def test_onelake_address_does_not_double_encode_a_table_name():
         )
     )
     assert store._url(location) == location.value
+
+
+@weaver_test()
+def test_parallel_direct_tables_publish_independent_verified_logs(tmp_path):
+    pytest.importorskip("deltalake")
+    workers = 4
+    barrier = threading.Barrier(workers)
+
+    class ConcurrentStore(FilesystemStore):
+        def write(self, location, data):
+            if location.name == "00000000000000000000.json":
+                barrier.wait(timeout=20)
+            return super().write(location, data)
+
+    store = ConcurrentStore()
+    (tmp_path / "Tables").mkdir()
+
+    def publish(source, target):
+        Path(source.value).rename(target.value)
+
+    def create(qualified, columns, *, identity_column, workspace):
+        stage = Location(str(tmp_path / "Files" / f"stage-{qualified}"))
+        destination = Location(str(tmp_path / "Tables" / f"table-{qualified}"))
+        return create_staged_delta_table(
+            stage=stage,
+            destination=destination,
+            store=store,
+            columns=columns,
+            identity_column=identity_column,
+            publish=publish,
+        )
+
+    actions = [
+        (str(index), str(index), (("Id", "bigint", True),), None)
+        for index in range(workers)
+    ]
+    outcomes = run_direct_delta_actions(create, actions, max_workers=workers)
+    assert [outcome["succeeded"] for outcome in outcomes] == [True] * workers
+    assert sorted(path.name for path in (tmp_path / "Tables").iterdir()) == [
+        f"table-{index}" for index in range(workers)
+    ]
 
 
 @weaver_test()

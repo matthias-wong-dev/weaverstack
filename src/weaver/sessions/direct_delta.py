@@ -5,7 +5,9 @@ from __future__ import annotations
 import json
 import re
 import tempfile
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from importlib import import_module, metadata
 from pathlib import Path
 from typing import Callable, Sequence
@@ -44,11 +46,14 @@ def direct_profile_supported(
     return True
 
 
-def run_direct_delta_actions(create, actions, *, workspace=None):
-    """Settle each independent direct commit without losing later siblings."""
+def run_direct_delta_actions(create, actions, *, workspace=None, max_workers=1):
+    """Settle independent Tables within one installer batch in input order."""
+    if type(max_workers) is not int or not 1 <= max_workers <= 16:
+        raise ValueError("direct Delta workers must be an integer from 1 to 16")
     origin = time.monotonic()
-    outcomes = []
-    for label, qualified, columns, identity in actions:
+
+    def settle(action):
+        label, qualified, columns, identity = action
         started = time.monotonic()
         try:
             create(
@@ -68,8 +73,12 @@ def run_direct_delta_actions(create, actions, *, workspace=None):
             outcome = {"label": label, "succeeded": True}
         outcome["started_after_seconds"] = started - origin
         outcome["duration_seconds"] = time.monotonic() - started
-        outcomes.append(outcome)
-    return outcomes
+        return outcome
+
+    if max_workers == 1 or len(actions) < 2:
+        return [settle(action) for action in actions]
+    with ThreadPoolExecutor(max_workers=min(max_workers, len(actions))) as executor:
+        return list(executor.map(settle, actions))
 
 
 def table_identity(target: FabricSparkTarget, qualified: str) -> tuple[str, str]:
@@ -95,6 +104,7 @@ def create_bound_delta_table(
     resolver,
     store,
     publish: Callable[[Location, Location], None],
+    resolver_lock: threading.Lock | None = None,
 ) -> DeltaAllocation:
     """Resolve a frozen four-part Table name to one typed Lakehouse path."""
     match = _OBJECT.fullmatch(qualified_name)
@@ -105,7 +115,11 @@ def create_bound_delta_table(
     schema, name = table_identity(target, qualified_name)
     schema = validate_name(schema, what="schema")
     name = validate_name(name, what="object name")
-    lakehouse_root = resolver.lakehouse(ItemRef(target.lakehouse))
+    if resolver_lock is None:
+        lakehouse_root = resolver.lakehouse(ItemRef(target.lakehouse))
+    else:
+        with resolver_lock:
+            lakehouse_root = resolver.lakehouse(ItemRef(target.lakehouse))
     stage_relative = f"Files/weaver-stage-{uuid4().hex}"
     stage = lakehouse_root / stage_relative
     destination = lakehouse_root / f"Tables/{schema}/{name}"

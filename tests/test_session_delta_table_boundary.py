@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import threading
 from types import ModuleType, SimpleNamespace
 
 import pytest
@@ -10,6 +11,7 @@ from support.weaver_test import weaver_test
 
 from weaver.errors import CommandError
 from weaver.sessions.console import ConsoleScope, ConsoleSession
+from weaver.sessions.direct_delta import run_direct_delta_actions
 from weaver.sessions.notebook import NotebookSession
 from weaver.workspaces import Workspace
 
@@ -355,6 +357,66 @@ def test_direct_actions_keep_failed_sibling_and_order(host, notebook, monkeypatc
     assert [outcome["succeeded"] for outcome in outcomes] == [False, True]
     assert outcomes[0]["error_message"] == "profile mismatch"
     assert len(calls) == 2
+
+
+@weaver_test()
+@pytest.mark.parametrize("workers", (4, 8, 16))
+def test_direct_delta_actions_upload_independent_tables_concurrently(workers):
+    barrier = threading.Barrier(workers)
+    calls = []
+    lock = threading.Lock()
+
+    def create(qualified, columns, *, identity_column, workspace):
+        with lock:
+            calls.append(qualified)
+        barrier.wait(timeout=10)
+        if qualified == "table-0":
+            raise ValueError("profile mismatch")
+        return qualified
+
+    actions = [(str(i), f"table-{i}", (), None) for i in range(workers)]
+    outcomes = run_direct_delta_actions(
+        create, actions, workspace=None, max_workers=workers
+    )
+    assert len(calls) == workers
+    assert [result["label"] for result in outcomes] == [str(i) for i in range(workers)]
+    assert [result["succeeded"] for result in outcomes] == [False] + [True] * (
+        workers - 1
+    )
+    assert all(result["duration_seconds"] >= 0 for result in outcomes)
+
+
+@weaver_test()
+def test_direct_delta_actions_reject_invalid_worker_counts():
+    with pytest.raises(ValueError, match="workers"):
+        run_direct_delta_actions(lambda *_args, **_kwargs: None, [], max_workers=0)
+
+
+@weaver_test()
+def test_console_routes_configured_delta_workers_without_spark(monkeypatch):
+    barrier = threading.Barrier(4)
+    session = ConsoleSession(
+        workspace=Workspace(workspace="Demo"),
+        direct_delta_workers=4,
+        livy=_Livy(),
+    )
+
+    def create(qualified, columns, *, identity_column, workspace):
+        barrier.wait(timeout=10)
+        return qualified
+
+    monkeypatch.setattr(session, "create_direct_delta_table", create)
+    actions = [(str(i), f"table-{i}", (), None) for i in range(4)]
+    outcomes = session.create_direct_delta_table_actions(actions)
+    assert [row["succeeded"] for row in outcomes] == [True] * 4
+    assert session.scope().livy.acquired is False
+
+
+@weaver_test()
+def test_console_uses_qualified_direct_delta_upload_bound_by_default():
+    session = ConsoleSession(workspace=Workspace(workspace="Demo"))
+    assert session.direct_delta_workers == 16
+    session.close()
 
 
 @weaver_test()
