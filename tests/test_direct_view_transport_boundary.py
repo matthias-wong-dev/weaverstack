@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import threading
+import time
 import zlib
 from types import SimpleNamespace
 from urllib.parse import urlsplit
@@ -217,7 +219,7 @@ def _native_template():
     }
 
 
-def _view_session(store, *, unsupported=False):
+def _view_session(store, *, unsupported=False, direct_view_workers=1):
     item = "11111111-2222-4333-8444-555555555555"
     root = Location(onelake_url("workspace", item, base_url=store.base_url))
     resolver = SimpleNamespace(
@@ -227,7 +229,10 @@ def _view_session(store, *, unsupported=False):
         ),
     )
     scope = SimpleNamespace(resolver=resolver, transport_store=store)
-    session = ConsoleSession(workspace=Workspace(workspace="Work"))
+    session = ConsoleSession(
+        workspace=Workspace(workspace="Work"),
+        direct_view_workers=direct_view_workers,
+    )
     session.scope = lambda _workspace=None: scope
     livy = object()
     session._foreground_livy = lambda _scope: livy
@@ -337,6 +342,171 @@ def test_desktop_session_uses_live_view_then_direct_files_and_shape_fallback():
         direct["properties"]["view.catalogAndNamespace.part.1"]
         == "opaque-live-target-namespace"
     )
+    session.close()
+
+
+@weaver_test()
+def test_console_accepts_bounded_direct_view_workers():
+    session = ConsoleSession(
+        workspace=Workspace(workspace="Work"), direct_view_workers=4
+    )
+    assert session.direct_view_workers == 4
+    session.close()
+
+
+@weaver_test()
+@pytest.mark.parametrize("workers", [4, 8, 16])
+def test_independent_view_file_publications_overlap_and_return_in_source_order(
+    workers,
+):
+    class OverlapStore(ViewStore):
+        def __init__(self):
+            super().__init__()
+            self.barrier = threading.Barrier(workers, timeout=5)
+            self.lock = threading.Lock()
+            self.active = 0
+            self.peak = 0
+
+        def publish_view_file(self, stage, destination, decoded, *, properties):
+            with self.lock:
+                self.active += 1
+                self.peak = max(self.peak, self.active)
+            try:
+                self.barrier.wait()
+                return super().publish_view_file(
+                    stage, destination, decoded, properties=properties
+                )
+            finally:
+                with self.lock:
+                    self.active -= 1
+
+    store = OverlapStore()
+    session, calls, root = _view_session(store, direct_view_workers=workers)
+    names = ["seed"] + [f"direct{i}" for i in range(workers)]
+    actions = [
+        (name, f"CREATE VIEW `Work`.`Lake`.`Sales`.`{name}` AS\nSELECT {i} AS Value\n")
+        for i, name in enumerate(names)
+    ]
+    results = session.create_spark_view_actions(
+        actions, workspace=Workspace(workspace="Work")
+    )
+    assert [one["label"] for one in results] == names
+    assert [one["view_route"] for one in results] == ["spark_template"] + [
+        "direct"
+    ] * workers
+    assert all(one["succeeded"] for one in results)
+    assert store.peak == workers
+    assert calls == [
+        ("spark", ("seed",)),
+        ("shape", tuple(names[1:])),
+    ]
+    for i, name in enumerate(names[1:], 1):
+        assert (
+            json.loads(store.read(root.join("Tables", "Sales", name)))["viewText"]
+            == f"SELECT {i} AS Value"
+        )
+    session.close()
+
+
+@weaver_test()
+@pytest.mark.parametrize("workers", [0, 17, True, "4"])
+def test_direct_view_worker_bound_rejects_invalid_values(workers):
+    with pytest.raises(ValueError, match="direct View workers"):
+        ConsoleSession(
+            workspace=Workspace(workspace="Work"), direct_view_workers=workers
+        )
+
+
+@weaver_test()
+def test_failed_view_publication_keeps_ordered_sibling_outcomes_without_retry():
+    class FaultStore(ViewStore):
+        def publish_view_file(self, stage, destination, decoded, *, properties):
+            if destination.value.endswith("/beta"):
+                raise StoreError("owned beta publication failed")
+            return super().publish_view_file(
+                stage, destination, decoded, properties=properties
+            )
+
+    store = FaultStore()
+    session, calls, root = _view_session(store, direct_view_workers=4)
+    names = ["seed", "alpha", "beta", "gamma", "delta"]
+    actions = [
+        (name, f"CREATE VIEW `Work`.`Lake`.`Sales`.`{name}` AS\nSELECT {i} AS Value\n")
+        for i, name in enumerate(names)
+    ]
+    results = session.create_spark_view_actions(
+        actions, workspace=Workspace(workspace="Work")
+    )
+    assert [one["label"] for one in results] == names
+    assert [one["succeeded"] for one in results] == [True, True, False, True, True]
+    assert results[2]["view_route"] == "direct"
+    assert results[2]["error_type"] == "StoreError"
+    assert calls == [
+        ("spark", ("seed",)),
+        ("shape", ("alpha", "beta", "gamma", "delta")),
+    ]
+    assert not store.exists(root.join("Tables", "Sales", "beta"))
+    assert all(
+        store.exists(root.join("Tables", "Sales", name))
+        for name in ("seed", "alpha", "gamma", "delta")
+    )
+    session.close()
+
+
+@weaver_test()
+def test_view_shape_fallback_waits_for_direct_sibling_publications():
+    class DrainStore(ViewStore):
+        def __init__(self):
+            super().__init__()
+            self.lock = threading.Lock()
+            self.active = 0
+            self.barrier = threading.Barrier(3, timeout=3)
+
+        def publish_view_file(self, stage, destination, decoded, *, properties):
+            with self.lock:
+                self.active += 1
+            try:
+                self.barrier.wait()
+                time.sleep(0.03)
+                return super().publish_view_file(
+                    stage, destination, decoded, properties=properties
+                )
+            finally:
+                with self.lock:
+                    self.active -= 1
+
+    store = DrainStore()
+    session, calls, _root = _view_session(store, direct_view_workers=4)
+    original = session.execute_spark_sql_actions
+
+    def serial_spark(actions, **kwargs):
+        with store.lock:
+            assert store.active == 0
+        return original(actions, **kwargs)
+
+    session.execute_spark_sql_actions = serial_spark
+    names = ["seed", "alpha", "bad_shape", "gamma", "delta"]
+    actions = [
+        (name, f"CREATE VIEW `Work`.`Lake`.`Sales`.`{name}` AS\nSELECT {i} AS Value\n")
+        for i, name in enumerate(names)
+    ]
+    results = session.create_spark_view_actions(
+        actions, workspace=Workspace(workspace="Work")
+    )
+    assert [one["label"] for one in results] == names
+    assert [one["view_route"] for one in results] == [
+        "spark_template",
+        "direct",
+        "spark_fallback",
+        "direct",
+        "direct",
+    ]
+    assert all(one["succeeded"] for one in results)
+    assert calls == [
+        ("spark", ("seed",)),
+        ("shape", ("alpha", "bad_shape", "gamma", "delta")),
+        ("spark", ("bad_shape",)),
+    ]
     session.close()
 
 

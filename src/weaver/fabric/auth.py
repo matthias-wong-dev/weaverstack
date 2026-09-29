@@ -9,6 +9,7 @@ desktop CLI installs a service principal, Azure CLI and browser sign-in chain;
 from __future__ import annotations
 
 import os
+import threading
 from pathlib import Path
 
 from ..errors import ConfigError
@@ -440,13 +441,15 @@ class TokenProvider:
         self._margin = margin
         self._token: str | None = None
         self._expires_on = 0.0
+        self._lock = threading.RLock()
 
     def _credential(self):
         # Built once and kept: constructing one per call would shell out to the
         # CLI every time, which is the cost this class exists to avoid.
-        if self._cred is None:
-            self._cred = credential()
-        return self._cred
+        with self._lock:
+            if self._cred is None:
+                self._cred = credential()
+            return self._cred
 
     @property
     def diagnostic(self) -> dict:
@@ -458,13 +461,13 @@ class TokenProvider:
     def __call__(self) -> str:
         import time
 
-        if self._token is None or time.time() >= self._expires_on - self._margin:
-            acquired = self._credential().get_token(self.scope)
-            self._token = acquired.token
-            # A credential that reports no expiry gets renewed every call. Slow
-            # rather than wrong, and no shipped credential does it.
-            self._expires_on = float(getattr(acquired, "expires_on", 0) or 0)
-        return self._token
+        with self._lock:
+            if self._token is None or time.time() >= self._expires_on - self._margin:
+                acquired = self._credential().get_token(self.scope)
+                self._token = acquired.token
+                # A credential that reports no expiry gets renewed every call.
+                self._expires_on = float(getattr(acquired, "expires_on", 0) or 0)
+            return self._token
 
 
 def token_source(token=None, *, scope: str, cred=None):

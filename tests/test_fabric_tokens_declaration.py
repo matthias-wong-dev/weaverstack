@@ -9,6 +9,10 @@ previous shape never modelled.
 
 from __future__ import annotations
 
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
+
 from support.weaver_test import weaver_test
 
 from weaver.fabric.auth import TokenProvider, token_source
@@ -58,6 +62,36 @@ def _provider(monkeypatch, *, lifetime=3600.0, margin=300.0):
 
 
 # --- the provider -------------------------------------------------------------
+
+
+@weaver_test()
+def test_concurrent_token_requests_share_one_refresh():
+    class SlowCredential:
+        def __init__(self):
+            self.lock = threading.Lock()
+            self.calls = 0
+
+        def get_token(self, _scope):
+            with self.lock:
+                self.calls += 1
+                sequence = self.calls
+            time.sleep(0.05)
+            return _Acquired(f"token-{sequence}", time.time() + 3600)
+
+    credential = SlowCredential()
+    provider = TokenProvider("scope", credential)
+    start = threading.Barrier(5, timeout=2)
+
+    def read():
+        start.wait()
+        return provider()
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        futures = [executor.submit(read) for _ in range(4)]
+        start.wait()
+        values = [future.result(timeout=2) for future in futures]
+    assert credential.calls == 1
+    assert values == ["token-1"] * 4
 
 
 @weaver_test()

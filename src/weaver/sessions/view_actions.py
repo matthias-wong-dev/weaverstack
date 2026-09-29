@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any, Sequence
 
@@ -170,10 +171,12 @@ def create_view_actions(
         except Exception:
             outcomes.extend(spark(group, "spark_fallback"))
             continue
-        for item, shape in zip(group, shapes, strict=True):
-            action_started = time.monotonic()
+        group_outcomes: list[dict[str, Any] | None] = [None] * len(group)
+        publishes: list[tuple[int, PreparedView, bytes]] = []
+        fallbacks: list[tuple[int, PreparedView]] = []
+        for slot, (item, shape) in enumerate(zip(group, shapes, strict=True)):
             if not shape["succeeded"]:
-                outcomes.extend(spark([item], "spark_fallback"))
+                fallbacks.append((slot, item))
                 continue
             try:
                 decoded = compile_view_metadata(
@@ -183,26 +186,44 @@ def create_view_actions(
                     now_ms=int(time.time() * 1000),
                 )
             except ValueError:
-                outcomes.extend(spark([item], "spark_fallback"))
+                fallbacks.append((slot, item))
                 continue
+            publishes.append((slot, item, decoded))
+
+        context = session.telemetry.capture_context()
+
+        def publish(spec: tuple[int, PreparedView, bytes]) -> dict[str, Any]:
+            _, item, decoded = spec
+            action_started = time.monotonic()
             try:
-                with session.telemetry.timing("onelake.view"):
-                    scope.transport_store.publish_view_file(
-                        item.stage,
-                        item.destination,
-                        decoded,
-                        properties=VIEW_PROPERTIES,
-                    )
+                with session.telemetry.use_context(context):
+                    with session.telemetry.timing("onelake.view"):
+                        scope.transport_store.publish_view_file(
+                            item.stage,
+                            item.destination,
+                            decoded,
+                            properties=VIEW_PROPERTIES,
+                        )
             except Exception as exc:
-                outcomes.append(failed(item.label, exc, action_started, "direct"))
-            else:
-                outcomes.append(
-                    {
-                        "label": item.label,
-                        "succeeded": True,
-                        "started_after_seconds": action_started - origin,
-                        "duration_seconds": time.monotonic() - action_started,
-                        "view_route": "direct",
-                    }
-                )
+                return failed(item.label, exc, action_started, "direct")
+            return {
+                "label": item.label,
+                "succeeded": True,
+                "started_after_seconds": action_started - origin,
+                "duration_seconds": time.monotonic() - action_started,
+                "view_route": "direct",
+            }
+
+        workers = min(session.direct_view_workers, len(publishes))
+        if workers > 1:
+            with ThreadPoolExecutor(max_workers=workers) as executor:
+                direct_outcomes = list(executor.map(publish, publishes))
+        else:
+            direct_outcomes = [publish(spec) for spec in publishes]
+        for (slot, _, _), result in zip(publishes, direct_outcomes, strict=True):
+            group_outcomes[slot] = result
+        for slot, item in fallbacks:
+            group_outcomes[slot] = spark([item], "spark_fallback")[0]
+        assert all(result is not None for result in group_outcomes)
+        outcomes.extend(result for result in group_outcomes if result is not None)
     return outcomes

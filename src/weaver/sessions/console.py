@@ -90,12 +90,16 @@ class ConsoleSession(Session):
         progress: Any = None,
         credential: Any = None,
         direct_delta_workers: int = 16,
+        direct_view_workers: int = 1,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
         if type(direct_delta_workers) is not int or not 1 <= direct_delta_workers <= 16:
             raise ValueError("direct Delta workers must be an integer from 1 to 16")
         self.direct_delta_workers = direct_delta_workers
+        if type(direct_view_workers) is not int or not 1 <= direct_view_workers <= 16:
+            raise ValueError("direct View workers must be an integer from 1 to 16")
+        self.direct_view_workers = direct_view_workers
         self._delta_resolution_lock = threading.Lock()
         from ..fabric.auth import checked_credential
 
