@@ -301,21 +301,28 @@ class OneLakeDfsClient:
             or any(p in ("", ".", "..") for p in source.relative.split("/"))
             or any(p in ("", ".", "..") for p in target.relative.split("/"))
         ):
-            raise StoreError("View publication needs a private Files stage and bound Tables target")
+            raise StoreError(
+                "View publication needs a private Files stage and bound Tables target"
+            )
         if not isinstance(decoded, bytes) or not decoded or not properties:
             raise StoreError("View publication needs verified JSON and View properties")
         stage_url = self._url(stage)
         destination_url = self._url(destination)
-        if self._request("HEAD", destination_url, expected=(200, 404)).status_code != 404:
+        if (
+            self._request("HEAD", destination_url, expected=(200, 404)).status_code
+            != 404
+        ):
             raise StoreError("View destination already exists")
         encoded = zlib.compress(decoded)
         created = False
         publishing = False
         try:
             self._request(
-                "PUT", f"{stage_url}?resource=file",
+                "PUT",
+                f"{stage_url}?resource=file",
                 headers={
-                    "If-None-Match": "*", "x-ms-properties": properties,
+                    "If-None-Match": "*",
+                    "x-ms-properties": properties,
                     "x-ms-content-type": "application/json",
                     "x-ms-content-encoding": "deflate",
                 },
@@ -323,15 +330,21 @@ class OneLakeDfsClient:
             )
             created = True
             self._request(
-                "PATCH", f"{stage_url}?action=append&position=0", data=encoded,
-                headers={"Content-Length": str(len(encoded))}, expected=(202,),
+                "PATCH",
+                f"{stage_url}?action=append&position=0",
+                data=encoded,
+                headers={"Content-Length": str(len(encoded))},
+                expected=(202,),
             )
             self._request(
-                "PATCH", f"{stage_url}?action=flush&position={len(encoded)}", expected=(200,),
+                "PATCH",
+                f"{stage_url}?action=flush&position={len(encoded)}",
+                expected=(200,),
             )
             before = self._request("HEAD", stage_url, expected=(200,))
             self._request(
-                "PATCH", f"{stage_url}?action=setProperties",
+                "PATCH",
+                f"{stage_url}?action=setProperties",
                 headers={
                     "If-Match": before.headers["ETag"],
                     "x-ms-content-type": "application/json",
@@ -342,15 +355,20 @@ class OneLakeDfsClient:
             )
             snapshot = self.read_view_file(stage)
             self._verify_view_snapshot(snapshot, decoded, encoded, properties)
-            if self._request("HEAD", destination_url, expected=(200, 404)).status_code != 404:
+            if (
+                self._request("HEAD", destination_url, expected=(200, 404)).status_code
+                != 404
+            ):
                 raise StoreError("View destination already exists")
             source_path = "/".join(("", source.workspace, source.item, source.relative))
             publishing = True
             result = self._request(
-                "PUT", destination_url,
+                "PUT",
+                destination_url,
                 headers={
                     "x-ms-rename-source": quote(source_path, safe="/"),
-                    "If-None-Match": "*", "x-ms-source-if-match": snapshot.etag,
+                    "If-None-Match": "*",
+                    "x-ms-source-if-match": snapshot.etag,
                 },
                 expected=(201,),
             )
@@ -366,20 +384,32 @@ class OneLakeDfsClient:
                 try:
                     final = self.read_view_file(destination)
                     self._verify_view_snapshot(final, decoded, encoded, properties)
-                    if self._request("HEAD", stage_url, expected=(200, 404)).status_code == 404:
+                    if (
+                        self._request(
+                            "HEAD", stage_url, expected=(200, 404)
+                        ).status_code
+                        == 404
+                    ):
                         return final
                 except Exception:
                     pass
-                raise StoreError("View publication is uncertain; inspect its destination before retrying") from exc
+                raise StoreError(
+                    "View publication is uncertain; inspect its destination before retrying"
+                ) from exc
             if created:
                 try:
                     current = self._request("HEAD", stage_url, expected=(200, 404))
                     if current.status_code == 200:
-                        self._request("DELETE", stage_url,
-                                      headers={"If-Match": current.headers["ETag"]},
-                                      expected=(200, 202, 204))
+                        self._request(
+                            "DELETE",
+                            stage_url,
+                            headers={"If-Match": current.headers["ETag"]},
+                            expected=(200, 202, 204),
+                        )
                 except Exception as cleanup_error:
-                    raise StoreError("View private stage cleanup failed; inspect it before retrying") from cleanup_error
+                    raise StoreError(
+                        "View private stage cleanup failed; inspect it before retrying"
+                    ) from cleanup_error
             raise
 
     @staticmethod

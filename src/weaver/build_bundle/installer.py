@@ -376,9 +376,8 @@ def _run_batch(
     def flush_spark() -> None:
         if not spark_actions:
             return
-        if (
-            not can_batch_spark
-            or (len(spark_actions) == 1 and spark_actions[0].kind != BUILD_VIEW)
+        if not can_batch_spark or (
+            len(spark_actions) == 1 and spark_actions[0].kind != BUILD_VIEW
         ):
             results.extend(
                 _run_action(action, batch, context, bundle, installer)
@@ -423,7 +422,9 @@ def _run_batch(
     for action in batch.actions:
         if action.executor == "spark_sql":
             flush_tables()
-            if spark_actions and (spark_actions[0].kind == BUILD_VIEW) != (action.kind == BUILD_VIEW):
+            if spark_actions and (spark_actions[0].kind == BUILD_VIEW) != (
+                action.kind == BUILD_VIEW
+            ):
                 flush_spark()
             spark_actions.append(action)
             continue
@@ -630,7 +631,9 @@ def _run_spark_actions(
                     seconds=outcome["started_after_seconds"]
                 )
                 finished = started + timedelta(seconds=outcome["duration_seconds"])
-                if action.kind == BUILD_VIEW and isinstance(outcome.get("view_route"), str):
+                if action.kind == BUILD_VIEW and isinstance(
+                    outcome.get("view_route"), str
+                ):
                     details = {**details, "view_route": outcome["view_route"]}
                 if outcome["succeeded"]:
                     completed[action.id] = ActionResult(

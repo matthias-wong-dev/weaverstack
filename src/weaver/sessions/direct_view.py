@@ -14,18 +14,37 @@ from ..targets import ItemRef, validate_name
 
 VIEW_PROPERTIES = "xCatalogMetadataVersion=MjAyNDA1,xCatalogTableType=VklFVw=="
 _MAX_TEMPLATE_BYTES = 1024 * 1024
-_TOP_LEVEL = frozenset({
-    "tableType", "storage", "allColumns", "partitionColumnNames", "properties",
-    "owner", "createTime", "lastAccessTime", "createVersion", "viewText",
-    "unsupportedFeatures", "tracksPartitionsInCatalog", "schemaPreservesCase",
-    "ignoredProperties", "viewOriginalText",
-})
-_FIXED_PROPERTIES = frozenset({
-    "view.referredTempFunctionsNames", "view.referredTempVariablesNames",
-    "view.referredTempViewNames", "view.catalogAndNamespace.numParts",
-    "view.catalogAndNamespace.part.0", "view.catalogAndNamespace.part.1",
-    "view.schemaMode", "view.query.out.numCols",
-})
+_TOP_LEVEL = frozenset(
+    {
+        "tableType",
+        "storage",
+        "allColumns",
+        "partitionColumnNames",
+        "properties",
+        "owner",
+        "createTime",
+        "lastAccessTime",
+        "createVersion",
+        "viewText",
+        "unsupportedFeatures",
+        "tracksPartitionsInCatalog",
+        "schemaPreservesCase",
+        "ignoredProperties",
+        "viewOriginalText",
+    }
+)
+_FIXED_PROPERTIES = frozenset(
+    {
+        "view.referredTempFunctionsNames",
+        "view.referredTempVariablesNames",
+        "view.referredTempViewNames",
+        "view.catalogAndNamespace.numParts",
+        "view.catalogAndNamespace.part.0",
+        "view.catalogAndNamespace.part.1",
+        "view.schemaMode",
+        "view.query.out.numCols",
+    }
+)
 _PART = r"`(?:``|[^`])+`"
 _OBJECT = r"\.".join([_PART] * 4)
 _STATEMENT = re.compile(
@@ -52,7 +71,10 @@ def bound_view_paths(resolver, qualified: str) -> tuple[Location, Location, str]
     parts = [part[1:-1].replace("``", "`") for part in re.findall(_PART, qualified)]
     workspace, lakehouse, schema, name = parts
     target = FabricSparkTarget(resolver.configuration.workspace, lakehouse)
-    if target.namespace != (workspace, lakehouse) or target.qualify(schema, name) != qualified:
+    if (
+        target.namespace != (workspace, lakehouse)
+        or target.qualify(schema, name) != qualified
+    ):
         raise ValueError("View statement does not match its bound Lakehouse")
     schema = validate_name(schema, what="schema")
     name = validate_name(name, what="object name")
@@ -71,7 +93,10 @@ def _profile_error(detail: str) -> ValueError:
 def _validate_template(template: Any) -> None:
     if not isinstance(template, dict) or template.keys() != _TOP_LEVEL:
         raise _profile_error("native fields changed")
-    if template["tableType"] != "VIEW" or template["storage"] != {"compressed": False, "properties": {}}:
+    if template["tableType"] != "VIEW" or template["storage"] != {
+        "compressed": False,
+        "properties": {},
+    }:
         raise _profile_error("native View storage changed")
     if (
         template["partitionColumnNames"] != []
@@ -96,10 +121,15 @@ def _validate_template(template: Any) -> None:
         f"view.query.out.col.{index}" for index in range(len(columns))
     }
     unknown = properties.keys() - expected
-    if not all(key.startswith("view.sqlConfig.") and len(key) > len("view.sqlConfig.") for key in unknown):
+    if not all(
+        key.startswith("view.sqlConfig.") and len(key) > len("view.sqlConfig.")
+        for key in unknown
+    ):
         raise _profile_error("native View properties changed")
-    if not expected <= properties.keys() or not unknown or not all(
-        isinstance(value, str) for value in properties.values()
+    if (
+        not expected <= properties.keys()
+        or not unknown
+        or not all(isinstance(value, str) for value in properties.values())
     ):
         raise _profile_error("native View properties changed")
     if (
@@ -171,7 +201,11 @@ def compile_view_metadata(
         raise ValueError("View output shape requires a nonempty query")
     if type(now_ms) is not int or now_ms < 0:
         raise ValueError("View output shape requires a valid creation time")
-    if not isinstance(schema, Mapping) or schema.keys() != {"type", "fields"} or schema["type"] != "struct":
+    if (
+        not isinstance(schema, Mapping)
+        or schema.keys() != {"type", "fields"}
+        or schema["type"] != "struct"
+    ):
         raise ValueError("View output shape must be a Spark struct")
     fields = schema["fields"]
     if not isinstance(fields, list) or not fields or len(fields) > 10000:
@@ -179,20 +213,51 @@ def compile_view_metadata(
     columns = []
     names = set()
     for field in fields:
-        if not isinstance(field, dict) or field.keys() != {"name", "type", "nullable", "metadata"}:
+        if not isinstance(field, dict) or field.keys() != {
+            "name",
+            "type",
+            "nullable",
+            "metadata",
+        }:
             raise ValueError("View output shape contains an unknown column")
         name = field["name"]
-        if not isinstance(name, str) or not name or "\x00" in name or name.casefold() in names:
+        if (
+            not isinstance(name, str)
+            or not name
+            or "\x00" in name
+            or name.casefold() in names
+        ):
             raise ValueError("View output shape contains a duplicate or invalid name")
         names.add(name.casefold())
-        if type(field["nullable"]) is not bool or not isinstance(field["metadata"], dict) or _contains_variant(field["type"]):
+        if (
+            type(field["nullable"]) is not bool
+            or not isinstance(field["metadata"], dict)
+            or _contains_variant(field["type"])
+        ):
             raise ValueError("View output shape contains an unsupported column")
         try:
-            column_type = json.dumps(field["type"], separators=(",", ":"), ensure_ascii=False, allow_nan=False)
-            metadata = json.dumps(field["metadata"], separators=(",", ":"), ensure_ascii=False, allow_nan=False)
+            column_type = json.dumps(
+                field["type"],
+                separators=(",", ":"),
+                ensure_ascii=False,
+                allow_nan=False,
+            )
+            metadata = json.dumps(
+                field["metadata"],
+                separators=(",", ":"),
+                ensure_ascii=False,
+                allow_nan=False,
+            )
         except (TypeError, ValueError) as exc:
             raise ValueError("View output shape contains invalid column JSON") from exc
-        columns.append({"name": name, "colType": column_type, "nullable": field["nullable"], "metadata": metadata})
+        columns.append(
+            {
+                "name": name,
+                "colType": column_type,
+                "nullable": field["nullable"],
+                "metadata": metadata,
+            }
+        )
     result = deepcopy(dict(template))
     result["allColumns"] = columns
     result["viewText"] = result["viewOriginalText"] = query

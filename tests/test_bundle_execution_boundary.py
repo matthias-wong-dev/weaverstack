@@ -825,7 +825,9 @@ def test_consecutive_spark_actions_cross_as_one_labelled_submission(tmp_path):
 
 
 @weaver_test()
-def test_view_actions_use_one_session_capability_without_crossing_other_spark_sql(tmp_path):
+def test_view_actions_use_one_session_capability_without_crossing_other_spark_sql(
+    tmp_path,
+):
     actions = (
         _action("ordinary_before"),
         replace(_action("native"), kind=BUILD_VIEW),
@@ -845,22 +847,41 @@ def test_view_actions_use_one_session_capability_without_crossing_other_spark_sq
                 "succeeded": label != "direct",
                 "started_after_seconds": float(index),
                 "duration_seconds": 0.25,
-                **({"error_type": "AnalysisException", "error_message": "bad view"}
-                   if label == "direct" else {}),
+                **(
+                    {"error_type": "AnalysisException", "error_message": "bad view"}
+                    if label == "direct"
+                    else {}
+                ),
             }
             for index, (label, _statement) in enumerate(actions)
         ]
 
-    session.create_spark_view_actions = lambda actions, **kwargs: labelled("view", actions, **kwargs)
-    session.execute_spark_sql_actions = lambda actions, **kwargs: labelled("sql", actions, **kwargs)
-    session.execute_spark_sql = lambda statement, **kwargs: labelled(
-        "single-sql", [("ordinary_after" if statement == "select 3" else "ordinary_before", statement)], **kwargs
-    ) and []
+    session.create_spark_view_actions = lambda actions, **kwargs: labelled(
+        "view", actions, **kwargs
+    )
+    session.execute_spark_sql_actions = lambda actions, **kwargs: labelled(
+        "sql", actions, **kwargs
+    )
+    session.execute_spark_sql = lambda statement, **kwargs: (
+        labelled(
+            "single-sql",
+            [
+                (
+                    "ordinary_after" if statement == "select 3" else "ordinary_before",
+                    statement,
+                )
+            ],
+            **kwargs,
+        )
+        and []
+    )
     report = Installer(session).install(bundle)
     assert not report.succeeded
     assert [(r.action_id, r.status) for r in report.action_results()] == [
-        ("ordinary_before", "succeeded"), ("native", "succeeded"),
-        ("direct", "failed"), ("ordinary_after", "succeeded"),
+        ("ordinary_before", "succeeded"),
+        ("native", "succeeded"),
+        ("direct", "failed"),
+        ("ordinary_after", "succeeded"),
         ("single_view", "succeeded"),
     ]
     assert [one[:2] for one in submitted] == [

@@ -31,7 +31,9 @@ class PreparedView:
         return self.stage.value.rsplit("/Files/", 1)[0], self.schema
 
 
-def create_view_actions(session, actions: Sequence[tuple[str, str]], *, workspace) -> list[dict[str, Any]]:
+def create_view_actions(
+    session, actions: Sequence[tuple[str, str]], *, workspace
+) -> list[dict[str, Any]]:
     """Capture a live View template, then analyse and publish independent siblings."""
     ordered = list(actions)
     if not ordered:
@@ -42,8 +44,10 @@ def create_view_actions(session, actions: Sequence[tuple[str, str]], *, workspac
 
     def failed(label, error, started, route):
         return {
-            "label": label, "succeeded": False,
-            "error_type": type(error).__name__, "error_message": str(error),
+            "label": label,
+            "succeeded": False,
+            "error_type": type(error).__name__,
+            "error_message": str(error),
             "started_after_seconds": started - origin,
             "duration_seconds": time.monotonic() - started,
             "view_route": route,
@@ -58,7 +62,8 @@ def create_view_actions(session, actions: Sequence[tuple[str, str]], *, workspac
             )
             if (
                 not isinstance(results, list)
-                or [result.get("label") for result in results] != [label for label, _ in pairs]
+                or [result.get("label") for result in results]
+                != [label for label, _ in pairs]
                 or any(
                     type(result.get("succeeded")) is not bool
                     or not isinstance(result.get("started_after_seconds"), (int, float))
@@ -70,11 +75,15 @@ def create_view_actions(session, actions: Sequence[tuple[str, str]], *, workspac
                     for result in results
                 )
             ):
-                raise ValueError("View Spark outcomes did not match the submitted actions")
+                raise ValueError(
+                    "View Spark outcomes did not match the submitted actions"
+                )
             return [
                 {
                     **result,
-                    "started_after_seconds": submitted - origin + result["started_after_seconds"],
+                    "started_after_seconds": submitted
+                    - origin
+                    + result["started_after_seconds"],
                     "view_route": route,
                 }
                 for result in results
@@ -106,8 +115,12 @@ def create_view_actions(session, actions: Sequence[tuple[str, str]], *, workspac
             except Exception:
                 break
             next_item = PreparedView(
-                next_label, next_statement, next_query,
-                next_stage, next_destination, next_schema,
+                next_label,
+                next_statement,
+                next_query,
+                next_stage,
+                next_destination,
+                next_schema,
             )
             if next_item.key != first.key:
                 break
@@ -125,7 +138,8 @@ def create_view_actions(session, actions: Sequence[tuple[str, str]], *, workspac
                 try:
                     native = scope.transport_store.read_view_file(seed.destination)
                     template = load_native_view_template(
-                        native.content, content_type=native.content_type,
+                        native.content,
+                        content_type=native.content_type,
                         content_encoding=native.content_encoding,
                         properties=native.properties,
                     )
@@ -146,10 +160,13 @@ def create_view_actions(session, actions: Sequence[tuple[str, str]], *, workspac
             )
             if (
                 not isinstance(shapes, list)
-                or [shape.get("label") for shape in shapes] != [item.label for item in group]
+                or [shape.get("label") for shape in shapes]
+                != [item.label for item in group]
                 or any(type(shape.get("succeeded")) is not bool for shape in shapes)
             ):
-                raise ValueError("View output shapes did not match the submitted actions")
+                raise ValueError(
+                    "View output shapes did not match the submitted actions"
+                )
         except Exception:
             outcomes.extend(spark(group, "spark_fallback"))
             continue
@@ -160,7 +177,9 @@ def create_view_actions(session, actions: Sequence[tuple[str, str]], *, workspac
                 continue
             try:
                 decoded = compile_view_metadata(
-                    template, shape.get("schema"), item.query,
+                    template,
+                    shape.get("schema"),
+                    item.query,
                     now_ms=int(time.time() * 1000),
                 )
             except ValueError:
@@ -169,15 +188,21 @@ def create_view_actions(session, actions: Sequence[tuple[str, str]], *, workspac
             try:
                 with session.telemetry.timing("onelake.view"):
                     scope.transport_store.publish_view_file(
-                        item.stage, item.destination, decoded, properties=VIEW_PROPERTIES
+                        item.stage,
+                        item.destination,
+                        decoded,
+                        properties=VIEW_PROPERTIES,
                     )
             except Exception as exc:
                 outcomes.append(failed(item.label, exc, action_started, "direct"))
             else:
-                outcomes.append({
-                    "label": item.label, "succeeded": True,
-                    "started_after_seconds": action_started - origin,
-                    "duration_seconds": time.monotonic() - action_started,
-                    "view_route": "direct",
-                })
+                outcomes.append(
+                    {
+                        "label": item.label,
+                        "succeeded": True,
+                        "started_after_seconds": action_started - origin,
+                        "duration_seconds": time.monotonic() - action_started,
+                        "view_route": "direct",
+                    }
+                )
     return outcomes

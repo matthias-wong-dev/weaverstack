@@ -548,8 +548,11 @@ class ConsoleSession(Session):
         )
         livy = self._foreground_livy(scope)
         return scope.livy_run(
-            source, name="spark_view_shapes",
-            timeout=allowance * len(ordered), livy=livy, retry_submission=False,
+            source,
+            name="spark_view_shapes",
+            timeout=allowance * len(ordered),
+            livy=livy,
+            retry_submission=False,
         )
 
     def describe_spark_query_actions(
