@@ -38,6 +38,17 @@ def _test_paths() -> tuple[Path, ...]:
 
 
 @weaver_test()
+def test_fabric_dispatch_tests_use_the_configured_lakehouse():
+    for module in (
+        "test_run_dispatch_boundary.py",
+        "test_validation_dispatch_boundary.py",
+    ):
+        source = (TESTS / "fabric" / module).read_text(encoding="utf-8")
+        assert 'LAKEHOUSE = "PYTEST_LH_1"' not in source, module
+        assert "fabric_target_lakehouse" in source, module
+
+
+@weaver_test()
 def test_every_test_module_names_a_claim():
     unnamed = sorted(
         path for path in _test_modules() if not MODULE_NAME.fullmatch(Path(path).name)

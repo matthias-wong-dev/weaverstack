@@ -34,16 +34,13 @@ from support.weaver_test import weaver_test
 
 from weaver.operations.test import run_test
 
-#: The Lakehouse the artefacts are deployed into. Emptied first, because a run
-#: that found a previous run's modules would prove nothing about this one.
-LAKEHOUSE = "PYTEST_LH_1"
-
 
 @pytest.fixture(scope="module")
 def judged(
     fabric_workspace,
     fabric_client,
     weaver_session,
+    fabric_target_lakehouse,
     fabric_empty_lakehouse,
     fabric_initialise_catalogue,
     tmp_path_factory,
@@ -52,14 +49,15 @@ def judged(
 
     from weaver.fabric import FabricResolver, OneLakeDfsClient
 
-    fabric_empty_lakehouse(LAKEHOUSE)
+    lakehouse = fabric_target_lakehouse.name
+    fabric_empty_lakehouse(lakehouse)
     fabric_initialise_catalogue()
 
     return thin_estate(
         tmp_path_factory.mktemp("judged"),
         outcomes=(),
         judgements=JUDGEMENTS,
-        lakehouse=LAKEHOUSE,
+        lakehouse=lakehouse,
         workspace=fabric_workspace,
         resolver=FabricResolver(fabric_workspace, client=fabric_client),
         store=OneLakeDfsClient(),
