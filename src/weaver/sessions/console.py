@@ -357,6 +357,7 @@ class ConsoleSession(Session):
                 identity_column=identity_column,
                 resolver=scope.resolver,
                 store=scope.transport_store,
+                publish=scope.transport_store.rename_directory,
             )
 
     def create_direct_delta_table_actions(

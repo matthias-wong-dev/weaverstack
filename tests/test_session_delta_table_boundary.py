@@ -274,6 +274,7 @@ def test_console_direct_creation_does_not_acquire_livy(monkeypatch):
     from weaver.sessions import direct_delta
 
     captured = []
+    store = SimpleNamespace(rename_directory=lambda *_: None)
     monkeypatch.setattr(
         direct_delta,
         "create_bound_delta_table",
@@ -287,7 +288,7 @@ def test_console_direct_creation_does_not_acquire_livy(monkeypatch):
     monkeypatch.setattr(
         ConsoleScope,
         "transport_store",
-        property(lambda self: "onelake"),
+        property(lambda self: store),
     )
     session = ConsoleSession(workspace=Workspace(workspace="Demo"), livy=_Livy())
     assert (
@@ -297,12 +298,13 @@ def test_console_direct_creation_does_not_acquire_livy(monkeypatch):
         == "allocated"
     )
     assert captured[0]["resolver"] == "resolved"
-    assert captured[0]["store"] == "onelake"
+    assert captured[0]["store"] is store
+    assert captured[0]["publish"] == store.rename_directory
     assert session.scope().livy.acquired is False
 
 
 @weaver_test()
-def test_notebook_direct_creation_uses_its_storage_identity(notebook, monkeypatch):
+def test_notebook_direct_creation_stages_with_native_store(notebook, monkeypatch):
     from weaver.sessions import direct_delta
 
     captured = []
@@ -319,7 +321,8 @@ def test_notebook_direct_creation_uses_its_storage_identity(notebook, monkeypatc
     )
     session = notebook(SimpleNamespace(conf=_Conf()))
     assert session.create_direct_delta_table(TARGET, COLUMNS) == "allocated"
-    assert captured[0]["store"].token == "storage-token"
+    assert captured[0]["store"] is session.scope().transport_store
+    assert captured[0]["publish"].__self__.token == "storage-token"
 
 
 @weaver_test()

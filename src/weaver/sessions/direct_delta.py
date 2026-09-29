@@ -4,16 +4,16 @@ from __future__ import annotations
 
 import json
 import re
+import tempfile
 import time
 from importlib import import_module, metadata
+from pathlib import Path
 from typing import Callable, Sequence
 from uuid import uuid4
 
-from ..fabric.onelake import abfss_root, onelake_url
-from ..fabric.resources import LAKEHOUSE
 from ..locations import Location
 from ..spark import FabricSparkTarget
-from ..store import Store
+from ..store import FilesystemStore, Store
 from ..targets import ItemRef, validate_name
 from .delta_profile import (
     WRITER_VERSION,
@@ -94,6 +94,7 @@ def create_bound_delta_table(
     identity_column: str | None,
     resolver,
     store,
+    publish: Callable[[Location, Location], None],
 ) -> DeltaAllocation:
     """Resolve a frozen four-part Table name to one typed Lakehouse path."""
     match = _OBJECT.fullmatch(qualified_name)
@@ -104,37 +105,27 @@ def create_bound_delta_table(
     schema, name = table_identity(target, qualified_name)
     schema = validate_name(schema, what="schema")
     name = validate_name(name, what="object name")
-    item = resolver.resolve(ItemRef(target.lakehouse), item_type=LAKEHOUSE)
-    workspace_id = resolver.workspace.id
+    lakehouse_root = resolver.lakehouse(ItemRef(target.lakehouse))
     stage_relative = f"Files/weaver-stage-{uuid4().hex}"
-    stage = Location(onelake_url(workspace_id, item.id, stage_relative))
-    destination = Location(
-        onelake_url(workspace_id, item.id, f"Tables/{schema}/{name}")
-    )
+    stage = lakehouse_root / stage_relative
+    destination = lakehouse_root / f"Tables/{schema}/{name}"
     return create_staged_delta_table(
-        uri=f"{abfss_root(workspace_id, item.id)}/{stage_relative}",
         stage=stage,
         destination=destination,
         store=store,
         columns=columns,
         identity_column=identity_column,
-        storage_options={
-            "bearer_token": store.token,
-            "use_fabric_endpoint": "true",
-        },
-        publish=store.rename_directory,
+        publish=publish,
     )
 
 
 def create_staged_delta_table(
     *,
-    uri: str,
     stage: Location,
     destination: Location,
     store: Store,
     columns: Sequence[Sequence],
     identity_column: str | None,
-    storage_options: dict[str, str] | None,
     publish: Callable[[Location, Location], None],
 ) -> DeltaAllocation:
     """Create in private storage; verify the final log before conditional publish."""
@@ -163,35 +154,46 @@ def create_staged_delta_table(
         for field in profile.schema["fields"]
     ]
     schema = Schema.from_json(json.dumps({"type": "struct", "fields": fields}))
-    table = DeltaTable.create(
-        uri,
-        schema,
-        configuration={
-            key: value
-            for key, value in profile.configuration.items()
-            if key != "delta.columnMapping.maxColumnId"
-        },
-        partition_by=list(profile.partition_columns),
-        storage_options=storage_options,
-        mode="error",
-    )
-    if profile.final_version:
-        features = {
-            "columnMapping": TableFeatures.ColumnMapping,
-            "identityColumns": TableFeatures.IdentityColumns,
-            "invariants": TableFeatures.Invariants,
-            "generatedColumns": TableFeatures.GeneratedColumns,
-        }
-        table.alter.add_feature(
-            [features[name] for name in profile.protocol["writerFeatures"]],
-            allow_protocol_versions_increase=True,
+    with tempfile.TemporaryDirectory(prefix="weaver-delta-") as directory:
+        local = Path(directory) / "table"
+        table = DeltaTable.create(
+            str(local),
+            schema,
+            configuration={
+                key: value
+                for key, value in profile.configuration.items()
+                if key != "delta.columnMapping.maxColumnId"
+            },
+            partition_by=list(profile.partition_columns),
+            mode="error",
         )
-        table.update_incremental()
-    original = read_delta_snapshot(store, stage)
-    allocation = verify_delta_profile_v1(profile, original)
-    publish(stage, destination)
-    if store.exists(stage) or not store.exists(destination):
-        raise ValueError("Delta Table publication did not move the validated stage")
-    if read_delta_snapshot(store, destination) != original:
-        raise ValueError("Published Delta log differs from validated stage")
-    return allocation
+        if profile.final_version:
+            features = {
+                "columnMapping": TableFeatures.ColumnMapping,
+                "identityColumns": TableFeatures.IdentityColumns,
+                "invariants": TableFeatures.Invariants,
+                "generatedColumns": TableFeatures.GeneratedColumns,
+            }
+            table.alter.add_feature(
+                [features[name] for name in profile.protocol["writerFeatures"]],
+                allow_protocol_versions_increase=True,
+            )
+            table.update_incremental()
+        draft = read_delta_snapshot(FilesystemStore(), Location(str(local)))
+        verify_delta_profile_v1(profile, draft)
+        store.make_directory(stage)
+        log_root = stage / "_delta_log"
+        store.make_directory(log_root)
+        for version in range(profile.final_version + 1):
+            name = f"{version:020d}.json"
+            store.write(log_root / name, (local / "_delta_log" / name).read_bytes())
+        original = read_delta_snapshot(store, stage)
+        allocation = verify_delta_profile_v1(profile, original)
+        if original != draft:
+            raise ValueError("Delta Table stage differs from its validated draft")
+        publish(stage, destination)
+        if store.exists(stage) or not store.exists(destination):
+            raise ValueError("Delta Table publication did not move the validated stage")
+        if read_delta_snapshot(store, destination) != original:
+            raise ValueError("Published Delta log differs from validated stage")
+        return allocation

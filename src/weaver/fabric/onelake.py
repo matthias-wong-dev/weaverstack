@@ -7,7 +7,7 @@ from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Callable
-from urllib.parse import quote, unquote, urlencode
+from urllib.parse import quote, unquote, urlencode, urlsplit
 
 from ..errors import CommandError
 from ..locations import Location
@@ -234,6 +234,8 @@ class OneLakeDfsClient:
 
     def rename_directory(self, source: Location, destination: Location) -> None:
         """Publish one validated private directory without replacing its target."""
+        source = self._publication_location(source)
+        destination = self._publication_location(destination)
         origin = parse_onelake(source, base_url=self.base_url)
         target = parse_onelake(destination, base_url=self.base_url)
         if (origin.workspace, origin.item) != (target.workspace, target.item):
@@ -254,6 +256,31 @@ class OneLakeDfsClient:
         )
         if response.headers.get("x-ms-continuation"):
             raise StoreError("Delta publication returned an incomplete rename")
+
+    def _publication_location(self, location: Location) -> Location:
+        if not location.value.startswith("abfss://"):
+            return location
+        address = urlsplit(location.value)
+        segments = address.path.strip("/").split("/")
+        if (
+            address.hostname != "onelake.dfs.fabric.microsoft.com"
+            or not address.username
+            or address.password
+            or address.port
+            or address.query
+            or address.fragment
+            or len(segments) < 3
+            or any(segment in ("", ".", "..") for segment in segments)
+        ):
+            raise StoreError("Delta publication needs a bound OneLake path")
+        return Location(
+            onelake_url(
+                address.username,
+                segments[0],
+                "/".join(segments[1:]),
+                base_url=self.base_url,
+            )
+        )
 
 
 def _parse_time(value: str | None) -> datetime | None:

@@ -79,10 +79,11 @@ class NotebookSession(Session):
                 columns=columns,
                 identity_column=identity_column,
                 resolver=scope.resolver,
-                store=OneLakeDfsClient(
+                store=scope.transport_store,
+                publish=OneLakeDfsClient(
                     token=lambda: credentials.getToken("storage"),
                     telemetry=self.telemetry,
-                ),
+                ).rename_directory,
             )
 
     def create_direct_delta_table_actions(
