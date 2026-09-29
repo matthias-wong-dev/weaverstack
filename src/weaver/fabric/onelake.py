@@ -180,37 +180,39 @@ class OneLakeDfsClient:
                 "directory": directory,
             }
         )
-        response = self._request("GET", url, expected=(200, 404))
-        if response.status_code == 404:
-            raise StoreNotFoundError(
-                f"cannot list a location that does not exist: {location}",
-                executor="OneLake",
-            )
-
-        # Never return a partial listing: callers use it for destructive and
-        # reconciliation operations.
-        if response.headers.get("x-ms-continuation"):
-            raise NotImplementedError("OneLake listing pagination is not implemented")
-
         entries: list[Entry] = []
         prefix = f"{lakehouse_artifact_segment(parsed.item)}/"
-        for path in response.json().get("paths", []):
-            name = path.get("name", "")
-            relative = name[len(prefix) :] if name.startswith(prefix) else name
-            entries.append(
-                Entry(
-                    location=Location(
-                        f"{self.base_url}/{parsed.workspace}/"
-                        f"{lakehouse_artifact_segment(parsed.item)}/{relative}"
-                    ),
-                    is_directory=str(path.get("isDirectory", "false")).lower()
-                    == "true",
-                    size=int(path["contentLength"])
-                    if path.get("contentLength")
-                    else None,
-                    modified=_parse_time(path.get("lastModified")),
-                    etag=path.get("etag"),
+        next_url: str | None = url
+        while next_url is not None:
+            response = self._request("GET", next_url, expected=(200, 404))
+            if response.status_code == 404:
+                raise StoreNotFoundError(
+                    f"cannot list a location that does not exist: {location}",
+                    executor="OneLake",
                 )
+            for path in response.json().get("paths", []):
+                name = path.get("name", "")
+                relative = name[len(prefix) :] if name.startswith(prefix) else name
+                entries.append(
+                    Entry(
+                        location=Location(
+                            f"{self.base_url}/{parsed.workspace}/"
+                            f"{lakehouse_artifact_segment(parsed.item)}/{relative}"
+                        ),
+                        is_directory=str(path.get("isDirectory", "false")).lower()
+                        == "true",
+                        size=int(path["contentLength"])
+                        if path.get("contentLength")
+                        else None,
+                        modified=_parse_time(path.get("lastModified")),
+                        etag=path.get("etag"),
+                    )
+                )
+            continuation = response.headers.get("x-ms-continuation")
+            next_url = (
+                f"{url}&{urlencode({'continuation': continuation})}"
+                if continuation
+                else None
             )
         return entries
 
