@@ -355,6 +355,13 @@ def test_console_accepts_bounded_direct_view_workers():
 
 
 @weaver_test()
+def test_console_uses_qualified_direct_view_upload_bound_by_default():
+    session = ConsoleSession(workspace=Workspace(workspace="Work"))
+    assert session.direct_view_workers == 8
+    session.close()
+
+
+@weaver_test()
 @pytest.mark.parametrize("workers", [4, 8, 16])
 def test_independent_view_file_publications_overlap_and_return_in_source_order(
     workers,
