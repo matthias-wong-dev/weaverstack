@@ -24,6 +24,7 @@ from ..declaration.model import (
     WeaverDocumentId,
     WeaverItemId,
 )
+from ..targets import FILES_AREA, TABLES_AREA
 from .changes import (
     FOLDER as FOLDER_KIND,
 )
@@ -50,10 +51,6 @@ from .models import (
 from .payloads import sha256_hex
 from .stages import SHORTCUT, PlannedStage
 from .targets import WAREHOUSE_TARGET, BoundTarget
-
-#: Where a Lakehouse shortcut is materialised, by what it points at.
-TABLES_AREA = "Tables"
-FILES_AREA = "Files"
 
 
 @dataclass(frozen=True)

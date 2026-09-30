@@ -67,8 +67,7 @@ def await_publication(
 def _commit_log(target_name, object_id, session, workspace):
 
     from ..fabric.resources import WAREHOUSE
-    from ..resolution import TABLES_AREA
-    from ..targets import ItemRef
+    from ..targets import TABLES_AREA, ItemRef
 
     resolver = session.resolver(workspace)
     item = resolver.resolve(ItemRef(target_name), item_type=WAREHOUSE)
