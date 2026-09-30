@@ -367,7 +367,7 @@ def install_in_scope(session, bundle, *, workspace=None, timeout=None):
     store = scope.transport_store
     from ..targets import ItemRef
 
-    root = scope.resolver.lakehouse_root(ItemRef(target.item_id))
+    root = scope.resolver.lakehouse(ItemRef(target.item_id))
     stage = root.join("Files", "_weaver_install_" + uuid4().hex)
     incoming = stage / "carrier.zip"
     output = stage / "result.json"
@@ -390,8 +390,12 @@ def install_in_scope(session, bundle, *, workspace=None, timeout=None):
     source = bootstrap_source(
         carrier, native(incoming), native(output), workers=session.direct_delta_workers
     )
-    store.make_directory(stage)
-    store.write(incoming, carrier.data)
+    try:
+        store.make_directory(stage)
+        store.write(incoming, carrier.data)
+    except BaseException:
+        store.delete(stage, recursive=True)
+        raise
     settled = None
     complete = False
     received = False

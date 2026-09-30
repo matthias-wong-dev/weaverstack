@@ -245,6 +245,94 @@ def test_archive_interruption_fails_every_unacknowledged_action():
     assert rows[0].details["remote_result"] == "private/report.json"
 
 
+@pytest.mark.parametrize("failure", [False, True])
+@weaver_test()
+def test_ready_archive_bootstrap_restores_the_live_interpreter(
+    tmp_path, monkeypatch, failure
+):
+    import importlib
+    import io
+    import shutil
+    import sys
+    import tempfile
+    import types
+
+    from weaver.sessions.install_archive import Carrier, bootstrap_source, read_receipt
+
+    body = (
+        "def run_bundle(*args, **kwargs):\n    raise RuntimeError('installer interrupted')\n"
+        if failure
+        else "def run_bundle(*args, **kwargs):\n    return {'status': 'completed', 'marker': 'extracted runtime'}\n"
+    )
+    members = {
+        "runtime/weaver/__init__.py": b"",
+        "runtime/weaver/sessions/__init__.py": b"",
+        "runtime/weaver/sessions/archive_runtime.py": body.encode(),
+    }
+    stream = io.BytesIO()
+    with zipfile.ZipFile(stream, "w") as zipped:
+        for name, data in members.items():
+            zipped.writestr(name, data)
+    carrier = Carrier(
+        stream.getvalue(),
+        {name: hashlib.sha256(data).hexdigest() for name, data in members.items()},
+    )
+    incoming, output = tmp_path / "carrier.zip", tmp_path / "result.json"
+    incoming.write_bytes(carrier.data)
+    sdk = types.ModuleType("notebookutils")
+    sdk.fs = types.SimpleNamespace(
+        cp=lambda source, target, recurse: shutil.copyfile(
+            source, target.removeprefix("file:")
+        ),
+        put=lambda path, content, overwrite: (
+            __import__("pathlib").Path(path).write_text(content)
+        ),
+    )
+    monkeypatch.setitem(sys.modules, "notebookutils", sdk)
+    original_import = importlib.import_module
+
+    def dependency(name, *args, **kwargs):
+        if name in ("pyarrow", "yaml", "requests", "azure.identity", "mssql_python"):
+            return types.ModuleType(name)
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(importlib, "import_module", dependency)
+    monkeypatch.setattr(importlib.metadata, "version", lambda name: "1.6.6")
+    original_mkdtemp = tempfile.mkdtemp
+    private = []
+
+    def mkdtemp(*args, **kwargs):
+        path = original_mkdtemp(*args, **kwargs)
+        private.append(__import__("pathlib").Path(path))
+        return path
+
+    monkeypatch.setattr(tempfile, "mkdtemp", mkdtemp)
+    previous = {
+        name: module
+        for name, module in sys.modules.items()
+        if name == "weaver" or name.startswith("weaver.")
+    }
+    paths = list(sys.path)
+    emitted = []
+    program = bootstrap_source(carrier, str(incoming), str(output), workers=16)
+    if failure:
+        with pytest.raises(RuntimeError, match="installer interrupted"):
+            exec(program, {"spark": object(), "emit": emitted.append})
+        assert not emitted
+    else:
+        exec(program, {"spark": object(), "emit": emitted.append})
+        result = read_receipt(emitted[0], output.read_bytes())
+        assert result["marker"] == "extracted runtime"
+        assert result["archive_sha256"] == carrier.sha256
+    assert sys.path == paths
+    assert {
+        name: module
+        for name, module in sys.modules.items()
+        if name == "weaver" or name.startswith("weaver.")
+    } == previous
+    assert len(private) == 1 and not private[0].exists()
+
+
 @weaver_test()
 def test_archive_bootstrap_declines_missing_dependency_before_install(
     tmp_path, monkeypatch

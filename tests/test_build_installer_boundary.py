@@ -114,6 +114,7 @@ def test_corrupt_archive_receipt_remains_uncertain(tmp_path, monkeypatch):
     import types
 
     from weaver.sessions import ConsoleSession
+    from weaver.targets import ItemRef
 
     location, store = _bundle(tmp_path)
     bundle = load_bundle(location, store=store)
@@ -122,8 +123,11 @@ def test_corrupt_archive_receipt_remains_uncertain(tmp_path, monkeypatch):
     ).install(bundle)
     destination = tmp_path / "destination"
 
+    resolver = given_resolver(root=destination)
+    files = resolver.files_root(ItemRef(TARGET.item_id)).path
+
     def submit(source, **kwargs):
-        stage = next((destination / "Files").iterdir())
+        stage = next(files.iterdir())
         output = {
             "status": "completed",
             "archive_sha256": hashlib.sha256(
@@ -136,9 +140,7 @@ def test_corrupt_archive_receipt_remains_uncertain(tmp_path, monkeypatch):
         return {"bytes": len(data), "sha256": "incorrect"}
 
     scope = types.SimpleNamespace(
-        resolver=types.SimpleNamespace(
-            lakehouse_root=lambda item: Location(str(destination))
-        ),
+        resolver=resolver,
         transport_store=FilesystemStore(),
         livy_run=submit,
     )
@@ -150,7 +152,120 @@ def test_corrupt_archive_receipt_remains_uncertain(tmp_path, monkeypatch):
         row.status == FAILED and row.details["uncertain"]
         for row in report.action_results()
     )
-    assert len(list((destination / "Files").iterdir())) == 1
+    assert len(list(files.iterdir())) == 1
+
+
+@weaver_test()
+def test_archive_upload_failure_removes_unsubmitted_carrier(tmp_path, monkeypatch):
+    import types
+
+    from weaver.sessions import ConsoleSession
+    from weaver.targets import ItemRef
+
+    location, store = _bundle(tmp_path)
+    resolver = given_resolver(root=tmp_path / "destination")
+    files = resolver.files_root(ItemRef(TARGET.item_id)).path
+
+    class BrokenUpload(FilesystemStore):
+        def write(self, location, data):
+            super().write(location, data[:10])
+            raise OSError("upload interrupted before submission")
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("unuploaded carrier was submitted")
+
+    scope = types.SimpleNamespace(
+        resolver=resolver, transport_store=BrokenUpload(), livy_run=forbidden
+    )
+    session = ConsoleSession(progress=False)
+    monkeypatch.setattr(session, "scope", lambda workspace=None: scope)
+    with pytest.raises(OSError, match="upload interrupted"):
+        session.install_bundle(
+            load_bundle(location, store=store), workspace=given_workspace()
+        )
+    assert not list(files.iterdir())
+
+
+@pytest.mark.parametrize("outcome", ["completed", "prefix", "missing", "cancelled"])
+@pytest.mark.parametrize("timeout", [None, 7])
+@weaver_test()
+def test_archive_interruption_preserves_the_acknowledged_boundary(
+    tmp_path, monkeypatch, outcome, timeout
+):
+    import hashlib
+    import json
+    import types
+
+    from weaver.fabric.livy import DEFAULT_STATEMENT_TIMEOUT
+    from weaver.sessions import ConsoleSession
+    from weaver.targets import ItemRef
+
+    location, store = _bundle(tmp_path)
+    bundle = load_bundle(location, store=store)
+    expected = given_installer(
+        store=store, executors={"spark_sql": Recorder()}
+    ).install(bundle)
+    resolver = given_resolver(root=tmp_path / "destination")
+    files = resolver.files_root(ItemRef(TARGET.item_id)).path
+    calls = []
+
+    def submit(source, **kwargs):
+        calls.append(kwargs)
+        stage = next(files.iterdir())
+        if outcome in ("completed", "prefix"):
+            mapping = expected.to_mapping()
+            if outcome == "prefix":
+                mapping.update(
+                    status="running",
+                    finished_at=None,
+                    sequences=mapping["sequences"][:1],
+                )
+            result = {
+                "status": "completed" if outcome == "completed" else "running",
+                "archive_sha256": hashlib.sha256(
+                    (stage / "carrier.zip").read_bytes()
+                ).hexdigest(),
+                "report": mapping,
+            }
+            (stage / "result.json").write_text(json.dumps(result))
+        if outcome == "cancelled":
+            raise KeyboardInterrupt("caller cancelled")
+        raise TimeoutError("receipt did not arrive")
+
+    scope = types.SimpleNamespace(
+        resolver=resolver, transport_store=FilesystemStore(), livy_run=submit
+    )
+    session = ConsoleSession(progress=False)
+    monkeypatch.setattr(session, "scope", lambda workspace=None: scope)
+    if outcome == "cancelled":
+        with pytest.raises(KeyboardInterrupt, match="caller cancelled"):
+            session.install_bundle(bundle, workspace=given_workspace(), timeout=timeout)
+    else:
+        report = session.install_bundle(
+            bundle, workspace=given_workspace(), timeout=timeout
+        )
+        assert report is not None
+        if outcome == "completed":
+            assert report.to_mapping() == expected.to_mapping()
+        else:
+            rows = list(report.action_results())
+            assert report.status == FAILED
+            assert [row.status for row in rows] == (
+                [SUCCEEDED, FAILED, FAILED] if outcome == "prefix" else [FAILED] * 3
+            )
+            uncertain = rows[1:] if outcome == "prefix" else rows
+            assert all(row.details["uncertain"] is True for row in uncertain)
+            assert all(
+                (next(files.iterdir()) / "result.json").as_posix()
+                == row.details["remote_result"]
+                for row in uncertain
+            )
+    assert len(calls) == 1
+    assert calls[0]["retry_submission"] is False
+    assert calls[0]["timeout"] == 3 * (
+        DEFAULT_STATEMENT_TIMEOUT if timeout is None else timeout
+    )
+    assert len(list(files.iterdir())) == (0 if outcome == "completed" else 1)
 
 
 @weaver_test()
@@ -179,6 +294,7 @@ def test_console_archive_declines_before_mutation_without_submission_retry(
     import types
 
     from weaver.sessions import ConsoleSession
+    from weaver.targets import ItemRef
 
     location, store = _bundle(tmp_path)
     bundle = load_bundle(location, store=store)
@@ -208,10 +324,9 @@ def test_console_archive_declines_before_mutation_without_submission_retry(
         exec(source, {"emit": receipts.append, "spark": object()})
         return receipts[-1]
 
+    resolver = given_resolver(root=tmp_path / "destination")
     scope = types.SimpleNamespace(
-        resolver=types.SimpleNamespace(
-            lakehouse_root=lambda item: Location(str(tmp_path / "destination"))
-        ),
+        resolver=resolver,
         transport_store=FilesystemStore(),
         livy_run=submit,
     )
@@ -221,7 +336,7 @@ def test_console_archive_declines_before_mutation_without_submission_retry(
     assert returned is None
     assert len(calls) == 1
     assert calls[0]["retry_submission"] is False
-    assert not list((tmp_path / "destination/Files").iterdir())
+    assert not list(resolver.files_root(ItemRef(TARGET.item_id)).path.iterdir())
 
 
 @weaver_test()
