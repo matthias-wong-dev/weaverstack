@@ -356,13 +356,30 @@ must respect protected scopes, and overlapping writers need enforced ordering or
 a common exclusion. Different known workspace IDs, item IDs, kinds or disjoint
 paths retain distinct scopes.
 
-These are structural extension contracts. Matching runtime drivers, exclusion
-enforcement, yielding waits and archive delegation remain gated. External fragment
-prerequisite receipts must distinguish successful outcomes from known-terminal
-ordering outcomes. A terminal-order receipt cannot satisfy a success prerequisite,
-supply a typed production result or certify completion. An uncertain receipt
-satisfies neither edge. Shortcut and endpoint readiness retain their current
-implementations. Load and Test scheduling is unchanged.
+The internal `MutationExecutor` validates sealed plans and payload bytes before
+admission. It schedules the frozen edge sets through stable ready counts and
+bounded runtime lanes. Pending continuations release workers and execution
+permits. Logical exclusions remain attached to acknowledged operations until
+settlement; uncertainty retains them. Typed runtime drivers match the frozen
+contracts. Bound physical adapters call the existing executors through supplied
+contexts, capability requirements and one owned lane per shared connection,
+Session or inner pool.
+
+Reports retain action-keyed success, known failure, dependency blocking,
+not-dispatched and uncertain outcomes in frozen action order. Independent work
+continues by default; fail-fast and cancellation stop new admissions and drain
+running work. Supported cancellation requires a driver-confirmed outcome.
+Operation acknowledgements are persisted before result consumers run when a
+journal is supplied. Ordinary journal events are checkpointed in bounded groups.
+Runtime clocks, handles and invocation IDs remain outside plan identity.
+
+Recording drivers exercise these internal runtime mechanics. Real shortcut and
+endpoint waits, archive delegation and public adoption remain gated. External
+fragment prerequisite receipts must distinguish successful outcomes from
+known-terminal ordering outcomes. A terminal-order receipt cannot satisfy a
+success prerequisite, supply a typed production result or certify completion.
+An uncertain receipt satisfies neither edge. Shortcut and endpoint readiness
+retain their current implementations. Load and Test scheduling is unchanged.
 
 ## Architecture invariants
 
