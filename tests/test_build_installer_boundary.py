@@ -533,8 +533,8 @@ def test_archive_cleanup_failure_preserves_the_verified_outcome(
     failure = session.archive_cleanup_failures[0]
     assert failure == {
         "status": outcome,
-        "stage": str(stage),
-        "remote_result": str(stage / "result.json"),
+        "stage": stage.as_posix(),
+        "remote_result": (stage / "result.json").as_posix(),
         "error_type": "OSError",
         "error_message": "carrier deletion unavailable",
     }
