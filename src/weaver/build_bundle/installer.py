@@ -17,6 +17,7 @@ from datetime import datetime, timedelta, timezone
 from itertools import groupby
 from typing import Any, Mapping
 
+from ..delta_protocol import ProtocolMinima, ProtocolOptions
 from ..errors import InstallError
 from ..sessions.direct_delta import direct_profile_supported
 from ..store import Store
@@ -205,13 +206,20 @@ class Installer:
             *,
             identity_column=None,
             column_mapping=True,
+            protocol_minima: ProtocolMinima | None = None,
         ):
+            options: ProtocolOptions = (
+                {"protocol_minima": protocol_minima}
+                if protocol_minima is not None
+                else {}
+            )
             return session.create_delta_table(
                 qualified_name,
                 columns,
                 identity_column=identity_column,
                 column_mapping=column_mapping,
                 workspace=workspace,
+                **options,
             )
 
         return create
@@ -229,12 +237,24 @@ class Installer:
         session = self.session
         workspace = self.workspace
 
-        def create(qualified_name, columns, *, identity_column=None):
+        def create(
+            qualified_name,
+            columns,
+            *,
+            identity_column=None,
+            protocol_minima: ProtocolMinima | None = None,
+        ):
+            options: ProtocolOptions = (
+                {"protocol_minima": protocol_minima}
+                if protocol_minima is not None
+                else {}
+            )
             return session.create_direct_delta_table(
                 qualified_name,
                 columns,
                 identity_column=identity_column,
                 workspace=workspace,
+                **options,
             )
 
         return create

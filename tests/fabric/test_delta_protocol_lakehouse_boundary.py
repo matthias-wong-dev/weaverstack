@@ -172,7 +172,7 @@ def protocol_estate(
                 payload_sha256=hashlib.sha256(payload).hexdigest(),
             )
             result = execute_install_action(action, payload, context=current)
-            assert result.status == "succeeded", result.to_mapping()
+            assert result.status == "succeeded", json.dumps(result.to_mapping())
             assert (destination.qualify(SCHEMA, name) in allocations) == (
                 route == "direct"
             )
