@@ -13,6 +13,9 @@ from ..catalogue.runtime_state import (
     RuntimeStateEstablishment,
     RuntimeStateInvalidation,
 )
+from ..mutation.models import BuildBatch as BuildBatch
+from ..mutation.models import BuildSequence
+from ..mutation.models import InstallAction as InstallAction
 from .changes import TargetChange
 from .execution import BundleExecution
 from .incremental import BuildSelection
@@ -113,112 +116,6 @@ class OmittedNode:
 
 
 @dataclass(frozen=True)
-class InstallAction:
-    """One independently executable unit.
-
-    ``payload`` is a bundle-relative path and ``payload_sha256`` protects its
-    contents. ``source_path`` preserves the authored relative path for failure
-    reporting; it is never reconstructed from generated names.
-
-    ``awaits_name_release`` marks a dropped shortcut whose name this plan reuses
-    for an owned object. Fabric may stop listing the shortcut before OneLake
-    releases its namespace.
-    """
-
-    id: str
-    kind: str
-    resource_node_id: str | None
-    executor: str
-    payload: str | None
-    payload_sha256: str | None
-    source_path: str | None = None
-    awaits_name_release: bool = False
-
-    def to_mapping(self) -> dict[str, Any]:
-        mapping: dict[str, Any] = {
-            "id": self.id,
-            "kind": self.kind,
-            "resource_node_id": self.resource_node_id,
-            "executor": self.executor,
-            "payload": self.payload,
-            "payload_sha256": self.payload_sha256,
-        }
-        if self.source_path is not None:
-            # Omitted when absent rather than written as null: the canonical
-            # plan.yml is what bundle_id hashes, and a key that appeared on
-            # every action would change the id of every bundle that has no
-            # authored source to name.
-            mapping["source_path"] = self.source_path
-        if self.awaits_name_release:
-            # Omitted when false, for the reason ``source_path`` is.
-            mapping["awaits_name_release"] = True
-        return mapping
-
-    @classmethod
-    def from_mapping(cls, mapping: Mapping[str, Any]) -> "InstallAction":
-        return cls(
-            id=mapping["id"],
-            kind=mapping["kind"],
-            resource_node_id=mapping.get("resource_node_id"),
-            executor=mapping["executor"],
-            payload=mapping.get("payload"),
-            payload_sha256=mapping.get("payload_sha256"),
-            source_path=mapping.get("source_path"),
-            awaits_name_release=bool(mapping.get("awaits_name_release", False)),
-        )
-
-
-@dataclass(frozen=True)
-class BuildBatch:
-    id: str
-    target_id: str
-    actions: tuple[InstallAction, ...]
-
-    def to_mapping(self) -> dict[str, Any]:
-        return {
-            "id": self.id,
-            "target_id": self.target_id,
-            "actions": [action.to_mapping() for action in self.actions],
-        }
-
-    @classmethod
-    def from_mapping(cls, mapping: Mapping[str, Any]) -> "BuildBatch":
-        return cls(
-            id=mapping["id"],
-            target_id=mapping["target_id"],
-            actions=tuple(
-                InstallAction.from_mapping(a) for a in mapping.get("actions", ())
-            ),
-        )
-
-
-@dataclass(frozen=True)
-class BuildSequence:
-    """One barrier. Every batch here completes before the next sequence starts."""
-
-    number: int
-    description: str
-    batches: tuple[BuildBatch, ...]
-
-    def to_mapping(self) -> dict[str, Any]:
-        return {
-            "number": self.number,
-            "description": self.description,
-            "batches": [batch.to_mapping() for batch in self.batches],
-        }
-
-    @classmethod
-    def from_mapping(cls, mapping: Mapping[str, Any]) -> "BuildSequence":
-        return cls(
-            number=mapping["number"],
-            description=mapping["description"],
-            batches=tuple(
-                BuildBatch.from_mapping(b) for b in mapping.get("batches", ())
-            ),
-        )
-
-
-@dataclass(frozen=True)
 class BuildPlan:
     """A whole deployment, fully bound and ordered."""
 
@@ -265,6 +162,15 @@ class BuildPlan:
 
     @classmethod
     def from_mapping(cls, mapping: Mapping[str, Any]) -> "BuildPlan":
+        from dataclasses import fields
+
+        from ..errors import BuildError
+
+        unknown = set(mapping) - {f.name for f in fields(cls)}
+        if unknown:
+            raise BuildError(
+                f"BuildPlan has unknown fields: {sorted(unknown, key=str)!r}"
+            )
         return cls(
             format_version=mapping["format_version"],
             bundle_id=mapping["bundle_id"],

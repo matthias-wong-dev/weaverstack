@@ -22,7 +22,12 @@ from ..errors import InstallError
 from ..sessions.direct_delta import direct_profile_supported
 from ..store import Store
 from ..targets import ItemRef
-from .bundle import BuildBundle, validate_bundle
+from .bundle import (
+    BuildBundle,
+    check_format_version,
+    validate_bundle,
+    validate_plan_structure,
+)
 from .executors import default_executors
 from .executors.base import (
     ActionExecutor,
@@ -314,6 +319,8 @@ class Installer:
         caller says which.
         """
 
+        check_format_version(bundle.plan.format_version)
+        validate_plan_structure(bundle.plan)
         self._bind(bundle.plan)
         # Revalidate immediately before execution.
         validate_bundle(bundle.location, bundle.plan, store=bundle.store or self.store)

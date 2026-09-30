@@ -291,6 +291,39 @@ and result location, and are recorded separately in `archive_cleanup_failures`
 and surfaced as Session warnings. Uncertain carriers and journals remain at
 their report's recorded location.
 
+## Gated physical mutation contract
+
+`weaver.mutation` owns the physical action, target and execution identities and
+one directory codec. Build imports those representations and keeps its selection,
+omissions, repository identity, runtime state and target changes in `BuildPlan`.
+Normal Build writes format 4 and uses the existing Installer and archive path.
+
+Format 5 is available through the codec's explicit `allow_mutation=True` option.
+The legacy Installer rejects it before binding targets. Every format-5 action
+carries `depends_on`, including an empty list for roots. Sequence and batch
+nesting is the authoritative action collection; batches decode target bindings,
+and sequences provide presentation grouping. Dependency edges define execution
+intent. `compile_legacy_build` converts format-4 plans into explicit conservative
+batch barriers using linear-sized completion gates. It preserves member IDs,
+source paths and the Build envelope and performs no execution.
+
+A `MutationPlan` owns tuples and recursively frozen envelope mappings. Construction
+and decoding use the same structural validation and `weaver.graph.Graph`.
+Dependencies, typed result references, required completion, resource exclusions,
+write scopes and protected scopes participate in canonical identity. Dependency
+order is canonical; duplicate dependencies are invalid. The codec retains
+`plan.yml`, `payload/`, binary bytes, SHA-256 checks and manifest-last writes.
+
+`DriverContract` declares an extension's payload and result types and whether it
+starts or settles an asynchronous operation. Validation requires causal typed
+references and settlement before declared certification and required completion.
+`PhysicalScope` contracts require destructive writes to respect protected scopes;
+overlapping writers need dependency ordering or a common exclusion. These are
+structural extension contracts. Matching runtime drivers, exclusion enforcement,
+yielding waits and archive delegation are gated until the common executor and
+archive implementation land. Shortcut and endpoint readiness retain their
+current implementations. Load and Test scheduling is unchanged.
+
 ## Architecture invariants
 
 Enforced by `tests/test_core_boundary.py`:
