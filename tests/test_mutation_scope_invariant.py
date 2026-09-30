@@ -146,6 +146,132 @@ def test_physical_alias_writers_require_enforced_order_or_exclusion(
 
 
 @weaver_test()
+@pytest.mark.parametrize("mode", ["direct", "decoded"])
+@pytest.mark.parametrize(
+    "path", ["Files/Protected ", " Files/Protected", "Files/Protected\t"]
+)
+def test_noncanonical_protected_root_cannot_bypass_scope_checks(mode, path):
+    targets = _alias_targets({}, {})
+    action = _writer(
+        "sales", destructive_scopes=(PhysicalScope("sales", "Files/Protected"),)
+    )
+    base = _plan(targets, (action,))
+    scope = PhysicalScope("alias", path)
+    with pytest.raises(BuildError, match="canonical.*scope path|scope path.*canonical"):
+        if mode == "direct":
+            replace(base, protected_scopes=(scope,))
+        else:
+            mapping = base.to_mapping()
+            mapping["protected_scopes"] = [scope.to_mapping()]
+            MutationPlan.from_mapping(mapping)
+
+
+@weaver_test()
+@pytest.mark.parametrize("mode", ["direct", "decoded"])
+@pytest.mark.parametrize("policy", ["unordered", "ordered", "excluded"])
+def test_noncanonical_writer_path_cannot_bypass_scope_checks(mode, policy):
+    targets = _alias_targets({}, {})
+    exclusions = ("item-files",) if policy == "excluded" else ()
+    first = _writer("sales", exclusions=exclusions)
+    second = replace(
+        _writer(
+            "alias",
+            depends_on=("sales",) if policy == "ordered" else (),
+            exclusions=exclusions,
+        ),
+        writes=(PhysicalScope("alias", "Files/Protected "),),
+    )
+    base = _plan(targets, (first,))
+    with pytest.raises(BuildError, match="scope path must be canonical"):
+        if mode == "direct":
+            batches = (
+                base.sequences[0].batches[0],
+                MutationBatch("alias", "alias", (second,)),
+            )
+            replace(base, sequences=(replace(base.sequences[0], batches=batches),))
+        else:
+            mapping = base.to_mapping()
+            mapping["sequences"][0]["batches"][1]["actions"] = [second.to_mapping()]
+            MutationPlan.from_mapping(mapping)
+
+
+@weaver_test()
+@pytest.mark.parametrize("mode", ["direct", "decoded"])
+@pytest.mark.parametrize("path", ["", "Files/Protected", "Files/Monthly Reports"])
+def test_canonical_scope_path_is_accepted_without_changing_identity(mode, path):
+    from weaver.locations import Location
+
+    targets = _alias_targets({}, {})
+    action = replace(_writer("sales"), writes=(PhysicalScope("sales", path),))
+    plan = _plan(targets, (action,))
+    if mode == "decoded":
+        plan = MutationPlan.from_mapping(plan.to_mapping())
+    assert next(plan.actions())[2].writes[0].path == path
+    if path:
+        root = Location("https://example.invalid/item")
+        assert root.join(path).value == root.value + "/" + path
+
+
+@weaver_test()
+@pytest.mark.parametrize("mode", ["direct", "decoded"])
+@pytest.mark.parametrize("path", ["Files/Other", "Files/ProtectedCopy"])
+def test_genuinely_distinct_scope_paths_remain_accepted(mode, path):
+    targets = _alias_targets({}, {})
+    first = _writer(
+        "sales", destructive_scopes=(PhysicalScope("sales", "Files/Protected"),)
+    )
+    second = replace(_writer("alias"), writes=(PhysicalScope("alias", path),))
+    plan = _plan(
+        targets,
+        (first, second),
+        protected=(PhysicalScope("alias", path),),
+    )
+    if mode == "decoded":
+        plan = MutationPlan.from_mapping(plan.to_mapping())
+    assert tuple(action.writes[0].path for _, _, action in plan.actions()) == (
+        "Files/Protected",
+        path,
+    )
+
+
+@weaver_test()
+@pytest.mark.parametrize("mode", ["direct", "decoded"])
+@pytest.mark.parametrize(
+    "identity", ["item_id", "workspace_id", "execution_workspace_id"]
+)
+def test_noncanonical_physical_identity_cannot_bypass_alias_checks(mode, identity):
+    targets = _alias_targets({"workspace_id": "workspace"}, {})
+    action = _writer(
+        "alias", destructive_scopes=(PhysicalScope("alias", "Files/Protected"),)
+    )
+    base = _plan(targets, (action,), workspace_id="workspace")
+    protected = (PhysicalScope("sales", "Files/Protected"),)
+    changes = {identity: "same-item " if identity == "item_id" else "workspace "}
+    with pytest.raises(BuildError, match="physical identity must be canonical"):
+        if mode == "direct":
+            if identity == "execution_workspace_id":
+                replace(
+                    base,
+                    execution=replace(base.execution, workspace_id=changes[identity]),
+                    protected_scopes=protected,
+                )
+            else:
+                replace(
+                    base,
+                    targets=(targets[0], replace(targets[1], **changes)),
+                    protected_scopes=protected,
+                )
+        else:
+            mapping = base.to_mapping()
+            if identity == "execution_workspace_id":
+                mapping["execution"]["workspace_id"] = changes[identity]
+            else:
+                mapping["targets"][1].update(changes)
+            mapping["protected_scopes"] = [scope.to_mapping() for scope in protected]
+            MutationPlan.from_mapping(mapping)
+
+
+@weaver_test()
 @pytest.mark.parametrize("difference", ["workspace", "item", "kind", "path"])
 def test_distinct_physical_bindings_remain_valid_without_live_resolution(difference):
     targets = list(_alias_targets({"workspace_id": "left"}, {"workspace_id": "left"}))

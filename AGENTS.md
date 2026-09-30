@@ -299,8 +299,14 @@ omissions, repository identity, runtime state and target changes in `BuildPlan`.
 Normal Build writes format 4 and uses the existing Installer and archive path.
 
 Format 5 is available through the codec's explicit `allow_mutation=True` option.
-The legacy Installer rejects it before binding targets. Every format-5 action
-supplies `depends_on` and `settle_after`, including empty lists for roots.
+The legacy Installer rejects it before binding targets. Format 4 remains temporary
+public routing until the common executor and archive readers are qualified.
+Format 5 is the canonical Build bundle at that migration boundary; older bundles
+will be refused with regeneration guidance. Permanent format-4 readers and exact
+old YAML or bundle IDs are not compatibility requirements. Build behaviour,
+failure semantics and physical outcomes remain migration invariants.
+Every format-5 action supplies `depends_on` and `settle_after`, including empty
+lists for roots.
 Sequence and batch nesting is the authoritative action collection; batches decode
 target bindings, and sequences provide presentation grouping. The planner freezes
 both edge sets. Execution may use only those links.
@@ -314,10 +320,11 @@ asynchronous required-completion proofs follow success paths only. Physical writ
 ordering may use the union of both edge sets. References must exist; self-links,
 duplicate edges within or across the sets, and cycles in their union are invalid.
 
-`compile_legacy_build` preserves member IDs, source paths, groups and the Build
-envelope. Each admitted batch has a linear settlement chain in manifest order and
-a success gate over every original member. Later batches and sequences require
-the preceding gate's success. A known failed member permits the remaining admitted
+`compile_legacy_build` is transitional scaffolding that preserves member IDs,
+source paths, groups and the Build envelope. Each admitted batch has a linear
+settlement chain in manifest order and a success gate over every original member.
+Later batches and sequences require the preceding gate's success. A known failed
+member permits the remaining admitted
 members to run in order while blocking the next batch. The compatibility compiler
 serializes even legacy groups whose normal dispatch can overlap members. This
 bounded planning-only conversion has linear-sized links and gates. Normal format-4
@@ -335,8 +342,12 @@ retains `plan.yml`, `payload/`, binary bytes, SHA-256 checks and manifest-last w
 `DriverContract` declares an extension's payload and result types and whether it
 starts or settles an asynchronous operation. Validation requires causal typed
 references and successful settlement before declared certification and required
-completion. `PhysicalScope` comparisons use item kind, item ID and effective
-workspace ID across manifest aliases. A target's explicit workspace ID takes
+completion. `PhysicalScope.path` is canonical target-relative intent. Shared
+validation rejects outer whitespace, unsafe relative paths and padded physical
+item/workspace IDs before scope comparisons; execution does not repair them.
+The empty scope path covers the whole target. `PhysicalScope` comparisons use item
+kind, item ID and effective workspace ID across manifest aliases. A target's
+explicit workspace ID takes
 precedence; a target with no workspace descriptor uses the execution workspace ID.
 Workspace display names provide no physical identity. When either workspace is
 unresolved, equal kind/item IDs are potentially overlapping. Destructive writes

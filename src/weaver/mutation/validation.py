@@ -312,10 +312,18 @@ def _validate_scopes(plan, actions, graph):
             raise BuildError(f"unknown scope target {scope.target_id!r}")
         if not isinstance(scope.path, str):
             raise BuildError("scope path must be a string")
+        if scope.path != scope.path.strip():
+            raise BuildError(f"scope path must be canonical: {scope.path!r}")
         if scope.path:
             _check_relative(scope.path, what="scope path")
 
     targets = {target.id: target for target in plan.targets}
+    identities = [plan.execution.workspace_id]
+    for target in plan.targets:
+        identities.extend((target.item_id, target.workspace_id))
+    for value in identities:
+        if value is not None and value != value.strip():
+            raise BuildError(f"physical identity must be canonical: {value!r}")
 
     def workspace_id(target):
         if target.workspace_id is not None:
