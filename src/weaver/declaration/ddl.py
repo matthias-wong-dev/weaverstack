@@ -137,6 +137,10 @@ def _spark_table_ddl(document: "SourceDocument", destination) -> GeneratedDdl:
             if column not in ses.audit_columns
         ],
         "column_mapping": True,
+        "protocol_minima": {
+            "minReaderVersion": ses.delta_min_reader_version,
+            "minWriterVersion": ses.delta_min_writer_version,
+        },
     }
     content = json.dumps(payload, indent=2, sort_keys=True) + "\n"
     return GeneratedDdl(

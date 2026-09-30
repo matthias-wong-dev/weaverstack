@@ -12,6 +12,7 @@ import threading
 from dataclasses import dataclass
 from typing import Any, Sequence
 
+from ..delta_protocol import DirectDeltaAction, ProtocolMinima, SparkDeltaAction
 from ..errors import CommandError
 from ..targets import ItemRef, WarehouseTarget
 from ..workspaces import Workspace
@@ -89,9 +90,15 @@ class ConsoleSession(Session):
         resolver: Any = None,
         progress: Any = None,
         credential: Any = None,
+        direct_delta_workers: int = 16,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
+        if type(direct_delta_workers) is not int or not 1 <= direct_delta_workers <= 16:
+            raise ValueError("direct Delta workers must be an integer from 1 to 16")
+        self.direct_delta_workers = direct_delta_workers
+        self._delta_resolution_lock = threading.Lock()
+        self.archive_cleanup_failures: list[dict[str, Any]] = []
         from ..fabric.auth import checked_credential
 
         # Validate the supplied credential now; acquire its token lazily.
@@ -107,6 +114,50 @@ class ConsoleSession(Session):
         self._progress_lock = threading.Lock()
         self._ticker = None
         self._ticking = False
+
+    # --- progress -----------------------------------------------------------
+
+    def install_bundle(self, bundle, *, workspace=None, timeout=None):
+        return self._install_archive(bundle, workspace=workspace, timeout=timeout)
+
+    def install_batches(
+        self,
+        bundle,
+        *,
+        sequence_number,
+        batch_ids,
+        build_datetime,
+        workspace=None,
+        timeout=None,
+    ):
+        request = {
+            "sequence_number": sequence_number,
+            "batch_ids": list(batch_ids),
+            "build_datetime": build_datetime,
+        }
+        return self._install_archive(
+            bundle, workspace=workspace, timeout=timeout, request=request
+        )
+
+    def _install_archive(self, bundle, *, workspace=None, timeout=None, request=None):
+        from ..fabric.livy import LivySession
+
+        if (
+            type(self) is not ConsoleSession
+            or any(
+                value is not None for value in (self._given_store, self._given_resolver)
+            )
+            or (
+                self._given_livy is not None
+                and type(self._given_livy) is not LivySession
+            )
+        ):
+            return None
+        from .install_archive import install_in_scope
+
+        return install_in_scope(
+            self, bundle, workspace=workspace, timeout=timeout, request=request
+        )
 
     # --- progress -----------------------------------------------------------
 
@@ -339,6 +390,60 @@ class ConsoleSession(Session):
 
     # --- execution capabilities ---------------------------------------------
 
+    def create_direct_delta_table(
+        self,
+        qualified_name: str,
+        columns: Sequence[Sequence[Any]],
+        *,
+        identity_column: str | None = None,
+        protocol_minima: ProtocolMinima | None = None,
+        workspace: Workspace | None = None,
+    ) -> Any:
+        from .direct_delta import create_bound_delta_table
+
+        scope = self.scope(workspace)
+        with self.telemetry.timing("onelake.delta_table"):
+            return create_bound_delta_table(
+                qualified_name=qualified_name,
+                columns=columns,
+                identity_column=identity_column,
+                resolver=scope.resolver,
+                store=scope.transport_store,
+                publish=scope.transport_store.rename_directory,
+                resolver_lock=self._delta_resolution_lock,
+                protocol_minima=protocol_minima,
+            )
+
+    def create_direct_delta_table_actions(
+        self,
+        actions: Sequence[DirectDeltaAction],
+        *,
+        workspace: Workspace | None = None,
+    ) -> list[dict[str, Any]]:
+        from .direct_delta import run_direct_delta_actions
+
+        if self.direct_delta_workers > 1 and actions:
+            # Construct the shared scope before workers enter its lazy resources.
+            self.scope(workspace)
+        context = self.telemetry.capture_context()
+
+        def create(qualified, columns, *, identity_column, workspace, **options):
+            with self.telemetry.use_context(context):
+                return self.create_direct_delta_table(
+                    qualified,
+                    columns,
+                    identity_column=identity_column,
+                    workspace=workspace,
+                    **options,
+                )
+
+        return run_direct_delta_actions(
+            create,
+            actions,
+            workspace=workspace,
+            max_workers=self.direct_delta_workers,
+        )
+
     def create_delta_table(
         self,
         qualified_name: str,
@@ -346,6 +451,7 @@ class ConsoleSession(Session):
         *,
         identity_column: str | None = None,
         column_mapping: bool = True,
+        protocol_minima: ProtocolMinima | None = None,
         workspace: Workspace | None = None,
         timeout: float | None = None,
     ) -> Any:
@@ -356,6 +462,7 @@ class ConsoleSession(Session):
             columns,
             identity_column=identity_column,
             column_mapping=column_mapping,
+            protocol_minima=protocol_minima,
         )
         scope = self.scope(workspace)
         livy = self._foreground_livy(scope)
@@ -364,6 +471,30 @@ class ConsoleSession(Session):
             name="delta_table",
             timeout=timeout,
             livy=livy,
+        )
+
+    def create_delta_table_actions(
+        self,
+        actions: Sequence[SparkDeltaAction],
+        *,
+        workspace: Workspace | None = None,
+        timeout: float | None = None,
+    ) -> list[dict[str, Any]]:
+        ordered = list(actions)
+        if not ordered:
+            return []
+        from ..fabric.livy import DEFAULT_STATEMENT_TIMEOUT
+        from .delta_table import remote_delta_table_actions_program
+
+        allowance = DEFAULT_STATEMENT_TIMEOUT if timeout is None else timeout
+        scope = self.scope(workspace)
+        livy = self._foreground_livy(scope)
+        return scope.livy_run(
+            remote_delta_table_actions_program(ordered),
+            name="delta_table_actions",
+            timeout=allowance * len(ordered),
+            livy=livy,
+            retry_submission=False,
         )
 
     def execute_python(
@@ -427,6 +558,64 @@ class ConsoleSession(Session):
         )
         livy = self._foreground_livy(scope)
         return scope.livy_run(source, name="spark_sql", timeout=timeout, livy=livy)
+
+    def describe_spark_query_actions(
+        self,
+        actions: Sequence[tuple[str, Sequence[str]]],
+        *,
+        workspace: Workspace | None = None,
+        timeout: float | None = None,
+    ) -> list[dict[str, Any]]:
+        """Read each labelled query shape in one ordered Livy submission."""
+        ordered = [(label, list(statements)) for label, statements in actions]
+        if not ordered:
+            return []
+        from ..fabric.livy import DEFAULT_STATEMENT_TIMEOUT
+
+        allowance = DEFAULT_STATEMENT_TIMEOUT if timeout is None else timeout
+        scope = self.scope(workspace)
+        assert isinstance(scope, ConsoleScope)
+        source = (
+            "import time as _time\n"
+            f"_actions = {ordered!r}\n"
+            "_key = 'spark.sql.caseSensitive'\n"
+            "_previous = spark.conf.get(_key)\n"
+            "_restore = str(_previous).lower() != 'true'\n"
+            "_results = []\n"
+            "_origin = _time.monotonic()\n"
+            "if _restore:\n"
+            "    spark.conf.set(_key, 'true')\n"
+            "try:\n"
+            "    for _label, _statements in _actions:\n"
+            "        _started = _time.monotonic()\n"
+            "        try:\n"
+            "            for _statement in _statements[:-1]:\n"
+            "                spark.sql(_statement)\n"
+            "            _rows = [row.asDict() for row in spark.sql(_statements[-1]).collect()]\n"
+            "        except Exception as _error:\n"
+            "            _outcome = {\n"
+            "                'label': _label, 'succeeded': False,\n"
+            "                'error_type': type(_error).__name__,\n"
+            "                'error_message': str(_error),\n"
+            "            }\n"
+            "        else:\n"
+            "            _outcome = {'label': _label, 'succeeded': True, 'rows': _rows}\n"
+            "        _outcome['started_after_seconds'] = _started - _origin\n"
+            "        _outcome['duration_seconds'] = _time.monotonic() - _started\n"
+            "        _results.append(_outcome)\n"
+            "finally:\n"
+            "    if _restore:\n"
+            "        spark.conf.set(_key, _previous)\n"
+            "emit(_results)\n"
+        )
+        livy = self._foreground_livy(scope)
+        return scope.livy_run(
+            source,
+            name="spark_sql_query_shapes",
+            timeout=allowance * len(ordered),
+            livy=livy,
+            retry_submission=False,
+        )
 
     def execute_spark_sql_actions(
         self,

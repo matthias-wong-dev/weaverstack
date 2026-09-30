@@ -17,6 +17,7 @@ from ...declaration.metadata import (
     audit_column_name,
     signature_column_name,
 )
+from ...delta_protocol import ProtocolOptions
 from ...errors import InstallError
 from ..models import InstallAction
 from .base import InstallationContext
@@ -37,6 +38,37 @@ class SparkTableExecutor:
         payload: bytes | None,
         context: InstallationContext,
     ) -> dict[str, Any] | None:
+        specification, details = self.prepare(action, payload, context)
+        qualified, physical, identity_name, column_mapping, *policy = specification
+        creation_options: ProtocolOptions = (
+            {"protocol_minima": policy[0]} if policy else {}
+        )
+        from ...sessions.direct_delta import direct_profile_supported
+
+        direct = direct_profile_supported(physical, identity_name, column_mapping)
+        if direct and context.create_direct_delta_table is not None:
+            context.create_direct_delta_table(
+                qualified, physical, identity_column=identity_name, **creation_options
+            )
+        else:
+            assert context.create_delta_table is not None
+            context.create_delta_table(
+                qualified,
+                physical,
+                identity_column=identity_name,
+                column_mapping=column_mapping,
+                **creation_options,
+            )
+        return details
+
+    def prepare(
+        self,
+        action: InstallAction,
+        payload: bytes | None,
+        context: InstallationContext,
+        *,
+        query_rows: list[dict] | None = None,
+    ) -> tuple[tuple, dict[str, Any]]:
         if payload is None:
             raise InstallError(f"spark_table action {action.id!r} has no payload")
         if context.create_delta_table is None:
@@ -83,6 +115,7 @@ class SparkTableExecutor:
                 context,
                 action=action,
                 qualified=qualified,
+                preloaded_rows=query_rows,
             )
             business_columns = validate_build_columns(
                 qualified,
@@ -106,18 +139,31 @@ class SparkTableExecutor:
             + [tuple(entry) for entry in instruction["audit_columns"]]
             + [tuple(entry) for entry in instruction.get("internal_columns") or ()]
         )
-
-        context.create_delta_table(
+        specification = (
             qualified,
             physical,
-            identity_column=identity_name,
-            column_mapping=instruction.get("column_mapping", True),
+            identity_name,
+            instruction.get("column_mapping", True),
         )
-        return {
+        if "protocol_minima" in instruction:
+            specification += (instruction["protocol_minima"],)
+        details = {
             "object": qualified,
             "schema_mode": instruction["schema_mode"],
             "columns": [name for name, _type, _nn in physical],
         }
+        return specification, details
+
+    def shape_request(
+        self, action: InstallAction, payload: bytes | None
+    ) -> list[str] | None:
+        if payload is None:
+            raise InstallError(f"spark_table action {action.id!r} has no payload")
+        instruction = json.loads(payload.decode("utf-8"))
+        query = instruction.get("source_query")
+        if query is None:
+            return None
+        return [*(instruction.get("setup") or ()), f"DESCRIBE QUERY {query}"]
 
     def _query_shape(
         self,
@@ -126,16 +172,20 @@ class SparkTableExecutor:
         *,
         action: InstallAction,
         qualified: str,
+        preloaded_rows: list[dict] | None = None,
     ) -> tuple[tuple[str, ...], dict[str, str]]:
         """Read ordered output names and types, reporting shape failures here."""
 
-        try:
-            rows = context.spark_sql_batch(statements, exact_case=True)
-        except Exception as exc:
-            raise InstallError(
-                f"spark_table action {action.id!r} could not read the shape of "
-                f"the query behind {qualified}: {exc}"
-            ) from exc
+        if preloaded_rows is None:
+            try:
+                rows = context.spark_sql_batch(statements, exact_case=True)
+            except Exception as exc:
+                raise InstallError(
+                    f"spark_table action {action.id!r} could not read the shape of "
+                    f"the query behind {qualified}: {exc}"
+                ) from exc
+        else:
+            rows = preloaded_rows
 
         columns: list[str] = []
         types: dict[str, str] = {}

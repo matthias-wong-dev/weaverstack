@@ -100,3 +100,34 @@ class InstallationReport:
         import yaml
 
         return yaml.safe_dump(self.to_mapping(), sort_keys=False, allow_unicode=True)
+
+    @classmethod
+    def from_mapping(cls, mapping) -> "InstallationReport":
+        sequences = []
+        for sequence in mapping["sequences"]:
+            rows = []
+            for original in sequence["actions"]:
+                row = dict(original)
+                for name in ("started_at", "finished_at"):
+                    if row.get(name) is not None:
+                        row[name] = datetime.fromisoformat(row[name])
+                rows.append(ActionResult(**row))
+            sequences.append(
+                SequenceResult(
+                    number=sequence["number"],
+                    description=sequence["description"],
+                    status=sequence["status"],
+                    actions=tuple(rows),
+                )
+            )
+        return cls(
+            bundle_id=mapping["bundle_id"],
+            status=mapping["status"],
+            started_at=datetime.fromisoformat(mapping["started_at"]),
+            finished_at=(
+                datetime.fromisoformat(mapping["finished_at"])
+                if mapping.get("finished_at") is not None
+                else None
+            ),
+            sequences=tuple(sequences),
+        )

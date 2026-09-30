@@ -127,6 +127,8 @@ _KIND_KEYS = {
         "Foreign keys",
         "Not null",
         "Identity",
+        "Delta minReaderVersion",
+        "Delta minWriterVersion",
         "Comparison columns",
         "Incremental",
         HAS_LOAD_PROCEDURE,
@@ -448,6 +450,22 @@ class WeaverDocument:
     prohibit_rebuild: bool = False
     static: bool = False
     raw: dict[str, Any] = field(default_factory=dict)
+    declared_delta_min_reader_version: int | None = None
+    declared_delta_min_writer_version: int | None = None
+
+    @property
+    def delta_min_reader_version(self) -> int:
+        from ..delta_protocol import DEFAULT_MIN_READER_VERSION
+
+        value = self.declared_delta_min_reader_version
+        return DEFAULT_MIN_READER_VERSION if value is None else value
+
+    @property
+    def delta_min_writer_version(self) -> int:
+        from ..delta_protocol import DEFAULT_MIN_WRITER_VERSION
+
+        value = self.declared_delta_min_writer_version
+        return DEFAULT_MIN_WRITER_VERSION if value is None else value
 
     @property
     def qualified(self) -> str:
@@ -629,6 +647,10 @@ def parse_document(text: str, *, language: str) -> SesDocument:
             loaded, kind=kind, language=language, object_id=object_id
         )
     _reject_unknown_keys(loaded, kind)
+    if language not in {SPARK_SQL, PYTHON} and any(
+        key in loaded for key in ("Delta minReaderVersion", "Delta minWriterVersion")
+    ):
+        raise MetadataError("Delta protocol minimums require a Lakehouse Table")
 
     # A Warehouse (T-SQL) table may declare Schema or omit it: with a declaration
     # the declared types are authoritative; without one the table takes its shape
@@ -742,6 +764,12 @@ def parse_document(text: str, *, language: str) -> SesDocument:
         prohibit_rebuild=prohibit_rebuild,
         static=static,
         raw=dict(loaded),
+        declared_delta_min_reader_version=_parse_delta_minimum(
+            loaded, "Delta minReaderVersion", maximum=3
+        ),
+        declared_delta_min_writer_version=_parse_delta_minimum(
+            loaded, "Delta minWriterVersion", maximum=7
+        ),
     )
 
 
@@ -1252,6 +1280,15 @@ def _parse_file_keys(value: Any, *, kind: str) -> tuple[str, ...]:
             )
         patterns.append(normalised)
     return tuple(patterns)
+
+
+def _parse_delta_minimum(raw: dict[str, Any], key: str, *, maximum: int) -> int | None:
+    if key not in raw:
+        return None
+    value = raw[key]
+    if type(value) is not int or not 1 <= value <= maximum:
+        raise MetadataError(f"{key} must be an integer from 1 to {maximum}")
+    return value
 
 
 def _parse_identity(value: Any) -> str | None:

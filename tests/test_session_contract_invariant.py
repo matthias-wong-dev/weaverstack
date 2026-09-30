@@ -26,6 +26,8 @@ HOSTS = (ConsoleSession, NotebookSession, TestSession)
 #: and a caller may pass the same arguments to any of them.
 CAPABILITIES = (
     "create_delta_table",
+    "create_delta_table_actions",
+    "describe_spark_query_actions",
     "execute_python",
     "execute_spark_sql_actions",
     "execute_spark_sql_batch",
@@ -79,6 +81,27 @@ def test_no_session_capability_is_left_unlisted():
 
 
 @weaver_test()
+def test_generic_query_shape_fallback_stops_on_an_unclassified_failure(monkeypatch):
+    from weaver.workspaces import Workspace
+
+    session = TestSession(workspace=Workspace(workspace="Demo"))
+    called = []
+
+    def describe(statements, **_kwargs):
+        called.append(statements[-1])
+        if statements[-1] == "BAD":
+            raise ConnectionError("uncertain remote result")
+        return [{"col_name": "Id", "data_type": "bigint"}]
+
+    monkeypatch.setattr(session, "execute_spark_sql_batch", describe)
+    with pytest.raises(ConnectionError, match="uncertain remote result"):
+        session.describe_spark_query_actions(
+            [("first", ["GOOD"]), ("second", ["BAD"]), ("third", ["UNTOUCHED"])]
+        )
+    assert called == ["GOOD", "BAD"]
+
+
+@weaver_test()
 def test_the_test_host_records_rather_than_interprets():
     """``TestSession`` answers from configuration and never reads a statement.
 
@@ -118,6 +141,35 @@ def test_the_test_host_records_the_delta_table_specification():
         "identity_column": "Customer key",
         "column_mapping": True,
     }
+
+
+@weaver_test()
+def test_the_test_host_records_each_labelled_delta_table_without_modelling_spark():
+    from weaver.workspaces import Workspace
+
+    session = TestSession(workspace=Workspace(workspace="Demo"))
+    outcomes = session.create_delta_table_actions(
+        [
+            (
+                "first",
+                "`Demo`.`Sales`.`DWG`.`One`",
+                (("Id", "bigint", True),),
+                None,
+                True,
+            ),
+            (
+                "second",
+                "`Demo`.`Sales`.`DWG`.`Two`",
+                (("Id", "bigint", True),),
+                None,
+                False,
+            ),
+        ]
+    )
+
+    assert [o["label"] for o in outcomes] == ["first", "second"]
+    assert [call.kind for call in session.calls] == ["delta_table", "delta_table"]
+    assert [call.body["column_mapping"] for call in session.calls] == [True, False]
 
 
 @weaver_test()

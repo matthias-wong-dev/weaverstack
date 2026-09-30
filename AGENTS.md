@@ -244,6 +244,53 @@ reproduces what the function would have done proves nothing: the first Fabric
 suite deleted files through the store directly and looked like it was testing
 `wipe`.
 
+## Archived Lakehouse installation
+
+`Installer` offers a revalidated frozen bundle to `Session.install_bundle`.
+The concrete default returns `None` before installation and retains the local
+Installer loop. Custom executor registries retain that loop.
+
+`ConsoleSession` carries eligible Lakehouse bundles into its existing Livy
+session. Eligibility requires the bundle's frozen Spark attachment, built-in
+executors, and Lakehouse destinations with the central catalogue Warehouse.
+Mixed installations offer contiguous Lakehouse batches from each sequence to
+`Session.install_batches`. Warehouse batches retain their existing execution
+path. Batch order and sequence barriers remain fixed, and every segment shares
+the installation's Registry timestamp. A borrowed `LivySession` uses the same
+archive path; custom sessions, stores, resolvers and Livy implementations retain
+their supplied capabilities.
+
+The carrier checks the stored manifest against the validated in-memory plan
+before acquiring the installation scope. It carries those checked bytes,
+referenced payload bytes and the
+caller's Python runtime sources and static SQL, YAML and JSON resources. The
+batch-selection request is a hashed carrier member; the frozen manifest and
+payloads remain unchanged. The remote installer validates the full bundle before
+executing the selected contiguous Lakehouse batches.
+The carrier and every member have a SHA-256 identity. Extraction validates the full
+inventory, paths, file kinds and content before creating the private tree. The
+expanded-size bound is 128 MiB; larger bundles retain the local Installer loop.
+The remote program imports the extracted runtime in an isolated namespace and
+restores previously loaded Weaver modules and import paths after installation.
+
+Runtime dependencies are checked before installation. Missing dependencies or a
+Delta writer version mismatch produce an explicit pre-mutation decline. The
+archive path retains the versioned direct-Delta writer and the caller's worker
+bound, supported Spark Views, dependency barriers, catalogue settlement and
+load-artefact installation. Build does not execute loads or validations.
+
+One mutation submission has retries disabled and an allowance equal to the
+planned action count times the per-action statement timeout. Complete sequence
+prefixes are journalled to the private OneLake result file. The final Livy result
+is a byte count and hash for that file. The desktop validates ordered action
+identities, outcomes and clocks and persists the normal installation report.
+An unavailable outcome retains validated prefixes and fails every unacknowledged
+action with an uncertainty marker. Completed and declined carriers are removed.
+Cleanup failures preserve the verified installation outcome, retain the carrier
+and result location, and are recorded separately in `archive_cleanup_failures`
+and surfaced as Session warnings. Uncertain carriers and journals remain at
+their report's recorded location.
+
 ## Architecture invariants
 
 Enforced by `tests/test_core_boundary.py`:
@@ -296,6 +343,14 @@ Enforceable as the corresponding code lands:
   `DeltaTarget` is a Lakehouse and a `WarehouseTarget` a Warehouse, and core never
   asks the workspace what a bare name is. A destructive operation must not depend
   on name inference.
+- **Delta protocol minima are creation policy.** Lakehouse Table declarations
+  accept `Delta minReaderVersion` and `Delta minWriterVersion`. Authored values
+  participate in declaration signatures. Omitted values resolve to Weaver's
+  current defaults and are frozen into creation payloads. A default-only upgrade
+  leaves unchanged installed Tables on their existing protocol. Both direct and
+  Spark creation use reader 3/writer 7 by default; schema features are per Table.
+  Explicit minima may be raised by features required by that Table. The direct
+  profile verifies the committed protocol, schema and properties before publishing.
 - **The central catalogue is authoritative.** No target-local catalogue, no
   target-local runtime, no target-local logging authority.
 - **Certification is per object.** Before a rebuild, the selected objects and

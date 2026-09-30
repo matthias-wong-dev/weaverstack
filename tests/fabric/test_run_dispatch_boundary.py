@@ -51,16 +51,13 @@ from weaver.errors import LoadError
 from weaver.load_report import FAILED, SUCCEEDED
 from weaver.operations.load import run_load
 
-#: The Lakehouse the artefacts are deployed into. Emptied first, because a run
-#: that found a previous run's modules would prove nothing about this one.
-LAKEHOUSE = "PYTEST_LH_1"
-
 
 @pytest.fixture(scope="module")
 def thin(
     fabric_workspace,
     fabric_client,
     weaver_session,
+    fabric_target_lakehouse,
     fabric_empty_lakehouse,
     fabric_initialise_catalogue,
     tmp_path_factory,
@@ -74,12 +71,13 @@ def thin(
 
     from weaver.fabric import FabricResolver, OneLakeDfsClient
 
-    fabric_empty_lakehouse(LAKEHOUSE)
+    lakehouse = fabric_target_lakehouse.name
+    fabric_empty_lakehouse(lakehouse)
     fabric_initialise_catalogue()
 
     estate = thin_estate(
         tmp_path_factory.mktemp("thin"),
-        lakehouse=LAKEHOUSE,
+        lakehouse=lakehouse,
         workspace=fabric_workspace,
         resolver=FabricResolver(fabric_workspace, client=fabric_client),
         store=OneLakeDfsClient(),
@@ -215,7 +213,9 @@ def _said(node) -> str:
 
 
 @weaver_test(hosted=True, resources={"tds"})
-def test_every_settled_node_reaches_the_log_from_the_desktop(thin, tolerated):
+def test_every_settled_node_reaches_the_log_from_the_desktop(
+    thin, tolerated, fabric_target_lakehouse
+):
     """The run's evidence, read back out of `_.Log`.
 
     A desktop Session appends asynchronously through a flusher it owns, so the
@@ -251,7 +251,7 @@ def test_every_settled_node_reaches_the_log_from_the_desktop(thin, tolerated):
     for row in logged.values():
         assert row["Task type"] == "load"
         assert row["Target type"] == "Lakehouse"
-        assert row["Target name"] == LAKEHOUSE
+        assert row["Target name"] == fabric_target_lakehouse.name
         assert row["Schema name"] == "Tables/Thin"
 
     # And the frozen vocabulary, both values of it this run produces.

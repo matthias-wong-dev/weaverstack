@@ -174,6 +174,110 @@ def test_one_statement_is_one_submission_too(desktop):
 
 
 @weaver_test()
+def test_query_shape_batch_keeps_default_allowance_per_query(desktop):
+    session, livy = desktop([])
+    session.describe_spark_query_actions(
+        [
+            ("first", ["DESCRIBE QUERY SELECT 1"]),
+            ("second", ["DESCRIBE QUERY SELECT 2"]),
+        ]
+    )
+    assert livy.kwargs == [
+        {"timeout": 2 * DEFAULT_STATEMENT_TIMEOUT, "retry_submission": False}
+    ]
+
+
+@weaver_test()
+def test_notebook_query_shapes_report_a_failure_without_losing_later_rows(notebook):
+    spark = _Spark(
+        {
+            "DESCRIBE QUERY SELECT 1": [_Row(col_name="a", data_type="int")],
+            "DESCRIBE QUERY SELECT 2": [_Row(col_name="b", data_type="bigint")],
+        }
+    )
+    original_sql = spark.sql
+
+    def sql(statement):
+        if statement == "DESCRIBE QUERY BAD":
+            raise ValueError("invalid query")
+        return original_sql(statement)
+
+    spark.sql = sql
+    session = notebook(spark)
+    outcomes = session.describe_spark_query_actions(
+        [
+            ("first", ["DESCRIBE QUERY SELECT 1"]),
+            ("broken", ["DESCRIBE QUERY BAD"]),
+            ("last", ["DESCRIBE QUERY SELECT 2"]),
+        ]
+    )
+
+    assert [(o["label"], o["succeeded"]) for o in outcomes] == [
+        ("first", True),
+        ("broken", False),
+        ("last", True),
+    ]
+    assert outcomes[0]["rows"] == [{"col_name": "a", "data_type": "int"}]
+    assert outcomes[1]["error_message"] == "invalid query"
+    assert outcomes[2]["rows"] == [{"col_name": "b", "data_type": "bigint"}]
+    assert spark.conf.get(CASE_KEY) == "false"
+
+
+@weaver_test()
+def test_labelled_query_shapes_share_one_submission_and_keep_sibling_rows(desktop):
+    session, livy = desktop([])
+    session.describe_spark_query_actions(
+        [
+            (
+                "first",
+                [
+                    "CREATE TEMPORARY VIEW one AS SELECT 1",
+                    "DESCRIBE QUERY SELECT * FROM one",
+                ],
+            ),
+            ("broken", ["DESCRIBE QUERY BROKEN"]),
+            ("last", ["DESCRIBE QUERY SELECT 2"]),
+        ],
+        timeout=12.5,
+    )
+
+    assert len(livy.submitted) == 1
+    assert livy.kwargs == [{"timeout": 37.5, "retry_submission": False}]
+    spark = _Spark(
+        {
+            "DESCRIBE QUERY SELECT * FROM one": [_Row(col_name="n", data_type="int")],
+            "DESCRIBE QUERY SELECT 2": [_Row(col_name="m", data_type="bigint")],
+        }
+    )
+    original_sql = spark.sql
+
+    def sql(statement):
+        if statement == "DESCRIBE QUERY BROKEN":
+            raise ValueError("invalid query")
+        return original_sql(statement)
+
+    spark.sql = sql
+    emitted = []
+    exec(livy.submitted[0], {"spark": spark, "emit": emitted.append})
+
+    assert [(o["label"], o["succeeded"]) for o in emitted[0]] == [
+        ("first", True),
+        ("broken", False),
+        ("last", True),
+    ]
+    assert emitted[0][0]["rows"] == [{"col_name": "n", "data_type": "int"}]
+    assert emitted[0][1]["error_type"] == "ValueError"
+    assert emitted[0][1]["error_message"] == "invalid query"
+    assert emitted[0][2]["rows"] == [{"col_name": "m", "data_type": "bigint"}]
+    assert spark.collected == [
+        "DESCRIBE QUERY SELECT * FROM one",
+        "DESCRIBE QUERY SELECT 2",
+    ]
+    assert all(case == "true" for _, case in spark.executed)
+    assert spark.conf.get(CASE_KEY) == "false"
+
+
+@weaver_test()
 def test_labelled_actions_that_cross_share_one_submission(desktop):
     outcomes = [
         {

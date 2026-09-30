@@ -107,6 +107,691 @@ def _bundle(tmp_path):
     return location, store
 
 
+@pytest.mark.parametrize(
+    "outcome", ["success", "failure", "uncertain", "decline", "exception"]
+)
+@weaver_test()
+def test_mixed_install_delegates_lakehouse_batches_in_manifest_order(tmp_path, outcome):
+    import hashlib
+
+    from weaver.build_bundle import Installer
+    from weaver.build_bundle.bundle import BuildBundle
+
+    location, store = _bundle(tmp_path)
+    frozen = load_bundle(location, store=store)
+    warehouse = BoundTarget(id="warehouse-WH", kind="warehouse", item_id="WH")
+    warehouse_action = replace(
+        frozen.plan.sequences[0].batches[0].actions[0],
+        id="warehouse-action",
+        executor="tsql",
+        payload="payload/warehouse.sql",
+        payload_sha256=hashlib.sha256(b"select 1;").hexdigest(),
+    )
+    sequence = replace(
+        frozen.plan.sequences[0],
+        batches=(
+            frozen.plan.sequences[0].batches[0],
+            BuildBatch("warehouse-batch", warehouse.id, (warehouse_action,)),
+            frozen.plan.sequences[1].batches[0],
+        ),
+    )
+    plan = replace(
+        frozen.plan,
+        targets=frozen.plan.targets + (warehouse,),
+        sequences=(sequence, frozen.plan.sequences[2]),
+    )
+    payloads = {
+        action.payload: store.read(frozen.location.join(*action.payload.split("/")))
+        for _, _, action in frozen.plan.actions()
+    }
+    payloads[warehouse_action.payload] = b"select 1;"
+    mixed = write_bundle(location, plan=plan, payloads=payloads, store=store)
+    installer = given_installer(store=store, warehouses=("WH",))
+    delegated = []
+    instants = []
+    import types
+
+    warehouse_calls = []
+    installer.session.sql_executor = lambda *args, **kwargs: types.SimpleNamespace(
+        execute_script=warehouse_calls.append
+    )
+
+    def install_batches(
+        bundle, *, sequence_number, batch_ids, build_datetime, workspace
+    ):
+        delegated.append((sequence_number, batch_ids))
+        instants.append(build_datetime)
+        selected = next(
+            row for row in bundle.plan.sequences if row.number == sequence_number
+        )
+        selected = replace(
+            selected,
+            batches=tuple(batch for batch in selected.batches if batch.id in batch_ids),
+        )
+        part = BuildBundle(
+            bundle.location, replace(bundle.plan, sequences=(selected,)), bundle.store
+        )
+        if outcome == "decline":
+            return None
+        if outcome == "exception":
+            raise RuntimeError("unsubmitted carrier failed")
+        if outcome == "uncertain":
+            from weaver.sessions.install_archive import uncertain_report
+
+            return uncertain_report(part.plan, "receipt lost", "remote-result.json")
+        if outcome == "failure":
+            return Installer(
+                installer.session, executors={"spark_sql": Recorder(fail_on=("a1",))}
+            ).install(part)
+        return Installer(installer.session).install(
+            part, on_sequence=lambda report: None
+        )
+
+    installer.session.install_batches = install_batches
+    report = installer.install(mixed)
+    failed = outcome in ("failure", "uncertain", "exception")
+    assert report.status == (FAILED if failed else SUCCEEDED)
+    assert delegated == (
+        [(10, ("b0",))] if failed else [(10, ("b0",)), (10, ("b1",)), (30, ("b2",))]
+    )
+    assert len(set(instants)) == 1
+    assert warehouse_calls == ([] if failed else ["select 1;"])
+    assert [row.status for row in report.action_results()] == (
+        [FAILED, SKIPPED, SKIPPED, SKIPPED] if failed else [SUCCEEDED] * 4
+    )
+    assert [row.action_id for row in report.action_results()] == [
+        "a1",
+        "warehouse-action",
+        "a2",
+        "a3",
+    ]
+    assert (
+        load_bundle(location, store=store).plan.to_mapping() == mixed.plan.to_mapping()
+    )
+
+
+@weaver_test()
+def test_archive_rejects_a_stored_plan_changed_after_bundle_validation(
+    tmp_path, monkeypatch
+):
+    import yaml
+
+    from weaver.errors import InstallError
+    from weaver.sessions import ConsoleSession
+
+    location, store = _bundle(tmp_path)
+    bundle = load_bundle(location, store=store)
+    changed = yaml.safe_load(store.read(location / "plan.yml"))
+    changed["sequences"][0]["description"] = "Changed after validation"
+    store.write(location / "plan.yml", yaml.safe_dump(changed).encode())
+    session = ConsoleSession(progress=False)
+    touched = []
+    monkeypatch.setattr(session, "scope", lambda *args: touched.append("scope"))
+    with pytest.raises(InstallError, match="frozen installation plan"):
+        session.install_bundle(bundle, workspace=given_workspace())
+    assert touched == []
+
+
+@weaver_test()
+def test_corrupt_archive_receipt_remains_uncertain(tmp_path, monkeypatch):
+    import hashlib
+    import json
+    import types
+
+    from weaver.sessions import ConsoleSession
+    from weaver.targets import ItemRef
+
+    location, store = _bundle(tmp_path)
+    bundle = load_bundle(location, store=store)
+    expected = given_installer(
+        store=store, executors={"spark_sql": Recorder()}
+    ).install(bundle)
+    destination = tmp_path / "destination"
+
+    resolver = given_resolver(root=destination)
+    files = resolver.files_root(ItemRef(TARGET.item_id)).path
+
+    def submit(source, **kwargs):
+        stage = next(files.iterdir())
+        output = {
+            "status": "completed",
+            "archive_sha256": hashlib.sha256(
+                (stage / "carrier.zip").read_bytes()
+            ).hexdigest(),
+            "report": expected.to_mapping(),
+        }
+        data = json.dumps(output).encode()
+        (stage / "result.json").write_bytes(data)
+        return {"bytes": len(data), "sha256": "incorrect"}
+
+    scope = types.SimpleNamespace(
+        resolver=resolver,
+        transport_store=FilesystemStore(),
+        livy_run=submit,
+    )
+    session = ConsoleSession(progress=False)
+    monkeypatch.setattr(session, "scope", lambda workspace=None: scope)
+    report = session.install_bundle(bundle, workspace=given_workspace())
+    assert report.status == FAILED
+    assert all(
+        row.status == FAILED and row.details["uncertain"]
+        for row in report.action_results()
+    )
+    assert len(list(files.iterdir())) == 1
+
+
+@weaver_test()
+def test_archive_upload_failure_removes_unsubmitted_carrier(tmp_path, monkeypatch):
+    import types
+
+    from weaver.sessions import ConsoleSession
+    from weaver.targets import ItemRef
+
+    location, store = _bundle(tmp_path)
+    resolver = given_resolver(root=tmp_path / "destination")
+    files = resolver.files_root(ItemRef(TARGET.item_id)).path
+
+    class BrokenUpload(FilesystemStore):
+        def write(self, location, data):
+            super().write(location, data[:10])
+            raise OSError("upload interrupted before submission")
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("unuploaded carrier was submitted")
+
+    scope = types.SimpleNamespace(
+        resolver=resolver, transport_store=BrokenUpload(), livy_run=forbidden
+    )
+    session = ConsoleSession(progress=False)
+    monkeypatch.setattr(session, "scope", lambda workspace=None: scope)
+    with pytest.raises(OSError, match="upload interrupted"):
+        session.install_bundle(
+            load_bundle(location, store=store), workspace=given_workspace()
+        )
+    assert not list(files.iterdir())
+
+
+@pytest.mark.parametrize("outcome", ["completed", "prefix", "missing", "cancelled"])
+@pytest.mark.parametrize("timeout", [None, 7])
+@weaver_test()
+def test_archive_interruption_preserves_the_acknowledged_boundary(
+    tmp_path, monkeypatch, outcome, timeout
+):
+    import hashlib
+    import json
+    import types
+
+    from weaver.fabric.livy import DEFAULT_STATEMENT_TIMEOUT
+    from weaver.sessions import ConsoleSession
+    from weaver.targets import ItemRef
+
+    location, store = _bundle(tmp_path)
+    bundle = load_bundle(location, store=store)
+    expected = given_installer(
+        store=store, executors={"spark_sql": Recorder()}
+    ).install(bundle)
+    resolver = given_resolver(root=tmp_path / "destination")
+    files = resolver.files_root(ItemRef(TARGET.item_id)).path
+    calls = []
+
+    def submit(source, **kwargs):
+        calls.append(kwargs)
+        stage = next(files.iterdir())
+        if outcome in ("completed", "prefix"):
+            mapping = expected.to_mapping()
+            if outcome == "prefix":
+                mapping.update(
+                    status="running",
+                    finished_at=None,
+                    sequences=mapping["sequences"][:1],
+                )
+            result = {
+                "status": "completed" if outcome == "completed" else "running",
+                "archive_sha256": hashlib.sha256(
+                    (stage / "carrier.zip").read_bytes()
+                ).hexdigest(),
+                "report": mapping,
+            }
+            (stage / "result.json").write_text(json.dumps(result))
+        if outcome == "cancelled":
+            raise KeyboardInterrupt("caller cancelled")
+        raise TimeoutError("receipt did not arrive")
+
+    scope = types.SimpleNamespace(
+        resolver=resolver, transport_store=FilesystemStore(), livy_run=submit
+    )
+    session = ConsoleSession(progress=False)
+    monkeypatch.setattr(session, "scope", lambda workspace=None: scope)
+    if outcome == "cancelled":
+        with pytest.raises(KeyboardInterrupt, match="caller cancelled"):
+            session.install_bundle(bundle, workspace=given_workspace(), timeout=timeout)
+    else:
+        report = session.install_bundle(
+            bundle, workspace=given_workspace(), timeout=timeout
+        )
+        assert report is not None
+        if outcome == "completed":
+            assert report.to_mapping() == expected.to_mapping()
+            assert len(session.archive_installations) == 1
+        else:
+            rows = list(report.action_results())
+            assert report.status == FAILED
+            assert [row.status for row in rows] == (
+                [SUCCEEDED, FAILED, FAILED] if outcome == "prefix" else [FAILED] * 3
+            )
+            uncertain = rows[1:] if outcome == "prefix" else rows
+            assert all(row.details["uncertain"] is True for row in uncertain)
+            assert all(
+                (next(files.iterdir()) / "result.json").as_posix()
+                == row.details["remote_result"]
+                for row in uncertain
+            )
+    assert len(calls) == 1
+    assert calls[0]["retry_submission"] is False
+    assert calls[0]["timeout"] == 3 * (
+        DEFAULT_STATEMENT_TIMEOUT if timeout is None else timeout
+    )
+    assert len(list(files.iterdir())) == (0 if outcome == "completed" else 1)
+
+
+@weaver_test()
+def test_changed_executor_registry_keeps_the_local_install_path(tmp_path):
+    location, store = _bundle(tmp_path)
+    installer = given_installer(store=store)
+    recorder = Recorder()
+    installer.executors["spark_sql"] = recorder
+
+    def unsupported(*args, **kwargs):
+        raise AssertionError("custom executor was delegated")
+
+    installer.session.install_bundle = unsupported
+    installer.session.install_batches = unsupported
+    report = installer.install(load_bundle(location, store=store))
+    assert report.status == SUCCEEDED
+    assert recorder.calls == ["a1", "a2", "a3"]
+
+
+@weaver_test()
+def test_console_archive_declines_before_mutation_without_submission_retry(
+    tmp_path, monkeypatch
+):
+    import importlib
+    import shutil
+    import sys
+    import types
+
+    from weaver.sessions import ConsoleSession
+    from weaver.targets import ItemRef
+
+    location, store = _bundle(tmp_path)
+    bundle = load_bundle(location, store=store)
+    receipts = []
+    calls = []
+    sdk = types.ModuleType("notebookutils")
+    sdk.fs = types.SimpleNamespace(
+        cp=lambda source, target, recurse: shutil.copyfile(
+            source, target.removeprefix("file:")
+        ),
+        put=lambda path, content, overwrite: (
+            __import__("pathlib").Path(path).write_text(content)
+        ),
+    )
+    monkeypatch.setitem(sys.modules, "notebookutils", sdk)
+    original = importlib.import_module
+
+    def missing(name, *args, **kwargs):
+        if name == "pyarrow":
+            raise ModuleNotFoundError("missing pyarrow")
+        return original(name, *args, **kwargs)
+
+    monkeypatch.setattr(importlib, "import_module", missing)
+
+    def submit(source, **kwargs):
+        calls.append(kwargs)
+        exec(source, {"emit": receipts.append, "spark": object()})
+        return receipts[-1]
+
+    resolver = given_resolver(root=tmp_path / "destination")
+    scope = types.SimpleNamespace(
+        resolver=resolver,
+        transport_store=FilesystemStore(),
+        livy_run=submit,
+    )
+    session = ConsoleSession(progress=False)
+    monkeypatch.setattr(session, "scope", lambda workspace=None: scope)
+    returned = session.install_bundle(bundle, workspace=given_workspace())
+    assert returned is None
+    assert len(calls) == 1
+    assert calls[0]["retry_submission"] is False
+    assert not list(resolver.files_root(ItemRef(TARGET.item_id)).path.iterdir())
+
+
+@pytest.mark.parametrize("outcome", ["completed", "declined"])
+@pytest.mark.parametrize("warning_error", [False, True])
+@weaver_test()
+def test_archive_cleanup_failure_preserves_the_verified_outcome(
+    tmp_path, monkeypatch, outcome, warning_error
+):
+    import hashlib
+    import json
+    import types
+
+    from weaver.sessions import ConsoleSession
+    from weaver.targets import ItemRef
+
+    location, store = _bundle(tmp_path)
+    bundle = load_bundle(location, store=store)
+    expected = given_installer(
+        store=store, executors={"spark_sql": Recorder()}
+    ).install(bundle)
+    resolver = given_resolver(root=tmp_path / "destination")
+    files = resolver.files_root(ItemRef(TARGET.item_id)).path
+    calls = []
+
+    class CleanupFailure(FilesystemStore):
+        def delete(self, location, *, recursive=False):
+            raise OSError("carrier deletion unavailable")
+
+    def submit(source, **kwargs):
+        calls.append(kwargs)
+        stage = next(files.iterdir())
+        result = {
+            "status": outcome,
+            "archive_sha256": hashlib.sha256(
+                (stage / "carrier.zip").read_bytes()
+            ).hexdigest(),
+        }
+        if outcome == "completed":
+            result["report"] = expected.to_mapping()
+        else:
+            result.update(mutated=False, reason="missing runtime dependency")
+        data = json.dumps(result).encode()
+        (stage / "result.json").write_bytes(data)
+        return {"bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()}
+
+    scope = types.SimpleNamespace(
+        resolver=resolver, transport_store=CleanupFailure(), livy_run=submit
+    )
+    session = ConsoleSession(progress=False)
+    monkeypatch.setattr(session, "scope", lambda workspace=None: scope)
+    if warning_error:
+
+        def broken_warning(message):
+            raise OSError("warning output unavailable")
+
+        monkeypatch.setattr(session, "warn", broken_warning)
+    returned = session.install_bundle(bundle, workspace=given_workspace())
+    assert (
+        returned.to_mapping() == expected.to_mapping()
+        if outcome == "completed"
+        else returned is None
+    )
+    assert len(calls) == 1
+    stage = next(files.iterdir())
+    assert (stage / "result.json").exists()
+    assert len(session.archive_cleanup_failures) == 1
+    failure = session.archive_cleanup_failures[0]
+    assert failure == {
+        "status": outcome,
+        "stage": stage.as_posix(),
+        "remote_result": (stage / "result.json").as_posix(),
+        "error_type": "OSError",
+        "error_message": "carrier deletion unavailable",
+    }
+    if not warning_error:
+        assert any(stage.as_posix() in warning for warning in session.warnings)
+
+
+@pytest.mark.parametrize("receipt", ["valid", "lost", "wrong_selection"])
+@weaver_test()
+def test_console_archive_uses_borrowed_livy_for_selected_lakehouse_batches(
+    tmp_path, monkeypatch, receipt
+):
+    import hashlib
+    import json
+    import types
+    import zipfile
+
+    from weaver.fabric import LivySession
+    from weaver.sessions import ConsoleSession
+    from weaver.targets import ItemRef
+
+    location, store = _bundle(tmp_path)
+    bundle = load_bundle(location, store=store)
+    part = replace(
+        bundle, plan=replace(bundle.plan, sequences=(bundle.plan.sequences[1],))
+    )
+    expected = given_installer(
+        store=store, executors={"spark_sql": Recorder()}
+    ).install(part)
+    resolver = given_resolver(root=tmp_path / "destination")
+    files = resolver.files_root(ItemRef(TARGET.item_id)).path
+    calls = []
+
+    def submit(source, **kwargs):
+        calls.append(kwargs)
+        stage = next(files.iterdir())
+        with zipfile.ZipFile(stage / "carrier.zip") as carrier:
+            request = json.loads(carrier.read("request.json"))
+            assert carrier.read("bundle/plan.yml") == store.read(location / "plan.yml")
+            assert request["batch_ids"] == ["b1"]
+        result = {
+            "status": "completed",
+            "request": request,
+            "archive_sha256": hashlib.sha256(
+                (stage / "carrier.zip").read_bytes()
+            ).hexdigest(),
+            "report": expected.to_mapping(),
+        }
+        if receipt == "wrong_selection":
+            result["request"] = dict(request, batch_ids=["b0"])
+        data = json.dumps(result).encode()
+        (stage / "result.json").write_bytes(data)
+        if receipt == "lost":
+            raise TimeoutError("receipt lost")
+        return {"bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()}
+
+    scope = types.SimpleNamespace(
+        resolver=resolver, transport_store=FilesystemStore(), livy_run=submit
+    )
+    session = ConsoleSession(progress=False, livy=object.__new__(LivySession))
+    monkeypatch.setattr(session, "scope", lambda workspace=None: scope)
+    report = session.install_batches(
+        bundle,
+        sequence_number=20,
+        batch_ids=("b1",),
+        build_datetime="2026-09-30 12:34:56.000000",
+        workspace=given_workspace(),
+        timeout=7,
+    )
+    assert [row.action_id for row in report.action_results()] == ["a2"]
+    assert report.status == (FAILED if receipt == "wrong_selection" else SUCCEEDED)
+    if receipt == "wrong_selection":
+        assert next(report.action_results()).details["uncertain"]
+    else:
+        assert len(session.archive_installations) == 1
+    assert calls[0]["retry_submission"] is False
+    assert calls[0]["timeout"] == 7
+    assert len(list(files.iterdir())) == (1 if receipt == "wrong_selection" else 0)
+
+
+@pytest.mark.parametrize(
+    "sequence_number,batch_ids",
+    [
+        (999, ("b0",)),
+        (10, ()),
+        (10, ("unknown",)),
+        (10, ("b0", "b0")),
+        (10, ("b1", "b0")),
+        (10, ("b0", "b2")),
+        (10, ("warehouse-batch",)),
+    ],
+)
+@weaver_test()
+def test_archive_selection_refuses_invalid_or_noncontiguous_batches(
+    tmp_path, sequence_number, batch_ids
+):
+    from weaver.build_bundle.installer import select_install_batches
+    from weaver.errors import InstallError
+
+    location, store = _bundle(tmp_path)
+    plan = load_bundle(location, store=store).plan
+    warehouse = BoundTarget(id="warehouse-WH", kind="warehouse", item_id="WH")
+    original = [sequence.batches[0] for sequence in plan.sequences]
+    sequence = replace(
+        plan.sequences[0],
+        batches=tuple(original) + (BuildBatch("warehouse-batch", warehouse.id, ()),),
+    )
+    mixed = replace(plan, targets=plan.targets + (warehouse,), sequences=(sequence,))
+    with pytest.raises(InstallError, match="installation"):
+        select_install_batches(
+            mixed, sequence_number=sequence_number, batch_ids=batch_ids
+        )
+
+
+@weaver_test()
+def test_archive_runtime_installs_only_the_requested_lakehouse_batches(
+    tmp_path, monkeypatch
+):
+    import json
+    import sys
+    import types
+
+    from weaver.sessions import archive_runtime
+
+    location, store = _bundle(tmp_path)
+    original = store.read(location / "plan.yml")
+    request = {
+        "sequence_number": 20,
+        "batch_ids": ["b1"],
+        "build_datetime": "2026-09-30 12:34:56.000000",
+    }
+    (location.path.parent / "request.json").write_text(json.dumps(request))
+    session = given_installer(store=store).session
+    monkeypatch.setattr(archive_runtime, "ArchiveSession", lambda **kwargs: session)
+    sdk = types.ModuleType("notebookutils")
+    sdk.fs = types.SimpleNamespace(put=lambda *args: None)
+    monkeypatch.setitem(sys.modules, "notebookutils", sdk)
+    result = archive_runtime.run_bundle(
+        location.path.parent, object(), "report.json", "carrier", workers=16
+    )
+    assert [
+        row["action_id"]
+        for sequence in result["report"]["sequences"]
+        for row in sequence["actions"]
+    ] == ["a2"]
+    assert result["request"] == request
+    assert store.read(location / "plan.yml") == original
+
+
+@weaver_test()
+def test_native_archive_install_journals_the_real_installer_report(
+    tmp_path, monkeypatch
+):
+    import json
+    import sys
+    import types
+
+    from weaver.sessions import archive_runtime
+
+    location, store = _bundle(tmp_path)
+    session = given_installer(store=store).session
+    monkeypatch.setattr(archive_runtime, "ArchiveSession", lambda **kwargs: session)
+    writes = []
+    sdk = types.ModuleType("notebookutils")
+    sdk.fs = types.SimpleNamespace(
+        put=lambda path, content, overwrite: writes.append(json.loads(content))
+    )
+    monkeypatch.setitem(sys.modules, "notebookutils", sdk)
+    result = archive_runtime.run_bundle(
+        location.path.parent, object(), "report.json", "carrier", workers=16
+    )
+    assert result["status"] == "completed"
+    assert result["report"]["status"] == SUCCEEDED
+    assert [
+        row["action_id"]
+        for sequence in result["report"]["sequences"]
+        for row in sequence["actions"]
+    ] == ["a1", "a2", "a3"]
+    assert [len(item["report"]["sequences"]) for item in writes] == [1, 2, 3]
+    assert all(item["archive_sha256"] == "carrier" for item in writes)
+
+
+@weaver_test()
+def test_install_persists_complete_sequence_prefixes(tmp_path):
+    location, store = _bundle(tmp_path)
+    installer = given_installer(
+        store=store, executors={"spark_sql": Recorder(fail_on=("a2",))}
+    )
+    prefixes = []
+    report = installer.install(
+        load_bundle(location, store=store),
+        on_sequence=lambda report: prefixes.append(report.to_mapping()),
+    )
+    assert [[row["number"] for row in item["sequences"]] for item in prefixes] == [
+        [10],
+        [10, 20],
+        [10, 20, 30],
+    ]
+    assert all(
+        item["status"] == "running" and item["finished_at"] is None for item in prefixes
+    )
+    assert [row.status for row in report.action_results()] == [
+        SUCCEEDED,
+        FAILED,
+        SKIPPED,
+    ]
+
+
+@weaver_test()
+def test_carrier_uses_the_exact_frozen_bundle_bytes(tmp_path):
+    import io
+    import zipfile
+
+    from weaver.sessions.install_archive import pack_bundle
+
+    location, store = _bundle(tmp_path)
+    bundle = load_bundle(location, store=store)
+    carrier = pack_bundle(bundle)
+    assert carrier is not None
+    with zipfile.ZipFile(io.BytesIO(carrier.data)) as archive:
+        assert archive.read("bundle/plan.yml") == store.read(location / "plan.yml")
+        assert archive.read("bundle/payload/a1/stmt.spark.sql") == b"select 0\n"
+        assert (
+            archive.read("runtime/weaver/sessions/install_archive.py")
+            == __import__("pathlib")
+            .Path(
+                __import__("weaver.sessions.install_archive", fromlist=["x"]).__file__
+            )
+            .read_bytes()
+        )
+
+
+@weaver_test()
+def test_session_owned_installation_persists_the_delegated_report(tmp_path):
+    location, store = _bundle(tmp_path)
+    bundle = load_bundle(location, store=store)
+    original = given_installer(store=store, executors={"spark_sql": Recorder()})
+    expected = original.install(bundle)
+    installer = given_installer(store=store)
+    seen = []
+
+    def install_bundle(incoming, *, workspace=None):
+        seen.append(incoming)
+        return expected
+
+    installer.session.install_bundle = install_bundle
+    returned = installer.install(bundle)
+    assert returned is expected
+    assert seen == [bundle]
+    import yaml
+
+    assert (
+        yaml.safe_load(store.read(location / "install-report.yml"))
+        == expected.to_mapping()
+    )
+
+
 @weaver_test()
 def test_successful_install_reports_every_action(tmp_path):
     location, store = _bundle(tmp_path)

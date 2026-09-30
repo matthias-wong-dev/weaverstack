@@ -15,6 +15,12 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any, Iterator, Sequence
 
+from ..delta_protocol import (
+    DirectDeltaAction,
+    ProtocolMinima,
+    ProtocolOptions,
+    SparkDeltaAction,
+)
 from ..errors import CommandError
 from ..targets import ItemRef
 from ..workspaces import Workspace
@@ -263,6 +269,16 @@ class Session(ABC):
 
     # --- execution capabilities ---------------------------------------------
 
+    def install_bundle(self, bundle, *, workspace: Workspace | None = None):
+        """Install a frozen bundle as one host-owned unit, or decline before work."""
+        return None
+
+    def install_batches(
+        self, bundle, *, sequence_number, batch_ids, build_datetime, workspace=None
+    ):
+        """Install contiguous Lakehouse batches, or decline before work."""
+        return None
+
     @abstractmethod
     def create_delta_table(
         self,
@@ -271,10 +287,88 @@ class Session(ABC):
         *,
         identity_column: str | None = None,
         column_mapping: bool = True,
+        protocol_minima: ProtocolMinima | None = None,
         workspace: Workspace | None = None,
         timeout: float | None = None,
     ) -> Any:
         """Create one Delta table through this host's active Spark session."""
+
+    def create_delta_table_actions(
+        self,
+        actions: Sequence[SparkDeltaAction],
+        *,
+        workspace: Workspace | None = None,
+        timeout: float | None = None,
+    ) -> list[dict[str, Any]]:
+        """Create labelled Tables serially; an unclassified failure stops the batch."""
+        origin = time.monotonic()
+        outcomes = []
+        for (
+            label,
+            qualified_name,
+            columns,
+            identity_column,
+            column_mapping,
+            *policy,
+        ) in actions:
+            options: ProtocolOptions = {"protocol_minima": policy[0]} if policy else {}
+            started = time.monotonic()
+            self.create_delta_table(
+                qualified_name,
+                columns,
+                identity_column=identity_column,
+                column_mapping=column_mapping,
+                workspace=workspace,
+                timeout=timeout,
+                **options,
+            )
+            outcomes.append(
+                {
+                    "label": label,
+                    "succeeded": True,
+                    "started_after_seconds": started - origin,
+                    "duration_seconds": time.monotonic() - started,
+                }
+            )
+        return outcomes
+
+    def create_direct_delta_table(
+        self,
+        qualified_name: str,
+        columns: Sequence[Sequence[Any]],
+        *,
+        identity_column: str | None = None,
+        protocol_minima: ProtocolMinima | None = None,
+        workspace: Workspace | None = None,
+    ) -> Any:
+        """Third-party Sessions retain their established Spark capability."""
+        options: ProtocolOptions = (
+            {"protocol_minima": protocol_minima} if protocol_minima is not None else {}
+        )
+        return self.create_delta_table(
+            qualified_name,
+            columns,
+            identity_column=identity_column,
+            workspace=workspace,
+            **options,
+        )
+
+    def create_direct_delta_table_actions(
+        self,
+        actions: Sequence[DirectDeltaAction],
+        *,
+        workspace: Workspace | None = None,
+    ) -> list[dict[str, Any]]:
+        """An unclassified third-party failure stops this serial fallback."""
+        spark_actions: list[SparkDeltaAction] = []
+        for action in actions:
+            if len(action) == 4:
+                spark_actions.append((action[0], action[1], action[2], action[3], True))
+            else:
+                spark_actions.append(
+                    (action[0], action[1], action[2], action[3], True, action[4])
+                )
+        return self.create_delta_table_actions(spark_actions, workspace=workspace)
 
     @abstractmethod
     def execute_python(
@@ -325,6 +419,32 @@ class Session(ABC):
             outcome["started_after_seconds"] = started - origin
             outcome["duration_seconds"] = time.monotonic() - started
             outcomes.append(outcome)
+        return outcomes
+
+    def describe_spark_query_actions(
+        self,
+        actions: Sequence[tuple[str, Sequence[str]]],
+        *,
+        workspace: Workspace | None = None,
+        timeout: float | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return labelled query-shape rows; propagate unclassified failures."""
+        origin = time.monotonic()
+        outcomes: list[dict[str, Any]] = []
+        for label, statements in actions:
+            started = time.monotonic()
+            rows = self.execute_spark_sql_batch(
+                statements, exact_case=True, workspace=workspace, timeout=timeout
+            )
+            outcomes.append(
+                {
+                    "label": label,
+                    "succeeded": True,
+                    "rows": rows,
+                    "started_after_seconds": started - origin,
+                    "duration_seconds": time.monotonic() - started,
+                }
+            )
         return outcomes
 
     @abstractmethod

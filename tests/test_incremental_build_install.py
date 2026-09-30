@@ -1002,6 +1002,40 @@ def test_the_registry_payload_carries_the_token_unresolved(tmp_path):
 
 
 @weaver_test()
+def test_implicit_delta_default_upgrade_does_not_rebuild_registered_tables(
+    tmp_path, monkeypatch
+):
+    from weaver import delta_protocol
+
+    monkeypatch.setattr(delta_protocol, "DEFAULT_MIN_READER_VERSION", 2)
+    monkeypatch.setattr(delta_protocol, "DEFAULT_MIN_WRITER_VERSION", 5)
+    root = _estate(tmp_path)
+    previous = _repository(root)
+    installed = _catalogue(previous, "Lakehouse/Raw")
+    inventory = _raw_inventory(previous)
+    monkeypatch.setattr(delta_protocol, "DEFAULT_MIN_READER_VERSION", 3)
+    monkeypatch.setattr(delta_protocol, "DEFAULT_MIN_WRITER_VERSION", 7)
+    current = _repository(root)
+    bundle = generate_item_build_bundle(
+        current,
+        bindings=_raw_binding(),
+        output=Location(str(tmp_path / "upgraded-bundle")),
+        store=FilesystemStore(),
+        target_inventories=inventory,
+        catalogue=installed,
+        catalogue_binding=WarehouseBinding(
+            ItemRef("Weaver_Control"), workspace_name=WORKSPACE
+        ),
+    )
+    assert bundle.plan.selection.selected_for_build == ()
+    assert bundle.plan.selection.selected_for_drop == ()
+    assert not any(
+        action.kind in {BUILD_TABLE, DROP_TABLE}
+        for _sequence, _batch, action in bundle.plan.actions()
+    )
+
+
+@weaver_test()
 def test_planner_emits_no_physical_work_for_unchanged_repository(tmp_path):
     repository = _repository(_estate(tmp_path))
     store = FilesystemStore()
