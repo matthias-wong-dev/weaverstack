@@ -48,3 +48,26 @@ def test_runtime_qualification_generates_its_actual_authored_payload(route, case
         payload["identity_column"][0] if identity else payload["identity_column"]
     ) == ("Id" if identity else None)
     compile(module._observation_program([]), "protocol-observer", "exec")
+
+
+@weaver_test()
+def test_runtime_qualification_calls_existing_session_statement_capabilities():
+    import ast
+    import inspect
+
+    from weaver.sessions import ConsoleSession
+
+    module = _qualification()
+    tree = ast.parse(inspect.getsource(module.protocol_estate.__wrapped__))
+    methods = {
+        node.func.attr
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "weaver_session"
+    }
+    assert methods
+    assert all(callable(getattr(ConsoleSession, method, None)) for method in methods), (
+        methods
+    )

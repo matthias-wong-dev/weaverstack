@@ -100,11 +100,11 @@ def protocol_estate(
     destination = resolver.spark_destination(item)
     schema = destination.qualified_schema(SCHEMA)
     request.addfinalizer(
-        lambda: weaver_session.spark_sql(
+        lambda: weaver_session.execute_spark_sql(
             f"DROP SCHEMA IF EXISTS {schema} CASCADE", workspace=fabric_workspace
         )
     )
-    weaver_session.spark_sql_batch(
+    weaver_session.execute_spark_sql_batch(
         [f"DROP SCHEMA IF EXISTS {schema} CASCADE", f"CREATE SCHEMA {schema}"],
         workspace=fabric_workspace,
     )
