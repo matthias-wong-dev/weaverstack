@@ -211,6 +211,28 @@ def test_mixed_install_delegates_lakehouse_batches_in_manifest_order(tmp_path, o
 
 
 @weaver_test()
+def test_archive_rejects_a_stored_plan_changed_after_bundle_validation(
+    tmp_path, monkeypatch
+):
+    import yaml
+
+    from weaver.errors import InstallError
+    from weaver.sessions import ConsoleSession
+
+    location, store = _bundle(tmp_path)
+    bundle = load_bundle(location, store=store)
+    changed = yaml.safe_load(store.read(location / "plan.yml"))
+    changed["sequences"][0]["description"] = "Changed after validation"
+    store.write(location / "plan.yml", yaml.safe_dump(changed).encode())
+    session = ConsoleSession(progress=False)
+    touched = []
+    monkeypatch.setattr(session, "scope", lambda *args: touched.append("scope"))
+    with pytest.raises(InstallError, match="frozen installation plan"):
+        session.install_bundle(bundle, workspace=given_workspace())
+    assert touched == []
+
+
+@weaver_test()
 def test_corrupt_archive_receipt_remains_uncertain(tmp_path, monkeypatch):
     import hashlib
     import json
@@ -442,6 +464,82 @@ def test_console_archive_declines_before_mutation_without_submission_retry(
     assert len(calls) == 1
     assert calls[0]["retry_submission"] is False
     assert not list(resolver.files_root(ItemRef(TARGET.item_id)).path.iterdir())
+
+
+@pytest.mark.parametrize("outcome", ["completed", "declined"])
+@pytest.mark.parametrize("warning_error", [False, True])
+@weaver_test()
+def test_archive_cleanup_failure_preserves_the_verified_outcome(
+    tmp_path, monkeypatch, outcome, warning_error
+):
+    import hashlib
+    import json
+    import types
+
+    from weaver.sessions import ConsoleSession
+    from weaver.targets import ItemRef
+
+    location, store = _bundle(tmp_path)
+    bundle = load_bundle(location, store=store)
+    expected = given_installer(
+        store=store, executors={"spark_sql": Recorder()}
+    ).install(bundle)
+    resolver = given_resolver(root=tmp_path / "destination")
+    files = resolver.files_root(ItemRef(TARGET.item_id)).path
+    calls = []
+
+    class CleanupFailure(FilesystemStore):
+        def delete(self, location, *, recursive=False):
+            raise OSError("carrier deletion unavailable")
+
+    def submit(source, **kwargs):
+        calls.append(kwargs)
+        stage = next(files.iterdir())
+        result = {
+            "status": outcome,
+            "archive_sha256": hashlib.sha256(
+                (stage / "carrier.zip").read_bytes()
+            ).hexdigest(),
+        }
+        if outcome == "completed":
+            result["report"] = expected.to_mapping()
+        else:
+            result.update(mutated=False, reason="missing runtime dependency")
+        data = json.dumps(result).encode()
+        (stage / "result.json").write_bytes(data)
+        return {"bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()}
+
+    scope = types.SimpleNamespace(
+        resolver=resolver, transport_store=CleanupFailure(), livy_run=submit
+    )
+    session = ConsoleSession(progress=False)
+    monkeypatch.setattr(session, "scope", lambda workspace=None: scope)
+    if warning_error:
+
+        def broken_warning(message):
+            raise OSError("warning output unavailable")
+
+        monkeypatch.setattr(session, "warn", broken_warning)
+    returned = session.install_bundle(bundle, workspace=given_workspace())
+    assert (
+        returned.to_mapping() == expected.to_mapping()
+        if outcome == "completed"
+        else returned is None
+    )
+    assert len(calls) == 1
+    stage = next(files.iterdir())
+    assert (stage / "result.json").exists()
+    assert len(session.archive_cleanup_failures) == 1
+    failure = session.archive_cleanup_failures[0]
+    assert failure == {
+        "status": outcome,
+        "stage": str(stage),
+        "remote_result": str(stage / "result.json"),
+        "error_type": "OSError",
+        "error_message": "carrier deletion unavailable",
+    }
+    if not warning_error:
+        assert any(str(stage) in warning for warning in session.warnings)
 
 
 @pytest.mark.parametrize("receipt", ["valid", "lost", "wrong_selection"])

@@ -98,6 +98,7 @@ class ConsoleSession(Session):
             raise ValueError("direct Delta workers must be an integer from 1 to 16")
         self.direct_delta_workers = direct_delta_workers
         self._delta_resolution_lock = threading.Lock()
+        self.archive_cleanup_failures: list[dict[str, Any]] = []
         from ..fabric.auth import checked_credential
 
         # Validate the supplied credential now; acquire its token lazily.

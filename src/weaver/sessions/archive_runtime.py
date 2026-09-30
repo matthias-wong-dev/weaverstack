@@ -67,13 +67,20 @@ class ArchiveSession(NotebookSession):
             return self._archive_stores[id(scope)]
 
     def create_direct_delta_table(
-        self, qualified_name, columns, *, identity_column=None, workspace=None
+        self,
+        qualified_name,
+        columns,
+        *,
+        identity_column=None,
+        protocol_minima=None,
+        workspace=None,
     ):
         with self.telemetry.timing("onelake.delta_table"):
             allocated = create_bound_delta_table(
                 qualified_name=qualified_name,
                 columns=columns,
                 identity_column=identity_column,
+                protocol_minima=protocol_minima,
                 resolver=self.resolver(workspace),
                 store=self._delta_store,
                 publish=self._delta_store.rename_directory,
@@ -87,13 +94,14 @@ class ArchiveSession(NotebookSession):
         self.scope(workspace)
         context = self.telemetry.capture_context()
 
-        def create(qualified, columns, *, identity_column, workspace):
+        def create(qualified, columns, *, identity_column, workspace, **options):
             with self.telemetry.use_context(context):
                 return self.create_direct_delta_table(
                     qualified,
                     columns,
                     identity_column=identity_column,
                     workspace=workspace,
+                    **options,
                 )
 
         return run_direct_delta_actions(

@@ -68,8 +68,22 @@ class Carrier:
 
 def pack_bundle(bundle, *, request=None) -> Carrier | None:
     """Carry frozen payloads and the installed caller's matching runtime."""
+    import yaml
+
+    from ..errors import InstallError
+
     runtime = Path(__file__).resolve().parents[1]
-    files = {"bundle/plan.yml": (bundle.store).read(bundle.location / "plan.yml")}
+    manifest = bundle.store.read(bundle.location / "plan.yml")
+    try:
+        stored = json.dumps(yaml.safe_load(manifest), sort_keys=True, allow_nan=False)
+        frozen = json.dumps(bundle.plan.to_mapping(), sort_keys=True, allow_nan=False)
+    except (TypeError, ValueError, yaml.YAMLError) as error:
+        raise InstallError(
+            "Stored bundle differs from frozen installation plan"
+        ) from error
+    if stored != frozen:
+        raise InstallError("Stored bundle differs from frozen installation plan")
+    files = {"bundle/plan.yml": manifest}
     if request is not None:
         files["request.json"] = json.dumps(
             request, sort_keys=True, allow_nan=False
@@ -411,7 +425,7 @@ def install_in_scope(session, bundle, *, workspace=None, timeout=None, request=N
         store.delete(stage, recursive=True)
         raise
     settled = None
-    complete = False
+    verified_status = None
     received = False
 
     def record(result):
@@ -441,14 +455,14 @@ def install_in_scope(session, bundle, *, workspace=None, timeout=None, request=N
             and result.get("mutated") is False
             and isinstance(result.get("reason"), str)
         ):
-            complete = True
+            verified_status = "declined"
             return None
         if result.get("status") != "completed":
             raise ValueError("archive installation has not completed")
         if request is not None and result.get("request") != request:
             raise ValueError("archive result belongs to a different batch selection")
         report = decode_report(result["report"], plan)
-        complete = True
+        verified_status = "completed"
         record(result)
         return report
     except Exception as error:
@@ -461,7 +475,7 @@ def install_in_scope(session, bundle, *, workspace=None, timeout=None, request=N
                     )
                 if result.get("status") == "completed" and not received:
                     report = decode_report(result["report"], plan)
-                    complete = True
+                    verified_status = "completed"
                     record(result)
                     return report
                 if result.get("status") == "running":
@@ -470,5 +484,21 @@ def install_in_scope(session, bundle, *, workspace=None, timeout=None, request=N
             pass
         return uncertain_report(plan, str(error), output.value, settled=settled)
     finally:
-        if complete:
-            store.delete(stage, recursive=True)
+        if verified_status is not None:
+            try:
+                store.delete(stage, recursive=True)
+            except Exception as cleanup_error:
+                failure = {
+                    "status": verified_status,
+                    "stage": stage.value,
+                    "remote_result": output.value,
+                    "error_type": type(cleanup_error).__name__,
+                    "error_message": str(cleanup_error),
+                }
+                session.archive_cleanup_failures.append(failure)
+                try:
+                    session.warn(
+                        f"Installation carrier cleanup failed: {stage.value}. Result retained at {output.value}: {cleanup_error}"
+                    )
+                except Exception:
+                    pass

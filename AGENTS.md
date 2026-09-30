@@ -260,7 +260,9 @@ the installation's Registry timestamp. A borrowed `LivySession` uses the same
 archive path; custom sessions, stores, resolvers and Livy implementations retain
 their supplied capabilities.
 
-The carrier contains the frozen manifest, referenced payload bytes and the
+The carrier checks the stored manifest against the validated in-memory plan
+before acquiring the installation scope. It carries those checked bytes,
+referenced payload bytes and the
 caller's Python runtime sources and static SQL, YAML and JSON resources. The
 batch-selection request is a hashed carrier member; the frozen manifest and
 payloads remain unchanged. The remote installer validates the full bundle before
@@ -283,8 +285,11 @@ prefixes are journalled to the private OneLake result file. The final Livy resul
 is a byte count and hash for that file. The desktop validates ordered action
 identities, outcomes and clocks and persists the normal installation report.
 An unavailable outcome retains validated prefixes and fails every unacknowledged
-action with an uncertainty marker. Completed and declined carriers are removed;
-uncertain carriers and journals remain at their report's recorded location.
+action with an uncertainty marker. Completed and declined carriers are removed.
+Cleanup failures preserve the verified installation outcome, retain the carrier
+and result location, and are recorded separately in `archive_cleanup_failures`
+and surfaced as Session warnings. Uncertain carriers and journals remain at
+their report's recorded location.
 
 ## Architecture invariants
 

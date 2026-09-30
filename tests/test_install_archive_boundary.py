@@ -212,6 +212,40 @@ def test_archive_native_session_preserves_direct_delta_workers(monkeypatch):
     session.close()
 
 
+@pytest.mark.parametrize("batch", [False, True])
+@weaver_test()
+def test_archive_direct_creation_preserves_frozen_protocol_minima(monkeypatch, batch):
+    from support.workspaces import given_workspace
+
+    from weaver.sessions import archive_runtime
+
+    calls = []
+    monkeypatch.setattr(
+        archive_runtime,
+        "create_bound_delta_table",
+        lambda **arguments: calls.append(arguments),
+    )
+    session = archive_runtime.ArchiveSession(
+        workspace=given_workspace(), token=lambda: "unused"
+    )
+    session.resolver = lambda workspace: None
+    policy = {"minReaderVersion": 2, "minWriterVersion": 5}
+    try:
+        if batch:
+            results = session.create_direct_delta_table_actions(
+                [("a", "table", [["Value", "string", False]], None, policy)]
+            )
+            assert results[0]["succeeded"], results
+        else:
+            session.create_direct_delta_table(
+                "table", [["Value", "string", False]], protocol_minima=policy
+            )
+        assert len(calls) == 1
+        assert calls[0]["protocol_minima"] == policy
+    finally:
+        session.close()
+
+
 @weaver_test()
 def test_native_archive_store_preserves_non_utf8_payloads(tmp_path):
     from weaver.locations import Location
