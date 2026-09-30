@@ -205,11 +205,7 @@ def test_real_warehouse_prune_freezes_member_settlement_order():
     actions = {a.id: a for _, _, a in compiled.actions()}
     order = Graph(
         actions,
-        (
-            (p, a.id)
-            for a in actions.values()
-            for p in (*a.depends_on, *a.settle_after)
-        ),
+        ((p, a.id) for a in actions.values() for p in (*a.depends_on, *a.settle_after)),
     ).order()
     assert [id for id in order if id in {a.id for a in members}] == [
         a.id for a in members
