@@ -185,19 +185,23 @@ def test_supported_scalar_table_creates_through_direct_session_capability():
 
 
 @weaver_test()
-def test_variant_table_refuses_before_any_creation_capability():
+def test_variant_table_uses_direct_creation_capability():
     capability = _Capability([])
+    created = []
     context = replace(
         _context(capability, DESTINATION),
-        create_direct_delta_table=lambda *_args, **_kwargs: pytest.fail("mutated"),
+        create_direct_delta_table=lambda *args, **kwargs: created.append(
+            (args, kwargs)
+        ),
     )
     payload = _payload(
         source_query=None,
         schema_mode="declared",
         declared_columns=[["Payload", "variant", False]],
     )
-    with pytest.raises(ValueError, match="VARIANT.*not supported"):
-        SparkTableExecutor().execute(_action(), payload, context)
+    SparkTableExecutor().execute(_action(), payload, context)
+    assert len(created) == 1
+    assert created[0][0][1][0] == ("Payload", "variant", False)
     assert capability.creations == []
 
 

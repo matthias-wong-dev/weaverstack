@@ -177,9 +177,12 @@ def _installed(bundle, session, *, executor="spark_sql"):
     return report, recorder
 
 
-def _table_bundle(tmp_path, actions, *, source_queries=None, column_types=None):
+def _table_bundle(
+    tmp_path, actions, *, source_queries=None, column_types=None, protocol_minima=None
+):
     source_queries = source_queries or {}
     column_types = column_types or {}
+    protocol_minima = protocol_minima or {}
     payloads = {
         action.id: (
             json.dumps(
@@ -194,6 +197,11 @@ def _table_bundle(tmp_path, actions, *, source_queries=None, column_types=None):
                     "audit_columns": [],
                     "column_mapping": True,
                     "schema_mode": "declared",
+                    **(
+                        {"protocol_minima": protocol_minima[action.id]}
+                        if action.id in protocol_minima
+                        else {}
+                    ),
                 }
             ).encode("utf-8")
             if action.executor == "spark_table"
@@ -213,6 +221,48 @@ def _table_bundle(tmp_path, actions, *, source_queries=None, column_types=None):
         actions=actions,
         payloads_by_id=payloads,
     )
+
+
+@weaver_test()
+@pytest.mark.parametrize("direct", [False, True])
+def test_grouped_table_install_preserves_authored_protocol_per_action(tmp_path, direct):
+    minima = {"minReaderVersion": 2, "minWriterVersion": 5}
+    actions = (_action("first", "spark_table"), _action("second", "spark_table"))
+    bundle = _table_bundle(
+        tmp_path,
+        actions,
+        column_types={} if direct else {action.id: "array<int>" for action in actions},
+        protocol_minima={action.id: minima for action in actions},
+    )
+    session = _session(ELSEWHERE)
+    submitted = []
+
+    def capture(actions, **_kwargs):
+        submitted.extend(actions)
+        return [
+            {
+                "label": action[0],
+                "succeeded": True,
+                "started_after_seconds": 0.0,
+                "duration_seconds": 0.1,
+            }
+            for action in actions
+        ]
+
+    session.create_direct_delta_table_actions = (
+        capture
+        if direct
+        else lambda *_args, **_kwargs: pytest.fail("unexpected direct route")
+    )
+    session.create_delta_table_actions = (
+        capture
+        if not direct
+        else lambda *_args, **_kwargs: pytest.fail("unexpected Spark fallback")
+    )
+    report = Installer(session).install(bundle)
+    assert report.succeeded
+    assert [action[0] for action in submitted] == ["first", "second"]
+    assert [action[-1] for action in submitted] == [minima, minima]
 
 
 @weaver_test()
@@ -287,7 +337,7 @@ def test_scalar_table_batch_uses_direct_session_actions(tmp_path):
 
 
 @weaver_test()
-def test_variant_batch_refuses_that_action_and_keeps_ordinary_sibling(tmp_path):
+def test_variant_batch_uses_direct_creation_with_its_ordinary_sibling(tmp_path):
     bundle = _table_bundle(
         tmp_path,
         (_action("variant", "spark_table"), _action("ordinary", "spark_table")),
@@ -316,10 +366,10 @@ def test_variant_batch_refuses_that_action_and_keeps_ordinary_sibling(tmp_path):
     assert [
         (action.action_id, action.status) for action in report.action_results()
     ] == [
-        ("variant", "failed"),
+        ("variant", "succeeded"),
         ("ordinary", "succeeded"),
     ]
-    assert [action[0] for action in submitted] == ["ordinary"]
+    assert [action[0] for action in submitted] == ["variant", "ordinary"]
 
 
 @weaver_test()

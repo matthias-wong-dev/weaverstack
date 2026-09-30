@@ -296,6 +296,14 @@ Enforceable as the corresponding code lands:
   `DeltaTarget` is a Lakehouse and a `WarehouseTarget` a Warehouse, and core never
   asks the workspace what a bare name is. A destructive operation must not depend
   on name inference.
+- **Delta protocol minima are creation policy.** Lakehouse Table declarations
+  accept `Delta minReaderVersion` and `Delta minWriterVersion`. Authored values
+  participate in declaration signatures. Omitted values resolve to Weaver's
+  current defaults and are frozen into creation payloads. A default-only upgrade
+  leaves unchanged installed Tables on their existing protocol. Both direct and
+  Spark creation use reader 3/writer 7 by default; schema features are per Table.
+  Explicit minima may be raised by features required by that Table. The direct
+  profile verifies the committed protocol, schema and properties before publishing.
 - **The central catalogue is authoritative.** No target-local catalogue, no
   target-local runtime, no target-local logging authority.
 - **Certification is per object.** Before a rebuild, the selected objects and

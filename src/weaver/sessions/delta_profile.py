@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 from uuid import UUID
 
+from ..delta_protocol import resolve_protocol_minima
 from ..locations import Location
 from ..store import Store
 
@@ -95,6 +96,7 @@ def compile_delta_profile_v1(
     identity_column: str | None = None,
     generated_columns: Mapping[str, str] | None = None,
     partition_columns: Sequence[str] = (),
+    protocol_minima: Mapping[str, int] | None = None,
 ) -> DeltaProfileV1:
     """Compile physical fields, protocol and properties without asking the writer."""
     if not columns:
@@ -135,14 +137,28 @@ def compile_delta_profile_v1(
             }
         )
     variant = any(field["type"] == "variant" for field in fields)
-    feature_table = variant or identity_column is not None
+    minima = resolve_protocol_minima(protocol_minima)
+    reader = max(2, minima["minReaderVersion"])
+    writer = max(5, minima["minWriterVersion"])
+    if (
+        variant
+        or identity_column is not None
+        or any(field["type"] == "timestamp_ntz" for field in fields)
+        or reader >= 3
+        or writer >= 7
+    ):
+        reader, writer = max(3, reader), max(7, writer)
+    feature_table = writer >= 7
     protocol: dict[str, Any] = {
-        "minReaderVersion": 3 if feature_table else 2,
-        "minWriterVersion": 7 if feature_table else 5,
+        "minReaderVersion": reader,
+        "minWriterVersion": writer,
     }
     if feature_table:
         protocol["readerFeatures"] = ["columnMapping"]
         protocol["writerFeatures"] = ["columnMapping"]
+        if any(field["type"] == "timestamp_ntz" for field in fields):
+            protocol["readerFeatures"].append("timestampNtz")
+            protocol["writerFeatures"].append("timestampNtz")
         if variant:
             protocol["readerFeatures"].append("variantType")
             protocol["writerFeatures"].append("variantType")

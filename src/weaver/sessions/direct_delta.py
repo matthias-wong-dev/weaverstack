@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Callable, Sequence
 from uuid import uuid4
 
+from ..delta_protocol import DirectDeltaAction, ProtocolMinima
 from ..locations import Location
 from ..spark import FabricSparkTarget
 from ..store import FilesystemStore, Store
@@ -33,8 +34,6 @@ def direct_profile_supported(
     columns: Sequence[Sequence], identity_column: str | None, column_mapping: bool
 ) -> bool:
     """Use v1 for scalar Tables; retain TableBuilder for other supported types."""
-    if any(re.search(r"\bvariant\b", str(column[1]), re.I) for column in columns):
-        raise ValueError("VARIANT columns are not supported in Weaver Table Build")
     if not column_mapping:
         return False
     try:
@@ -46,14 +45,16 @@ def direct_profile_supported(
     return True
 
 
-def run_direct_delta_actions(create, actions, *, workspace=None, max_workers=1):
+def run_direct_delta_actions(
+    create, actions: Sequence[DirectDeltaAction], *, workspace=None, max_workers=1
+):
     """Settle independent Tables within one installer batch in input order."""
     if type(max_workers) is not int or not 1 <= max_workers <= 16:
         raise ValueError("direct Delta workers must be an integer from 1 to 16")
     origin = time.monotonic()
 
     def settle(action):
-        label, qualified, columns, identity = action
+        label, qualified, columns, identity, *policy = action
         started = time.monotonic()
         try:
             create(
@@ -61,6 +62,7 @@ def run_direct_delta_actions(create, actions, *, workspace=None, max_workers=1):
                 columns,
                 identity_column=identity,
                 workspace=workspace,
+                **({"protocol_minima": policy[0]} if policy else {}),
             )
         except Exception as exc:
             outcome = {
@@ -105,6 +107,7 @@ def create_bound_delta_table(
     store,
     publish: Callable[[Location, Location], None],
     resolver_lock: threading.Lock | None = None,
+    protocol_minima: ProtocolMinima | None = None,
 ) -> DeltaAllocation:
     """Resolve a frozen four-part Table name to one typed Lakehouse path."""
     match = _OBJECT.fullmatch(qualified_name)
@@ -130,6 +133,7 @@ def create_bound_delta_table(
         columns=columns,
         identity_column=identity_column,
         publish=publish,
+        protocol_minima=protocol_minima,
     )
 
 
@@ -141,11 +145,12 @@ def create_staged_delta_table(
     columns: Sequence[Sequence],
     identity_column: str | None,
     publish: Callable[[Location, Location], None],
+    protocol_minima: ProtocolMinima | None = None,
 ) -> DeltaAllocation:
     """Create in private storage; verify the final log before conditional publish."""
-    profile = compile_delta_profile_v1(columns, identity_column=identity_column)
-    if any(field["type"] == "variant" for field in profile.schema["fields"]):
-        raise ValueError("VARIANT columns are not supported in Weaver Table Build")
+    profile = compile_delta_profile_v1(
+        columns, identity_column=identity_column, protocol_minima=protocol_minima
+    )
     if metadata.version("deltalake") != WRITER_VERSION:
         raise ValueError("Delta writer version differs from Weaver profile")
     if store.exists(stage) or store.exists(destination):
@@ -187,6 +192,8 @@ def create_staged_delta_table(
                 "identityColumns": TableFeatures.IdentityColumns,
                 "invariants": TableFeatures.Invariants,
                 "generatedColumns": TableFeatures.GeneratedColumns,
+                "variantType": TableFeatures.VariantType,
+                "timestampNtz": TableFeatures.TimestampWithoutTimezone,
             }
             table.alter.add_feature(
                 [features[name] for name in profile.protocol["writerFeatures"]],

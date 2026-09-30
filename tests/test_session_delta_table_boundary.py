@@ -103,20 +103,174 @@ def notebook():
 
 
 @weaver_test()
+@pytest.mark.parametrize("remote", [False, True])
+def test_spark_creation_honours_explicit_protocol_minimums(remote, delta_module):
+    from weaver.sessions.delta_table import (
+        create_delta_table_in_session,
+        remote_delta_table_program,
+    )
+
+    spark = SimpleNamespace(conf=_Conf())
+    minima = {"minReaderVersion": 2, "minWriterVersion": 5}
+    if remote:
+        exec(
+            remote_delta_table_program(
+                TARGET,
+                COLUMNS[1:],
+                identity_column=None,
+                column_mapping=True,
+                protocol_minima=minima,
+            ),
+            {"spark": spark, "emit": lambda _: None},
+        )
+    else:
+        create_delta_table_in_session(
+            spark,
+            TARGET,
+            COLUMNS[1:],
+            identity_column=None,
+            column_mapping=True,
+            protocol_minima=minima,
+        )
+    (builder,) = _DeltaTable.builders
+    assert ("property", "delta.minReaderVersion", "2") in builder.calls
+    assert ("property", "delta.minWriterVersion", "5") in builder.calls
+
+
+@weaver_test()
+def test_base_direct_fallback_preserves_authored_protocol_policy():
+    from weaver.sessions.testing import TestSession
+
+    minima = {"minReaderVersion": 2, "minWriterVersion": 5}
+    session = TestSession(workspace=Workspace(workspace="Demo"))
+    outcomes = session.create_direct_delta_table_actions(
+        [("ordinary", TARGET, COLUMNS[1:], None, minima)]
+    )
+    assert outcomes[0]["succeeded"] is True
+    assert session.calls[0].body["protocol_minima"] == minima
+
+
+@weaver_test()
+def test_test_session_retains_protocol_policy_through_the_base_action_fallback():
+    from weaver.sessions.testing import TestSession
+
+    minima = {"minReaderVersion": 2, "minWriterVersion": 5}
+    session = TestSession(workspace=Workspace(workspace="Demo"))
+    outcomes = session.create_delta_table_actions(
+        [("ordinary", TARGET, COLUMNS[1:], None, True, minima)]
+    )
+    assert outcomes[0]["succeeded"] is True
+    assert session.calls[0].body["protocol_minima"] == minima
+
+
+@weaver_test()
+def test_notebook_labelled_spark_actions_preserve_authored_protocol_minima(
+    notebook, delta_module
+):
+    spark = SimpleNamespace(conf=_Conf())
+    minima = {"minReaderVersion": 2, "minWriterVersion": 5}
+    outcomes = notebook(spark).create_delta_table_actions(
+        [("ordinary", TARGET, COLUMNS[1:], None, True, minima)]
+    )
+    assert outcomes[0]["succeeded"] is True
+    (builder,) = _DeltaTable.builders
+    assert ("property", "delta.minReaderVersion", "2") in builder.calls
+    assert ("property", "delta.minWriterVersion", "5") in builder.calls
+
+
+@weaver_test()
+def test_remote_table_batch_preserves_each_explicit_policy(delta_module):
+    from weaver.sessions.delta_table import remote_delta_table_actions_program
+
+    spark = SimpleNamespace(conf=_Conf())
+    actions = [
+        ("first", TARGET, COLUMNS[1:], None, True),
+        (
+            "second",
+            TARGET + "Two",
+            COLUMNS[1:],
+            None,
+            True,
+            {"minReaderVersion": 2, "minWriterVersion": 5},
+        ),
+    ]
+    exec(
+        remote_delta_table_actions_program(actions),
+        {"spark": spark, "emit": lambda _: None},
+    )
+    for builder, expected in zip(
+        _DeltaTable.builders, [("3", "7"), ("2", "5")], strict=True
+    ):
+        assert ("property", "delta.minReaderVersion", expected[0]) in builder.calls
+        assert ("property", "delta.minWriterVersion", expected[1]) in builder.calls
+
+
+@weaver_test()
+def test_remote_table_batch_preserves_the_common_floor_for_every_action(delta_module):
+    from weaver.sessions.delta_table import remote_delta_table_actions_program
+
+    spark = SimpleNamespace(conf=_Conf())
+    actions = [
+        ("first", TARGET, COLUMNS[1:], None, True),
+        ("second", TARGET + "Two", COLUMNS[1:], None, True),
+    ]
+    exec(
+        remote_delta_table_actions_program(actions),
+        {"spark": spark, "emit": lambda _: None},
+    )
+    assert len(_DeltaTable.builders) == 2
+    for builder in _DeltaTable.builders:
+        assert ("property", "delta.minReaderVersion", "3") in builder.calls
+        assert ("property", "delta.minWriterVersion", "7") in builder.calls
+
+
+@weaver_test()
+@pytest.mark.parametrize("remote", [False, True])
+def test_spark_creation_uses_weaver_common_protocol_floor(remote, delta_module):
+    from weaver.sessions.delta_table import (
+        create_delta_table_in_session,
+        remote_delta_table_program,
+    )
+
+    spark = SimpleNamespace(conf=_Conf())
+    if remote:
+        exec(
+            remote_delta_table_program(
+                TARGET, COLUMNS[1:], identity_column=None, column_mapping=True
+            ),
+            {"spark": spark, "emit": lambda _: None},
+        )
+    else:
+        create_delta_table_in_session(
+            spark, TARGET, COLUMNS[1:], identity_column=None, column_mapping=True
+        )
+    (builder,) = _DeltaTable.builders
+    assert ("property", "delta.minReaderVersion", "3") in builder.calls
+    assert ("property", "delta.minWriterVersion", "7") in builder.calls
+
+
+@weaver_test()
 def test_notebook_creates_an_ordinary_table_without_identity_support(
     notebook, delta_module
 ):
     del delta_module.IdentityGenerator
     spark = SimpleNamespace(conf=_Conf())
 
-    result = notebook(spark).create_delta_table(TARGET, COLUMNS[1:])
+    minima = {"minReaderVersion": 2, "minWriterVersion": 5}
+    result = notebook(spark).create_delta_table(
+        TARGET, COLUMNS[1:], protocol_minima=minima
+    )
 
     assert result == "created"
     (builder,) = _DeltaTable.builders
+    assert ("property", "delta.minReaderVersion", "2") in builder.calls
+    assert ("property", "delta.minWriterVersion", "5") in builder.calls
     assert builder.calls == [
         ("tableName", TARGET),
         ("addColumn", "Customer id", "string", {"nullable": False}),
         ("addColumn", "Amount", "decimal(18,2)", {"nullable": True}),
+        ("property", "delta.minReaderVersion", "2"),
+        ("property", "delta.minWriterVersion", "5"),
         ("property", "delta.columnMapping.mode", "name"),
         ("execute", "true"),
     ]
@@ -249,7 +403,7 @@ class _Livy:
 
 
 @weaver_test()
-def test_console_submits_a_self_contained_serialised_creator(monkeypatch):
+def test_console_submits_a_self_contained_serialised_creator(monkeypatch, delta_module):
     monkeypatch.setattr(
         ConsoleScope, "resolver", property(lambda self: SimpleNamespace(workspace=None))
     )
@@ -259,7 +413,10 @@ def test_console_submits_a_self_contained_serialised_creator(monkeypatch):
         livy=livy,
     )
 
-    result = session.create_delta_table(TARGET, COLUMNS, identity_column="Customer key")
+    minima = {"minReaderVersion": 2, "minWriterVersion": 5}
+    result = session.create_delta_table(
+        TARGET, COLUMNS, identity_column="Customer key", protocol_minima=minima
+    )
 
     assert result == {"created": True}
     (source,) = livy.submitted
@@ -269,6 +426,34 @@ def test_console_submits_a_self_contained_serialised_creator(monkeypatch):
     assert "IdentityGenerator" in source
     assert "delta.columnMapping.mode" in source
     assert "spark.sql.caseSensitive" in source
+    exec(source, {"spark": SimpleNamespace(conf=_Conf()), "emit": lambda _: None})
+    (builder,) = _DeltaTable.builders
+    assert ("property", "delta.minReaderVersion", "2") in builder.calls
+    assert ("property", "delta.minWriterVersion", "5") in builder.calls
+
+
+@weaver_test()
+@pytest.mark.parametrize("host", ("console", "notebook"))
+def test_labelled_direct_actions_preserve_each_tables_protocol_policy(
+    host, notebook, monkeypatch
+):
+    session = (
+        ConsoleSession(workspace=Workspace(workspace="Demo"), livy=_Livy())
+        if host == "console"
+        else notebook(SimpleNamespace(conf=_Conf()))
+    )
+    captured = []
+
+    def create(_qualified, _columns, **kwargs):
+        captured.append(kwargs["protocol_minima"])
+
+    monkeypatch.setattr(session, "create_direct_delta_table", create)
+    minima = {"minReaderVersion": 2, "minWriterVersion": 5}
+    outcomes = session.create_direct_delta_table_actions(
+        [("first", TARGET, COLUMNS, None, minima)]
+    )
+    assert outcomes[0]["succeeded"] is True
+    assert captured == [minima]
 
 
 @weaver_test()
@@ -295,11 +480,18 @@ def test_console_direct_creation_does_not_acquire_livy(monkeypatch):
     session = ConsoleSession(workspace=Workspace(workspace="Demo"), livy=_Livy())
     assert (
         session.create_direct_delta_table(
-            TARGET, COLUMNS, identity_column="Customer key"
+            TARGET,
+            COLUMNS,
+            identity_column="Customer key",
+            protocol_minima={"minReaderVersion": 2, "minWriterVersion": 5},
         )
         == "allocated"
     )
     assert captured[0]["resolver"] == "resolved"
+    assert captured[0]["protocol_minima"] == {
+        "minReaderVersion": 2,
+        "minWriterVersion": 5,
+    }
     assert captured[0]["store"] is store
     assert captured[0]["publish"] == store.rename_directory
     assert session.scope().livy.acquired is False
@@ -322,7 +514,12 @@ def test_notebook_direct_creation_stages_with_native_store(notebook, monkeypatch
         sys.modules, "notebookutils", SimpleNamespace(credentials=credentials)
     )
     session = notebook(SimpleNamespace(conf=_Conf()))
-    assert session.create_direct_delta_table(TARGET, COLUMNS) == "allocated"
+    minima = {"minReaderVersion": 2, "minWriterVersion": 5}
+    assert (
+        session.create_direct_delta_table(TARGET, COLUMNS, protocol_minima=minima)
+        == "allocated"
+    )
+    assert captured[0]["protocol_minima"] == minima
     assert captured[0]["store"] is session.scope().transport_store
     assert captured[0]["publish"].__self__.token == "storage-token"
 

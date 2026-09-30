@@ -9,6 +9,7 @@ from __future__ import annotations
 import time
 from typing import Any, Sequence
 
+from ..delta_protocol import DirectDeltaAction, ProtocolMinima, SparkDeltaAction
 from ..errors import CommandError
 from ..workspaces import Workspace
 from .base import Session, WorkspaceScope, run_spark_statements
@@ -65,6 +66,7 @@ class NotebookSession(Session):
         columns: Sequence[Sequence[Any]],
         *,
         identity_column: str | None = None,
+        protocol_minima: ProtocolMinima | None = None,
         workspace: Workspace | None = None,
     ) -> Any:
         from notebookutils import credentials
@@ -78,6 +80,7 @@ class NotebookSession(Session):
                 qualified_name=qualified_name,
                 columns=columns,
                 identity_column=identity_column,
+                protocol_minima=protocol_minima,
                 resolver=scope.resolver,
                 store=scope.transport_store,
                 publish=OneLakeDfsClient(
@@ -88,7 +91,7 @@ class NotebookSession(Session):
 
     def create_direct_delta_table_actions(
         self,
-        actions: Sequence[tuple[str, str, Sequence[Sequence[Any]], str | None]],
+        actions: Sequence[DirectDeltaAction],
         *,
         workspace: Workspace | None = None,
     ) -> list[dict[str, Any]]:
@@ -105,6 +108,7 @@ class NotebookSession(Session):
         *,
         identity_column: str | None = None,
         column_mapping: bool = True,
+        protocol_minima: ProtocolMinima | None = None,
         workspace: Workspace | None = None,
         timeout: float | None = None,
     ) -> Any:
@@ -118,11 +122,12 @@ class NotebookSession(Session):
                 columns,
                 identity_column=identity_column,
                 column_mapping=column_mapping,
+                protocol_minima=protocol_minima,
             )
 
     def create_delta_table_actions(
         self,
-        actions: Sequence[tuple[str, str, Sequence[Sequence[Any]], str | None, bool]],
+        actions: Sequence[SparkDeltaAction],
         *,
         workspace: Workspace | None = None,
         timeout: float | None = None,
@@ -137,7 +142,7 @@ class NotebookSession(Session):
         origin = time.monotonic()
         outcomes = []
         with self.telemetry.timing("spark.delta_table_actions"):
-            for label, qualified, columns, identity, mapping in ordered:
+            for label, qualified, columns, identity, mapping, *policy in ordered:
                 started = time.monotonic()
                 try:
                     create_delta_table_in_session(
@@ -146,6 +151,7 @@ class NotebookSession(Session):
                         columns,
                         identity_column=identity,
                         column_mapping=mapping,
+                        protocol_minima=policy[0] if policy else None,
                     )
                 except Exception as exc:
                     outcome = {
