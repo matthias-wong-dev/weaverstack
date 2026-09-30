@@ -53,13 +53,15 @@ class BuildResult:
     errors: tuple[BuildFailure, ...] = ()
     selection: Any = field(default=None, repr=False, compare=False)
     installation_report: Any = field(default=None, repr=False, compare=False)
+    #: The installation report, kept after the build's temporary bundle is gone.
+    report_path: str | None = None
 
     @property
     def succeeded(self) -> bool:
         return self.status == "succeeded"
 
     def to_mapping(self) -> dict:
-        return {
+        mapping = {
             "source": self.source,
             "items": list(self.items),
             "bundle_id": self.bundle_id,
@@ -68,6 +70,10 @@ class BuildResult:
             "status": self.status,
             "errors": [error.to_mapping() for error in self.errors],
         }
+        if self.installation_report is not None:
+            mapping["actions"] = self.installation_report.action_counts()
+            mapping["report_path"] = self.report_path
+        return mapping
 
 
 def build(
@@ -350,8 +356,19 @@ def _run_build(
             ),
             selection=bundle.plan.selection,
             installation_report=report,
+            report_path=_keep_report(report),
         )
     return result
+
+
+def _keep_report(report) -> str:
+    """Write the report to a directory the build's temporary bundle is not in."""
+
+    from ..build_bundle.installer import REPORT_FILENAME
+
+    path = Path(tempfile.mkdtemp(prefix="weaver-build-report-")) / REPORT_FILENAME
+    path.write_text(report.to_yaml(), encoding="utf-8")
+    return path.as_posix()
 
 
 def _selection_lines(selection, bindings) -> tuple[str, ...]:

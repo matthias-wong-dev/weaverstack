@@ -24,6 +24,7 @@ import sys
 import types
 
 import pytest
+from support.reports import report_of
 from support.weaver_test import weaver_test
 
 import weaver
@@ -327,7 +328,10 @@ def test_a_failed_build_result_marks_the_build_task_failed(repository, monkeypat
 def test_build_reports_selection_after_the_bundle_and_before_installation(
     monkeypatch, tmp_path
 ):
+    import tempfile
     from contextlib import contextmanager
+
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
 
     from weaver.build_bundle import (
         BuildSelection,
@@ -361,7 +365,7 @@ def test_build_reports_selection_after_the_bundle_and_before_installation(
         bundle_id="bundle-1",
         location=Location(str(tmp_path / "bundle")),
     )
-    report = types.SimpleNamespace(status="succeeded", action_results=lambda: iter(()))
+    report = report_of()
     events = []
 
     class Session:
@@ -436,6 +440,12 @@ def test_build_reports_selection_after_the_bundle_and_before_installation(
     )
     assert result.selection is selection
     assert result.installation_report is report
+    assert result.to_mapping()["actions"] == {
+        "total": 0,
+        "succeeded": 0,
+        "skipped": 0,
+        "failed": 0,
+    }
 
 
 @weaver_test()
