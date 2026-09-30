@@ -539,7 +539,7 @@ def test_archive_cleanup_failure_preserves_the_verified_outcome(
         "error_message": "carrier deletion unavailable",
     }
     if not warning_error:
-        assert any(str(stage) in warning for warning in session.warnings)
+        assert any(stage.as_posix() in warning for warning in session.warnings)
 
 
 @pytest.mark.parametrize("receipt", ["valid", "lost", "wrong_selection"])
