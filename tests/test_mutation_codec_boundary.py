@@ -205,3 +205,60 @@ def test_frozen_mutation_manifest_binds_intent_to_its_identity(tmp_path):
     store.write(location.join("plan.yml"), yaml.safe_dump(mapping).encode("utf-8"))
     with pytest.raises(BuildError, match="identity"):
         load_bundle(location, store=store, allow_mutation=True)
+
+
+@weaver_test()
+@pytest.mark.parametrize("boundary", ["construction", "decoded", "direct_validation"])
+def test_sealed_mutation_identity_rejects_changed_direct_or_decoded_intent(
+    tmp_path, boundary
+):
+    from weaver.mutation.bundle import compute_bundle_id, validate_bundle
+
+    draft = _plan()
+    sealed = replace(draft, bundle_id=compute_bundle_id(draft))
+    batch = sealed.sequences[0].batches[0]
+    changed_action = replace(batch.actions[0], resource_node_id="Files/Other")
+    changed = replace(
+        sealed,
+        bundle_id="",
+        sequences=(
+            replace(
+                sealed.sequences[0],
+                batches=(replace(batch, actions=(changed_action,)),),
+            ),
+        ),
+    )
+    assert compute_bundle_id(changed) != sealed.bundle_id
+    with pytest.raises(BuildError, match="identity"):
+        if boundary == "construction":
+            replace(changed, bundle_id=sealed.bundle_id)
+        elif boundary == "decoded":
+            mapping = changed.to_mapping()
+            mapping["bundle_id"] = sealed.bundle_id
+            MutationPlan.from_mapping(mapping)
+        else:
+            # Revalidation must also reject an object whose frozen guard was bypassed.
+            object.__setattr__(changed, "bundle_id", sealed.bundle_id)
+            validate_bundle(
+                Location(str(tmp_path / "direct")), changed, store=FilesystemStore()
+            )
+
+
+@weaver_test()
+@pytest.mark.parametrize("boundary", ["direct_validation", "load"])
+def test_empty_drafting_identity_is_not_an_execution_bundle(tmp_path, boundary):
+    from weaver.mutation.bundle import validate_bundle, validate_plan_structure
+
+    draft = _plan()
+    assert draft.bundle_id == ""
+    validate_plan_structure(draft)
+    assert MutationPlan.from_mapping(draft.to_mapping()) == draft
+    store = FilesystemStore()
+    location = Location(str(tmp_path / "draft"))
+    store.write(location.join("payload", "runtime.payload"), b"\x00\xff")
+    store.write(location.join("plan.yml"), plan_to_yaml(draft).encode())
+    with pytest.raises(BuildError, match="identity"):
+        if boundary == "load":
+            load_bundle(location, store=store, allow_mutation=True)
+        else:
+            validate_bundle(location, draft, store=store)

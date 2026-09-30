@@ -1,4 +1,8 @@
-"""Planning-only conversion of format-4 Build barriers."""
+"""Planning-only conversion of format-4 batch admission and member order.
+
+The compatibility plan serializes admitted members, including optimized legacy
+groups. Normal format-4 installation retains its grouped and concurrent dispatch.
+"""
 
 from dataclasses import replace
 
@@ -27,9 +31,12 @@ def compile_legacy_build(plan) -> MutationPlan:
             dependencies = () if previous is None else (previous,)
             actions = tuple(
                 MutationAction(
-                    **a.to_mapping(), target_id=batch.target_id, depends_on=dependencies
+                    **a.to_mapping(),
+                    target_id=batch.target_id,
+                    depends_on=dependencies,
+                    settle_after=() if index == 0 else (batch.actions[index - 1].id,),
                 )
-                for a in batch.actions
+                for index, a in enumerate(batch.actions)
             )
             batches.append(MutationBatch(batch.id, batch.target_id, actions))
             if not actions:

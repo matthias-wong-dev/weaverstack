@@ -184,18 +184,28 @@ def validate_mutation_plan(plan: MutationPlan) -> None:
                     raise BuildError("invalid extension payload")
         else:
             _validate_action_shape(action, set())
-        if len(action.depends_on) != len(set(action.depends_on)):
-            raise BuildError(f"action {action.id!r} has a duplicate dependency")
+        edges = (*action.depends_on, *action.settle_after)
+        if len(edges) != len(set(edges)):
+            raise BuildError(f"action {action.id!r} has a duplicate ordering edge")
     try:
-        graph = Graph(
+        ordering = Graph(
+            (a.id for a in actions),
+            ((dep, a.id) for a in actions for dep in (*a.depends_on, *a.settle_after)),
+        )
+        success = Graph(
             (a.id for a in actions),
             ((dep, a.id) for a in actions for dep in a.depends_on),
         )
     except GraphError as exc:
         raise BuildError(str(exc)) from exc
 
-    _validate_results_and_completion(plan, actions, contracts, graph)
-    _validate_scopes(plan, actions, graph)
+    _validate_results_and_completion(plan, actions, contracts, success)
+    _validate_scopes(plan, actions, ordering)
+    if plan.bundle_id:
+        from .bundle import compute_bundle_id
+
+        if plan.bundle_id != compute_bundle_id(plan):
+            raise BuildError("mutation bundle identity does not match its plan")
 
 
 def _validate_results_and_completion(plan, actions, contracts, graph):
@@ -305,8 +315,29 @@ def _validate_scopes(plan, actions, graph):
         if scope.path:
             _check_relative(scope.path, what="scope path")
 
+    targets = {target.id: target for target in plan.targets}
+
+    def workspace_id(target):
+        if target.workspace_id is not None:
+            return target.workspace_id
+        if target.workspace_name is None:
+            return plan.execution.workspace_id
+        return None
+
+    def may_share_item(left_id, right_id):
+        left, right = targets[left_id], targets[right_id]
+        if (left.kind, left.item_id) != (right.kind, right.item_id):
+            return False
+        left_workspace, right_workspace = workspace_id(left), workspace_id(right)
+        # Unresolved workspace names cannot establish physical disjointness.
+        return (
+            left_workspace is None
+            or right_workspace is None
+            or left_workspace == right_workspace
+        )
+
     def covers(parent, child):
-        return parent.target_id == child.target_id and (
+        return may_share_item(parent.target_id, child.target_id) and (
             parent.path == ""
             or parent.path == child.path
             or child.path.startswith(parent.path + "/")

@@ -188,10 +188,7 @@ def write_bundle(
         check_format_version(plan.format_version)
     validate_plan_structure(plan)
     if isinstance(plan, MutationPlan):
-        identity = compute_bundle_id(plan)
-        if plan.bundle_id and plan.bundle_id != identity:
-            raise BuildError("mutation bundle identity does not match its plan")
-        plan = replace(plan, bundle_id=identity)
+        plan = replace(plan, bundle_id=compute_bundle_id(plan))
     payloads = dict(payloads)
     for relative, data in payloads.items():
         _check_payload_path(relative)
@@ -242,8 +239,6 @@ def load_bundle(
         store.read(plan_location).decode("utf-8"), allow_mutation=allow_mutation
     )
     validate_bundle(location, plan, store=store)
-    if isinstance(plan, MutationPlan) and plan.bundle_id != compute_bundle_id(plan):
-        raise BuildError("mutation bundle identity does not match its manifest")
     return BuildBundle(location=location, plan=plan, store=store)
 
 
@@ -258,6 +253,8 @@ def validate_bundle(
     """
 
     validate_plan_structure(plan)
+    if isinstance(plan, MutationPlan) and not plan.bundle_id:
+        raise BuildError("mutation bundle requires a sealed identity")
     _validate_payload_integrity(location, plan, store)
 
 

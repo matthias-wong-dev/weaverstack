@@ -181,8 +181,16 @@ class DriverContract:
 
 @dataclass(frozen=True, kw_only=True)
 class MutationAction(InstallAction):
+    """Success prerequisites and known-terminal ordering are separate edges.
+
+    ``settle_after`` permits continuation after a known failure or blocked
+    outcome. Pending or uncertain work remains unsettled. Only ``depends_on``
+    provides successful production, result and certification evidence.
+    """
+
     target_id: str
     depends_on: tuple[str, ...]
+    settle_after: tuple[str, ...] = ()
     result_from: ResultReference | None = None
     certifies: tuple[str, ...] = ()
     resources: tuple[str, ...] = ()
@@ -197,6 +205,11 @@ class MutationAction(InstallAction):
 
             raise BuildError(f"action {self.id!r} has a duplicate dependency")
         object.__setattr__(self, "depends_on", tuple(sorted(dependencies)))
+        object.__setattr__(
+            self,
+            "settle_after",
+            tuple(sorted(owned_strings(self.settle_after, what="settle_after"))),
+        )
         for name in ("certifies", "resources", "exclusions"):
             object.__setattr__(
                 self, name, owned_strings(getattr(self, name), what=name)
@@ -209,6 +222,7 @@ class MutationAction(InstallAction):
     def to_mapping(self) -> dict[str, Any]:
         mapping = super().to_mapping()
         mapping["depends_on"] = sorted(self.depends_on)
+        mapping["settle_after"] = list(self.settle_after)
         mapping["result_from"] = (
             None if self.result_from is None else self.result_from.to_mapping()
         )
@@ -220,7 +234,9 @@ class MutationAction(InstallAction):
 
     @classmethod
     def from_mapping(cls, mapping, *, target_id):
-        checked_mapping(mapping, cls, exclude=("target_id",))
+        checked_mapping(
+            mapping, cls, exclude=("target_id",), required=("settle_after",)
+        )
         values = dict(mapping)
         if values.get("result_from") is not None:
             values["result_from"] = ResultReference.from_mapping(values["result_from"])

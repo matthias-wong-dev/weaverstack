@@ -300,29 +300,57 @@ Normal Build writes format 4 and uses the existing Installer and archive path.
 
 Format 5 is available through the codec's explicit `allow_mutation=True` option.
 The legacy Installer rejects it before binding targets. Every format-5 action
-carries `depends_on`, including an empty list for roots. Sequence and batch
-nesting is the authoritative action collection; batches decode target bindings,
-and sequences provide presentation grouping. Dependency edges define execution
-intent. `compile_legacy_build` converts format-4 plans into explicit conservative
-batch barriers using linear-sized completion gates. It preserves member IDs,
-source paths and the Build envelope and performs no execution.
+supplies `depends_on` and `settle_after`, including empty lists for roots.
+Sequence and batch nesting is the authoritative action collection; batches decode
+target bindings, and sequences provide presentation grouping. The planner freezes
+both edge sets. Execution may use only those links.
+
+`depends_on` requires successful predecessors. `settle_after` imposes order after
+a predecessor's known terminal outcome, including known failure or dependency
+blocking. It permits an otherwise admitted member to continue after failure.
+Pending or uncertain outcomes remain unsettled. Failed, blocked and uncertain
+actions provide no success evidence. Typed result references, certification and
+asynchronous required-completion proofs follow success paths only. Physical writer
+ordering may use the union of both edge sets. References must exist; self-links,
+duplicate edges within or across the sets, and cycles in their union are invalid.
+
+`compile_legacy_build` preserves member IDs, source paths, groups and the Build
+envelope. Each admitted batch has a linear settlement chain in manifest order and
+a success gate over every original member. Later batches and sequences require
+the preceding gate's success. A known failed member permits the remaining admitted
+members to run in order while blocking the next batch. The compatibility compiler
+serializes even legacy groups whose normal dispatch can overlap members. This
+bounded planning-only conversion has linear-sized links and gates. Normal format-4
+installation retains Spark grouping, bulk actions and direct-Delta concurrency.
 
 A `MutationPlan` owns tuples and recursively frozen envelope mappings. Construction
 and decoding use the same structural validation and `weaver.graph.Graph`.
-Dependencies, typed result references, required completion, resource exclusions,
-write scopes and protected scopes participate in canonical identity. Dependency
-order is canonical; duplicate dependencies are invalid. The codec retains
-`plan.yml`, `payload/`, binary bytes, SHA-256 checks and manifest-last writes.
+Both edge sets, typed result references, required completion, resource exclusions,
+write scopes and protected scopes participate in canonical identity. Edge order
+is canonical. A nonempty `bundle_id` must match the plan's computed identity at
+shared validation. Empty identity is allowed for drafting; bundle validation
+requires a sealed identity, and the writer seals drafts before writing. The codec
+retains `plan.yml`, `payload/`, binary bytes, SHA-256 checks and manifest-last writes.
 
 `DriverContract` declares an extension's payload and result types and whether it
 starts or settles an asynchronous operation. Validation requires causal typed
-references and settlement before declared certification and required completion.
-`PhysicalScope` contracts require destructive writes to respect protected scopes;
-overlapping writers need dependency ordering or a common exclusion. These are
-structural extension contracts. Matching runtime drivers, exclusion enforcement,
-yielding waits and archive delegation are gated until the common executor and
-archive implementation land. Shortcut and endpoint readiness retain their
-current implementations. Load and Test scheduling is unchanged.
+references and successful settlement before declared certification and required
+completion. `PhysicalScope` comparisons use item kind, item ID and effective
+workspace ID across manifest aliases. A target's explicit workspace ID takes
+precedence; a target with no workspace descriptor uses the execution workspace ID.
+Workspace display names provide no physical identity. When either workspace is
+unresolved, equal kind/item IDs are potentially overlapping. Destructive writes
+must respect protected scopes, and overlapping writers need enforced ordering or
+a common exclusion. Different known workspace IDs, item IDs, kinds or disjoint
+paths retain distinct scopes.
+
+These are structural extension contracts. Matching runtime drivers, exclusion
+enforcement, yielding waits and archive delegation remain gated. External fragment
+prerequisite receipts must distinguish successful outcomes from known-terminal
+ordering outcomes. A terminal-order receipt cannot satisfy a success prerequisite,
+supply a typed production result or certify completion. An uncertain receipt
+satisfies neither edge. Shortcut and endpoint readiness retain their current
+implementations. Load and Test scheduling is unchanged.
 
 ## Architecture invariants
 
