@@ -17,6 +17,7 @@ from ...declaration.metadata import (
     audit_column_name,
     signature_column_name,
 )
+from ...delta_protocol import ProtocolOptions
 from ...errors import InstallError
 from ..models import InstallAction
 from .base import InstallationContext
@@ -38,13 +39,16 @@ class SparkTableExecutor:
         context: InstallationContext,
     ) -> dict[str, Any] | None:
         specification, details = self.prepare(action, payload, context)
-        qualified, physical, identity_name, column_mapping = specification
+        qualified, physical, identity_name, column_mapping, *policy = specification
+        creation_options: ProtocolOptions = (
+            {"protocol_minima": policy[0]} if policy else {}
+        )
         from ...sessions.direct_delta import direct_profile_supported
 
         direct = direct_profile_supported(physical, identity_name, column_mapping)
         if direct and context.create_direct_delta_table is not None:
             context.create_direct_delta_table(
-                qualified, physical, identity_column=identity_name
+                qualified, physical, identity_column=identity_name, **creation_options
             )
         else:
             assert context.create_delta_table is not None
@@ -53,6 +57,7 @@ class SparkTableExecutor:
                 physical,
                 identity_column=identity_name,
                 column_mapping=column_mapping,
+                **creation_options,
             )
         return details
 
@@ -140,6 +145,8 @@ class SparkTableExecutor:
             identity_name,
             instruction.get("column_mapping", True),
         )
+        if "protocol_minima" in instruction:
+            specification += (instruction["protocol_minima"],)
         details = {
             "object": qualified,
             "schema_mode": instruction["schema_mode"],

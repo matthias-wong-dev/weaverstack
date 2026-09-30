@@ -592,7 +592,7 @@ def _run_table_actions(
             ):
                 outcomes = installer.direct_delta_table_actions()(
                     [
-                        (action.id, *specification[:3])
+                        (action.id, *specification[:3], *specification[4:])
                         for action, specification, _ in prepared
                     ]
                 )

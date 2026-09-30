@@ -12,6 +12,7 @@ import threading
 from dataclasses import dataclass
 from typing import Any, Sequence
 
+from ..delta_protocol import DirectDeltaAction, ProtocolMinima, SparkDeltaAction
 from ..errors import CommandError
 from ..targets import ItemRef, WarehouseTarget
 from ..workspaces import Workspace
@@ -394,6 +395,7 @@ class ConsoleSession(Session):
         columns: Sequence[Sequence[Any]],
         *,
         identity_column: str | None = None,
+        protocol_minima: ProtocolMinima | None = None,
         workspace: Workspace | None = None,
     ) -> Any:
         from .direct_delta import create_bound_delta_table
@@ -408,11 +410,12 @@ class ConsoleSession(Session):
                 store=scope.transport_store,
                 publish=scope.transport_store.rename_directory,
                 resolver_lock=self._delta_resolution_lock,
+                protocol_minima=protocol_minima,
             )
 
     def create_direct_delta_table_actions(
         self,
-        actions: Sequence[tuple[str, str, Sequence[Sequence[Any]], str | None]],
+        actions: Sequence[DirectDeltaAction],
         *,
         workspace: Workspace | None = None,
     ) -> list[dict[str, Any]]:
@@ -423,13 +426,14 @@ class ConsoleSession(Session):
             self.scope(workspace)
         context = self.telemetry.capture_context()
 
-        def create(qualified, columns, *, identity_column, workspace):
+        def create(qualified, columns, *, identity_column, workspace, **options):
             with self.telemetry.use_context(context):
                 return self.create_direct_delta_table(
                     qualified,
                     columns,
                     identity_column=identity_column,
                     workspace=workspace,
+                    **options,
                 )
 
         return run_direct_delta_actions(
@@ -446,6 +450,7 @@ class ConsoleSession(Session):
         *,
         identity_column: str | None = None,
         column_mapping: bool = True,
+        protocol_minima: ProtocolMinima | None = None,
         workspace: Workspace | None = None,
         timeout: float | None = None,
     ) -> Any:
@@ -456,6 +461,7 @@ class ConsoleSession(Session):
             columns,
             identity_column=identity_column,
             column_mapping=column_mapping,
+            protocol_minima=protocol_minima,
         )
         scope = self.scope(workspace)
         livy = self._foreground_livy(scope)
@@ -468,7 +474,7 @@ class ConsoleSession(Session):
 
     def create_delta_table_actions(
         self,
-        actions: Sequence[tuple[str, str, Sequence[Sequence[Any]], str | None, bool]],
+        actions: Sequence[SparkDeltaAction],
         *,
         workspace: Workspace | None = None,
         timeout: float | None = None,

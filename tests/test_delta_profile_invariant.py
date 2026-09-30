@@ -57,7 +57,12 @@ def test_profile_compiles_schema_properties_and_allocated_names_invariant():
     profile = compile_delta_profile_v1(COLUMNS)
     assert profile.version == "weaver-delta/v1"
     assert profile.writer_version == "1.6.6"
-    assert profile.protocol == {"minReaderVersion": 2, "minWriterVersion": 5}
+    assert profile.protocol == {
+        "minReaderVersion": 3,
+        "minWriterVersion": 7,
+        "readerFeatures": ["columnMapping"],
+        "writerFeatures": ["columnMapping", "invariants"],
+    }
     assert profile.configuration == {
         "delta.columnMapping.mode": "name",
         "delta.columnMapping.maxColumnId": "3",

@@ -6,6 +6,7 @@ import json
 from importlib import import_module
 from typing import Any, Sequence
 
+from ..delta_protocol import ProtocolMinima, SparkDeltaAction, resolve_protocol_minima
 from ..errors import CommandError
 
 _CASE_SENSITIVE = "spark.sql.caseSensitive"
@@ -25,9 +26,11 @@ def create_delta_table_in_session(
     *,
     identity_column: str | None,
     column_mapping: bool,
+    protocol_minima: ProtocolMinima | None = None,
 ):
     """Create one strict Delta table against an active Spark session."""
 
+    minima = resolve_protocol_minima(protocol_minima)
     delta_tables = import_module("delta.tables")
     DeltaTable = delta_tables.DeltaTable
 
@@ -50,6 +53,9 @@ def create_delta_table_in_session(
                 assert identity_generator is not None
                 options["generatedAlwaysAs"] = identity_generator()
             builder = builder.addColumn(name, type_, **options)
+        builder = builder.property(
+            "delta.minReaderVersion", str(minima["minReaderVersion"])
+        ).property("delta.minWriterVersion", str(minima["minWriterVersion"]))
         if column_mapping:
             builder = builder.property("delta.columnMapping.mode", "name")
         return builder.execute()
@@ -64,6 +70,7 @@ def remote_delta_table_program(
     *,
     identity_column: str | None,
     column_mapping: bool,
+    protocol_minima: ProtocolMinima | None = None,
 ) -> str:
     """Return a self-contained program for the desktop Session's Livy crossing."""
 
@@ -73,6 +80,7 @@ def remote_delta_table_program(
             "columns": [list(column) for column in columns],
             "identity_column": identity_column,
             "column_mapping": bool(column_mapping),
+            "protocol_minima": resolve_protocol_minima(protocol_minima),
         },
         ensure_ascii=True,
         separators=(",", ":"),
@@ -105,6 +113,8 @@ def remote_delta_table_program(
         "        if _name == _spec['identity_column']:\n"
         "            _options['generatedAlwaysAs'] = _identity_factory()\n"
         "        _builder = _builder.addColumn(_name, _type, **_options)\n"
+        "    for _key, _value in _spec['protocol_minima'].items():\n"
+        "        _builder = _builder.property('delta.' + _key, str(_value))\n"
         "    if _spec['column_mapping']:\n"
         "        _builder = _builder.property('delta.columnMapping.mode', 'name')\n"
         "    _builder.execute()\n"
@@ -115,7 +125,7 @@ def remote_delta_table_program(
     )
 
 
-def remote_delta_table_actions_program(actions) -> str:
+def remote_delta_table_actions_program(actions: Sequence[SparkDeltaAction]) -> str:
     """Run labelled TableBuilder creates in order with one outcome per Table."""
     specification = json.dumps(
         [
@@ -125,8 +135,11 @@ def remote_delta_table_actions_program(actions) -> str:
                 "columns": [list(column) for column in columns],
                 "identity_column": identity,
                 "column_mapping": bool(mapping),
+                "protocol_minima": resolve_protocol_minima(
+                    policy[0] if policy else None
+                ),
             }
-            for label, qualified, columns, identity, mapping in actions
+            for label, qualified, columns, identity, mapping, *policy in actions
         ],
         ensure_ascii=True,
         separators=(",", ":"),
@@ -164,6 +177,8 @@ def remote_delta_table_actions_program(actions) -> str:
         "                if _name == _spec['identity_column']:\n"
         "                    _options['generatedAlwaysAs'] = _identity_factory()\n"
         "                _builder = _builder.addColumn(_name, _type, **_options)\n"
+        "            for _key, _value in _spec['protocol_minima'].items():\n"
+        "                _builder = _builder.property('delta.' + _key, str(_value))\n"
         "            if _spec['column_mapping']:\n"
         "                _builder = _builder.property('delta.columnMapping.mode', 'name')\n"
         "            _builder.execute()\n"

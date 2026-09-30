@@ -109,19 +109,68 @@ def test_direct_creation_publishes_only_the_verified_profile(tmp_path):
 
 
 @weaver_test()
-def test_direct_creation_refuses_variant_before_writing(tmp_path):
+@pytest.mark.parametrize(
+    "type_name, feature",
+    [("variant", "variantType"), ("timestamp_ntz", "timestampNtz")],
+)
+@pytest.mark.parametrize("identity", [None, "Id"])
+def test_direct_creation_publishes_a_verified_feature_table(
+    tmp_path, type_name, feature, identity
+):
+    from weaver.sessions.delta_profile import (
+        compile_delta_profile_v1,
+        read_delta_snapshot,
+        verify_delta_profile_v1,
+    )
+
     stage = tmp_path / "Files" / "private"
     destination = tmp_path / "Tables" / "dbo" / "Customer"
-    with pytest.raises(ValueError, match="VARIANT.*not supported"):
-        create_staged_delta_table(
-            stage=Location(str(stage)),
-            destination=Location(str(destination)),
-            store=FilesystemStore(),
-            columns=(("Payload", "variant", False),),
-            identity_column=None,
-            publish=lambda *_: pytest.fail("published unsupported Table"),
+    destination.parent.mkdir(parents=True)
+    columns = (
+        (("Id", "bigint", True), ("Payload", type_name, False))
+        if identity
+        else (("Payload", type_name, False),)
+    )
+    allocation = create_staged_delta_table(
+        stage=Location(str(stage)),
+        destination=Location(str(destination)),
+        store=FilesystemStore(),
+        columns=columns,
+        identity_column=identity,
+        publish=lambda source, target: Path(source.value).rename(target.value),
+    )
+    snapshot = read_delta_snapshot(FilesystemStore(), Location(str(destination)))
+    assert (
+        verify_delta_profile_v1(
+            compile_delta_profile_v1(columns, identity_column=identity), snapshot
         )
-    assert not stage.exists() and not destination.exists()
+        == allocation
+    )
+    assert set(snapshot["protocol"]["readerFeatures"]) == {"columnMapping", feature}
+    assert ("identityColumns" in snapshot["protocol"]["writerFeatures"]) is bool(
+        identity
+    )
+    assert not stage.exists() and destination.is_dir()
+
+
+@weaver_test()
+def test_native_writer_honours_explicit_protocol_minimums(tmp_path):
+    from weaver.sessions.delta_profile import read_delta_snapshot
+
+    stage = tmp_path / "stage"
+    destination = tmp_path / "table"
+    create_staged_delta_table(
+        stage=Location(str(stage)),
+        destination=Location(str(destination)),
+        store=FilesystemStore(),
+        columns=(("Value", "string", False),),
+        identity_column=None,
+        protocol_minima={"minReaderVersion": 2, "minWriterVersion": 5},
+        publish=lambda source, target: Path(source.value).rename(target.value),
+    )
+    assert read_delta_snapshot(FilesystemStore(), Location(str(destination)))[
+        "protocol"
+    ] == {"minReaderVersion": 2, "minWriterVersion": 5}
 
 
 @weaver_test()
@@ -246,6 +295,7 @@ def test_direct_table_uses_resolved_item_and_private_stage(monkeypatch, native_s
             resolver=resolver,
             store=store,
             publish=store.rename_directory,
+            protocol_minima={"minReaderVersion": 2, "minWriterVersion": 5},
         )
         == "allocation"
     )
@@ -258,6 +308,7 @@ def test_direct_table_uses_resolved_item_and_private_stage(monkeypatch, native_s
     assert call["stage"].value.startswith(f"{lakehouse_root.value}/Files/weaver-stage-")
     assert "uri" not in call and "storage_options" not in call
     assert call["publish"] == store.rename_directory
+    assert call["protocol_minima"] == {"minReaderVersion": 2, "minWriterVersion": 5}
 
 
 @weaver_test()
@@ -319,8 +370,7 @@ def test_parallel_direct_tables_publish_independent_verified_logs(tmp_path):
 def test_direct_profile_does_not_silently_send_variant_to_spark():
     assert direct_profile_supported((("Id", "bigint", True),), None, True)
     assert not direct_profile_supported((("Lines", "array<int>", False),), None, True)
-    with pytest.raises(ValueError, match="VARIANT.*not supported"):
-        direct_profile_supported((("Payload", "variant", False),), None, True)
+    assert direct_profile_supported((("Payload", "variant", False),), None, True)
 
 
 @weaver_test()

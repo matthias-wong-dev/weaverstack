@@ -15,6 +15,12 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any, Iterator, Sequence
 
+from ..delta_protocol import (
+    DirectDeltaAction,
+    ProtocolMinima,
+    ProtocolOptions,
+    SparkDeltaAction,
+)
 from ..errors import CommandError
 from ..targets import ItemRef
 from ..workspaces import Workspace
@@ -281,6 +287,7 @@ class Session(ABC):
         *,
         identity_column: str | None = None,
         column_mapping: bool = True,
+        protocol_minima: ProtocolMinima | None = None,
         workspace: Workspace | None = None,
         timeout: float | None = None,
     ) -> Any:
@@ -288,7 +295,7 @@ class Session(ABC):
 
     def create_delta_table_actions(
         self,
-        actions: Sequence[tuple[str, str, Sequence[Sequence[Any]], str | None, bool]],
+        actions: Sequence[SparkDeltaAction],
         *,
         workspace: Workspace | None = None,
         timeout: float | None = None,
@@ -296,7 +303,15 @@ class Session(ABC):
         """Create labelled Tables serially; an unclassified failure stops the batch."""
         origin = time.monotonic()
         outcomes = []
-        for label, qualified_name, columns, identity_column, column_mapping in actions:
+        for (
+            label,
+            qualified_name,
+            columns,
+            identity_column,
+            column_mapping,
+            *policy,
+        ) in actions:
+            options: ProtocolOptions = {"protocol_minima": policy[0]} if policy else {}
             started = time.monotonic()
             self.create_delta_table(
                 qualified_name,
@@ -305,6 +320,7 @@ class Session(ABC):
                 column_mapping=column_mapping,
                 workspace=workspace,
                 timeout=timeout,
+                **options,
             )
             outcomes.append(
                 {
@@ -322,30 +338,37 @@ class Session(ABC):
         columns: Sequence[Sequence[Any]],
         *,
         identity_column: str | None = None,
+        protocol_minima: ProtocolMinima | None = None,
         workspace: Workspace | None = None,
     ) -> Any:
         """Third-party Sessions retain their established Spark capability."""
+        options: ProtocolOptions = (
+            {"protocol_minima": protocol_minima} if protocol_minima is not None else {}
+        )
         return self.create_delta_table(
             qualified_name,
             columns,
             identity_column=identity_column,
             workspace=workspace,
+            **options,
         )
 
     def create_direct_delta_table_actions(
         self,
-        actions: Sequence[tuple[str, str, Sequence[Sequence[Any]], str | None]],
+        actions: Sequence[DirectDeltaAction],
         *,
         workspace: Workspace | None = None,
     ) -> list[dict[str, Any]]:
         """An unclassified third-party failure stops this serial fallback."""
-        return self.create_delta_table_actions(
-            [
-                (label, qualified, columns, identity, True)
-                for label, qualified, columns, identity in actions
-            ],
-            workspace=workspace,
-        )
+        spark_actions: list[SparkDeltaAction] = []
+        for action in actions:
+            if len(action) == 4:
+                spark_actions.append((action[0], action[1], action[2], action[3], True))
+            else:
+                spark_actions.append(
+                    (action[0], action[1], action[2], action[3], True, action[4])
+                )
+        return self.create_delta_table_actions(spark_actions, workspace=workspace)
 
     @abstractmethod
     def execute_python(

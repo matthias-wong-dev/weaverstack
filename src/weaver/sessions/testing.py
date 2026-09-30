@@ -20,6 +20,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Sequence
 
+from ..delta_protocol import ProtocolMinima
 from ..errors import CommandError
 from ..workspaces import Workspace
 from .base import Session, WorkspaceScope
@@ -120,6 +121,7 @@ class TestSession(Session):
         *,
         identity_column: str | None = None,
         column_mapping: bool = True,
+        protocol_minima: ProtocolMinima | None = None,
         workspace: Workspace | None = None,
         timeout: float | None = None,
     ) -> Any:
@@ -130,6 +132,11 @@ class TestSession(Session):
                 "columns": [list(column) for column in columns],
                 "identity_column": identity_column,
                 "column_mapping": column_mapping,
+                **(
+                    {"protocol_minima": protocol_minima}
+                    if protocol_minima is not None
+                    else {}
+                ),
             },
             workspace,
             timeout=timeout,
