@@ -499,7 +499,7 @@ def _ids(observation, name: str, column: str) -> list:
 
 
 @weaver_test(integration=True, resources=BUILDING)
-def test_a_realistic_estate_builds_from_nothing(acceptance):
+def test_a_realistic_estate_builds_from_nothing(acceptance, monkeypatch):
     """
     Intent: A realistic multi-item repository builds from nothing against real
     Fabric, catalogue included, with shortcuts into a foreign workspace and a
@@ -530,19 +530,31 @@ def test_a_realistic_estate_builds_from_nothing(acceptance):
     acceptance.step("seed-neighbour", lambda: _seed_the_neighbour(acceptance))
     acceptance.require("seed-neighbour")
 
+    from weaver.build_bundle import Installer
+
+    plans = []
+    install = Installer.install
+
+    def capture_install(installer, bundle, *args, **kwargs):
+        plans.append(bundle.plan)
+        return install(installer, bundle, *args, **kwargs)
+
     archive_offset = len(getattr(acceptance.session, "archive_installations", ()))
-    step = acceptance.step(
-        "build",
-        lambda: weaver.build(
-            acceptance.repository,
-            items=acceptance.build_items,
-            session=acceptance.session,
-        ),
-    )
+    with monkeypatch.context() as capture:
+        capture.setattr(Installer, "install", capture_install)
+        step = acceptance.step(
+            "build",
+            lambda: weaver.build(
+                acceptance.repository,
+                items=acceptance.build_items,
+                session=acceptance.session,
+            ),
+        )
     acceptance.require("build")
 
     archives = acceptance.session.archive_installations[archive_offset:]
-    plan = step.result.plan
+    assert len(plans) == 1
+    plan = plans[0]
     targets = {target.id: target for target in plan.targets}
     expected = [
         action.id
