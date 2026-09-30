@@ -312,7 +312,7 @@ def _validate_scopes(plan, actions, graph):
             raise BuildError(f"unknown scope target {scope.target_id!r}")
         if not isinstance(scope.path, str):
             raise BuildError("scope path must be a string")
-        if scope.path != scope.path.strip():
+        if any(part != part.strip() for part in scope.path.split("/")):
             raise BuildError(f"scope path must be canonical: {scope.path!r}")
         if scope.path:
             _check_relative(scope.path, what="scope path")

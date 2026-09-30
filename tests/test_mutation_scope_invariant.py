@@ -148,7 +148,15 @@ def test_physical_alias_writers_require_enforced_order_or_exclusion(
 @weaver_test()
 @pytest.mark.parametrize("mode", ["direct", "decoded"])
 @pytest.mark.parametrize(
-    "path", ["Files/Protected ", " Files/Protected", "Files/Protected\t"]
+    "path",
+    [
+        "Files/Protected ",
+        " Files/Protected",
+        "Files/Protected\t",
+        "Files/ Protected",
+        "Files/Protected /Keep",
+        "Files/Schema/ Folder",
+    ],
 )
 def test_noncanonical_protected_root_cannot_bypass_scope_checks(mode, path):
     targets = _alias_targets({}, {})
@@ -168,8 +176,11 @@ def test_noncanonical_protected_root_cannot_bypass_scope_checks(mode, path):
 
 @weaver_test()
 @pytest.mark.parametrize("mode", ["direct", "decoded"])
-@pytest.mark.parametrize("policy", ["unordered", "ordered", "excluded"])
-def test_noncanonical_writer_path_cannot_bypass_scope_checks(mode, policy):
+@pytest.mark.parametrize("policy", ["unordered", "ordered", "settled", "excluded"])
+@pytest.mark.parametrize(
+    "path", ["Files/Protected ", "Files/ Protected", "Files/Protected /Keep"]
+)
+def test_noncanonical_writer_path_cannot_bypass_scope_checks(mode, policy, path):
     targets = _alias_targets({}, {})
     exclusions = ("item-files",) if policy == "excluded" else ()
     first = _writer("sales", exclusions=exclusions)
@@ -177,9 +188,11 @@ def test_noncanonical_writer_path_cannot_bypass_scope_checks(mode, policy):
         _writer(
             "alias",
             depends_on=("sales",) if policy == "ordered" else (),
+            settle_after=("sales",) if policy == "settled" else (),
             exclusions=exclusions,
         ),
-        writes=(PhysicalScope("alias", "Files/Protected "),),
+        resource_node_id="folder:" + path.removeprefix("Files/"),
+        writes=(PhysicalScope("alias", path),),
     )
     base = _plan(targets, (first,))
     with pytest.raises(BuildError, match="scope path must be canonical"):
@@ -192,6 +205,68 @@ def test_noncanonical_writer_path_cannot_bypass_scope_checks(mode, policy):
         else:
             mapping = base.to_mapping()
             mapping["sequences"][0]["batches"][1]["actions"] = [second.to_mapping()]
+            MutationPlan.from_mapping(mapping)
+
+
+@weaver_test()
+@pytest.mark.parametrize("mode", ["direct", "decoded"])
+@pytest.mark.parametrize("scenario", ["protected", "writers"])
+@pytest.mark.parametrize(
+    "name", [" Protected", "Protected ", "\tProtected", "Protected\t"]
+)
+def test_resolved_folder_component_alias_is_refused(mode, scenario, name):
+    from weaver.build_bundle.executors.base import InstallationContext, ResolvedTarget
+    from weaver.build_bundle.executors.folder import FolderExecutor
+    from weaver.fabric.resolution import FabricResolver
+    from weaver.fabric.resources import Item, WorkspaceItem
+    from weaver.targets import ItemRef
+    from weaver.workspaces import Workspace
+
+    class NoNetwork:
+        def __getattr__(self, name):
+            raise AssertionError(f"unexpected external operation: {name}")
+
+    target = BoundTarget(
+        "sales",
+        "lakehouse",
+        "11111111-1111-4111-8111-111111111111",
+        workspace_id="22222222-2222-4222-8222-222222222222",
+    )
+    resolver = FabricResolver(Workspace(workspace="Demo"), client=NoNetwork())
+    resolver._workspace = WorkspaceItem(target.workspace_id, "Demo")
+    resolver._items[target.item_id + ":Lakehouse"] = Item(
+        target.item_id, "Sales", "Lakehouse", target.workspace_id
+    )
+    context = InstallationContext(
+        resolver=resolver,
+        store=NoNetwork(),
+        target=ResolvedTarget(target, ItemRef(target.item_id)),
+    )
+    executor = FolderExecutor()
+    canonical = executor._location("folder:Protected", context)
+    assert executor._location("folder:" + name, context) == canonical
+    scope = PhysicalScope("sales", "Files/" + name)
+    padded = replace(
+        _writer("sales"),
+        id="padded",
+        resource_node_id="folder:" + name,
+        writes=(scope,),
+        destructive_scopes=(scope,) if scenario == "protected" else (),
+    )
+    existing = (
+        (replace(_writer("sales"), id="canonical"),) if scenario == "writers" else ()
+    )
+    protected = (
+        (PhysicalScope("sales", "Files/Protected"),) if scenario == "protected" else ()
+    )
+    base = _plan((target,), existing)
+    with pytest.raises(BuildError, match="scope path must be canonical"):
+        if mode == "direct":
+            _plan((target,), (*existing, padded), protected=protected)
+        else:
+            mapping = base.to_mapping()
+            mapping["sequences"][0]["batches"][0]["actions"].append(padded.to_mapping())
+            mapping["protected_scopes"] = [scope.to_mapping() for scope in protected]
             MutationPlan.from_mapping(mapping)
 
 

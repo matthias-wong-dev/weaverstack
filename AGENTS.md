@@ -343,8 +343,9 @@ retains `plan.yml`, `payload/`, binary bytes, SHA-256 checks and manifest-last w
 starts or settles an asynchronous operation. Validation requires causal typed
 references and successful settlement before declared certification and required
 completion. `PhysicalScope.path` is canonical target-relative intent. Shared
-validation rejects outer whitespace, unsafe relative paths and padded physical
-item/workspace IDs before scope comparisons; execution does not repair them.
+validation rejects whitespace padding in any path component, unsafe relative paths
+and padded physical item/workspace IDs before scope comparisons; execution does
+not repair them.
 The empty scope path covers the whole target. `PhysicalScope` comparisons use item
 kind, item ID and effective workspace ID across manifest aliases. A target's
 explicit workspace ID takes
