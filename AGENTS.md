@@ -253,13 +253,19 @@ Installer loop. Custom executor registries retain that loop.
 `ConsoleSession` carries eligible Lakehouse bundles into its existing Livy
 session. Eligibility requires the bundle's frozen Spark attachment, built-in
 executors, and Lakehouse destinations with the central catalogue Warehouse.
-Custom ConsoleSession implementations and injected transports use their existing
-capabilities. Warehouse workloads and bundles without Spark work retain their
-existing installation path.
+Mixed installations offer contiguous Lakehouse batches from each sequence to
+`Session.install_batches`. Warehouse batches retain their existing execution
+path. Batch order and sequence barriers remain fixed, and every segment shares
+the installation's Registry timestamp. A borrowed `LivySession` uses the same
+archive path; custom sessions, stores, resolvers and Livy implementations retain
+their supplied capabilities.
 
 The carrier contains the frozen manifest, referenced payload bytes and the
 caller's Python runtime sources and static SQL, YAML and JSON resources. The
-carrier and every member have a SHA-256 identity. Extraction validates the full
+batch-selection request is a hashed carrier member; the frozen manifest and
+payloads remain unchanged. The remote installer validates the full bundle before
+executing the selected contiguous Lakehouse batches.
+The carrier and every member have a SHA-256 identity. Extraction validates the full
 inventory, paths, file kinds and content before creating the private tree. The
 expanded-size bound is 128 MiB; larger bundles retain the local Installer loop.
 The remote program imports the extracted runtime in an isolated namespace and

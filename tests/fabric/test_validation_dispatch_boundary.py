@@ -42,6 +42,7 @@ def judged(
     weaver_session,
     fabric_target_lakehouse,
     fabric_empty_lakehouse,
+    fabric_lakehouse_cleanup,
     fabric_initialise_catalogue,
     tmp_path_factory,
 ):
@@ -50,6 +51,7 @@ def judged(
     from weaver.fabric import FabricResolver, OneLakeDfsClient
 
     lakehouse = fabric_target_lakehouse.name
+    fabric_lakehouse_cleanup(lakehouse)
     fabric_empty_lakehouse(lakehouse)
     fabric_initialise_catalogue()
 

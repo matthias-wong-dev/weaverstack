@@ -267,6 +267,12 @@ class Session(ABC):
         """Install a frozen bundle as one host-owned unit, or decline before work."""
         return None
 
+    def install_batches(
+        self, bundle, *, sequence_number, batch_ids, build_datetime, workspace=None
+    ):
+        """Install contiguous Lakehouse batches, or decline before work."""
+        return None
+
     @abstractmethod
     def create_delta_table(
         self,

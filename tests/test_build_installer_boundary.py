@@ -107,6 +107,109 @@ def _bundle(tmp_path):
     return location, store
 
 
+@pytest.mark.parametrize(
+    "outcome", ["success", "failure", "uncertain", "decline", "exception"]
+)
+@weaver_test()
+def test_mixed_install_delegates_lakehouse_batches_in_manifest_order(tmp_path, outcome):
+    import hashlib
+
+    from weaver.build_bundle import Installer
+    from weaver.build_bundle.bundle import BuildBundle
+
+    location, store = _bundle(tmp_path)
+    frozen = load_bundle(location, store=store)
+    warehouse = BoundTarget(id="warehouse-WH", kind="warehouse", item_id="WH")
+    warehouse_action = replace(
+        frozen.plan.sequences[0].batches[0].actions[0],
+        id="warehouse-action",
+        executor="tsql",
+        payload="payload/warehouse.sql",
+        payload_sha256=hashlib.sha256(b"select 1;").hexdigest(),
+    )
+    sequence = replace(
+        frozen.plan.sequences[0],
+        batches=(
+            frozen.plan.sequences[0].batches[0],
+            BuildBatch("warehouse-batch", warehouse.id, (warehouse_action,)),
+            frozen.plan.sequences[1].batches[0],
+        ),
+    )
+    plan = replace(
+        frozen.plan,
+        targets=frozen.plan.targets + (warehouse,),
+        sequences=(sequence, frozen.plan.sequences[2]),
+    )
+    payloads = {
+        action.payload: store.read(frozen.location.join(*action.payload.split("/")))
+        for _, _, action in frozen.plan.actions()
+    }
+    payloads[warehouse_action.payload] = b"select 1;"
+    mixed = write_bundle(location, plan=plan, payloads=payloads, store=store)
+    installer = given_installer(store=store, warehouses=("WH",))
+    delegated = []
+    instants = []
+    import types
+
+    warehouse_calls = []
+    installer.session.sql_executor = lambda *args, **kwargs: types.SimpleNamespace(
+        execute_script=warehouse_calls.append
+    )
+
+    def install_batches(
+        bundle, *, sequence_number, batch_ids, build_datetime, workspace
+    ):
+        delegated.append((sequence_number, batch_ids))
+        instants.append(build_datetime)
+        selected = next(
+            row for row in bundle.plan.sequences if row.number == sequence_number
+        )
+        selected = replace(
+            selected,
+            batches=tuple(batch for batch in selected.batches if batch.id in batch_ids),
+        )
+        part = BuildBundle(
+            bundle.location, replace(bundle.plan, sequences=(selected,)), bundle.store
+        )
+        if outcome == "decline":
+            return None
+        if outcome == "exception":
+            raise RuntimeError("unsubmitted carrier failed")
+        if outcome == "uncertain":
+            from weaver.sessions.install_archive import uncertain_report
+
+            return uncertain_report(part.plan, "receipt lost", "remote-result.json")
+        if outcome == "failure":
+            return Installer(
+                installer.session, executors={"spark_sql": Recorder(fail_on=("a1",))}
+            ).install(part)
+        return Installer(installer.session).install(
+            part, on_sequence=lambda report: None
+        )
+
+    installer.session.install_batches = install_batches
+    report = installer.install(mixed)
+    failed = outcome in ("failure", "uncertain", "exception")
+    assert report.status == (FAILED if failed else SUCCEEDED)
+    assert delegated == (
+        [(10, ("b0",))] if failed else [(10, ("b0",)), (10, ("b1",)), (30, ("b2",))]
+    )
+    assert len(set(instants)) == 1
+    assert warehouse_calls == ([] if failed else ["select 1;"])
+    assert [row.status for row in report.action_results()] == (
+        [FAILED, SKIPPED, SKIPPED, SKIPPED] if failed else [SUCCEEDED] * 4
+    )
+    assert [row.action_id for row in report.action_results()] == [
+        "a1",
+        "warehouse-action",
+        "a2",
+        "a3",
+    ]
+    assert (
+        load_bundle(location, store=store).plan.to_mapping() == mixed.plan.to_mapping()
+    )
+
+
 @weaver_test()
 def test_corrupt_archive_receipt_remains_uncertain(tmp_path, monkeypatch):
     import hashlib
@@ -247,6 +350,7 @@ def test_archive_interruption_preserves_the_acknowledged_boundary(
         assert report is not None
         if outcome == "completed":
             assert report.to_mapping() == expected.to_mapping()
+            assert len(session.archive_installations) == 1
         else:
             rows = list(report.action_results())
             assert report.status == FAILED
@@ -279,6 +383,7 @@ def test_changed_executor_registry_keeps_the_local_install_path(tmp_path):
         raise AssertionError("custom executor was delegated")
 
     installer.session.install_bundle = unsupported
+    installer.session.install_batches = unsupported
     report = installer.install(load_bundle(location, store=store))
     assert report.status == SUCCEEDED
     assert recorder.calls == ["a1", "a2", "a3"]
@@ -337,6 +442,148 @@ def test_console_archive_declines_before_mutation_without_submission_retry(
     assert len(calls) == 1
     assert calls[0]["retry_submission"] is False
     assert not list(resolver.files_root(ItemRef(TARGET.item_id)).path.iterdir())
+
+
+@pytest.mark.parametrize("receipt", ["valid", "lost", "wrong_selection"])
+@weaver_test()
+def test_console_archive_uses_borrowed_livy_for_selected_lakehouse_batches(
+    tmp_path, monkeypatch, receipt
+):
+    import hashlib
+    import json
+    import types
+    import zipfile
+
+    from weaver.fabric import LivySession
+    from weaver.sessions import ConsoleSession
+    from weaver.targets import ItemRef
+
+    location, store = _bundle(tmp_path)
+    bundle = load_bundle(location, store=store)
+    part = replace(
+        bundle, plan=replace(bundle.plan, sequences=(bundle.plan.sequences[1],))
+    )
+    expected = given_installer(
+        store=store, executors={"spark_sql": Recorder()}
+    ).install(part)
+    resolver = given_resolver(root=tmp_path / "destination")
+    files = resolver.files_root(ItemRef(TARGET.item_id)).path
+    calls = []
+
+    def submit(source, **kwargs):
+        calls.append(kwargs)
+        stage = next(files.iterdir())
+        with zipfile.ZipFile(stage / "carrier.zip") as carrier:
+            request = json.loads(carrier.read("request.json"))
+            assert carrier.read("bundle/plan.yml") == store.read(location / "plan.yml")
+            assert request["batch_ids"] == ["b1"]
+        result = {
+            "status": "completed",
+            "request": request,
+            "archive_sha256": hashlib.sha256(
+                (stage / "carrier.zip").read_bytes()
+            ).hexdigest(),
+            "report": expected.to_mapping(),
+        }
+        if receipt == "wrong_selection":
+            result["request"] = dict(request, batch_ids=["b0"])
+        data = json.dumps(result).encode()
+        (stage / "result.json").write_bytes(data)
+        if receipt == "lost":
+            raise TimeoutError("receipt lost")
+        return {"bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()}
+
+    scope = types.SimpleNamespace(
+        resolver=resolver, transport_store=FilesystemStore(), livy_run=submit
+    )
+    session = ConsoleSession(progress=False, livy=object.__new__(LivySession))
+    monkeypatch.setattr(session, "scope", lambda workspace=None: scope)
+    report = session.install_batches(
+        bundle,
+        sequence_number=20,
+        batch_ids=("b1",),
+        build_datetime="2026-09-30 12:34:56.000000",
+        workspace=given_workspace(),
+        timeout=7,
+    )
+    assert [row.action_id for row in report.action_results()] == ["a2"]
+    assert report.status == (FAILED if receipt == "wrong_selection" else SUCCEEDED)
+    if receipt == "wrong_selection":
+        assert next(report.action_results()).details["uncertain"]
+    else:
+        assert len(session.archive_installations) == 1
+    assert calls[0]["retry_submission"] is False
+    assert calls[0]["timeout"] == 7
+    assert len(list(files.iterdir())) == (1 if receipt == "wrong_selection" else 0)
+
+
+@pytest.mark.parametrize(
+    "sequence_number,batch_ids",
+    [
+        (999, ("b0",)),
+        (10, ()),
+        (10, ("unknown",)),
+        (10, ("b0", "b0")),
+        (10, ("b1", "b0")),
+        (10, ("b0", "b2")),
+        (10, ("warehouse-batch",)),
+    ],
+)
+@weaver_test()
+def test_archive_selection_refuses_invalid_or_noncontiguous_batches(
+    tmp_path, sequence_number, batch_ids
+):
+    from weaver.build_bundle.installer import select_install_batches
+    from weaver.errors import InstallError
+
+    location, store = _bundle(tmp_path)
+    plan = load_bundle(location, store=store).plan
+    warehouse = BoundTarget(id="warehouse-WH", kind="warehouse", item_id="WH")
+    original = [sequence.batches[0] for sequence in plan.sequences]
+    sequence = replace(
+        plan.sequences[0],
+        batches=tuple(original) + (BuildBatch("warehouse-batch", warehouse.id, ()),),
+    )
+    mixed = replace(plan, targets=plan.targets + (warehouse,), sequences=(sequence,))
+    with pytest.raises(InstallError, match="installation"):
+        select_install_batches(
+            mixed, sequence_number=sequence_number, batch_ids=batch_ids
+        )
+
+
+@weaver_test()
+def test_archive_runtime_installs_only_the_requested_lakehouse_batches(
+    tmp_path, monkeypatch
+):
+    import json
+    import sys
+    import types
+
+    from weaver.sessions import archive_runtime
+
+    location, store = _bundle(tmp_path)
+    original = store.read(location / "plan.yml")
+    request = {
+        "sequence_number": 20,
+        "batch_ids": ["b1"],
+        "build_datetime": "2026-09-30 12:34:56.000000",
+    }
+    (location.path.parent / "request.json").write_text(json.dumps(request))
+    session = given_installer(store=store).session
+    monkeypatch.setattr(archive_runtime, "ArchiveSession", lambda **kwargs: session)
+    sdk = types.ModuleType("notebookutils")
+    sdk.fs = types.SimpleNamespace(put=lambda *args: None)
+    monkeypatch.setitem(sys.modules, "notebookutils", sdk)
+    result = archive_runtime.run_bundle(
+        location.path.parent, object(), "report.json", "carrier", workers=16
+    )
+    assert [
+        row["action_id"]
+        for sequence in result["report"]["sequences"]
+        for row in sequence["actions"]
+    ] == ["a2"]
+    assert result["request"] == request
+    assert store.read(location / "plan.yml") == original
 
 
 @weaver_test()

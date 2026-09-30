@@ -12,7 +12,9 @@ resources; it does not decide where a frozen bundle installs.
 from __future__ import annotations
 
 import math
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
+from itertools import groupby
 from typing import Any, Mapping
 
 from ..errors import InstallError
@@ -41,6 +43,29 @@ from .report import (
 from .targets import WAREHOUSE_TARGET, BoundTarget
 
 REPORT_FILENAME = "install-report.yml"
+
+
+def select_install_batches(plan, *, sequence_number, batch_ids):
+    """Select contiguous Lakehouse batches from one frozen sequence."""
+    sequence = next(
+        (row for row in plan.sequences if row.number == sequence_number), None
+    )
+    if sequence is None or not batch_ids:
+        raise InstallError("installation batch selection is empty or unknown")
+    indexes = [
+        index for index, batch in enumerate(sequence.batches) if batch.id in batch_ids
+    ]
+    batches = tuple(sequence.batches[index] for index in indexes)
+    targets = {target.id: target for target in plan.targets}
+    if (
+        tuple(batch.id for batch in batches) != tuple(batch_ids)
+        or indexes != list(range(indexes[0], indexes[0] + len(indexes)))
+        or any(targets[batch.target_id].kind != "lakehouse" for batch in batches)
+    ):
+        raise InstallError(
+            "installation selection must name contiguous Lakehouse batches"
+        )
+    return replace(plan, sequences=(replace(sequence, batches=batches),))
 
 
 class _Deferred:
@@ -258,7 +283,9 @@ class Installer:
             return None
         return resolve(item)
 
-    def install(self, bundle: BuildBundle, *, on_sequence=None) -> InstallationReport:
+    def install(
+        self, bundle: BuildBundle, *, on_sequence=None, build_datetime=None
+    ) -> InstallationReport:
         """Execute a loaded bundle.
 
         A bundle rather than a location: reading one needs the store it lives
@@ -281,12 +308,13 @@ class Installer:
             for batch in sequence.batches
             for action in batch.actions
         )
-        if (
+        delegate = (
             self._delegate_bundle
             and builtins_only
             and capability is not None
             and on_sequence is None
-        ):
+        )
+        if delegate:
             report = capability(bundle, workspace=self.workspace)
             if report is not None:
                 (bundle.store or self.store).write(
@@ -299,7 +327,7 @@ class Installer:
         started = _now()
         # All Registry rows from one build share an instant so shortcut freshness
         # does not depend on statement timing.
-        build_datetime = _epoch(started)
+        build_datetime = build_datetime or _epoch(started)
         sequence_results: list[SequenceResult] = []
         stop = False
 
@@ -308,7 +336,12 @@ class Installer:
                 result = _skipped_sequence(sequence)
             else:
                 result = _run_sequence(
-                    sequence, resolved, bundle, self, build_datetime=build_datetime
+                    sequence,
+                    resolved,
+                    bundle,
+                    self,
+                    build_datetime=build_datetime,
+                    delegate_batches=delegate,
                 )
             sequence_results.append(result)
             if on_sequence is not None:
@@ -726,33 +759,62 @@ def _run_sequence(
     installer: "Installer",
     *,
     build_datetime: str | None = None,
+    delegate_batches: bool = False,
 ) -> SequenceResult:
     action_results: list[ActionResult] = []
     failed = False
 
     with installer.session.substep(_sequence_label(sequence, resolved)):
-        for batch in sequence.batches:
-            target = resolved[batch.target_id]
-            context = InstallationContext(
-                create_delta_table=installer.delta_table_creator(),
-                create_direct_delta_table=installer.direct_delta_table_creator(),
-                spark_sql=installer.spark_sql(),
-                spark_sql_batch=installer.spark_sql_batch(),
-                resolver=installer.resolver,
-                store=installer.store,
-                target=target,
-                sql=installer.sql_for(target.bound),
-                targets=resolved,
-                build_datetime=build_datetime,
-            )
-            if failed:
-                action_results.extend(
-                    _skipped_action(one, batch) for one in batch.actions
+        for lakehouse, group in groupby(
+            sequence.batches,
+            key=lambda batch: resolved[batch.target_id].bound.kind == "lakehouse",
+        ):
+            batches = tuple(group)
+            capability = getattr(installer.session, "install_batches", None)
+            if not failed and lakehouse and delegate_batches and capability is not None:
+                started = _now()
+                try:
+                    report = capability(
+                        bundle,
+                        sequence_number=sequence.number,
+                        batch_ids=tuple(batch.id for batch in batches),
+                        build_datetime=build_datetime,
+                        workspace=installer.workspace,
+                    )
+                except Exception as error:
+                    results = [
+                        _failed(action, batch.target_id, started, error)
+                        for batch in batches
+                        for action in batch.actions
+                    ]
+                else:
+                    results = None if report is None else list(report.action_results())
+                if results is not None:
+                    action_results.extend(results)
+                    failed = any(result.status == FAILED for result in results)
+                    continue
+            for batch in batches:
+                if failed:
+                    action_results.extend(
+                        _skipped_action(one, batch) for one in batch.actions
+                    )
+                    continue
+                target = resolved[batch.target_id]
+                context = InstallationContext(
+                    create_delta_table=installer.delta_table_creator(),
+                    create_direct_delta_table=installer.direct_delta_table_creator(),
+                    spark_sql=installer.spark_sql(),
+                    spark_sql_batch=installer.spark_sql_batch(),
+                    resolver=installer.resolver,
+                    store=installer.store,
+                    target=target,
+                    sql=installer.sql_for(target.bound),
+                    targets=resolved,
+                    build_datetime=build_datetime,
                 )
-                continue
-            results = _run_batch(batch, context, bundle, installer)
-            action_results.extend(results)
-            failed = any(result.status == FAILED for result in results)
+                results = _run_batch(batch, context, bundle, installer)
+                action_results.extend(results)
+                failed = any(result.status == FAILED for result in results)
 
     skipped = bool(action_results) and all(
         result.status == SKIPPED for result in action_results

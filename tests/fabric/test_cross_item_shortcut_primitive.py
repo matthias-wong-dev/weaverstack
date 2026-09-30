@@ -238,6 +238,7 @@ def shortcut_estate(
     fabric_client,
     fabric_shortcut_lakehouses,
     fabric_staging_lakehouse,
+    fabric_lakehouse_cleanup,
     livy_session,
     weaver_session,
     session_catalogue_sql,
@@ -254,6 +255,7 @@ def shortcut_estate(
     store = OneLakeDfsClient()
     producer = fabric_shortcut_lakehouses["producer"]
     consumer = fabric_shortcut_lakehouses["consumer"]
+    fabric_lakehouse_cleanup(producer.name, consumer.name)
     _forget_shortcuts(consumer, client=fabric_client)
 
     root = tmp_path_factory.mktemp("shortcut-repo")

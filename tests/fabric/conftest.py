@@ -919,6 +919,22 @@ def fabric_empty_lakehouse(
     return empty
 
 
+@pytest.fixture(scope="module")
+def fabric_lakehouse_cleanup(request, fabric_empty_lakehouse):
+    """Register target cleanup before setup, with consumers removed first."""
+    from functools import partial
+
+    registered = set()
+
+    def register(*names):
+        for name in names:
+            if name not in registered:
+                request.addfinalizer(partial(fabric_empty_lakehouse, name))
+                registered.add(name)
+
+    return register
+
+
 @pytest.fixture(scope="session")
 def fabric_initialise_catalogue(fabric_workspace, warehouse_session):
     """Build the package-owned catalogue Item after a fixture reset.

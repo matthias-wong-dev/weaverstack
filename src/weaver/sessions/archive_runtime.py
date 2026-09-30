@@ -104,14 +104,29 @@ class ArchiveSession(NotebookSession):
 def run_bundle(root, spark, output, archive_sha256, *, workers):
     import json
     import time
+    from dataclasses import replace
     from importlib import import_module
 
     from ..build_bundle import Installer, load_bundle
+    from ..build_bundle.bundle import validate_bundle
     from ..build_bundle.execution import execution_workspace
+    from ..build_bundle.installer import select_install_batches
     from ..locations import Location
     from ..store import FilesystemStore
 
     bundle = load_bundle(Location(str(root / "bundle")), store=FilesystemStore())
+    request_path = root / "request.json"
+    request = json.loads(request_path.read_text()) if request_path.exists() else None
+    build_datetime = None
+    if request is not None:
+        validate_bundle(bundle.location, bundle.plan, store=bundle.store)
+        selected = select_install_batches(
+            bundle.plan,
+            sequence_number=request["sequence_number"],
+            batch_ids=request["batch_ids"],
+        )
+        build_datetime = request["build_datetime"]
+        bundle = replace(bundle, plan=selected)
     workspace = execution_workspace(bundle.plan.execution, bundle.plan)
     fs = import_module("notebookutils").fs
 
@@ -119,6 +134,7 @@ def run_bundle(root, spark, output, archive_sha256, *, workers):
         result = {
             "status": "running",
             "archive_sha256": archive_sha256,
+            "request": request,
             "report": report.to_mapping(),
         }
         fs.put(output, json.dumps(result, separators=(",", ":"), allow_nan=False), True)
@@ -128,11 +144,14 @@ def run_bundle(root, spark, output, archive_sha256, *, workers):
         workspace=workspace, spark=spark, direct_delta_workers=workers
     ) as session:
         with session.task("Install", bundle.bundle_id):
-            report = Installer(session).install(bundle, on_sequence=journal)
+            report = Installer(session).install(
+                bundle, on_sequence=journal, build_datetime=build_datetime
+            )
         profiles = list(getattr(session, "created_profiles", ()))
         events = [event.to_mapping() for event in session.telemetry.events()]
     return {
         "status": "completed",
+        "request": request,
         "archive_sha256": archive_sha256,
         "report": report.to_mapping(),
         "install_seconds": time.monotonic() - started,

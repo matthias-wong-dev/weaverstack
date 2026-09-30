@@ -530,6 +530,7 @@ def test_a_realistic_estate_builds_from_nothing(acceptance):
     acceptance.step("seed-neighbour", lambda: _seed_the_neighbour(acceptance))
     acceptance.require("seed-neighbour")
 
+    archive_offset = len(getattr(acceptance.session, "archive_installations", ()))
     step = acceptance.step(
         "build",
         lambda: weaver.build(
@@ -539,6 +540,25 @@ def test_a_realistic_estate_builds_from_nothing(acceptance):
         ),
     )
     acceptance.require("build")
+
+    archives = acceptance.session.archive_installations[archive_offset:]
+    plan = step.result.plan
+    targets = {target.id: target for target in plan.targets}
+    expected = [
+        action.id
+        for _, batch, action in plan.actions()
+        if targets[batch.target_id].kind == "lakehouse"
+    ]
+    installed = [
+        action["action_id"]
+        for archive in archives
+        for sequence in archive["report"]["sequences"]
+        for action in sequence["actions"]
+    ]
+    assert expected and installed == expected, (
+        "mixed Build bypassed archived Lakehouse installation"
+    )
+    assert all(archive["request"] is not None for archive in archives)
 
     landing = _item(acceptance, "Lakehouse/Landing")
     curated = _item(acceptance, "Lakehouse/Curated")

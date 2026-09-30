@@ -116,14 +116,46 @@ class ConsoleSession(Session):
     # --- progress -----------------------------------------------------------
 
     def install_bundle(self, bundle, *, workspace=None, timeout=None):
-        if type(self) is not ConsoleSession or any(
-            value is not None
-            for value in (self._given_store, self._given_livy, self._given_resolver)
+        return self._install_archive(bundle, workspace=workspace, timeout=timeout)
+
+    def install_batches(
+        self,
+        bundle,
+        *,
+        sequence_number,
+        batch_ids,
+        build_datetime,
+        workspace=None,
+        timeout=None,
+    ):
+        request = {
+            "sequence_number": sequence_number,
+            "batch_ids": list(batch_ids),
+            "build_datetime": build_datetime,
+        }
+        return self._install_archive(
+            bundle, workspace=workspace, timeout=timeout, request=request
+        )
+
+    def _install_archive(self, bundle, *, workspace=None, timeout=None, request=None):
+        from ..fabric.livy import LivySession
+
+        if (
+            type(self) is not ConsoleSession
+            or any(
+                value is not None for value in (self._given_store, self._given_resolver)
+            )
+            or (
+                self._given_livy is not None
+                and type(self._given_livy) is not LivySession
+            )
         ):
             return None
         from .install_archive import install_in_scope
 
-        return install_in_scope(self, bundle, workspace=workspace, timeout=timeout)
+        return install_in_scope(
+            self, bundle, workspace=workspace, timeout=timeout, request=request
+        )
 
     # --- progress -----------------------------------------------------------
 

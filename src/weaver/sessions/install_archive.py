@@ -66,10 +66,14 @@ class Carrier:
         return hashlib.sha256(self.data).hexdigest()
 
 
-def pack_bundle(bundle) -> Carrier | None:
+def pack_bundle(bundle, *, request=None) -> Carrier | None:
     """Carry frozen payloads and the installed caller's matching runtime."""
     runtime = Path(__file__).resolve().parents[1]
     files = {"bundle/plan.yml": (bundle.store).read(bundle.location / "plan.yml")}
+    if request is not None:
+        files["request.json"] = json.dumps(
+            request, sort_keys=True, allow_nan=False
+        ).encode("utf-8")
     size = len(files["bundle/plan.yml"])
     for sequence in bundle.plan.sequences:
         for batch in sequence.batches:
@@ -316,16 +320,23 @@ finally:
     return "exec(" + repr(body) + ', {"spark": spark, "emit": emit})\n'
 
 
-def install_in_scope(session, bundle, *, workspace=None, timeout=None):
+def install_in_scope(session, bundle, *, workspace=None, timeout=None, request=None):
     import math
     import time
     from urllib.parse import urlsplit
     from uuid import uuid4
 
     from ..build_bundle.executors import default_executors
+    from ..build_bundle.installer import select_install_batches
     from ..fabric.livy import DEFAULT_STATEMENT_TIMEOUT
 
     plan = bundle.plan
+    if request is not None:
+        plan = select_install_batches(
+            plan,
+            sequence_number=request["sequence_number"],
+            batch_ids=request["batch_ids"],
+        )
     if (
         plan.execution is None
         or plan.execution.spark_home_target_id is None
@@ -342,9 +353,12 @@ def install_in_scope(session, bundle, *, workspace=None, timeout=None):
         action.executor not in default_executors() for action in actions
     ):
         return None
+    targets = {target.id: target for target in plan.targets}
     if any(
-        target.kind == "warehouse" and target.id != plan.execution.catalogue_target_id
-        for target in plan.targets
+        targets[batch.target_id].kind == "warehouse"
+        and batch.target_id != plan.execution.catalogue_target_id
+        for sequence in plan.sequences
+        for batch in sequence.batches
     ):
         return None
     allowance = DEFAULT_STATEMENT_TIMEOUT if timeout is None else timeout
@@ -355,7 +369,7 @@ def install_in_scope(session, bundle, *, workspace=None, timeout=None):
     ):
         raise ValueError("archive timeout must be a positive per-action allowance")
     started = time.monotonic()
-    carrier = pack_bundle(bundle)
+    carrier = pack_bundle(bundle, request=request)
     if carrier is None:
         return None
     target = next(
@@ -399,6 +413,18 @@ def install_in_scope(session, bundle, *, workspace=None, timeout=None):
     settled = None
     complete = False
     received = False
+
+    def record(result):
+        if not hasattr(session, "archive_installations"):
+            session.archive_installations = []
+        session.archive_installations.append(
+            result
+            | {
+                "carrier_bytes": len(carrier.data),
+                "archive_seconds": time.monotonic() - started,
+            }
+        )
+
     try:
         receipt = scope.livy_run(
             source,
@@ -419,25 +445,24 @@ def install_in_scope(session, bundle, *, workspace=None, timeout=None):
             return None
         if result.get("status") != "completed":
             raise ValueError("archive installation has not completed")
+        if request is not None and result.get("request") != request:
+            raise ValueError("archive result belongs to a different batch selection")
         report = decode_report(result["report"], plan)
         complete = True
-        if not hasattr(session, "archive_installations"):
-            session.archive_installations = []
-        session.archive_installations.append(
-            result
-            | {
-                "carrier_bytes": len(carrier.data),
-                "archive_seconds": time.monotonic() - started,
-            }
-        )
+        record(result)
         return report
     except Exception as error:
         try:
             result = json.loads(store.read(output))
             if result.get("archive_sha256") == carrier.sha256:
+                if request is not None and result.get("request") != request:
+                    raise ValueError(
+                        "archive recovery belongs to a different batch selection"
+                    )
                 if result.get("status") == "completed" and not received:
                     report = decode_report(result["report"], plan)
                     complete = True
+                    record(result)
                     return report
                 if result.get("status") == "running":
                     settled = decode_report(result["report"], plan, partial=True)
