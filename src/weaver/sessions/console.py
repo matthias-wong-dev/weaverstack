@@ -115,6 +115,18 @@ class ConsoleSession(Session):
 
     # --- progress -----------------------------------------------------------
 
+    def install_bundle(self, bundle, *, workspace=None, timeout=None):
+        if type(self) is not ConsoleSession or any(
+            value is not None
+            for value in (self._given_store, self._given_livy, self._given_resolver)
+        ):
+            return None
+        from .install_archive import install_in_scope
+
+        return install_in_scope(self, bundle, workspace=workspace, timeout=timeout)
+
+    # --- progress -----------------------------------------------------------
+
     #: Minimum width of the progress name column.
     PROGRESS_WIDTH = 52
 

@@ -162,46 +162,45 @@ class OneLakeDfsClient:
             for part in (lakehouse_artifact_segment(parsed.item), parsed.relative)
             if part
         )
-        url = f"{self.base_url}/{quote(parsed.workspace, safe='')}?" + urlencode(
-            {
-                "resource": "filesystem",
-                "recursive": "true" if recursive else "false",
-                "directory": directory,
-            }
-        )
-        response = self._request("GET", url, expected=(200, 404))
-        if response.status_code == 404:
-            raise StoreNotFoundError(
-                f"cannot list a location that does not exist: {location}",
-                executor="OneLake",
-            )
-
-        # Never return a partial listing: callers use it for destructive and
-        # reconciliation operations.
-        if response.headers.get("x-ms-continuation"):
-            raise NotImplementedError("OneLake listing pagination is not implemented")
-
+        query = {
+            "resource": "filesystem",
+            "recursive": "true" if recursive else "false",
+            "directory": directory,
+        }
         entries: list[Entry] = []
         prefix = f"{lakehouse_artifact_segment(parsed.item)}/"
-        for path in response.json().get("paths", []):
-            name = path.get("name", "")
-            relative = name[len(prefix) :] if name.startswith(prefix) else name
-            entries.append(
-                Entry(
-                    location=Location(
-                        f"{self.base_url}/{parsed.workspace}/"
-                        f"{lakehouse_artifact_segment(parsed.item)}/{relative}"
-                    ),
-                    is_directory=str(path.get("isDirectory", "false")).lower()
-                    == "true",
-                    size=int(path["contentLength"])
-                    if path.get("contentLength")
-                    else None,
-                    modified=_parse_time(path.get("lastModified")),
-                    etag=path.get("etag"),
-                )
+        while True:
+            url = f"{self.base_url}/{quote(parsed.workspace, safe='')}?" + urlencode(
+                query
             )
-        return entries
+            response = self._request("GET", url, expected=(200, 404))
+            if response.status_code == 404:
+                raise StoreNotFoundError(
+                    f"cannot list a location that does not exist: {location}",
+                    executor="OneLake",
+                )
+            for path in response.json().get("paths", []):
+                name = path.get("name", "")
+                relative = name[len(prefix) :] if name.startswith(prefix) else name
+                entries.append(
+                    Entry(
+                        location=Location(
+                            f"{self.base_url}/{parsed.workspace}/"
+                            f"{lakehouse_artifact_segment(parsed.item)}/{relative}"
+                        ),
+                        is_directory=str(path.get("isDirectory", "false")).lower()
+                        == "true",
+                        size=int(path["contentLength"])
+                        if path.get("contentLength")
+                        else None,
+                        modified=_parse_time(path.get("lastModified")),
+                        etag=path.get("etag"),
+                    )
+                )
+            continuation = response.headers.get("x-ms-continuation")
+            if not continuation:
+                return entries
+            query["continuation"] = continuation
 
     def read(self, location: Location) -> bytes:
         return self._request("GET", self._url(location), expected=(200,)).content

@@ -244,6 +244,42 @@ reproduces what the function would have done proves nothing: the first Fabric
 suite deleted files through the store directly and looked like it was testing
 `wipe`.
 
+## Archived Lakehouse installation
+
+`Installer` offers a revalidated frozen bundle to `Session.install_bundle`.
+The concrete default returns `None` before installation and retains the local
+Installer loop. Custom executor registries retain that loop.
+
+`ConsoleSession` carries eligible Lakehouse bundles into its existing Livy
+session. Eligibility requires the bundle's frozen Spark attachment, built-in
+executors, and Lakehouse destinations with the central catalogue Warehouse.
+Custom ConsoleSession implementations and injected transports use their existing
+capabilities. Warehouse workloads and bundles without Spark work retain their
+existing installation path.
+
+The carrier contains the frozen manifest, referenced payload bytes and the
+caller's Python runtime sources and static SQL, YAML and JSON resources. The
+carrier and every member have a SHA-256 identity. Extraction validates the full
+inventory, paths, file kinds and content before creating the private tree. The
+expanded-size bound is 128 MiB; larger bundles retain the local Installer loop.
+The remote program imports the extracted runtime in an isolated namespace and
+restores previously loaded Weaver modules and import paths after installation.
+
+Runtime dependencies are checked before installation. Missing dependencies or a
+Delta writer version mismatch produce an explicit pre-mutation decline. The
+archive path retains the versioned direct-Delta writer and the caller's worker
+bound, supported Spark Views, dependency barriers, catalogue settlement and
+load-artefact installation. Build does not execute loads or validations.
+
+One mutation submission has retries disabled and an allowance equal to the
+planned action count times the per-action statement timeout. Complete sequence
+prefixes are journalled to the private OneLake result file. The final Livy result
+is a byte count and hash for that file. The desktop validates ordered action
+identities, outcomes and clocks and persists the normal installation report.
+An unavailable outcome retains validated prefixes and fails every unacknowledged
+action with an uncertainty marker. Completed and declined carriers are removed;
+uncertain carriers and journals remain at their report's recorded location.
+
 ## Architecture invariants
 
 Enforced by `tests/test_core_boundary.py`:

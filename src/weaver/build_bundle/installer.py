@@ -77,6 +77,10 @@ class Installer:
         executors: dict[str, ActionExecutor] | None = None,
     ) -> None:
         self.session = session
+        self._delegate_bundle = executors is None
+        self._default_executor_types = {
+            name: type(executor) for name, executor in default_executors().items()
+        }
         self.executors = default_executors() if executors is None else executors
         self.workspace: Any = None
 
@@ -254,7 +258,7 @@ class Installer:
             return None
         return resolve(item)
 
-    def install(self, bundle: BuildBundle) -> InstallationReport:
+    def install(self, bundle: BuildBundle, *, on_sequence=None) -> InstallationReport:
         """Execute a loaded bundle.
 
         A bundle rather than a location: reading one needs the store it lives
@@ -268,6 +272,28 @@ class Installer:
         validate_bundle(bundle.location, bundle.plan, store=bundle.store or self.store)
 
         plan = bundle.plan
+        capability = getattr(self.session, "install_bundle", None)
+        builtins_only = all(
+            action.executor in self._default_executor_types
+            and type(self.executors.get(action.executor))
+            is self._default_executor_types[action.executor]
+            for sequence in plan.sequences
+            for batch in sequence.batches
+            for action in batch.actions
+        )
+        if (
+            self._delegate_bundle
+            and builtins_only
+            and capability is not None
+            and on_sequence is None
+        ):
+            report = capability(bundle, workspace=self.workspace)
+            if report is not None:
+                (bundle.store or self.store).write(
+                    bundle.location.join(REPORT_FILENAME),
+                    report.to_yaml().encode("utf-8"),
+                )
+                return report
         resolved = {target.id: self.resolve_target(target) for target in plan.targets}
 
         started = _now()
@@ -279,12 +305,22 @@ class Installer:
 
         for sequence in plan.sequences:
             if stop:
-                sequence_results.append(_skipped_sequence(sequence))
-                continue
-            result = _run_sequence(
-                sequence, resolved, bundle, self, build_datetime=build_datetime
-            )
+                result = _skipped_sequence(sequence)
+            else:
+                result = _run_sequence(
+                    sequence, resolved, bundle, self, build_datetime=build_datetime
+                )
             sequence_results.append(result)
+            if on_sequence is not None:
+                on_sequence(
+                    InstallationReport(
+                        bundle_id=plan.bundle_id,
+                        status="running",
+                        started_at=started,
+                        finished_at=None,
+                        sequences=tuple(sequence_results),
+                    )
+                )
             if result.status == FAILED:
                 stop = True
 

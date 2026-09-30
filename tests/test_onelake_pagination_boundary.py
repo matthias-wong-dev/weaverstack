@@ -1,10 +1,12 @@
-"""OneLake listing must fail loudly rather than silently truncate.
+"""OneLake listing follows every continuation page.
 
-Mocked, so it needs no tenant: a paged response would otherwise return only its
-first page and break a wipe, a sync or a reconciliation.
+Mocked, so it needs no tenant: a truncated listing would break a wipe, a sync or
+a reconciliation.
 """
 
 from __future__ import annotations
+
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 from support.weaver_test import weaver_test
@@ -49,14 +51,44 @@ def test_a_single_page_returns_its_entries(monkeypatch):
 
 
 @weaver_test()
-def test_a_continuation_token_fails_loudly(monkeypatch):
-    store = _store(
-        monkeypatch,
-        headers={"x-ms-continuation": "next-page-token"},
-        paths=[{"name": "lh.Lakehouse/Files/Tables/a.csv", "contentLength": "10"}],
+def test_a_continuation_token_returns_all_pages(monkeypatch):
+    store = OneLakeDfsClient(token="fake-token")
+    urls = []
+    responses = iter(
+        [
+            _Response(
+                {"x-ms-continuation": "next/page+token"},
+                [
+                    {
+                        "name": "lh.Lakehouse/Files/Tables/a.csv",
+                        "contentLength": "10",
+                    }
+                ],
+            ),
+            _Response(
+                {},
+                [
+                    {
+                        "name": "lh.Lakehouse/Files/Tables/b.csv",
+                        "contentLength": "20",
+                    }
+                ],
+            ),
+        ]
     )
-    with pytest.raises(NotImplementedError, match="pagination is not implemented"):
-        store.list(Location("https://onelake.dfs.fabric.microsoft.com/ws/lh/Files"))
+
+    def fake_request(method, url, **kwargs):
+        urls.append(url)
+        return next(responses)
+
+    monkeypatch.setattr(store, "_request", fake_request)
+    entries = store.list(
+        Location("https://onelake.dfs.fabric.microsoft.com/ws/lh/Files")
+    )
+
+    assert [entry.location.name for entry in entries] == ["a.csv", "b.csv"]
+    assert "continuation" not in parse_qs(urlsplit(urls[0]).query)
+    assert parse_qs(urlsplit(urls[1]).query)["continuation"] == ["next/page+token"]
 
 
 @weaver_test()

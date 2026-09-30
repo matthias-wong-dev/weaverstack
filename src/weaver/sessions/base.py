@@ -263,6 +263,10 @@ class Session(ABC):
 
     # --- execution capabilities ---------------------------------------------
 
+    def install_bundle(self, bundle, *, workspace: Workspace | None = None):
+        """Install a frozen bundle as one host-owned unit, or decline before work."""
+        return None
+
     @abstractmethod
     def create_delta_table(
         self,
