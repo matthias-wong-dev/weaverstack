@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from support.weaver_test import weaver_test
@@ -71,3 +72,67 @@ def test_runtime_qualification_calls_existing_session_statement_capabilities():
     assert all(callable(getattr(ConsoleSession, method, None)) for method in methods), (
         methods
     )
+
+
+@weaver_test()
+def test_runtime_qualification_accepts_explicit_minima_promoted_by_a_table_feature():
+    module = _qualification()
+    # Hypothetical observation exercises minimum semantics, not Fabric support.
+    seen = {
+        "protocol": {
+            "minReaderVersion": 3,
+            "minWriterVersion": 7,
+            "readerFeatures": ["columnMapping", "deletionVectors"],
+            "writerFeatures": ["columnMapping", "deletionVectors"],
+        },
+        "snapshot": {
+            "metaData": {"configuration": {"delta.enableDeletionVectors": "true"}}
+        },
+        "schema": {"fields": [{"name": "Value", "type": "string"}]},
+        "rows": [{"V": "hello"}],
+        "expected": "hello",
+        "dtype": "string",
+    }
+    module.test_runtime_table_protocol_features_and_readback_match_the_declaration(
+        "spark",
+        "explicit_scalar",
+        (
+            {"spark_explicit_scalar": SimpleNamespace(status="succeeded")},
+            {"spark_explicit_scalar": seen, "runtime": {"deltalake": "1.6.6"}},
+        ),
+    )
+
+
+@weaver_test()
+@pytest.mark.parametrize("backing", ["none", "flag_only", "feature_only"])
+def test_runtime_qualification_rejects_unexplained_explicit_minima_promotion(backing):
+    module = _qualification()
+    seen = {
+        "protocol": {
+            "minReaderVersion": 3,
+            "minWriterVersion": 7,
+            "readerFeatures": ["columnMapping"],
+            "writerFeatures": ["columnMapping"],
+        },
+        "snapshot": {"metaData": {"configuration": {}}},
+        "schema": {"fields": [{"name": "Value", "type": "string"}]},
+        "rows": [{"V": "hello"}],
+        "expected": "hello",
+        "dtype": "string",
+    }
+    if backing == "flag_only":
+        seen["snapshot"]["metaData"]["configuration"]["delta.enableDeletionVectors"] = (
+            "true"
+        )
+    if backing == "feature_only":
+        seen["protocol"]["readerFeatures"].append("deletionVectors")
+        seen["protocol"]["writerFeatures"].append("deletionVectors")
+    with pytest.raises(AssertionError):
+        module.test_runtime_table_protocol_features_and_readback_match_the_declaration(
+            "spark",
+            "explicit_scalar",
+            (
+                {"spark_explicit_scalar": SimpleNamespace(status="succeeded")},
+                {"spark_explicit_scalar": seen, "runtime": {"deltalake": "1.6.6"}},
+            ),
+        )

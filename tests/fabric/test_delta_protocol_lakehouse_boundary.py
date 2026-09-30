@@ -236,10 +236,25 @@ def test_runtime_table_protocol_features_and_readback_match_the_declaration(
     result = results[name]
     seen = observation[name]
     expected_floor = (2, 5) if case == "explicit_scalar" else (3, 7)
-    assert (
+    observed_floor = (
         seen["protocol"]["minReaderVersion"],
         seen["protocol"]["minWriterVersion"],
-    ) == expected_floor
+    )
+    legacy_promotion = (
+        route == "spark"
+        and case == "explicit_scalar"
+        and observed_floor != expected_floor
+    )
+    if legacy_promotion:
+        # Authored versions are minima. Runtime-enabled deletion vectors
+        # require feature protocol and expand legacy writer capabilities.
+        assert observed_floor == (3, 7)
+        properties = seen["snapshot"]["metaData"]["configuration"]
+        assert properties.get("delta.enableDeletionVectors") == "true"
+        assert "deletionVectors" in seen["protocol"]["readerFeatures"]
+        assert "deletionVectors" in seen["protocol"]["writerFeatures"]
+    else:
+        assert observed_floor == expected_floor
     reader = set(seen["protocol"].get("readerFeatures", ()))
     writer = set(seen["protocol"].get("writerFeatures", ()))
     assert ("timestampNtz" in reader) == (case in {"timestamp_ntz", "identity_ntz"})
@@ -247,7 +262,12 @@ def test_runtime_table_protocol_features_and_readback_match_the_declaration(
     assert ("variantType" in reader) == (case == "variant")
     assert ("variantType" in writer) == (case == "variant")
     assert ("identityColumns" in writer) == (case == "identity_ntz")
-    assert "generatedColumns" not in writer
+    if not legacy_promotion:
+        assert "generatedColumns" not in writer
+    assert all(
+        "delta.generationExpression" not in field.get("metadata", {})
+        for field in seen["schema"]["fields"]
+    )
     assert seen["dtype"] == dict((entry[0], entry[1].lower()) for entry in CASES)[case]
     expected_row = {"V": seen["expected"]}
     if case == "identity_ntz":
