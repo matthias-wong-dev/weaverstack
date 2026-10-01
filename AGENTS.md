@@ -356,8 +356,9 @@ must respect protected scopes, and overlapping writers need enforced ordering or
 a common exclusion. Different known workspace IDs, item IDs, kinds or disjoint
 paths retain distinct scopes.
 
-The internal `MutationExecutor` validates sealed plans and payload bytes before
-admission. `execute` accepts a `MutationPlan` and explicit payload bytes. Build
+The internal `MutationExecutor` validates sealed plans and all payload bytes before
+physical driver preflight and admission. `execute` accepts a `MutationPlan` and
+explicit payload bytes. Build
 callers load the plan and payloads from their bundle before execution. Wipe and
 Mirror callers supply their planner's plan. Persistence and transport stay with
 the caller. The transitional `physical_driver` binds the existing Build executors.

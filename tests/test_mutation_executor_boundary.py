@@ -9,8 +9,14 @@ from test_mutation_plan_representation import _action
 
 from weaver.errors import BuildError
 from weaver.locations import Location
-from weaver.mutation.bundle import BuildBundle, write_bundle
-from weaver.mutation.executor import Completed, MutationDriver, MutationExecutor
+from weaver.mutation import MutationPlan
+from weaver.mutation.bundle import BuildBundle, load_bundle, write_bundle
+from weaver.mutation.executor import (
+    Completed,
+    MutationDriver,
+    MutationExecutor,
+    physical_driver,
+)
 from weaver.store import FilesystemStore
 
 
@@ -55,3 +61,76 @@ def test_bundles_are_rejected_before_store_reads_or_driver_admission(
         )
     assert reads == []
     assert calls == []
+
+
+@weaver_test()
+@pytest.mark.parametrize("mode", ["direct", "decoded", "caller_loaded"])
+@pytest.mark.parametrize("fault", ["hash", "non_bytes"])
+@pytest.mark.parametrize("first_has_payload", [False, True])
+def test_all_payloads_checked_before_physical_preflight(
+    tmp_path, mode, fault, first_has_payload
+):
+    payloads = {"payload/second.payload": b"second"}
+    if first_has_payload:
+        payloads["payload/first.payload"] = b"first"
+    plan = sealed(
+        tuple(
+            _action(
+                name,
+                executor="load_file" if path in payloads else "folder",
+                payload=path if path in payloads else None,
+                payload_sha256=(
+                    hashlib.sha256(payloads[path]).hexdigest()
+                    if path in payloads
+                    else None
+                ),
+            )
+            for name in ("first", "second")
+            for path in (f"payload/{name}.payload",)
+        )
+    )
+    if mode == "decoded":
+        plan = MutationPlan.from_mapping(plan.to_mapping())
+    elif mode == "caller_loaded":
+        location = Location(str(tmp_path / "bundle"))
+        store = FilesystemStore()
+        write_bundle(
+            location, plan=plan, payloads=payloads, store=store, allow_mutation=True
+        )
+        bundle = load_bundle(location, store=store, allow_mutation=True)
+        plan = bundle.plan
+        assert isinstance(plan, MutationPlan)
+        payloads = {
+            action.payload: store.read(location.join(*action.payload.split("/")))
+            for _, _, action in plan.actions()
+            if action.payload is not None
+        }
+    payloads["payload/second.payload"] = (
+        b"changed" if fault == "hash" else bytearray(b"second")
+    )
+    events = []
+
+    class Context:
+        @property
+        def supplied_capability(self):
+            events.append("preflight")
+            return object()
+
+    class PhysicalExecutor:
+        def execute(self, action, data, context):
+            events.append("run")
+
+    driver = physical_driver(
+        PhysicalExecutor(),
+        {"sales": Context()},
+        lane="physical",
+        required_capabilities=("supplied_capability",),
+    )
+    executor = MutationExecutor(
+        {"load_file": driver, "folder": driver},
+        limits={"physical": 1},
+        journal=lambda event: events.append("journal"),
+    )
+    with pytest.raises(BuildError, match="invalid payload for action 'second'"):
+        executor.execute(plan, payloads)
+    assert events == []

@@ -223,6 +223,7 @@ class MutationExecutor:
                     or sha256(data).hexdigest() != action.payload_sha256
                 ):
                     raise BuildError(f"invalid payload for action {action.id!r}")
+        for _, _, action in plan.actions():
             if action.executor == "completion_gate":
                 if action.executor in self.drivers:
                     raise BuildError("completion_gate cannot be overridden")
