@@ -650,7 +650,8 @@ def test_a_physical_target_names_the_fabric_item_and_its_workspace(tmp_path):
     external = rows["Sales.External"]
     assert external["target_type"] == "physical"
     assert external["target_item_name"] == "Reference"
-    assert external["target_schema_name"] == "Ref"
+    # A physical table target keeps its area, as a logical one does.
+    assert external["target_schema_name"] == "Tables/Ref"
     assert external["target_object_name"] == "Customer"
     assert external["target_workspace_name"] == "Shared Data"
 
@@ -658,6 +659,47 @@ def test_a_physical_target_names_the_fabric_item_and_its_workspace(tmp_path):
     assert rows["Reference"]["target_object_name"] is None
     assert rows["Sales.Incoming"]["target_object_name"] is None
     assert rows["Sales.Incoming"]["target_schema_name"] == "Incoming/Daily"
+
+
+def _recreated(item: WeaverItemId, rows):
+    from weaver.catalogue.shortcuts import recreatable
+    from weaver.catalogue.state import Catalogue
+    from weaver.installed import installed_shortcuts
+
+    shortcuts = installed_shortcuts(Catalogue(rows={item: {SHORTCUT.name: rows}}))
+    return {
+        str(each.destination): each
+        for each in recreatable(shortcuts, item=item, bindings={})
+    }
+
+
+@weaver_test()
+def test_a_recorded_physical_table_target_is_recreated_from_its_stored_area(tmp_path):
+    _repository, rows = _shortcut_rows(tmp_path)
+    curated = WeaverItemId.parse("Lakehouse/Curated")
+
+    recreated = _recreated(curated, (rows["Sales.External"], rows["Sales.Incoming"]))
+
+    table = recreated["Lakehouse/Curated/Tables/Sales.External"]
+    assert table.shortcut.target_schema == "Tables/Ref"
+    assert table.source_components == ("Tables", "Ref", "Customer")
+    folder = recreated["Lakehouse/Curated/Files/Sales.Incoming"]
+    assert folder.source_components == ("Files", "Incoming", "Daily")
+
+
+@weaver_test()
+def test_a_legacy_bare_physical_table_target_is_read_as_its_tables_area(tmp_path):
+    """Catalogues written before the area was stored record ``Ref``."""
+
+    _repository, rows = _shortcut_rows(tmp_path)
+    curated = WeaverItemId.parse("Lakehouse/Curated")
+    legacy = {**rows["Sales.External"], "target_schema_name": "Ref"}
+
+    recreated = _recreated(curated, (legacy,))
+
+    table = recreated["Lakehouse/Curated/Tables/Sales.External"]
+    assert table.shortcut.target_schema == "Tables/Ref"
+    assert table.source_components == ("Tables", "Ref", "Customer")
 
 
 @weaver_test()

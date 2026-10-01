@@ -29,6 +29,9 @@ CONNECTION_BACKOFF = 2.0
 #: it can mean the work was done and the reply was not.
 TRANSIENT_STATUSES = frozenset({429, 502, 503, 504})
 
+#: Methods that change nothing, so any failure of one is safe to repeat.
+READ_METHODS = frozenset({"GET", "HEAD"})
+
 
 class FabricError(WeaverError):
     executor = "REST"
@@ -103,10 +106,36 @@ def send(method: str, url: str, **kwargs):
         try:
             return requests.request(method, url, **kwargs)
         except requests.exceptions.RequestException as exc:
-            repeatable = method == "GET" or never_sent(exc)
+            repeatable = method in READ_METHODS or never_sent(exc)
             if not repeatable or attempt == CONNECTION_ATTEMPTS:
                 raise
             time.sleep(CONNECTION_BACKOFF * attempt)
+
+
+def send_until_answered(
+    method: str,
+    url: str,
+    *,
+    expected: tuple[int, ...],
+    retry_transient: bool = True,
+    **kwargs,
+):
+    """:func:`send`, also repeating a transient refusal while attempts remain.
+
+    Returns the last response whatever its status, for the caller to judge.
+    """
+
+    for attempt in range(1, CONNECTION_ATTEMPTS + 1):
+        response = send(method, url, **kwargs)
+        if (
+            retry_transient
+            and response.status_code not in expected
+            and response.status_code in TRANSIENT_STATUSES
+            and attempt < CONNECTION_ATTEMPTS
+        ):
+            time.sleep(retry_delay(response, attempt))
+            continue
+        return response
 
 
 class FabricClient:
@@ -160,35 +189,29 @@ class FabricClient:
             else nullcontext()
         )
         with observation:
-            for attempt in range(1, CONNECTION_ATTEMPTS + 1):
-                try:
-                    response = send(
-                        method,
-                        url,
-                        headers={
-                            "Authorization": f"Bearer {self.token}",
-                            "Content-Type": "application/json",
-                        },
-                        data=json.dumps(payload) if payload is not None else None,
-                        timeout=self.timeout,
-                    )
-                except requests.exceptions.RequestException as exc:
-                    raise FabricError(
-                        f"{method} {url} could not be reached: {exc}"
-                    ) from exc
-                if response.status_code in expected:
-                    return response
-                if (
-                    response.status_code in TRANSIENT_STATUSES
-                    and attempt < CONNECTION_ATTEMPTS
-                ):
-                    time.sleep(retry_delay(response, attempt))
-                    continue
-                raise FabricError(
-                    f"{method} {url} returned {response.status_code}: "
-                    f"{_response_message(response)}",
-                    status_code=response.status_code,
+            try:
+                response = send_until_answered(
+                    method,
+                    url,
+                    expected=expected,
+                    headers={
+                        "Authorization": f"Bearer {self.token}",
+                        "Content-Type": "application/json",
+                    },
+                    data=json.dumps(payload) if payload is not None else None,
+                    timeout=self.timeout,
                 )
+            except requests.exceptions.RequestException as exc:
+                raise FabricError(
+                    f"{method} {url} could not be reached: {exc}"
+                ) from exc
+            if response.status_code in expected:
+                return response
+            raise FabricError(
+                f"{method} {url} returned {response.status_code}: "
+                f"{_response_message(response)}",
+                status_code=response.status_code,
+            )
 
     def get_json(self, path: str) -> dict:
         response = self.request("GET", path, expected=(200,))

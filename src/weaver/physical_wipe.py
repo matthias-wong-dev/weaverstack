@@ -12,9 +12,16 @@ from typing import Iterable
 
 from .errors import CommandError
 from .locations import Location
-from .resolution import TABLES_AREA, resolver_for, store_for
+from .resolution import resolver_for, store_for
 from .store import Store
-from .targets import FILES_AREA, DeltaTarget, FolderTarget, ItemRef, WarehouseTarget
+from .targets import (
+    FILES_AREA,
+    TABLES_AREA,
+    DeltaTarget,
+    FolderTarget,
+    ItemRef,
+    WarehouseTarget,
+)
 from .workspaces import Workspace
 
 

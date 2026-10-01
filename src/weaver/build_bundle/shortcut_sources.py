@@ -1,9 +1,8 @@
 """Resolve physical shortcut sources before bundle generation.
 
 Physical sources are not build targets, so their workspace, item and case-exact
-storage path are frozen while the source inventory is available. Warehouse
-tables are published under ``Tables/<schema>/<table>``; Files sources require a
-Lakehouse.
+storage path are frozen while the source inventory is available. A table
+target names its ``Tables`` area; Files sources require a Lakehouse.
 """
 
 from __future__ import annotations
@@ -11,9 +10,8 @@ from __future__ import annotations
 from ..declaration.model import LAKEHOUSE, SCHEMA_SHORTCUT, TABLE_SHORTCUT
 from ..errors import BuildError
 from ..locations import Location
+from ..targets import TABLES_AREA
 from .shortcuts import ResolvedShortcutSource
-
-TABLES_AREA = "Tables"
 
 
 def physical_shortcuts(shortcuts, *, bindings):
@@ -84,8 +82,8 @@ def _source_path(declaration, *, root: Location, store) -> str:
     if declaration.shortcut_type == SCHEMA_SHORTCUT:
         components = [TABLES_AREA, tail]
     elif declaration.shortcut_type == TABLE_SHORTCUT:
-        schema, _, name = tail.partition(".")
-        components = [TABLES_AREA, schema, name]
+        relation = declaration.target_object
+        components = [*declaration.target_schema.split("/"), relation.object]
     else:
         components = tail.split("/")
 

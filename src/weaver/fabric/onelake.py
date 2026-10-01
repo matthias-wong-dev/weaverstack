@@ -13,13 +13,20 @@ from ..errors import CommandError
 from ..locations import Location
 from ..store import Entry, StoreError, StoreNotFoundError
 from .auth import STORAGE_SCOPE, token_source
-from .client import ONELAKE_DFS, _response_message
+from .client import (
+    ONELAKE_DFS,
+    READ_METHODS,
+    _response_message,
+    send_until_answered,
+)
 
 STORAGE_API_VERSION = "2023-11-03"
 DEFAULT_TIMEOUT = 120.0
 
 
 def lakehouse_artifact_segment(item: str) -> str:
+    """The URL segment for a Fabric item name or ID; a name gains ``.Lakehouse``."""
+
     try:
         uuid.UUID(item)
         return item
@@ -35,10 +42,11 @@ def onelake_url(
     base_url: str = ONELAKE_DFS,
     query: dict[str, str] | None = None,
 ) -> str:
-    parts = [workspace, lakehouse_artifact_segment(item)]
-    parts.extend(part for part in relative_path.strip("/").split("/") if part)
-    url = f"{base_url.rstrip('/')}/" + "/".join(quote(part, safe="") for part in parts)
-    return f"{url}?{urlencode(query)}" if query else url
+    """Render a URL from a Fabric item name or ID."""
+
+    return OneLakePath(workspace, lakehouse_artifact_segment(item), relative_path).url(
+        base_url=base_url, query=query
+    )
 
 
 def abfss_root(workspace_id: str, item_id: str) -> str:
@@ -47,9 +55,21 @@ def abfss_root(workspace_id: str, item_id: str) -> str:
 
 @dataclass(frozen=True)
 class OneLakePath:
+    """A OneLake location's parts. ``segment`` is the item as the URL spells it."""
+
     workspace: str
-    item: str
+    segment: str
     relative: str
+
+    def url(
+        self, *, base_url: str = ONELAKE_DFS, query: dict[str, str] | None = None
+    ) -> str:
+        parts = [self.workspace, self.segment]
+        parts.extend(part for part in self.relative.strip("/").split("/") if part)
+        url = f"{base_url.rstrip('/')}/" + "/".join(
+            quote(part, safe="") for part in parts
+        )
+        return f"{url}?{urlencode(query)}" if query else url
 
 
 def parse_onelake(location: Location, *, base_url: str = ONELAKE_DFS) -> OneLakePath:
@@ -62,7 +82,9 @@ def parse_onelake(location: Location, *, base_url: str = ONELAKE_DFS) -> OneLake
     parts = [unquote(part) for part in location.value[len(prefix) :].split("/") if part]
     if len(parts) < 2:
         raise CommandError(f"{location.value!r} names no item beneath its workspace")
-    return OneLakePath(workspace=parts[0], item=parts[1], relative="/".join(parts[2:]))
+    return OneLakePath(
+        workspace=parts[0], segment=parts[1], relative="/".join(parts[2:])
+    )
 
 
 class OneLakeDfsClient:
@@ -117,8 +139,16 @@ class OneLakeDfsClient:
         )
         with observation:
             try:
-                response = requests.request(
-                    method, url, headers=merged, data=data, timeout=self.timeout
+                response = send_until_answered(
+                    method,
+                    url,
+                    expected=expected,
+                    # A mutation refused with a transient status may still have
+                    # been acted on, so only a read repeats one.
+                    retry_transient=method in READ_METHODS,
+                    headers=merged,
+                    data=data,
+                    timeout=self.timeout,
                 )
             except requests.exceptions.RequestException as exc:
                 raise StoreError(
@@ -134,13 +164,8 @@ class OneLakeDfsClient:
             return response
 
     def _url(self, location: Location, query: dict[str, str] | None = None) -> str:
-        parsed = parse_onelake(location, base_url=self.base_url)
-        return onelake_url(
-            parsed.workspace,
-            parsed.item,
-            parsed.relative,
-            base_url=self.base_url,
-            query=query,
+        return parse_onelake(location, base_url=self.base_url).url(
+            base_url=self.base_url, query=query
         )
 
     def exists(self, location: Location) -> bool:
@@ -157,18 +182,14 @@ class OneLakeDfsClient:
 
     def list(self, location: Location, *, recursive: bool = False) -> list[Entry]:
         parsed = parse_onelake(location, base_url=self.base_url)
-        directory = "/".join(
-            part
-            for part in (lakehouse_artifact_segment(parsed.item), parsed.relative)
-            if part
-        )
+        directory = "/".join(part for part in (parsed.segment, parsed.relative) if part)
         query = {
             "resource": "filesystem",
             "recursive": "true" if recursive else "false",
             "directory": directory,
         }
         entries: list[Entry] = []
-        prefix = f"{lakehouse_artifact_segment(parsed.item)}/"
+        prefix = f"{parsed.segment}/"
         while True:
             url = f"{self.base_url}/{quote(parsed.workspace, safe='')}?" + urlencode(
                 query
@@ -186,7 +207,7 @@ class OneLakeDfsClient:
                     Entry(
                         location=Location(
                             f"{self.base_url}/{parsed.workspace}/"
-                            f"{lakehouse_artifact_segment(parsed.item)}/{relative}"
+                            f"{parsed.segment}/{relative}"
                         ),
                         is_directory=str(path.get("isDirectory", "false")).lower()
                         == "true",
@@ -237,13 +258,13 @@ class OneLakeDfsClient:
         destination = self._publication_location(destination)
         origin = parse_onelake(source, base_url=self.base_url)
         target = parse_onelake(destination, base_url=self.base_url)
-        if (origin.workspace, origin.item) != (target.workspace, target.item):
+        if (origin.workspace, origin.segment) != (target.workspace, target.segment):
             raise StoreError("Delta publication must stay in the same Lakehouse")
         if not origin.relative.startswith("Files/") or not target.relative.startswith(
             "Tables/"
         ):
             raise StoreError("Delta publication needs Files stage and Tables target")
-        source_path = "/".join(("", origin.workspace, origin.item, origin.relative))
+        source_path = "/".join(("", origin.workspace, origin.segment, origin.relative))
         response = self._request(
             "PUT",
             self._url(destination),
@@ -273,11 +294,8 @@ class OneLakeDfsClient:
         ):
             raise StoreError("Delta publication needs a bound OneLake path")
         return Location(
-            onelake_url(
-                address.username,
-                segments[0],
-                "/".join(segments[1:]),
-                base_url=self.base_url,
+            OneLakePath(address.username, segments[0], "/".join(segments[1:])).url(
+                base_url=self.base_url
             )
         )
 

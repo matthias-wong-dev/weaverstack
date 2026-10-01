@@ -301,7 +301,7 @@ def test_the_resolved_roots_agree_with_the_resolvers_own_arithmetic(tmp_path: Pa
 
     spark_path = lakehouse.table_path("Sales", "Order")
     store_path = resolver.delta_table(
-        DeltaTarget.parse("Sales_LH"), "Sales", "Order"
+        DeltaTarget.parse("Sales_LH/Tables"), "Sales", "Order"
     ).value
 
     assert spark_path.startswith("abfss://")

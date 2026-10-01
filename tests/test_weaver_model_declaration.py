@@ -105,8 +105,8 @@ def test_case_only_duplicate_declarations_are_rejected():
 @weaver_test()
 def test_logical_identity_is_independent_of_physical_binding():
     logical = WeaverItemId.parse("Lakehouse/Curated")
-    development = {logical: DeltaTarget.parse("Curated_Dev")}
-    production = {logical: DeltaTarget.parse("Curated_Prod")}
+    development = {logical: DeltaTarget.parse("Curated_Dev/Tables")}
+    production = {logical: DeltaTarget.parse("Curated_Prod/Tables")}
 
     assert next(iter(development)) == next(iter(production)) == logical
     assert development[logical] != production[logical]
