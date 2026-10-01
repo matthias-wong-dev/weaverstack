@@ -163,6 +163,32 @@ class _State:
     cancelling: bool = False
 
 
+def validate_inputs(plan, payloads):
+    from hashlib import sha256
+
+    from ..errors import BuildError
+    from .validation import validate_mutation_plan
+
+    if not isinstance(plan, MutationPlan):
+        raise BuildError("MutationExecutor requires a MutationPlan")
+    validate_mutation_plan(plan)
+    if not plan.bundle_id:
+        raise BuildError("mutation execution requires a sealed identity")
+    payloads = dict(payloads or {})
+    referenced = {a.payload for _, _, a in plan.actions() if a.payload is not None}
+    if set(payloads) != referenced:
+        raise BuildError("mutation payload inventory does not match the plan")
+    for _, _, action in plan.actions():
+        if action.payload is not None:
+            data = payloads[action.payload]
+            if (
+                not isinstance(data, bytes)
+                or sha256(data).hexdigest() != action.payload_sha256
+            ):
+                raise BuildError(f"invalid payload for action {action.id!r}")
+    return payloads
+
+
 class MutationExecutor:
     def __init__(
         self,
@@ -199,31 +225,26 @@ class MutationExecutor:
         payloads: Mapping[str, bytes] | None = None,
         *,
         cancellation=None,
+        selected=None,
+        prerequisites=(),
+        invocation_id=None,
     ):
-        from hashlib import sha256
-
         from ..errors import BuildError
-        from .validation import validate_mutation_plan
+        from .fragments import validate_fragment
 
-        if not isinstance(plan, MutationPlan):
-            raise BuildError("MutationExecutor requires a MutationPlan")
-        validate_mutation_plan(plan)
-        if not plan.bundle_id:
-            raise BuildError("mutation execution requires a sealed identity")
-        payloads = dict(payloads or {})
-        referenced = {a.payload for _, _, a in plan.actions() if a.payload is not None}
-        if set(payloads) != referenced:
-            raise BuildError("mutation payload inventory does not match the plan")
+        payloads = validate_inputs(plan, payloads)
+        selected = (
+            tuple(a.id for _, _, a in plan.actions()) if selected is None else selected
+        )
+        external = validate_fragment(plan, selected, prerequisites)
+        if invocation_id is not None and (
+            not isinstance(invocation_id, str) or not invocation_id
+        ):
+            raise BuildError("invalid mutation invocation identity")
         contracts = {c.executor: c for c in plan.driver_contracts}
         for _, _, action in plan.actions():
-            if action.payload is not None:
-                data = payloads[action.payload]
-                if (
-                    not isinstance(data, bytes)
-                    or sha256(data).hexdigest() != action.payload_sha256
-                ):
-                    raise BuildError(f"invalid payload for action {action.id!r}")
-        for _, _, action in plan.actions():
+            if action.id not in selected:
+                continue
             if action.executor == "completion_gate":
                 if action.executor in self.drivers:
                     raise BuildError("completion_gate cannot be overridden")
@@ -245,7 +266,9 @@ class MutationExecutor:
                 driver.preflight(
                     action, None if action.payload is None else payloads[action.payload]
                 )
-        return _Invocation(self, plan, payloads, cancellation).execute()
+        return _Invocation(
+            self, plan, payloads, cancellation, selected, external, invocation_id
+        ).execute()
 
 
 @dataclass
@@ -257,19 +280,23 @@ class _Task:
 
 
 class _Invocation:
-    def __init__(self, executor, plan, payloads, cancellation):
+    def __init__(
+        self, executor, plan, payloads, cancellation, selected, external, invocation_id
+    ):
         self.executor = executor
-        self.invocation_id = uuid4().hex
+        self.invocation_id = invocation_id or uuid4().hex
         self.journal_errors = []
         self.plan = plan
         self.payloads = payloads
         self.cancellation = cancellation
         self.states = {
-            a.id: _State(a, ready_at=self.now()) for _, _, a in plan.actions()
+            a.id: _State(a, ready_at=self.now())
+            for _, _, a in plan.actions()
+            if a.id in selected
         }
         self.order = {key: i for i, key in enumerate(self.states)}
         self.contracts = {c.executor: c for c in plan.driver_contracts}
-        self.results = {}
+        self.results = dict(external)
         self.operations = {}
         self.ledger = []
         self.leases = {}
@@ -283,11 +310,15 @@ class _Invocation:
         self.children = {key: [] for key in self.states}
         for key, state in self.states.items():
             action = state.action
-            self.remaining[key] = len(action.depends_on) + len(action.settle_after)
+            self.remaining[key] = sum(
+                p in self.states for p in action.depends_on + action.settle_after
+            )
             for parent in action.depends_on:
-                self.children[parent].append((key, True))
+                if parent in self.states:
+                    self.children[parent].append((key, True))
             for parent in action.settle_after:
-                self.children[parent].append((key, False))
+                if parent in self.states:
+                    self.children[parent].append((key, False))
             if not self.remaining[key]:
                 self.ready.add(key)
 
@@ -694,7 +725,7 @@ class _Invocation:
 
     def execute(self):
         with ThreadPoolExecutor(max_workers=self.executor.workers) as pool:
-            while len(self.results) < len(self.states) or self.running:
+            while not self.states.keys() <= self.results.keys() or self.running:
                 if self.stopped():
                     for key, state in self.states.items():
                         if key not in self.results and key not in self.active:
@@ -749,7 +780,7 @@ class _Invocation:
                         self.cancellation.wait(delay)
                     else:
                         self.executor.clock.sleep(delay)
-                elif len(self.results) < len(self.states):
+                elif not self.states.keys() <= self.results.keys():
                     for key, state in self.states.items():
                         if key not in self.results:
                             self.terminal(

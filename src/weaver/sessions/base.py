@@ -269,6 +269,15 @@ class Session(ABC):
 
     # --- execution capabilities ---------------------------------------------
 
+    def execute_mutation_archive(
+        self, bundle, *, staging, allow_mutation=False, **options
+    ):
+        from .install_archive import decline_mutation
+
+        return decline_mutation(
+            self, "Session does not provide generic archive execution"
+        )
+
     def install_bundle(self, bundle, *, workspace: Workspace | None = None):
         """Install a frozen bundle as one host-owned unit, or decline before work."""
         return None

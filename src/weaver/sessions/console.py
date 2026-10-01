@@ -120,6 +120,35 @@ class ConsoleSession(Session):
     def install_bundle(self, bundle, *, workspace=None, timeout=None):
         return self._install_archive(bundle, workspace=workspace, timeout=timeout)
 
+    def execute_mutation_archive(
+        self, bundle, *, staging, allow_mutation=False, **options
+    ):
+        from ..fabric.livy import LivySession
+        from .install_archive import decline_mutation, execute_mutation_in_scope
+
+        if allow_mutation is not True:
+            return decline_mutation(self, "generic archive execution is gated")
+        if (
+            type(self) is not ConsoleSession
+            or any(
+                value is not None
+                for value in (
+                    self._given_store,
+                    self._given_resolver,
+                    self._given_credential,
+                    self._executor,
+                )
+            )
+            or (
+                self._given_livy is not None
+                and type(self._given_livy) is not LivySession
+            )
+        ):
+            return decline_mutation(
+                self, "custom capabilities require direct execution"
+            )
+        return execute_mutation_in_scope(self, bundle, staging=staging, **options)
+
     def install_batches(
         self,
         bundle,

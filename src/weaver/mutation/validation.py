@@ -300,59 +300,10 @@ def _validate_results_and_completion(plan, actions, contracts, graph):
 
 
 def _validate_scopes(plan, actions, graph):
-    from .bundle import _check_relative
-    from .models import PhysicalScope
-    from .serialization import require_string
+    from .scopes import ScopeRules
 
-    def check(scope):
-        if not isinstance(scope, PhysicalScope):
-            raise BuildError("physical scope must be a frozen PhysicalScope")
-        require_string(scope.target_id, what="scope target")
-        if scope.target_id not in plan.target_ids:
-            raise BuildError(f"unknown scope target {scope.target_id!r}")
-        if not isinstance(scope.path, str):
-            raise BuildError("scope path must be a string")
-        if any(part != part.strip() for part in scope.path.split("/")):
-            raise BuildError(f"scope path must be canonical: {scope.path!r}")
-        if scope.path:
-            _check_relative(scope.path, what="scope path")
-
-    targets = {target.id: target for target in plan.targets}
-    identities = [plan.execution.workspace_id]
-    for target in plan.targets:
-        identities.extend((target.item_id, target.workspace_id))
-    for value in identities:
-        if value is not None and value != value.strip():
-            raise BuildError(f"physical identity must be canonical: {value!r}")
-
-    def workspace_id(target):
-        if target.workspace_id is not None:
-            return target.workspace_id
-        if target.workspace_name is None:
-            return plan.execution.workspace_id
-        return None
-
-    def may_share_item(left_id, right_id):
-        left, right = targets[left_id], targets[right_id]
-        if (left.kind, left.item_id) != (right.kind, right.item_id):
-            return False
-        left_workspace, right_workspace = workspace_id(left), workspace_id(right)
-        # Unresolved workspace names cannot establish physical disjointness.
-        return (
-            left_workspace is None
-            or right_workspace is None
-            or left_workspace == right_workspace
-        )
-
-    def covers(parent, child):
-        return may_share_item(parent.target_id, child.target_id) and (
-            parent.path == ""
-            or parent.path == child.path
-            or child.path.startswith(parent.path + "/")
-        )
-
-    def overlaps(left, right):
-        return covers(left, right) or covers(right, left)
+    rules = ScopeRules(plan)
+    check, covers, overlaps = rules.check, rules.covers, rules.overlaps
 
     for scope in plan.protected_scopes:
         check(scope)

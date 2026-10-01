@@ -387,13 +387,41 @@ completion events are checkpointed in bounded groups and flushed with subsequent
 admissions or at invocation completion.
 Runtime clocks, handles and invocation IDs remain outside plan identity.
 
-Recording drivers exercise these internal runtime mechanics. Real shortcut and
-endpoint waits, archive delegation and public adoption remain gated. External
-fragment prerequisite receipts must distinguish successful outcomes from
-known-terminal ordering outcomes. A terminal-order receipt cannot satisfy a
-success prerequisite, supply a typed production result or certify completion.
-An uncertain receipt satisfies neither edge. Shortcut and endpoint readiness
-retain their current implementations. Load and Test scheduling is unchanged.
+The internal `Session.execute_mutation_archive` capability requires explicit
+`allow_mutation=True`. `ConsoleSession` offers stored format-5 plans through the
+existing carrier and generated bootstrap. Supplied custom capabilities retain
+direct execution. Normal Build retains the format-4 route during qualification.
+The native binding calls the shared `MutationExecutor` through the existing
+physical executors. Warehouse-only work retains direct TDS; eligible Lakehouse
+plans may include central-catalogue TDS. The caller supplies one publication
+instant, bounded workers and an authorised staging candidate.
+
+`ArchiveStaging` can bind a staging Lakehouse outside the frozen plan. Staging
+uses the shared physical scope rules across aliases and workspace bindings and
+must be outside protected sources, writes and destructive scopes. Transitional
+physical actions without write scopes exclude their whole target. No safe
+candidate produces a recorded pre-mutation decline. Staging remains outside plan
+identity and is carried in the hashed fragment request.
+
+Fragment requests select frozen action IDs and supply exact prerequisite
+receipts. Each receipt binds the producer contract, invocation, selection and
+causal ledger. Known terminal evidence can satisfy settlement ordering; success
+edges and typed inputs require verified successful results. Start/await pairs
+stay together in one backend. Prerequisites that depend on an unfinished selected
+action are invalid.
+
+The buffered journal writes bounded hash-linked action checkpoints, durable
+admissions and operation acknowledgements. Recovery validates causal action
+evidence and preserves out-of-order successes. Missing final responses permit
+evidence recovery only; they grant no replay. Uncertain outcomes retain their
+carrier and journal locations. Cleanup diagnostics preserve settled results.
+Generated bootstraps serialize borrowed namespace changes and drain the shared
+executor before restoring modules or removing the private runtime.
+
+Recording resources qualify these internal paths locally. Fabric readiness,
+public adoption and performance remain unqualified. Shortcut and endpoint
+readiness retain their current implementations. Load and Test scheduling is
+unchanged.
 
 ## Architecture invariants
 
