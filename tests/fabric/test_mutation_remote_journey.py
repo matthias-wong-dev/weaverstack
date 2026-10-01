@@ -185,9 +185,9 @@ def test_lost_response_is_uncertain_without_replay_and_normal_build_converges(
         repaired = weaver.build(str(root), items=bindings, session=weaver_session)
         assert repaired.succeeded, repaired.errors
         assert store.exists(folder)
-        assert (
-            "Lakehouse/Remote/Files/A3.Remote" in repaired.selection.selected_for_build
-        )
+        assert "Lakehouse/Remote/Files/A3.Remote" in {
+            str(identity) for identity in repaired.selection.selected_for_build
+        }
         unchanged = weaver.build(str(root), items=bindings, session=weaver_session)
         assert unchanged.succeeded and unchanged.selection.selected_for_build == ()
         assert unchanged.selection.selected_for_drop == ()
