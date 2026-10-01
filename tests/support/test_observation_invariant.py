@@ -151,6 +151,22 @@ def test_values_ignores_blank_and_null_entries():
 
 
 @weaver_test()
+def test_values_ignores_the_sessions_temporary_views():
+    """A view another test left in a pooled session is not in the schema."""
+
+    seen = Observation(
+        rows={
+            "tables": [
+                {"tableName": "customer", "isTemporary": False},
+                {"tableName": "named", "isTemporary": True},
+            ]
+        }
+    )
+
+    assert seen.values("tables", "tableName") == {"customer"}
+
+
+@weaver_test()
 def test_a_scalar_wants_exactly_one_row():
     seen = Observation(rows={"n": [{"n": 1}, {"n": 2}]})
 
