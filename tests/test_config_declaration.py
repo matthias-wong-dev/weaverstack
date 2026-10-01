@@ -56,7 +56,9 @@ def test_the_logical_key_decides_which_kind_of_item_the_value_names():
         }
     )
 
-    assert workspace.target_for(_item("Lakehouse/Sales")) == DeltaTarget.parse("Shared/Tables")
+    assert workspace.target_for(_item("Lakehouse/Sales")) == DeltaTarget.parse(
+        "Shared/Tables"
+    )
     assert workspace.target_for(_item("Warehouse/Reporting")) == WarehouseTarget.parse(
         "Shared"
     )
