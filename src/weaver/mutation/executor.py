@@ -292,6 +292,7 @@ class _Invocation:
         self.operations = {}
         self.ledger = []
         self.leases = {}
+        self.operation_leases = {}
         self.used = {}
         self.running = {}
         self.active = set()
@@ -328,6 +329,16 @@ class _Invocation:
                 self.journal_errors.append(str(exc))
         self.ledger.append(event)
         return not self.journal_errors
+
+    def flush_journal(self):
+        if (
+            isinstance(self.executor.journal, MutationJournal)
+            and not self.journal_errors
+        ):
+            try:
+                self.executor.journal.flush()
+            except Exception as exc:
+                self.journal_errors.append(str(exc))
 
     def terminal(self, state, status, value=None, error=None):
         key = state.action.id
@@ -415,10 +426,22 @@ class _Invocation:
         retain = status == "uncertain" or (
             contract and contract.starts_operation and status == "succeeded"
         )
+        if contract and contract.starts_operation and action.id in self.operations:
+            for key in action.exclusions:
+                self.operation_leases[key] = action.id
+            retain = False
         if not retain:
             for key in list(self.leases):
-                if self.leases[key] in {action.id, owner}:
+                if self.leases[key] == action.id:
                     del self.leases[key]
+        if (
+            contract
+            and contract.settles_operation
+            and status in {"succeeded", "failed"}
+        ):
+            for key in list(self.operation_leases):
+                if self.operation_leases[key] == owner:
+                    del self.operation_leases[key]
 
     def owner(self, state):
         contract = self.contracts.get(state.action.executor)
@@ -441,7 +464,9 @@ class _Invocation:
         return not any(
             self.used.get(k, 0) >= self.executor.limits[k] for k in self.keys(state)
         ) and not any(
-            k in self.leases and self.leases[k] != owner for k in action.exclusions
+            (k in self.leases and self.leases[k] != action.id)
+            or (k in self.operation_leases and self.operation_leases[k] != owner)
+            for k in action.exclusions
         )
 
     def request(self, state):
@@ -545,6 +570,7 @@ class _Invocation:
             task = _Task(tuple(group), keys, len(group) > 1)
             task_id = key
             requests = tuple(self.request(member) for member in group)
+            self.flush_journal()
             if self.journal_errors:
                 for member in group:
                     if member.pending is None:
@@ -562,7 +588,7 @@ class _Invocation:
             for member in group:
                 self.active.add(member.action.id)
                 for exclusion in member.action.exclusions:
-                    self.leases[exclusion] = self.owner(member)
+                    self.leases[exclusion] = member.action.id
             for resource in keys:
                 self.used[resource] = self.used.get(resource, 0) + 1
             self.running[task_id] = task
@@ -595,7 +621,9 @@ class _Invocation:
     def accept(self, state, outcome, started=None, ended=None):
         if started is not None:
             state.active_seconds += ended - started
-        if self.now() >= state.deadline:
+        if self.now() >= state.deadline and not (
+            isinstance(outcome, Failed) and _valid_outcome(outcome)
+        ):
             contract = self.contracts.get(state.action.executor)
             if (
                 isinstance(outcome, Completed)
@@ -731,7 +759,15 @@ class _Invocation:
                         else s.deadline
                         for s in pending
                     )
-                    self.executor.clock.sleep(max(0, due - self.now()))
+                    delay = max(0, due - self.now())
+                    if self.cancellation is not None:
+                        delay = min(delay, 0.05)
+                    if self.executor.clock is time and callable(
+                        getattr(self.cancellation, "wait", None)
+                    ):
+                        self.cancellation.wait(delay)
+                    else:
+                        self.executor.clock.sleep(delay)
                 elif len(self.results) < len(self.states):
                     for key, state in self.states.items():
                         if key not in self.results:
@@ -740,14 +776,7 @@ class _Invocation:
                                 "not_dispatched",
                                 error="unsettled prerequisite or exclusion",
                             )
-        if (
-            isinstance(self.executor.journal, MutationJournal)
-            and not self.journal_errors
-        ):
-            try:
-                self.executor.journal.flush()
-            except Exception as exc:
-                self.journal_errors.append(str(exc))
+        self.flush_journal()
         return MutationReport(
             self.plan.bundle_id,
             tuple(self.results[key] for key in self.states),
@@ -757,7 +786,9 @@ class _Invocation:
             ),
             self.invocation_id,
             tuple(self.journal_errors),
-            tuple(sorted(self.leases.items())),
+            tuple(
+                sorted(set(self.leases.items()) | set(self.operation_leases.items()))
+            ),
         )
 
 

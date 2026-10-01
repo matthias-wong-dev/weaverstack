@@ -1223,7 +1223,7 @@ def test_late_starter_acknowledgement_retains_known_handle_without_success():
 
 
 @weaver_test()
-def test_resource_blocked_pending_expires_without_erasing_known_settlement():
+def test_action_exclusion_survives_other_settlement_until_pending_expiry():
     from weaver.mutation import ResultReference
     from weaver.mutation.executor import (
         Completed,
@@ -1268,7 +1268,7 @@ def test_resource_blocked_pending_expires_without_erasing_known_settlement():
         if request.action.id == "second":
             return Uncertain("second operation unknown")
         if request.action.id == "await":
-            return Pending("remaining-observation", 1)
+            return Pending("remaining-observation", clock.now + 1)
         return Completed()
 
     drivers = {

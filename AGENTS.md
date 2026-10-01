@@ -359,8 +359,11 @@ paths retain distinct scopes.
 The internal `MutationExecutor` validates sealed plans and payload bytes before
 admission. It schedules the frozen edge sets through stable ready counts and
 bounded runtime lanes. Pending continuations release workers and execution
-permits. Logical exclusions remain attached to acknowledged operations until
-settlement; uncertainty retains them. Typed runtime drivers match the frozen
+permits. Each action owns its declared exclusions through Pending and releases
+them on known completion. Operation leases remain attached to acknowledged
+starters until settlement. Settlers can access their operation's leases while
+their own exclusions serialize shared writers. Uncertainty retains the affected
+leases. Typed runtime drivers match the frozen
 contracts. Bound physical adapters call the existing executors through supplied
 contexts, capability requirements and one owned lane per shared connection,
 Session or inner pool.
@@ -368,9 +371,15 @@ Session or inner pool.
 Reports retain action-keyed success, known failure, dependency blocking,
 not-dispatched and uncertain outcomes in frozen action order. Independent work
 continues by default; fail-fast and cancellation stop new admissions and drain
-running work. Supported cancellation requires a driver-confirmed outcome.
-Operation acknowledgements are persisted before result consumers run when a
-journal is supplied. Ordinary journal events are checkpointed in bounded groups.
+running work. Idle waits observe cancellation through event interruption on the
+default clock or bounded sleeps on supplied clocks. Blocking driver calls must
+drain through their own contracts. Supported cancellation requires a
+driver-confirmed outcome. A valid known failure retains its error and settlement
+evidence after deadline expiry; late success cannot certify completion.
+Provided buffered journals persist each dispatch group's admission before its
+drivers run and operation acknowledgements before result consumers run. Ordinary
+completion events are checkpointed in bounded groups and flushed with subsequent
+admissions or at invocation completion.
 Runtime clocks, handles and invocation IDs remain outside plan identity.
 
 Recording drivers exercise these internal runtime mechanics. Real shortcut and
