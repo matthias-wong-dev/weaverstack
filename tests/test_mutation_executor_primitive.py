@@ -43,7 +43,7 @@ def test_pending_releases_single_worker_for_completed_parent_child():
     identity = plan.bundle_id
     report = mutation.MutationExecutor(
         {"folder": MutationDriver(run)}, workers=1, clock=clock
-    ).execute(plan, {})
+    ).execute(plan)
     assert [c[0] for c in calls] == ["await", "parent", "child", "await"]
     assert [r.action_id for r in report.results] == ["await", "parent", "child"]
     assert all(r.status == "succeeded" for r in report.results)
@@ -349,9 +349,17 @@ def test_all_inputs_are_validated_before_any_dispatch(tmp_path, mode, fault):
         if mode == "decoded":
             plan = MutationPlan.from_mapping(plan.to_mapping())
         if mode == "bundle":
-            MutationExecutor(drivers).execute(BuildBundle(location, plan, store))
-        else:
-            MutationExecutor(drivers).execute(plan, payloads)
+            bundle = BuildBundle(location, plan, store)
+            payloads = {
+                action.payload: store.read(
+                    bundle.location.join(*action.payload.split("/"))
+                )
+                for _, _, action in bundle.plan.actions()
+                if action.payload is not None
+            }
+            plan = bundle.plan
+            assert isinstance(plan, MutationPlan)
+        MutationExecutor(drivers).execute(plan, payloads)
     assert calls == []
 
 
@@ -1094,7 +1102,7 @@ def test_successful_execution_preserves_frozen_binary_payloads(tmp_path, mode):
 
     from weaver.locations import Location
     from weaver.mutation import MutationPlan
-    from weaver.mutation.bundle import write_bundle
+    from weaver.mutation.bundle import load_bundle, write_bundle
     from weaver.mutation.executor import Completed, MutationDriver, MutationExecutor
     from weaver.store import FilesystemStore
 
@@ -1110,16 +1118,26 @@ def test_successful_execution_preserves_frozen_binary_payloads(tmp_path, mode):
         )
     )
     identity = plan.bundle_id
+    payloads = {"payload/binary.payload": payload}
     if mode == "decoded":
         plan = MutationPlan.from_mapping(plan.to_mapping())
     if mode == "bundle":
-        plan = write_bundle(
+        store = FilesystemStore()
+        bundle = write_bundle(
             Location(str(tmp_path / "bundle")),
             plan=plan,
-            payloads={"payload/binary.payload": payload},
-            store=FilesystemStore(),
+            payloads=payloads,
+            store=store,
             allow_mutation=True,
         )
+        bundle = load_bundle(bundle.location, store=store, allow_mutation=True)
+        plan = bundle.plan
+        assert isinstance(plan, MutationPlan)
+        payloads = {
+            action.payload: store.read(bundle.location.join(*action.payload.split("/")))
+            for _, _, action in plan.actions()
+            if action.payload is not None
+        }
     seen = []
 
     def run(request):
@@ -1127,7 +1145,7 @@ def test_successful_execution_preserves_frozen_binary_payloads(tmp_path, mode):
         return Completed()
 
     report = MutationExecutor({"load_file": MutationDriver(run)}).execute(
-        plan, None if mode == "bundle" else {"payload/binary.payload": payload}
+        plan, payloads
     )
     assert seen == [payload]
     assert report.plan_id == identity

@@ -203,30 +203,10 @@ class MutationExecutor:
         from hashlib import sha256
 
         from ..errors import BuildError
-        from .bundle import BuildBundle
         from .validation import validate_mutation_plan
 
-        if isinstance(plan, BuildBundle):
-            if payloads is not None or plan.store is None:
-                raise BuildError("mutation bundle requires its payload store")
-            bundle = plan
-            plan = bundle.plan
-            if not isinstance(plan, MutationPlan):
-                raise BuildError(
-                    "MutationExecutor requires format 5; regenerate the bundle"
-                )
-            validate_mutation_plan(plan)
-            payloads = {
-                a.payload: bundle.store.read(
-                    bundle.location.join(*a.payload.split("/"))
-                )
-                for _, _, a in plan.actions()
-                if a.payload is not None
-            }
         if not isinstance(plan, MutationPlan):
-            raise BuildError(
-                "MutationExecutor requires format 5; regenerate the bundle"
-            )
+            raise BuildError("MutationExecutor requires a MutationPlan")
         validate_mutation_plan(plan)
         if not plan.bundle_id:
             raise BuildError("mutation execution requires a sealed identity")

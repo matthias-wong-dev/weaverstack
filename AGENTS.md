@@ -357,7 +357,11 @@ a common exclusion. Different known workspace IDs, item IDs, kinds or disjoint
 paths retain distinct scopes.
 
 The internal `MutationExecutor` validates sealed plans and payload bytes before
-admission. It schedules the frozen edge sets through stable ready counts and
+admission. `execute` accepts a `MutationPlan` and explicit payload bytes. Build
+callers load the plan and payloads from their bundle before execution. Wipe and
+Mirror callers supply their planner's plan. Persistence and transport stay with
+the caller. The transitional `physical_driver` binds the existing Build executors.
+The scheduler uses the frozen edge sets through stable ready counts and
 bounded runtime lanes. Pending continuations release workers and execution
 permits. Each action owns its declared exclusions through Pending and releases
 them on known completion. Operation leases remain attached to acknowledged
