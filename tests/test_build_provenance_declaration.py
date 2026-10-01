@@ -133,9 +133,11 @@ def test_the_authored_path_round_trips_through_plan_yaml():
 
     restored = plan_from_yaml(plan_to_yaml(_plan(_action())))
 
-    (sequence,) = restored.sequences
-    (batch,) = sequence.batches
-    (action,) = batch.actions
+    (action,) = (
+        action
+        for _, _, action in restored.actions()
+        if action.executor != "completion_gate"
+    )
     assert action.source_path == SOURCE
 
 
