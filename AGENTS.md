@@ -381,6 +381,9 @@ default clock or bounded sleeps on supplied clocks. Blocking driver calls must
 drain through their own contracts. Supported cancellation requires a
 driver-confirmed outcome. A valid known failure retains its error and settlement
 evidence after deadline expiry; late success cannot certify completion.
+Recovery accepts a zero-attempt uncertain settler after its acknowledged
+operation deadline expires and its causal prerequisites are satisfied. It retains
+confirmed starter results and preserves known operation settlement.
 Provided buffered journals persist each dispatch group's admission before its
 drivers run and operation acknowledgements before result consumers run. Ordinary
 completion events are checkpointed in bounded groups and flushed with subsequent

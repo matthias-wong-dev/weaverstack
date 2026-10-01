@@ -170,8 +170,26 @@ def _recover(plan, events, *, invocation_id, selected, external):
             validate_result(action, contract, result)
             if key in refused and result.status != "not_dispatched":
                 raise BuildError("refused admission requires unstarted result")
+            expired_observer = bool(
+                result.status == "uncertain"
+                and key not in admitted
+                and contract
+                and contract.settles_operation
+                and action.result_from.action_id in operations
+                and event.at >= operations[action.result_from.action_id].deadline
+                and all(
+                    p in results and results[p].status == "succeeded"
+                    for p in action.depends_on
+                )
+                and all(
+                    p in results and results[p].status in TERMINAL
+                    for p in action.settle_after
+                )
+            )
             expected_attempts = (
-                0 if result.status in {"blocked", "not_dispatched"} else 1
+                0
+                if result.status in {"blocked", "not_dispatched"} or expired_observer
+                else 1
             )
             if (
                 result.attempts != expected_attempts
@@ -185,6 +203,7 @@ def _recover(plan, events, *, invocation_id, selected, external):
             if (
                 result.status in {"succeeded", "failed", "uncertain"}
                 and key not in admitted
+                and not expired_observer
             ):
                 raise BuildError("terminal action lacks admission")
             if result.status == "blocked" and not any(
@@ -201,7 +220,11 @@ def _recover(plan, events, *, invocation_id, selected, external):
                     raise BuildError("successful operation lacks acknowledgement")
             if key in operations and result.status == "uncertain":
                 operations[key] = replace(operations[key], status="uncertain")
-            if contract and contract.settles_operation and key in admitted:
+            if (
+                contract
+                and contract.settles_operation
+                and (key in admitted or expired_observer)
+            ):
                 owner = action.result_from.action_id
                 if owner not in operations:
                     raise BuildError("settlement lacks operation acknowledgement")
