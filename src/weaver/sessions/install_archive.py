@@ -294,6 +294,7 @@ def execute_mutation_remote(
                     item.id,
                     workspace_name=plan.execution.workspace_name,
                     workspace_id=plan.execution.workspace_id,
+                    item_name=item.name,
                 ),
                 "Files/_weaver_carriers",
             )
@@ -329,7 +330,9 @@ def execute_mutation_remote(
     if home is not None:
         session.require_spark_home(home, workspace=frozen_workspace)
     store = scope.transport_store
-    root = scope.resolver.lakehouse(ItemRef(staging_target.item_id))
+    root = scope.resolver.lakehouse(
+        ItemRef(staging_target.item_name or staging_target.item_id)
+    )
     stage = root.join(*stage_scope.path.split("/"), invocation_id)
     incoming, output = stage / "carrier.zip", stage / "result.json"
 

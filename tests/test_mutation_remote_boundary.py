@@ -93,6 +93,69 @@ def test_lost_remote_response_is_uncertain_without_replay(tmp_path):
 
 
 @weaver_test()
+def test_default_staging_uses_discovered_name_with_real_fabric_resolver(tmp_path):
+    from dataclasses import replace
+    from types import SimpleNamespace
+
+    from weaver.fabric.resolution import FabricResolver
+    from weaver.mutation import MutationExecution
+    from weaver.mutation.bundle import compute_bundle_id
+    from weaver.store import FilesystemStore
+    from weaver.workspaces import Workspace
+
+    class RecordedClient:
+        def paged(self, path, **options):
+            if path == "workspaces":
+                return [{"id": "workspace-id", "displayName": "Demo"}]
+            assert path == "workspaces/workspace-id/items", path
+            return [
+                {
+                    "id": plan.targets[0].item_id,
+                    "displayName": "Sales",
+                    "type": "Lakehouse",
+                },
+                {
+                    "id": "stage-id",
+                    "displayName": "Carrier Storage",
+                    "type": "Lakehouse",
+                },
+            ]
+
+    plan = replace(
+        sealed((_action(),)),
+        bundle_id="",
+        execution=MutationExecution("Demo", spark_home_target_id="sales"),
+    )
+    plan = replace(plan, bundle_id=compute_bundle_id(plan))
+    resolver = FabricResolver(
+        Workspace(workspace="Demo"),
+        client=RecordedClient(),
+        base_url=tmp_path.as_posix(),
+    )
+    submissions = []
+
+    def lost(source, **options):
+        submissions.append(options)
+        raise OSError("recorded submission response lost")
+
+    scope = SimpleNamespace(
+        resolver=resolver, transport_store=FilesystemStore(), livy_run=lost
+    )
+    session = SimpleNamespace(
+        scope=lambda _: scope,
+        require_spark_home=lambda *a, **kw: None,
+        direct_delta_workers=16,
+    )
+    report = install_archive.execute_mutation_remote(session, plan)
+    assert len(submissions) == 1
+    assert all(result.status == "uncertain" for result in report.results)
+    assert (
+        "/workspace-id/stage-id.Lakehouse/Files/_weaver_carriers/"
+        in session.archive_mutations[0]["carrier"]
+    )
+
+
+@weaver_test()
 def test_numbered_build_stages_emit_dag_with_batch_failure_barrier():
     from test_mutation_plan_representation import _plan
 
