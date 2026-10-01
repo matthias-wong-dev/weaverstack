@@ -10,9 +10,8 @@ from typing import Any
 
 from .errors import LoadError
 from .locations import LakehouseSparkLocation
-from .resolution import TABLES_AREA
 from .spark import FabricSparkTarget, identifier
-from .targets import FILES_AREA, ItemRef
+from .targets import FILES_AREA, TABLES_AREA, ItemRef
 
 #: The Spark-facing root of a Fabric item. The same template as
 #: :func:`weaver.fabric.onelake.abfss_root`, repeated so that inferring an

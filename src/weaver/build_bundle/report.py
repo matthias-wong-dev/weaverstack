@@ -87,6 +87,18 @@ class InstallationReport:
             for action in sequence.actions:
                 yield action
 
+    def action_counts(self) -> dict[str, int]:
+        """Planned actions by final status. A fixed-point build plans none."""
+
+        results = tuple(self.action_results())
+        return {
+            "total": len(results),
+            **{
+                status: sum(result.status == status for result in results)
+                for status in (SUCCEEDED, SKIPPED, FAILED)
+            },
+        }
+
     def to_mapping(self) -> dict[str, Any]:
         return {
             "bundle_id": self.bundle_id,

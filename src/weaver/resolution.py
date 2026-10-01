@@ -10,11 +10,6 @@ downstream receives resolved locations and never derives them.
 
 from __future__ import annotations
 
-#: The Lakehouse area holding Delta tables. Never written by a user, a Delta
-#: target names a Lakehouse and the area follows from the object kind.
-TABLES_AREA = "Tables"
-
-
 # --- choosing an implementation for a workspace -----------------------------------
 
 

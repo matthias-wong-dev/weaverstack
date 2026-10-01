@@ -262,8 +262,70 @@ def test_a_workspace_failure_is_not_a_build_failure(monkeypatch):
 
 
 @weaver_test()
+def test_build_json_carries_the_action_counts_and_not_the_actions(monkeypatch, capsys):
+    import json
+
+    from support.reports import report_of
+
+    import weaver
+    from weaver.operations.build import BuildResult
+
+    parsed = _parsed_build(monkeypatch)
+    parsed.json = True
+    result = BuildResult(
+        source=".",
+        items=("Lakehouse/Sales",),
+        bundle_id="4d738abc",
+        installation=True,
+        bundle_path=None,
+        status="failed",
+        installation_report=report_of(
+            "succeeded", "failed", "skipped", status="failed"
+        ),
+        report_path="/tmp/weaver-build-report-x/install-report.yml",
+    )
+    monkeypatch.setattr(weaver, "build", lambda *_a, **_k: result)
+
+    assert _cli()._build_once(parsed) == 1
+    payload = json.loads(capsys.readouterr().out)
+
+    assert payload["actions"] == {
+        "total": 3,
+        "succeeded": 1,
+        "skipped": 1,
+        "failed": 1,
+    }
+    assert payload["report_path"] == result.report_path
+    assert "sequences" not in json.dumps(payload)
+
+
+@weaver_test()
+def test_a_prepared_bundle_reports_no_installation_counts():
+    from weaver.operations.build import BuildResult
+
+    mapping = BuildResult(
+        source=".",
+        items=("Lakehouse/Sales",),
+        bundle_id="4d738abc",
+        installation=False,
+        bundle_path="/tmp/bundle",
+        status="succeeded",
+    ).to_mapping()
+
+    assert set(mapping) == {
+        "source",
+        "items",
+        "bundle_id",
+        "installation",
+        "bundle_path",
+        "status",
+        "errors",
+    }
+
+
+@weaver_test()
 def test_build_completion_distinguishes_installation_from_a_prepared_bundle(capsys):
-    from types import SimpleNamespace
+    from support.reports import report_of
 
     from weaver.build_bundle import BuildSelection, Impact
     from weaver.build_bundle.report import FAILED, SKIPPED, SUCCEEDED
@@ -277,16 +339,7 @@ def test_build_completion_distinguishes_installation_from_a_prepared_bundle(caps
         selected_for_drop=(identity,),
         selected_for_build=(identity,),
     )
-    report = SimpleNamespace(
-        action_results=lambda: iter(
-            (
-                SimpleNamespace(status=SUCCEEDED),
-                SimpleNamespace(status=SUCCEEDED),
-                SimpleNamespace(status=FAILED),
-                SimpleNamespace(status=SKIPPED),
-            )
-        )
-    )
+    report = report_of(SUCCEEDED, SUCCEEDED, FAILED, SKIPPED, status=FAILED)
 
     _cli()._print_build(
         BuildResult(

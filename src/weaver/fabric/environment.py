@@ -128,8 +128,8 @@ def build_wheel(root: Path | None = None, *, output_dir: Path | None = None) -> 
     )
     if result.returncode != 0:
         raise CommandError(
-            "Wheel build failed. Install the `build` package and run Weaver "
-            "publish again.\n"
+            "Wheel build failed. Install Weaver's development dependencies "
+            "with `pip install -e '.[dev]'` and publish again.\n"
             + (result.stderr.strip() or result.stdout.strip())[-1000:]
         )
     built = sorted(

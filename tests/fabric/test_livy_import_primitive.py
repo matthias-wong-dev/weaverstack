@@ -46,7 +46,7 @@ def installed_environment(livy_session):
         "  'dependencies': sorted(['yaml', 'sqlparse', 'mssql_python']),\n"
         "  'surface': {\n"
         "    'folder': str(FolderTarget.parse('Sales_LH/Files')),\n"
-        "    'delta': str(DeltaTarget.parse('Sales_LH')),\n"
+        "    'delta': str(DeltaTarget.parse('Sales_LH/Tables')),\n"
         "    'joined': (Location('abfss://ws@workspace/lh') / 'Files' / 'x').value,\n"
         "  },\n"
         "  'document': {\n"
@@ -99,7 +99,7 @@ def test_the_core_public_surface_is_importable_there(installed_environment):
         # lands at Files/<Schema>/<Object>, so there is nothing beneath Files
         # left to configure.
         "folder": "Sales_LH/Files",
-        "delta": "Sales_LH",
+        "delta": "Sales_LH/Tables",
         "joined": "abfss://ws@workspace/lh/Files/x",
     }
 

@@ -15,7 +15,7 @@ from test_item_repository_declaration import _estate, _table, _write
 
 from weaver.declaration import parse_item_repository
 from weaver.declaration.model import ShortcutDeclaration, WeaverItemId
-from weaver.errors import DiscoveryError
+from weaver.errors import DiscoveryError, IdentityError
 from weaver.etl import item_load_artefacts
 from weaver.locations import Location
 
@@ -785,27 +785,72 @@ def test_a_logical_target_that_names_its_area_resolves(tmp_path):
     )
 
 
+def _table_shortcut(target: str, *, target_type: str = "physical", **extra):
+    return ShortcutDeclaration(
+        owner=CURATED,
+        name="Sales__Portable",
+        shortcut_type="table",
+        target_type=target_type,
+        target=target,
+        **extra,
+    )
+
+
+@pytest.mark.parametrize(
+    "target,target_type",
+    [
+        ("Lakehouse/Raw/Tables/Sales.Customer", "logical"),
+        ("Lakehouse/External/Tables/Sales.Customer", "physical"),
+        # A Warehouse's Delta publication.
+        ("Warehouse/External/Tables/Sales.Customer", "physical"),
+    ],
+)
 @weaver_test()
-def test_a_physical_table_target_may_spell_its_area_or_leave_it_out():
-    """A physical target names a Fabric item, whose Tables area the path adds."""
+def test_a_table_target_keeps_its_tables_area(target, target_type):
+    declaration = _table_shortcut(target, target_type=target_type)
 
-    spelled = ShortcutDeclaration(
-        owner=CURATED,
-        name="Sales__Portable",
-        shortcut_type="table",
+    assert declaration.target_tail == "Tables/Sales.Customer"
+    assert declaration.target_schema == "Tables/Sales"
+    assert str(declaration.target_object) == "Sales.Customer"
+
+
+@pytest.mark.parametrize(
+    "target",
+    ["Lakehouse/External/Sales.Customer", "Warehouse/External/Sales.Customer"],
+)
+@weaver_test()
+def test_a_physical_table_target_must_name_its_tables_area(target):
+    with pytest.raises(IdentityError, match="must name the Tables area"):
+        _table_shortcut(target)
+
+
+@weaver_test()
+def test_a_physical_table_target_refuses_the_files_area():
+    with pytest.raises(IdentityError, match="shortcut target"):
+        _table_shortcut("Lakehouse/External/Files/Sales.Customer")
+
+
+@weaver_test()
+def test_a_warehouse_view_target_stays_a_bare_relation():
+    view = ShortcutDeclaration(
+        owner=WeaverItemId.parse("Warehouse/Reporting"),
+        name="Sales__Customer",
+        shortcut_type="view",
         target_type="physical",
-        target="Lakehouse/External/Tables/Sales.Customer",
-        workspace="Shared Data",
-    )
-    bare = ShortcutDeclaration(
-        owner=CURATED,
-        name="Sales__Portable",
-        shortcut_type="table",
-        target_type="physical",
-        target="Lakehouse/External/Sales.Customer",
-        workspace="Shared Data",
+        target="Warehouse/External/Sales.Customer",
     )
 
-    assert spelled.target_tail == bare.target_tail == "Sales.Customer"
-    assert spelled.target_object == bare.target_object
-    assert spelled.target_schema == bare.target_schema == "Sales"
+    assert view.target_tail == "Sales.Customer"
+    assert view.target_schema == "Sales"
+
+
+@weaver_test()
+def test_a_physical_view_target_refuses_a_storage_area():
+    with pytest.raises(IdentityError, match="reads a relation"):
+        ShortcutDeclaration(
+            owner=WeaverItemId.parse("Warehouse/Reporting"),
+            name="Sales__Customer",
+            shortcut_type="view",
+            target_type="physical",
+            target="Warehouse/External/Tables/Sales.Customer",
+        )

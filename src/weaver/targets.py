@@ -10,10 +10,9 @@ from dataclasses import dataclass
 
 from .errors import IdentityError
 
-#: The Lakehouse area holding folder materialisations. Written explicitly in a
-#: folder target because it is what the user sees in the Fabric UI. The Delta
-#: area (``Tables``) is implicit for the same reason: a Delta target names a
-#: Lakehouse, and the area follows from the object kind.
+#: The two Lakehouse areas, as the Fabric UI shows them. A target naming one
+#: spells it: ``Sales/Tables`` for Delta tables, ``Sales/Files`` for folders.
+TABLES_AREA = "Tables"
 FILES_AREA = "Files"
 
 _ILLEGAL_IN_NAME = ("/", "\\", ":", "*", "?", '"', "<", ">", "|")
@@ -66,6 +65,21 @@ class ItemRef:
         return self.name
 
 
+def _area_target(text: str, *, area: str, what: str) -> ItemRef:
+    segments = _split(text, what=what)
+    if len(segments) != 2:
+        raise IdentityError(
+            f"{what} must be '<Lakehouse>/{area}', got {text!r}"
+            + (f". Remove everything after '/{area}'" if len(segments) > 2 else "")
+        )
+    if segments[1] != area:
+        raise IdentityError(
+            f"{what} must name the {area!r} area after the Lakehouse, "
+            f"got {segments[1]!r} in {text!r}"
+        )
+    return ItemRef(segments[0])
+
+
 @dataclass(frozen=True)
 class FolderTarget:
     """A Lakehouse Files area, written ``Sales/Files``."""
@@ -74,22 +88,7 @@ class FolderTarget:
 
     @classmethod
     def parse(cls, text: str) -> "FolderTarget":
-        segments = _split(text, what="folder target")
-        if len(segments) != 2:
-            raise IdentityError(
-                f"folder target must be '<Lakehouse>/{FILES_AREA}', got {text!r}"
-                + (
-                    f". Remove everything after '/{FILES_AREA}'"
-                    if len(segments) > 2
-                    else ""
-                )
-            )
-        if segments[1] != FILES_AREA:
-            raise IdentityError(
-                f"folder target must name the {FILES_AREA!r} area after the Lakehouse, "
-                f"got {segments[1]!r} in {text!r}"
-            )
-        return cls(lakehouse=ItemRef(segments[0]))
+        return cls(lakehouse=_area_target(text, area=FILES_AREA, what="folder target"))
 
     def __str__(self) -> str:
         return f"{self.lakehouse.name}/{FILES_AREA}"
@@ -97,27 +96,16 @@ class FolderTarget:
 
 @dataclass(frozen=True)
 class DeltaTarget:
-    """A Lakehouse holding Delta tables.
-
-    Named bare, as ``Sales``. The ``Tables`` area is implicit because the object
-    kind already determines it.
-    """
+    """A Lakehouse Tables area, written ``Sales/Tables``."""
 
     lakehouse: ItemRef
 
     @classmethod
     def parse(cls, text: str) -> "DeltaTarget":
-        segments = _split(text, what="delta target")
-        if len(segments) != 1:
-            raise IdentityError(
-                "delta target must name a Lakehouse only. The 'Tables' area is "
-                "implicit, "
-                f"got {text!r}"
-            )
-        return cls(lakehouse=ItemRef(segments[0]))
+        return cls(lakehouse=_area_target(text, area=TABLES_AREA, what="delta target"))
 
     def __str__(self) -> str:
-        return self.lakehouse.name
+        return f"{self.lakehouse.name}/{TABLES_AREA}"
 
 
 @dataclass(frozen=True)

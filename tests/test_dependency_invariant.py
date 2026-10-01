@@ -74,3 +74,18 @@ def test_every_declared_requirement_is_pinned():
     """A missing pin is an unpinned CI install, which is what the file prevents."""
 
     assert set(_declared()) <= set(_pinned())
+
+
+@weaver_test()
+def test_the_wheel_build_tool_is_a_development_dependency_only():
+    """Only ``environment publish --dev`` builds a wheel, from a checkout."""
+
+    project = tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))["project"]
+    runtime = {_canonical(Requirement(text).name) for text in project["dependencies"]}
+    dev = {
+        _canonical(Requirement(text).name)
+        for text in project["optional-dependencies"]["dev"]
+    }
+
+    assert "build" not in runtime
+    assert "build" in dev

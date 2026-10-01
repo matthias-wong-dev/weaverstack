@@ -10,10 +10,10 @@ from __future__ import annotations
 from ..build_bundle.targets import WAREHOUSE_TARGET
 from ..errors import CommandError
 from ..locations import LakehouseSparkLocation, Location
-from ..resolution import TABLES_AREA
 from ..spark import FabricSparkTarget
 from ..targets import (
     FILES_AREA,
+    TABLES_AREA,
     DeltaTarget,
     FolderTarget,
     ItemRef,

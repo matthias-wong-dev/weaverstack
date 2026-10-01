@@ -40,7 +40,6 @@ dependencies = [
     "mssql-python",
     "azure-identity>=1.23",
     "requests>=2.31",
-    "build>=1.2",
     "prompt_toolkit>=3.0",
     "packaging>=24",
     "deltalake==1.6.6",
@@ -50,9 +49,11 @@ dependencies = [
 # The test suite. Needs no JVM and no Spark:
 #   pytest                      core suite
 #   pytest -m fabric            plus a workspace, a capacity and `az login`
+# `build` makes the checkout wheel that `environment publish --dev` publishes.
 dev = [
     "pytest>=8.4",
     "ruff>=0.14",
+    "build>=1.2",
 ]
 
 [project.scripts]

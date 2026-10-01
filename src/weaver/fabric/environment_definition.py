@@ -429,9 +429,7 @@ def _with_pip_section(lines: list[str]) -> list[str]:
 
 
 #: Desktop transports and build tools are not installed into Fabric.
-DESKTOP_ONLY = frozenset(
-    {"azure-identity", "requests", "build", "prompt-toolkit", "packaging"}
-)
+DESKTOP_ONLY = frozenset({"azure-identity", "requests", "prompt-toolkit", "packaging"})
 
 
 def runtime_requirements(root: Path) -> tuple[str, ...]:

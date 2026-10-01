@@ -65,9 +65,16 @@ class Observation:
 
         Empty and null entries are dropped, `DESCRIBE` pads its output with
         blank rows to separate sections, and those are not object names.
+
+        `SHOW TABLES` also lists the session's temporary views, which belong to
+        the session rather than the schema, so those rows are dropped too.
         """
 
-        return {str(row[column]).lower() for row in self[name] if row[column]}
+        return {
+            str(row[column]).lower()
+            for row in self[name]
+            if row[column] and not row.get("isTemporary")
+        }
 
     def schema(self, name: str) -> bool:
         return self._flag(self.schemas, name, "schema")

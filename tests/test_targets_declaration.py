@@ -11,7 +11,7 @@ from weaver.targets import DeltaTarget, FolderTarget, ItemRef, WarehouseTarget
 ROUND_TRIP = [
     (FolderTarget, "Sales/Files"),
     (FolderTarget, "Control/Files"),
-    (DeltaTarget, "Sales"),
+    (DeltaTarget, "Sales/Tables"),
     (WarehouseTarget, "Reporting"),
     (ItemRef, "Weaver"),
 ]
@@ -63,9 +63,21 @@ def test_folder_target_requires_more_than_a_lakehouse():
 
 
 @weaver_test()
-def test_delta_target_rejects_an_explicit_tables_area():
-    with pytest.raises(IdentityError, match="implicit"):
-        DeltaTarget.parse("Sales/Tables")
+def test_delta_target_names_a_lakehouse_and_its_tables_area():
+    assert DeltaTarget.parse("Sales/Tables").lakehouse == ItemRef("Sales")
+
+
+@weaver_test()
+def test_delta_target_requires_the_tables_area():
+    with pytest.raises(IdentityError, match="'<Lakehouse>/Tables'"):
+        DeltaTarget.parse("Sales")
+
+
+@pytest.mark.parametrize("bad", ["Sales/Files", "Sales/tables", "Sales/Tables/Thing"])
+@weaver_test()
+def test_delta_target_refuses_any_other_area_or_path(bad):
+    with pytest.raises(IdentityError, match="delta target"):
+        DeltaTarget.parse(bad)
 
 
 @weaver_test()
@@ -78,7 +90,7 @@ def test_warehouse_target_rejects_a_path():
 def test_the_same_name_serves_different_slots():
     """Kind comes from the slot, never from the string."""
     assert (
-        DeltaTarget.parse("Shared").lakehouse
+        DeltaTarget.parse("Shared/Tables").lakehouse
         == WarehouseTarget.parse("Shared").warehouse
     )
 
@@ -97,6 +109,6 @@ def test_surrounding_whitespace_is_normalised():
 
 @weaver_test()
 def test_identities_are_immutable():
-    target = DeltaTarget.parse("Sales")
+    target = DeltaTarget.parse("Sales/Tables")
     with pytest.raises(Exception):
         target.lakehouse = ItemRef("Other")

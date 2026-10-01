@@ -4,7 +4,7 @@ from weaver import Shortcut
 Source__Customer = Shortcut(
     shortcut_type="table",
     target_type="physical",
-    target="Lakehouse/{{EXTERNAL_LAKEHOUSE}}/Source.Customer",
+    target="Lakehouse/{{EXTERNAL_LAKEHOUSE}}/Tables/Source.Customer",
     workspace="{{EXTERNAL_WORKSPACE}}",
 )
 
@@ -32,7 +32,7 @@ Source__Events = Shortcut(
 Source__Transaction = Shortcut(
     shortcut_type="table",
     target_type="physical",
-    target="Warehouse/{{EXTERNAL_WAREHOUSE}}/Source.Transaction",
+    target="Warehouse/{{EXTERNAL_WAREHOUSE}}/Tables/Source.Transaction",
     workspace="{{EXTERNAL_WORKSPACE}}",
 )
 
@@ -40,6 +40,6 @@ Source__Transaction = Shortcut(
 Source__Region = Shortcut(
     shortcut_type="table",
     target_type="physical",
-    target="Warehouse/{{EXTERNAL_WAREHOUSE}}/Reference.Region",
+    target="Warehouse/{{EXTERNAL_WAREHOUSE}}/Tables/Reference.Region",
     workspace="{{EXTERNAL_WORKSPACE}}",
 )

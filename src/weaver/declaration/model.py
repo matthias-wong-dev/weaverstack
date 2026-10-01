@@ -514,17 +514,12 @@ class ShortcutDeclaration:
 
     @property
     def target_tail(self) -> str:
-        """Return a target's object, schema or canonical path within its item."""
+        """Return a target's path within its item, including any area it names."""
 
         parts = _split(self.target, what="shortcut target")
         tail = "/".join(parts[2:])
         if self.shortcut_type in (TABLE_SHORTCUT, VIEW_SHORTCUT):
-            # A logical Lakehouse target is a Weaver identity, so it names the
-            # Tables area; a physical one names a Fabric item, whose Tables area
-            # the source path adds. Either spelling reaches the same relation.
-            if parts[2] == TABLES:
-                tail = "/".join(parts[3:])
-            _object_id(tail)
+            self._target_relation
         elif self.is_schema:
             _logical_name(tail, what="target schema")
         else:
@@ -539,18 +534,55 @@ class ShortcutDeclaration:
         return tail
 
     @property
+    def _target_relation(self) -> tuple[str | None, ObjectId]:
+        """Split a table or view target into its area and ``Schema.Object``.
+
+        A physical table shortcut reads Delta storage, so it names ``Tables``. A
+        physical view reads a relation over TDS, so it names none. A logical
+        target is a Weaver identity and is checked as one by the repository.
+        """
+
+        parts = _split(self.target, what="shortcut target")
+        area = parts[2] if len(parts) == 4 and parts[2] == TABLES else None
+        if len(parts) != (4 if area else 3):
+            raise IdentityError(
+                f"shortcut target {self.target!r} must be "
+                "ItemType/ItemName/Tables/Schema.Object or "
+                "ItemType/ItemName/Schema.Object"
+            )
+        if not self.is_logical:
+            if self.shortcut_type == TABLE_SHORTCUT and area is None:
+                raise IdentityError(
+                    f"physical table shortcut {self.name!r} must name the "
+                    f"{TABLES} area of its target: {parts[0]}/{parts[1]}/"
+                    f"{TABLES}/{parts[2]}"
+                )
+            if self.is_view and area is not None:
+                raise IdentityError(
+                    f"physical view shortcut {self.name!r} reads a relation, so its "
+                    f"target is {parts[0]}/{parts[1]}/{parts[3]}"
+                )
+        return area, _object_id(parts[-1])
+
+    @property
     def target_object(self) -> ObjectId | None:
         if self.shortcut_type in (TABLE_SHORTCUT, VIEW_SHORTCUT):
-            return _object_id(self.target_tail)
+            return self._target_relation[1]
         return None
 
     @property
     def target_schema(self) -> str:
+        """The target's schema, prefixed by the area when the target names one.
+
+        A folder's is its path beneath ``Files``.
+        """
+
         if self.is_schema:
             return self.target_tail
         if self.is_files:
             return self.target_tail.split("/", 1)[1]
-        return _object_id(self.target_tail).schema
+        area, relation = self._target_relation
+        return f"{area}/{relation.schema}" if area else relation.schema
 
     @property
     def logical_source(self) -> "WeaverDocumentId":

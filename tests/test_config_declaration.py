@@ -36,7 +36,7 @@ def test_typical_configuration_maps_logical_items_to_physical_ones():
     )
     assert workspace.environment == EnvironmentRef(None, "WeaverRuntime")
     assert workspace.execution.parallel_workers == 8
-    assert str(workspace.target_for(_item("Lakehouse/Sales"))) == "Dev_Data"
+    assert str(workspace.target_for(_item("Lakehouse/Sales"))) == "Dev_Data/Tables"
     assert workspace.settings_for(_item("Warehouse/Reporting")).parallel_workers == 4
 
 
@@ -56,7 +56,9 @@ def test_the_logical_key_decides_which_kind_of_item_the_value_names():
         }
     )
 
-    assert workspace.target_for(_item("Lakehouse/Sales")) == DeltaTarget.parse("Shared")
+    assert workspace.target_for(_item("Lakehouse/Sales")) == DeltaTarget.parse(
+        "Shared/Tables"
+    )
     assert workspace.target_for(_item("Warehouse/Reporting")) == WarehouseTarget.parse(
         "Shared"
     )

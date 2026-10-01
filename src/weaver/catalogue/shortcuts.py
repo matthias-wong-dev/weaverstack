@@ -77,18 +77,17 @@ class Recreated:
     def source_components(self) -> tuple[str, ...]:
         """Return the target's path within its physical item.
 
-        A logical target's stored schema carries its area. A physical target's
-        shortcut type selects ``Files`` or ``Tables``.
+        A stored table target carries its area, and an area-less relation is
+        published under ``Tables``. A physical folder target is stored as its
+        path beneath ``Files``.
         """
 
         shortcut = self.shortcut
-        if shortcut.is_logical:
-            area, schema = stored_area(shortcut.target_schema)
-            tail = (shortcut.target_object,) if shortcut.target_object else ()
-            return (area or TABLES, *_parts(schema), *tail)
-        area = FILES if shortcut.shortcut_type == FOLDER_SHORTCUT else TABLES
         tail = (shortcut.target_object,) if shortcut.target_object else ()
-        return (area, *_parts(shortcut.target_schema), *tail)
+        if shortcut.shortcut_type == FOLDER_SHORTCUT and not shortcut.is_logical:
+            return (FILES, *_parts(shortcut.target_schema), *tail)
+        area, schema = stored_area(shortcut.target_schema)
+        return (area or TABLES, *_parts(schema), *tail)
 
 
 def _parts(path: str) -> tuple[str, ...]:

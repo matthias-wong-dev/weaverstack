@@ -5,6 +5,7 @@ from __future__ import annotations
 from importlib import import_module
 
 import pytest
+from support.reports import report_of
 from support.weaver_test import weaver_test
 
 from weaver_cli.main import (
@@ -92,7 +93,10 @@ def test_bundle_install_hands_core_the_bundle_and_an_unplaced_session(
     monkeypatch.setattr(
         install_operation,
         "install",
-        lambda bundle, **kwargs: seen.update(bundle=bundle, **kwargs) or _Report(),
+        lambda bundle, **kwargs: (
+            seen.update(bundle=bundle, **kwargs)
+            or report_of("succeeded", "succeeded", "failed", "skipped")
+        ),
     )
 
     args = build_parser().parse_args(["install", "handover"])
@@ -107,27 +111,6 @@ def test_bundle_install_hands_core_the_bundle_and_an_unplaced_session(
     assert "Bundle  bundle" in output
 
 
-class _Report:
-    status = "succeeded"
-    bundle_id = "bundle"
-    succeeded = True
-
-    def action_results(self):
-        from types import SimpleNamespace
-
-        return iter(
-            (
-                SimpleNamespace(status="succeeded"),
-                SimpleNamespace(status="succeeded"),
-                SimpleNamespace(status="failed"),
-                SimpleNamespace(status="skipped"),
-            )
-        )
-
-    def to_mapping(self):
-        return {"status": self.status, "bundle_id": self.bundle_id}
-
-
 class _Result:
     workspace_name = "Sales"
 
@@ -139,7 +122,6 @@ class _Result:
 def test_zero_failed_install_actions_are_not_red(monkeypatch):
     import io
     import sys
-    from types import SimpleNamespace
 
     cli = import_module("weaver_cli.main")
 
@@ -147,14 +129,10 @@ def test_zero_failed_install_actions_are_not_red(monkeypatch):
         def isatty(self):
             return True
 
-    class Successful:
-        def action_results(self):
-            return iter((SimpleNamespace(status="succeeded"),))
-
     output = Terminal()
     monkeypatch.setattr(sys, "stdout", output)
 
-    cli._print_action_counts(Successful())
+    cli._print_action_counts(report_of("succeeded"))
 
     failed = next(line for line in output.getvalue().splitlines() if "0 failed" in line)
     assert "\x1b[31m" not in failed
