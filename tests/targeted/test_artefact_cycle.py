@@ -65,6 +65,7 @@ from factories import (
     item_bindings,
     item_id,
 )
+from support.bundles import build_metadata
 from support.weaver_test import weaver_test
 from support.workspaces import WORKSPACE
 
@@ -185,6 +186,7 @@ def physical(bundle, estate_targets) -> list[str]:
     return [
         action.id
         for _sequence, batch, action in bundle.plan.actions()
+        if action.executor != "completion_gate"
         if action.kind in PHYSICAL_KINDS and batch.target_id in estate_targets
     ]
 
@@ -209,7 +211,7 @@ def test_converges_from_a_correct_estate_by_selecting_nothing(estate, tmp_path):
     what a keep-set defect looks like.
     """
 
-    selection = build(estate, tmp_path)[0].plan.selection
+    selection = build_metadata(build(estate, tmp_path)[0].plan).selection
 
     assert selection.selected_for_build == ()
     assert selection.selected_for_drop == ()
@@ -239,6 +241,7 @@ def test_whatever_the_tail_publishes_is_only_ever_catalogue_work(estate, tmp_pat
     kinds = {
         action.kind
         for _sequence, _batch, action in build(estate, tmp_path)[0].plan.actions()
+        if action.executor != "completion_gate"
     }
 
     assert "publish_catalogue" in kinds, "the new Installation row is recorded"

@@ -123,3 +123,37 @@ def given_build_plan(
             ],
         },
     )
+
+
+def build_metadata(plan):
+    """Decode the planner's frozen Build envelope for fixture assertions."""
+    from types import SimpleNamespace
+
+    from weaver.build_bundle.changes import TargetChange
+    from weaver.build_bundle.incremental import BuildSelection
+    from weaver.build_bundle.models import OmittedNode
+    from weaver.catalogue.runtime_state import (
+        RuntimeStateEstablishment,
+        RuntimeStateInvalidation,
+    )
+
+    envelope = plan.build_envelope
+    return SimpleNamespace(
+        repository_name=envelope["repository_name"],
+        repository_signature=envelope["repository_signature"],
+        selection=BuildSelection.from_mapping(envelope["selection"]),
+        omitted_nodes=tuple(
+            OmittedNode.from_mapping(n) for n in envelope["omitted_nodes"]
+        ),
+        target_changes={
+            key: tuple(TargetChange.from_mapping(c) for c in changes)
+            for key, changes in envelope["target_changes"].items()
+        },
+        runtime_state=tuple(
+            RuntimeStateInvalidation.from_mapping(n) for n in envelope["runtime_state"]
+        ),
+        runtime_state_established=tuple(
+            RuntimeStateEstablishment.from_mapping(n)
+            for n in envelope["runtime_state_established"]
+        ),
+    )

@@ -36,6 +36,7 @@ from factories import (
     item_bindings,
     item_id,
 )
+from support.bundles import build_metadata
 from support.weaver_test import weaver_test
 from support.workspaces import WORKSPACE
 
@@ -153,7 +154,11 @@ def build(repository, tmp_path, *, catalogue, runtime_references: bool = True):
 
 
 def actions(bundle):
-    return [action for _sequence, _batch, action in bundle.plan.actions()]
+    return [
+        action
+        for _sequence, _batch, action in bundle.plan.actions()
+        if action.executor != "completion_gate"
+    ]
 
 
 # --- the property -------------------------------------------------------------
@@ -251,9 +256,9 @@ def test_the_second_build_selects_nothing_to_build_or_drop(estate, tmp_path):
     can still happen to render nothing.
     """
 
-    selection = build(
-        estate, tmp_path, catalogue=installed_catalogue(estate)
-    ).plan.selection
+    selection = build_metadata(
+        build(estate, tmp_path, catalogue=installed_catalogue(estate)).plan
+    ).selection
 
     assert selection.selected_for_build == ()
     assert selection.selected_for_drop == ()
@@ -267,7 +272,7 @@ def test_the_second_build_changes_no_target(estate, tmp_path):
 
     second = build(estate, tmp_path, catalogue=installed_catalogue(estate))
 
-    assert not second.plan.target_changes
+    assert not build_metadata(second.plan).target_changes
 
 
 @weaver_test()
@@ -375,6 +380,7 @@ def test_an_unchanged_descendant_is_re_certified_by_the_build_that_rebuilds_it(
     registry = [
         action
         for _sequence, _batch, action in bundle.plan.actions()
+        if action.executor != "completion_gate"
         if action.kind == "publish_registry"
     ]
     assert registry, "the rebuild must publish a Registry barrier"

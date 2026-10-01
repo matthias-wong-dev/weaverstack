@@ -170,13 +170,14 @@ def execute_mutation(
             contexts,
             lane="native-session",
             required_capabilities=("resolver", "store"),
+            allow_skipped=name == "sql_endpoint_refresh",
         )
 
         def run(request, physical=driver.run):
             try:
                 return physical(request)
-            except InstallError as error:
-                return Failed(str(error))
+            except (InstallError, BuildError, ValueError) as error:
+                return Failed(f"{type(error).__name__}: {error}")
 
         drivers[name] = replace(driver, run=run)
     return MutationExecutor(

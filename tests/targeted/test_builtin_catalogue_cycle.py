@@ -11,6 +11,7 @@ from factories import (
     single_document_repository,
     target_inventory,
 )
+from support.bundles import build_metadata
 from support.sessions import given_session
 from support.weaver_test import weaver_test
 from support.workspaces import WORKSPACE, given_resolver, given_workspace
@@ -231,7 +232,7 @@ def test_empty_registry_recovers_existing_protected_catalogue_tables(estate, tmp
     assert [action.resource_node_id for action in physical] == [f"{BUILTIN}/{missing}"]
     retained = {
         identity
-        for identity in bundle.plan.selection.prohibited
+        for identity in build_metadata(bundle.plan).selection.prohibited
         if identity.item == BUILTIN
     }
     assert {identity.object_id.qualified for identity in retained} == set(

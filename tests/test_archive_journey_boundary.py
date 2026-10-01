@@ -9,7 +9,6 @@ import pytest
 from support.acceptance import Acceptance
 from support.bundles import given_build_plan as BuildPlan
 from support.bundles import given_execution
-from support.sessions import PlanExecution as Installer
 from support.weaver_test import weaver_test
 
 from weaver.build_bundle import (
@@ -20,8 +19,6 @@ from weaver.build_bundle import (
     Impact,
     InstallAction,
 )
-from weaver.build_bundle.bundle import SUPPORTED_FORMAT_VERSION, BuildBundle
-from weaver.locations import Location
 from weaver.operations.build import BuildResult
 
 
@@ -33,8 +30,8 @@ from weaver.operations.build import BuildResult
         "missing",
         "reordered",
         "duplicate",
-        "warehouse",
-        "no-request",
+        "wrong-plan",
+        "failed-report",
     ],
 )
 @weaver_test()
@@ -44,7 +41,7 @@ def test_journey_archive_assertion_reads_the_installed_plan(monkeypatch, coverag
     lakehouse = BoundTarget("lh", "lakehouse", "Sales")
     warehouse = BoundTarget("wh", "warehouse", "Weaver")
     actions = tuple(
-        InstallAction(name, "materialise", None, "spark_sql", None, None)
+        InstallAction(name, "build_folder", None, "folder", None, None)
         for name in ("first", "warehouse", "second")
     )
     batches = tuple(
@@ -56,21 +53,25 @@ def test_journey_archive_assertion_reads_the_installed_plan(monkeypatch, coverag
     sequences = (BuildSequence(10, "mixed", batches),)
     targets = (lakehouse, warehouse)
     plan = BuildPlan(
-        SUPPORTED_FORMAT_VERSION,
-        "bundle",
-        "Sales",
-        "signature",
-        targets,
-        sequences,
-        BuildSelection(Impact((), (), ()), (), (), ()),
-        given_execution(targets, sequences),
+        targets=targets,
+        sequences=sequences,
+        selection=BuildSelection(Impact((), (), ()), (), (), ()),
+        execution=given_execution(targets, sequences),
     )
-    bundle = BuildBundle(Location("bundle"), plan)
+    expected = [a.id for _, _, a in plan.actions()]
     result = BuildResult(
         "source", ("Lakehouse/Sales",), "bundle", True, None, "succeeded"
     )
     assert not hasattr(result, "plan")
-    session = SimpleNamespace(archive_installations=[])
+
+    class Session:
+        def __init__(self):
+            self.archive_mutations = []
+
+        def execute_mutation_remote(self, received, payloads=None, **options):
+            assert received is plan
+
+    session = Session()
     acceptance = Acceptance("archive coverage")
     acceptance.session = session
     acceptance.workspace = SimpleNamespace(catalogue="Warehouse/Weaver")
@@ -86,28 +87,26 @@ def test_journey_archive_assertion_reads_the_installed_plan(monkeypatch, coverag
     )
     monkeypatch.setattr(journey, "_catalogue_rows", lambda *args: [])
     monkeypatch.setattr(journey, "_seed_the_neighbour", lambda *args: None)
-    monkeypatch.setattr(Installer, "install", lambda *args, **kwargs: None)
 
     def build(*args, **kwargs):
-        Installer(session).install(bundle)
+        if coverage != "fallback":
+            session.execute_mutation_remote(plan)
         identities = {
-            "complete": ["first", "second"],
+            "complete": expected,
             "fallback": [],
-            "missing": ["first"],
-            "reordered": ["second", "first"],
-            "duplicate": ["first", "second", "second"],
-            "warehouse": ["first", "warehouse", "second"],
-            "no-request": ["first", "second"],
+            "missing": expected[:-1],
+            "reordered": list(reversed(expected)),
+            "duplicate": expected + [expected[-1]],
+            "wrong-plan": ["other"],
+            "failed-report": expected,
         }[coverage]
         if identities:
-            session.archive_installations.append(
+            session.archive_mutations.append(
                 {
-                    "request": None if coverage == "no-request" else {},
-                    "report": {
-                        "sequences": [
-                            {"actions": [{"action_id": name} for name in identities]}
-                        ]
-                    },
+                    "status": "uncertain"
+                    if coverage == "failed-report"
+                    else "completed",
+                    "action_ids": identities,
                 }
             )
         return result

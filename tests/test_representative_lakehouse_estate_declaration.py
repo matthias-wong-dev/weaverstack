@@ -8,6 +8,7 @@ from collections import Counter, defaultdict
 
 import pytest
 from factories import FixtureCatalogue, item_bindings, target_inventory
+from support.bundles import build_metadata
 from support.representative_lakehouse_estate import (
     RepresentativeLakehouseSpec,
     make_representative_lakehouse_plan,
@@ -442,7 +443,7 @@ def test_two_motif_cold_bundle_contains_the_independent_runtime_census(tmp_path)
         for stream in ("Entity", "Adjustment")
     )
 
-    assert bundle.plan.omitted_nodes == ()
+    assert build_metadata(bundle.plan).omitted_nodes == ()
     assert runtime_resources == expected_runtime_resources
     assert len(runtime_resources) == 47
     assert (

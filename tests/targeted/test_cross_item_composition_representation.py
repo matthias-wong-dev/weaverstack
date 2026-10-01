@@ -21,6 +21,7 @@ from __future__ import annotations
 import pytest
 from factories import FixtureCatalogue, item_bindings, target_inventory
 from support.build_envs import CROSS_ITEM_JOURNEY_FIXTURE
+from support.bundles import build_metadata
 from support.weaver_test import weaver_test
 from support.workspaces import WORKSPACE
 
@@ -75,7 +76,11 @@ def plan(repository, tmp_path_factory):
 def _at(plan) -> dict:
     """Each action's sequence number, by the action id the manifest gave it."""
 
-    return {action.id: sequence.number for sequence, _batch, action in plan.actions()}
+    return {
+        action.id: sequence.number
+        for sequence, _batch, action in plan.actions()
+        if action.executor != "completion_gate"
+    }
 
 
 def _when(plan, ending: str) -> int:
@@ -121,7 +126,7 @@ def test_one_bundle_carries_both_targets(plan):
         "Reporting",
         "_weaver",
     }
-    assert plan.omitted_nodes == ()
+    assert build_metadata(plan).omitted_nodes == ()
 
 
 @weaver_test()
@@ -155,6 +160,7 @@ def test_the_warehouse_side_is_reached_over_tds(plan):
     by_target = {
         batch.target_id.split("--")[0]: action.executor
         for _sequence, batch, action in plan.actions()
+        if action.executor != "completion_gate"
         if action.id.endswith("shortcuts-Warehouse--Reporting")
     }
 
@@ -172,6 +178,7 @@ def test_the_warehouse_report_carries_a_load_procedure_and_a_test(plan):
     procedures = {
         action.id
         for _sequence, _batch, action in plan.actions()
+        if action.executor != "completion_gate"
         if action.id.startswith("runtime-Warehouse--Reporting--procedure")
     }
 

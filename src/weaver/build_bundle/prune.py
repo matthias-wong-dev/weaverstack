@@ -156,9 +156,15 @@ class TargetInventory:
         behaviour from actions. Action ids hold the summary and actions to a bijection.
         """
 
-        from .changes import apply_to
+        from .changes import TargetChange, apply_to
 
-        return apply_to(self, plan.target_changes.get(self.target_id, ()))
+        changes = (plan.build_envelope or {}).get("target_changes", {})
+        return apply_to(
+            self,
+            tuple(
+                TargetChange.from_mapping(c) for c in changes.get(self.target_id, ())
+            ),
+        )
 
     def has_object(self, schema: str, name: str, object_type: str) -> bool:
         """Return whether the matching inventory collection holds this object.

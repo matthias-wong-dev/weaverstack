@@ -33,6 +33,7 @@ from factories import (
 from factories import (
     FixtureInventory as _FixtureInventory,
 )
+from support.bundles import build_metadata
 from support.catalogues import LOADED_AT
 from support.weaver_test import weaver_test
 from support.workspaces import WORKSPACE
@@ -365,7 +366,7 @@ def test_a_build_with_nothing_to_do_leaves_every_table_alone(estate, tmp_path):
 
     bundle, _reached, after = _applied(estate, catalogue, tmp_path)
 
-    assert bundle.plan.runtime_state == ()
+    assert build_metadata(bundle.plan).runtime_state == ()
     assert _keys(after, BOOKMARK) == {CUSTOMER, CSV, OTHER}
     assert _keys(after, LOAD_STATUS) == {CUSTOMER, CSV, OTHER}
     assert _keys(after, TEST_STATUS) == {RECONCILE}
@@ -429,7 +430,7 @@ def test_an_empty_target_does_not_invalidate_what_it_never_held(tmp_path):
         catalogue_binding=CATALOGUE,
     )
 
-    assert bundle.plan.runtime_state == ()
+    assert build_metadata(bundle.plan).runtime_state == ()
 
 
 __all__: tuple = ()

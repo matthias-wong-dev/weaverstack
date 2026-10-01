@@ -28,7 +28,10 @@ def execute_bundle(bundle, session, *, executors=None, build_datetime=None):
                     continue
                 result = report.by_id[action.id]
                 status = (
-                    result.status
+                    "skipped"
+                    if isinstance(result.value, dict)
+                    and result.value.get("skipped") is True
+                    else result.status
                     if result.status in {"succeeded", "failed"}
                     else ("failed" if result.status == "uncertain" else "skipped")
                 )

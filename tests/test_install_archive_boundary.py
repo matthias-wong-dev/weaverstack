@@ -71,97 +71,103 @@ def test_durable_result_receipt_rejects_changed_bytes():
 
 
 def _report_pair():
-    plan = {
-        "bundle_id": "bundle",
-        "sequences": [
-            {
-                "number": 10,
-                "description": "first",
-                "batches": [
-                    {
-                        "target_id": "target",
-                        "actions": [
-                            {
-                                "id": "one",
-                                "executor": "spark_sql",
-                                "resource_node_id": None,
-                            }
-                        ],
-                    }
-                ],
-            }
-        ],
-    }
-    report = {
-        "bundle_id": "bundle",
-        "status": "succeeded",
-        "started_at": "2026-01-01T00:00:00+00:00",
-        "finished_at": "2026-01-01T00:00:01+00:00",
-        "sequences": [
-            {
-                "number": 10,
-                "description": "first",
-                "status": "succeeded",
-                "actions": [
-                    {
-                        "action_id": "one",
-                        "executor": "spark_sql",
-                        "target_id": "target",
-                        "resource_node_id": None,
-                        "status": "succeeded",
-                        "started_at": "2026-01-01T00:00:00+00:00",
-                        "finished_at": "2026-01-01T00:00:01+00:00",
-                        "duration_seconds": 1.0,
-                    }
-                ],
-            }
-        ],
-    }
-    return plan, report
+    from dataclasses import replace
+
+    from weaver.mutation import (
+        BoundTarget,
+        MutationAction,
+        MutationBatch,
+        MutationExecution,
+        MutationPlan,
+        MutationSequence,
+    )
+    from weaver.mutation.bundle import compute_bundle_id
+    from weaver.mutation.executor import Completed, MutationDriver, MutationExecutor
+    from weaver.sessions.mutation_report import encode_report
+
+    plan = MutationPlan(
+        execution=MutationExecution("Demo"),
+        targets=(BoundTarget("target", "lakehouse", "target-id"),),
+        sequences=(
+            MutationSequence(
+                10,
+                "first",
+                (
+                    MutationBatch(
+                        "batch",
+                        "target",
+                        (
+                            MutationAction(
+                                "one",
+                                "build_folder",
+                                None,
+                                "folder",
+                                None,
+                                None,
+                                target_id="target",
+                                depends_on=(),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        ),
+    )
+    plan = replace(plan, bundle_id=compute_bundle_id(plan))
+    report = MutationExecutor(
+        {"folder": MutationDriver(lambda request: Completed())}
+    ).execute(plan)
+    return plan, encode_report(report)
 
 
 @weaver_test()
 def test_remote_report_round_trip_is_complete():
-    from weaver.sessions.install_archive import decode_report
+    from weaver.sessions.mutation_report import decode_report, encode_report
 
     plan, mapping = _report_pair()
-    assert decode_report(mapping, plan).to_mapping() == mapping
+    assert encode_report(decode_report(plan, mapping)) == mapping
 
 
 @pytest.mark.parametrize(
     "change",
     [
-        "wrong_target",
+        "wrong_action",
         "missing_action",
         "nan",
-        "false_success",
-        "wrong_bundle",
-        "wrong_sequence",
-        "naive_clock",
+        "invalid_status",
+        "wrong_plan",
+        "duplicate_action",
+        "wrong_invocation",
     ],
 )
 @weaver_test()
 def test_remote_report_rejects_unsettled_protocol(change):
-    from weaver.sessions.install_archive import decode_report
+    from weaver.errors import BuildError
+    from weaver.sessions.mutation_report import decode_report
 
     plan, report = _report_pair()
-    row = report["sequences"][0]["actions"][0]
-    if change == "wrong_target":
-        row["target_id"] = "other"
+    results = report["fields"]["results"]["value"]
+    row = results[0]["fields"]
+    if change == "wrong_action":
+        row["action_id"]["value"] = "other"
     elif change == "missing_action":
-        report["sequences"][0]["actions"] = []
+        results.clear()
     elif change == "nan":
-        row["duration_seconds"] = float("nan")
-    elif change == "false_success":
-        row.update(status="failed", error_type="ExampleError", error_message="failure")
-    elif change == "wrong_bundle":
-        report["bundle_id"] = "different"
-    elif change == "wrong_sequence":
-        report["sequences"][0]["number"] = 20
+        row["active_seconds"]["value"] = float("nan")
+    elif change == "invalid_status":
+        row["status"]["value"] = "missing"
+    elif change == "wrong_plan":
+        report["fields"]["plan_id"]["value"] = "different"
+    elif change == "duplicate_action":
+        results.append(results[0])
     else:
-        row["started_at"] = "2026-01-01T00:00:00"
-    with pytest.raises(ValueError):
-        decode_report(report, plan)
+        report["fields"]["invocation_id"]["value"] = "different"
+    with pytest.raises((ValueError, BuildError)):
+        decode_report(
+            plan,
+            report,
+            invocation_id="expected" if change == "wrong_invocation" else None,
+        )
 
 
 @weaver_test()
@@ -263,22 +269,6 @@ def test_native_archive_store_preserves_non_utf8_payloads(tmp_path):
     assert store.read(destination) == b"\xff\x00\xfe"
 
 
-@weaver_test()
-def test_archive_interruption_fails_every_unacknowledged_action():
-    from weaver.sessions.install_archive import uncertain_report
-
-    plan, _ = _report_pair()
-    result = uncertain_report(
-        plan, "statement outcome unavailable", "private/report.json"
-    )
-    rows = list(result.action_results())
-    assert result.status == "failed"
-    assert [row.action_id for row in rows] == ["one"]
-    assert rows[0].status == "failed"
-    assert rows[0].details["uncertain"] is True
-    assert rows[0].details["remote_result"] == "private/report.json"
-
-
 @pytest.mark.parametrize("failure", [False, True])
 @weaver_test()
 def test_ready_archive_bootstrap_restores_the_live_interpreter(
@@ -294,9 +284,9 @@ def test_ready_archive_bootstrap_restores_the_live_interpreter(
     from weaver.sessions.install_archive import Carrier, bootstrap_source, read_receipt
 
     body = (
-        "def run_bundle(*args, **kwargs):\n    raise RuntimeError('installer interrupted')\n"
+        "def run_mutation(*args, **kwargs):\n    raise RuntimeError('installer interrupted')\n"
         if failure
-        else "def run_bundle(*args, **kwargs):\n    return {'status': 'completed', 'marker': 'extracted runtime'}\n"
+        else "def run_mutation(*args, **kwargs):\n    return {'status': 'completed', 'marker': 'extracted runtime'}\n"
     )
     members = {
         "runtime/weaver/__init__.py": b"",

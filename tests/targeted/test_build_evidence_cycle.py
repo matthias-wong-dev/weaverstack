@@ -11,7 +11,6 @@ from pathlib import Path
 
 import pytest
 from factories import full_estate
-from support.sessions import PlanExecution as Installer
 from support.sessions import given_session
 from support.weaver_test import weaver_test
 from support.workspaces import WORKSPACE
@@ -78,10 +77,15 @@ def _build(tmp_path, monkeypatch, *, catalogue, fail_at=None):
     monkeypatch.setattr(build_bundle, "catalogue_items_for_build", lambda *_a: ())
     monkeypatch.setattr(build_bundle, "read_build_state", lambda *_a, **_k: None)
     monkeypatch.setattr(build_bundle, "build_repository_bundle", generate)
+    from weaver.sessions.testing import TestSession
+
+    execute = TestSession.execute_mutation
     monkeypatch.setattr(
-        build_bundle,
-        "Installer",
-        lambda session: Installer(session, executors=executors),
+        TestSession,
+        "execute_mutation",
+        lambda session, plan, payloads=None, **options: execute(
+            session, plan, payloads, executors=executors, **options
+        ),
     )
     session = given_session(
         store=FilesystemStore(),
@@ -113,7 +117,11 @@ def _kept(result) -> InstallationReport:
 
 
 def _planned(bundle) -> list[str]:
-    return [action.id for _sequence, _batch, action in bundle.plan.actions()]
+    return [
+        action.id
+        for _sequence, _batch, action in bundle.plan.actions()
+        if action.executor != "completion_gate"
+    ]
 
 
 @weaver_test()

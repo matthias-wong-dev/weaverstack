@@ -158,6 +158,9 @@ def validate_mutation_plan(plan: MutationPlan) -> None:
         if contract.settles_operation and contract.consumes is None:
             raise BuildError("operation settler requires a consumed result type")
         contracts[contract.executor] = contract
+    omitted_ids = {
+        node["node_id"] for node in (plan.build_envelope or {}).get("omitted_nodes", ())
+    }
     actions = [a for _, _, a in plan.actions()]
     if (
         any(
@@ -183,7 +186,7 @@ def validate_mutation_plan(plan: MutationPlan) -> None:
                 if not action.payload.endswith(contract.payload_extension):
                     raise BuildError("invalid extension payload")
         else:
-            _validate_action_shape(action, set())
+            _validate_action_shape(action, omitted_ids)
         edges = (*action.depends_on, *action.settle_after)
         if len(edges) != len(set(edges)):
             raise BuildError(f"action {action.id!r} has a duplicate ordering edge")

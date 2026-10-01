@@ -11,6 +11,7 @@ from factories import (
     item_bindings,
     item_id,
 )
+from support.bundles import build_metadata
 from support.weaver_test import weaver_test
 from support.workspaces import WORKSPACE
 
@@ -128,11 +129,11 @@ def _bundle(
 
 
 def _assert_no_install_selection(bundle) -> None:
-    selection = bundle.plan.selection
+    selection = build_metadata(bundle.plan).selection
     assert selection.impact.new == ()
     assert selection.impact.changed == ()
     assert selection.selected_for_build == ()
-    assert bundle.plan.runtime_state_established == ()
+    assert build_metadata(bundle.plan).runtime_state_established == ()
     assert not [
         action
         for _sequence, _batch, action in bundle.plan.actions()
@@ -165,7 +166,7 @@ def test_an_unchanged_lakehouse_validation_selects_no_install_or_state_reset(tmp
 def _test_state_rows(bundle):
     return [
         row
-        for establishment in bundle.plan.runtime_state_established
+        for establishment in build_metadata(bundle.plan).runtime_state_established
         if establishment.table == "TestStatus"
         for row in establishment.rows
     ]
@@ -194,9 +195,10 @@ def test_a_changed_warehouse_validation_selects_its_procedure_and_resets_test_st
         installed_repository=before,
     )
 
-    assert [str(identity) for identity in bundle.plan.selection.selected_for_build] == [
-        "Warehouse/Reporting/procedure:_/Test Sales.Reconciles"
-    ]
+    assert [
+        str(identity)
+        for identity in build_metadata(bundle.plan).selection.selected_for_build
+    ] == ["Warehouse/Reporting/procedure:_/Test Sales.Reconciles"]
     assert _test_state_rows(bundle) == [
         {
             "item_type": "Warehouse",
@@ -230,9 +232,10 @@ def test_a_changed_lakehouse_validation_selects_its_module_and_resets_test_state
         installed_repository=before,
     )
 
-    assert [str(identity) for identity in bundle.plan.selection.selected_for_build] == [
-        "Lakehouse/Sales/file:_/Load/assumptions/Sales__NoOrphans.py"
-    ]
+    assert [
+        str(identity)
+        for identity in build_metadata(bundle.plan).selection.selected_for_build
+    ] == ["Lakehouse/Sales/file:_/Load/assumptions/Sales__NoOrphans.py"]
     assert _test_state_rows(bundle) == [
         {
             "item_type": "Lakehouse",
@@ -265,7 +268,7 @@ def test_a_validation_implementation_change_selects_the_generated_artefact(
         physical="Reporting_WH",
         installed_repository=before,
     )
-    selected = bundle.plan.selection.selected_for_build
+    selected = build_metadata(bundle.plan).selection.selected_for_build
 
     assert [str(identity) for identity in selected] == [
         "Warehouse/Reporting/procedure:_/Test Sales.Reconciles"
@@ -304,9 +307,10 @@ def test_a_lakehouse_validation_implementation_change_selects_and_resets(
         catalogue=catalogue,
     )
 
-    assert [str(identity) for identity in bundle.plan.selection.selected_for_build] == [
-        "Lakehouse/Sales/file:_/Load/assumptions/Sales__NoOrphans.py"
-    ]
+    assert [
+        str(identity)
+        for identity in build_metadata(bundle.plan).selection.selected_for_build
+    ] == ["Lakehouse/Sales/file:_/Load/assumptions/Sales__NoOrphans.py"]
     artefact = next(
         artefact
         for artefact in item_validation_artefacts(after, item=item_id(LAKEHOUSE))

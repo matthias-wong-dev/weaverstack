@@ -26,6 +26,7 @@ from factories import (
     item_id,
     target_inventory,
 )
+from support.bundles import build_metadata
 from support.weaver_test import weaver_test
 from support.workspaces import WORKSPACE
 
@@ -36,6 +37,7 @@ from weaver.build_bundle import (
 from weaver.build_bundle.changes import ADD, OBJECT_KINDS, REMOVE
 from weaver.catalogue.state import Catalogue
 from weaver.locations import Location
+from weaver.mutation import MutationPlan
 from weaver.store import FilesystemStore
 from weaver.targets import ItemRef
 
@@ -116,7 +118,10 @@ def test_every_action_that_touches_a_target_is_declared(repository, tmp_path, it
     plan = build(repository, tmp_path).plan
     target_id = target_id_of(item)
 
-    declared = {change.action_id for change in plan.target_changes.get(target_id, ())}
+    declared = {
+        change.action_id
+        for change in build_metadata(plan).target_changes.get(target_id, ())
+    }
     performed = {action.id for action in actions_on(plan, target_id)}
 
     assert performed, f"{item} planned no physical work to check"
@@ -135,7 +140,10 @@ def test_every_declared_change_names_an_action_that_runs(repository, tmp_path, i
     plan = build(repository, tmp_path).plan
     target_id = target_id_of(item)
 
-    declared = {change.action_id for change in plan.target_changes.get(target_id, ())}
+    declared = {
+        change.action_id
+        for change in build_metadata(plan).target_changes.get(target_id, ())
+    }
     performed = {action.id for action in actions_on(plan, target_id)}
 
     assert declared - performed == set(), sorted(declared - performed)
@@ -153,7 +161,7 @@ def test_no_change_is_attributed_to_the_wrong_target(repository, tmp_path):
     plan = build(repository, tmp_path).plan
     by_action = {action.id: batch.target_id for _s, batch, action in plan.actions()}
 
-    for target_id, changes in plan.target_changes.items():
+    for target_id, changes in build_metadata(plan).target_changes.items():
         for change in changes:
             assert by_action[change.action_id] == target_id, change
 
@@ -169,7 +177,7 @@ def test_both_item_types_declare_something(repository, tmp_path):
     plan = build(repository, tmp_path).plan
 
     for item in (ITEM, WAREHOUSE_ITEM):
-        assert plan.target_changes.get(target_id_of(item)), item
+        assert build_metadata(plan).target_changes.get(target_id_of(item)), item
 
 
 @weaver_test()
@@ -181,7 +189,7 @@ def test_a_warehouse_declares_the_kinds_only_it_has(repository, tmp_path):
     """
 
     plan = build(repository, tmp_path).plan
-    changes = plan.target_changes[target_id_of(WAREHOUSE_ITEM)]
+    changes = build_metadata(plan).target_changes[target_id_of(WAREHOUSE_ITEM)]
 
     assert any(
         change.object_kind == "stored_procedure" and change.effect == ADD
@@ -195,7 +203,7 @@ def test_a_warehouse_declares_the_kinds_only_it_has(repository, tmp_path):
 @weaver_test()
 def test_a_lakehouse_declares_the_kinds_only_it_has(repository, tmp_path):
     plan = build(repository, tmp_path).plan
-    changes = plan.target_changes[target_id_of(ITEM)]
+    changes = build_metadata(plan).target_changes[target_id_of(ITEM)]
 
     assert any(change.object_kind == "file" for change in changes)
     assert any(change.object_kind == "folder" for change in changes)
@@ -214,13 +222,13 @@ def test_the_summary_travels_in_the_manifest(repository, tmp_path):
     and it survives the round trip that proves it.
     """
 
-    from support.bundles import given_build_plan as BuildPlan
-
     plan = build(repository, tmp_path).plan
-    restored = BuildPlan.from_mapping(plan.to_mapping())
+    restored = MutationPlan.from_mapping(plan.to_mapping())
 
-    assert restored.target_changes == plan.target_changes
-    assert "target_changes" in plan.to_mapping()
+    assert (
+        build_metadata(restored).target_changes == build_metadata(plan).target_changes
+    )
+    assert "target_changes" in plan.to_mapping()["build_envelope"]
 
 
 @weaver_test()
@@ -233,13 +241,9 @@ def test_the_summary_is_part_of_bundle_identity(repository, tmp_path):
 
     plan = build(repository, tmp_path).plan
     target_id = target_id_of(ITEM)
-    tampered = replace(
-        plan,
-        target_changes={
-            **plan.target_changes,
-            target_id: plan.target_changes[target_id][:-1],
-        },
-    )
+    envelope = plan.to_mapping()["build_envelope"]
+    envelope["target_changes"][target_id] = envelope["target_changes"][target_id][:-1]
+    tampered = replace(plan, bundle_id="", build_envelope=envelope)
 
     assert compute_bundle_id(tampered) != compute_bundle_id(plan)
 
@@ -255,7 +259,7 @@ def test_a_declared_change_is_a_shape_the_inventory_can_hold(repository, tmp_pat
     plan = build(repository, tmp_path).plan
     empty = target_inventory()
 
-    for changes in plan.target_changes.values():
+    for changes in build_metadata(plan).target_changes.values():
         for change in changes:
             assert change.object_kind in OBJECT_KINDS
             assert change.effect in (ADD, REMOVE)

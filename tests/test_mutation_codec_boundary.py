@@ -3,11 +3,9 @@ from dataclasses import replace
 
 import pytest
 import yaml
-from support.sessions import given_installer
 from support.weaver_test import weaver_test
 
 from weaver.build_bundle.bundle import (
-    BuildBundle,
     load_bundle,
     plan_from_yaml,
     plan_to_yaml,
@@ -49,35 +47,6 @@ def _plan():
 
 
 @weaver_test()
-def test_installer_refuses_mutation_format_before_binding(tmp_path, monkeypatch):
-    store = FilesystemStore()
-    installer = given_installer(store=store)
-    bound = []
-    monkeypatch.setattr(installer, "_bind", lambda plan: bound.append(plan))
-    bundle = BuildBundle(Location(str(tmp_path / "bundle")), _plan(), store)
-    with pytest.raises(BuildError, match="format version 5"):
-        installer.install(bundle)
-    assert bound == []
-
-
-@weaver_test()
-def test_default_codec_refuses_mutation_write_before_any_store_write(
-    tmp_path, monkeypatch
-):
-    store = FilesystemStore()
-    written = []
-    monkeypatch.setattr(store, "write", lambda *args: written.append(args))
-    with pytest.raises(BuildError, match="format version 5"):
-        write_bundle(
-            Location(str(tmp_path / "bundle")),
-            plan=_plan(),
-            payloads={"payload/runtime.payload": b"\x00\xff"},
-            store=store,
-        )
-    assert written == []
-
-
-@weaver_test()
 def test_mutation_writer_rejects_unreferenced_escape_before_manifest(
     tmp_path, monkeypatch
 ):
@@ -115,8 +84,7 @@ def test_mutation_manifest_is_last_and_corrupt_payload_is_refused(
         store=store,
     )
     assert written[-1].endswith("plan.yml")
-    with pytest.raises(BuildError, match="format version 5"):
-        load_bundle(location, store=store)
+    assert load_bundle(location, store=store).plan.format_version == 5
     store.write(location.join("payload", "runtime.payload"), b"corrupt")
     with pytest.raises(BuildError, match="checksum"):
         load_bundle(location, store=store)
@@ -135,54 +103,24 @@ def test_mutation_manifest_is_last_and_corrupt_payload_is_refused(
     ],
 )
 def test_codec_refuses_ambiguous_legacy_or_serialized_intent(fault):
-    from test_mutation_compatibility_representation import _legacy_plan
-
+    mapping = _plan().to_mapping()
     if fault == "float_version":
-        text = plan_to_yaml(replace(_legacy_plan(), format_version=4.0))
+        mapping["format_version"] = 5.0
     elif fault == "legacy_graph_field":
-        mapping = _legacy_plan().to_mapping()
-        mapping["sequences"][0]["batches"][0]["actions"][0]["depends_on"] = []
-        text = yaml.safe_dump(mapping)
-    elif fault in {"legacy_top_graph", "legacy_coerced_flag"}:
-        mapping = _legacy_plan().to_mapping()
-        if fault == "legacy_top_graph":
-            mapping["dependency_edges"] = []
-        else:
-            mapping["sequences"][0]["batches"][0]["actions"][0][
-                "awaits_name_release"
-            ] = "false"
-        text = yaml.safe_dump(mapping)
-    elif fault == "invalid_yaml":
+        mapping["format_version"] = 4
+    elif fault == "legacy_top_graph":
+        mapping["dependency_edges"] = []
+    elif fault == "legacy_coerced_flag":
+        mapping["sequences"][0]["batches"][0]["actions"][0]["awaits_name_release"] = (
+            "false"
+        )
+    text = yaml.safe_dump(mapping)
+    if fault == "invalid_yaml":
         text = "format_version: [5\n"
-    else:
-        text = plan_to_yaml(_legacy_plan()) + "format_version: 4\n"
+    elif fault == "duplicate_yaml_field":
+        text += "format_version: 5\n"
     with pytest.raises(BuildError):
         plan_from_yaml(text)
-
-
-@weaver_test()
-def test_legacy_installer_refuses_embedded_dag_actions_before_binding(
-    tmp_path, monkeypatch
-):
-    from test_mutation_compatibility_representation import _legacy_plan
-
-    legacy = _legacy_plan()
-    batch = legacy.sequences[0].batches[0]
-    action = MutationAction(
-        **batch.actions[0].to_mapping(), target_id=batch.target_id, depends_on=()
-    )
-    legacy = replace(
-        legacy,
-        sequences=(
-            replace(legacy.sequences[0], batches=(replace(batch, actions=(action,)),)),
-        ),
-    )
-    installer = given_installer(store=FilesystemStore())
-    bound = []
-    monkeypatch.setattr(installer, "_bind", lambda plan: bound.append(plan))
-    with pytest.raises(BuildError, match="format-4.*DAG"):
-        installer.install(BuildBundle(Location(str(tmp_path / "bundle")), legacy))
-    assert bound == []
 
 
 @weaver_test()

@@ -819,7 +819,9 @@ class MutationJournal:
             self.buffer.clear()
 
 
-def physical_driver(executor, contexts, *, lane, required_capabilities):
+def physical_driver(
+    executor, contexts, *, lane, required_capabilities, allow_skipped=False
+):
     """Bind existing executors to one owned runtime lane.
 
     Use the same lane for a shared Spark Session, TDS connection or inner pool.
@@ -846,6 +848,8 @@ def physical_driver(executor, contexts, *, lane, required_capabilities):
             request.action, request.payload, contexts[request.action.target_id]
         )
         if isinstance(result, SkippedExecution):
+            if allow_skipped:
+                return Completed({**(result.details or {}), "skipped": True})
             return Failed("required physical action was skipped")
         return Completed(result)
 

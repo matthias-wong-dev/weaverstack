@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 import pytest
-from support.bundles import given_build_plan as BuildPlan
+from support.bundles import build_metadata
 from support.weaver_test import weaver_test
 from support.workspaces import WORKSPACE
 from test_item_dependencies_declaration import _dependency_estate
@@ -45,6 +45,7 @@ from weaver.catalogue.tables import REGISTRY, STANDARD_SURFACE_TABLES
 from weaver.declaration import parse_item_repository
 from weaver.declaration.model import WeaverDocumentId, WeaverItemId
 from weaver.locations import Location
+from weaver.mutation import MutationPlan
 from weaver.store import FilesystemStore
 from weaver.targets import ItemRef
 
@@ -439,7 +440,7 @@ def test_uncertified_physical_protected_object_is_changed_retained_and_recertifi
         ),
     )
 
-    selection = bundle.plan.selection
+    selection = build_metadata(bundle.plan).selection
     assert wanted in selection.impact.changed
     assert wanted not in selection.impact.new
     assert wanted in selection.prohibited
@@ -492,8 +493,8 @@ def test_uncertified_physical_protected_loadable_keeps_its_runtime_state(tmp_pat
     )
 
     customer = WeaverDocumentId.parse("Lakehouse/Raw/Tables/Sales.Customer")
-    assert customer in bundle.plan.selection.prohibited
-    assert bundle.plan.runtime_state == ()
+    assert customer in build_metadata(bundle.plan).selection.prohibited
+    assert build_metadata(bundle.plan).runtime_state == ()
 
 
 SHORTCUT_DESTINATION = "Warehouse/Reporting/Sales.PortableCustomer"
@@ -891,7 +892,7 @@ def test_a_source_rebuilt_earlier_refreshes_the_pointer_and_then_settles(tmp_pat
         return _dated(rows, "Warehouse/Reporting", "Sales", "PortableCustomer", reader)
 
     def touched(bundle):
-        selected = set(bundle.plan.selection.selected_for_build)
+        selected = set(build_metadata(bundle.plan).selection.selected_for_build)
         return {consumer, destination} & selected
 
     settled = _shortcut_bundle(
@@ -903,10 +904,10 @@ def test_a_source_rebuilt_earlier_refreshes_the_pointer_and_then_settles(tmp_pat
     stale = _shortcut_bundle(
         tmp_path, repository, rows=dated(LATER, EARLIER), name="stale"
     )
-    assert consumer in stale.plan.selection.selected_for_build
+    assert consumer in build_metadata(stale.plan).selection.selected_for_build
     # Refreshed over the address already there, and never dropped to do it.
-    assert destination in stale.plan.selection.selected_for_build
-    assert destination not in stale.plan.selection.selected_for_drop
+    assert destination in build_metadata(stale.plan).selection.selected_for_build
+    assert destination not in build_metadata(stale.plan).selection.selected_for_drop
     assert len(_shortcut_actions(stale)) == 1
 
     # The state that rebuild leaves: the reader dated after its source.
@@ -939,9 +940,9 @@ def test_a_refreshed_pointers_claim_is_deleted_and_republished(tmp_path):
 
     bundle = _shortcut_bundle(tmp_path, repository, rows=rows, name="dated")
 
-    assert destination in bundle.plan.selection.selected_for_build
+    assert destination in build_metadata(bundle.plan).selection.selected_for_build
     # Refreshed over its own address, so it is not on the drop side of the plan.
-    assert destination not in bundle.plan.selection.selected_for_drop
+    assert destination not in build_metadata(bundle.plan).selection.selected_for_drop
     delete_action = next(
         action
         for _sequence, _batch, action in bundle.plan.actions()
@@ -1027,8 +1028,8 @@ def test_implicit_delta_default_upgrade_does_not_rebuild_registered_tables(
             ItemRef("Weaver_Control"), workspace_name=WORKSPACE
         ),
     )
-    assert bundle.plan.selection.selected_for_build == ()
-    assert bundle.plan.selection.selected_for_drop == ()
+    assert build_metadata(bundle.plan).selection.selected_for_build == ()
+    assert build_metadata(bundle.plan).selection.selected_for_drop == ()
     assert not any(
         action.kind in {BUILD_TABLE, DROP_TABLE}
         for _sequence, _batch, action in bundle.plan.actions()
@@ -1059,9 +1060,9 @@ def test_planner_emits_no_physical_work_for_unchanged_repository(tmp_path):
     assert not any(
         action.kind in physical for _sequence, _batch, action in bundle.plan.actions()
     )
-    assert bundle.plan.selection.selected_for_build == ()
-    restored = BuildPlan.from_mapping(bundle.plan.to_mapping())
-    assert restored.selection == bundle.plan.selection
+    assert build_metadata(bundle.plan).selection.selected_for_build == ()
+    restored = MutationPlan.from_mapping(bundle.plan.to_mapping())
+    assert build_metadata(restored).selection == build_metadata(bundle.plan).selection
 
 
 @weaver_test()
