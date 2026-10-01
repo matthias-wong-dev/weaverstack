@@ -385,6 +385,10 @@ Provided buffered journals persist each dispatch group's admission before its
 drivers run and operation acknowledgements before result consumers run. Ordinary
 completion events are checkpointed in bounded groups and flushed with subsequent
 admissions or at invocation completion.
+An admission checkpoint failure records `admission_refused` in the final ledger
+before the action's zero-attempt `not_dispatched` result. Final receipt validation
+requires its journal diagnostic and rejects physical outcomes for that action.
+Checkpoint recovery without this final evidence retains admission uncertainty.
 Runtime clocks, handles and invocation IDs remain outside plan identity.
 
 The internal `Session.execute_mutation_archive` capability requires explicit
@@ -395,6 +399,9 @@ The native binding calls the shared `MutationExecutor` through the existing
 physical executors. Warehouse-only work retains direct TDS; eligible Lakehouse
 plans may include central-catalogue TDS. The caller supplies one publication
 instant, bounded workers and an authorised staging candidate.
+Catalogue-free physical plans bind a Workspace without a catalogue. Generic
+desktop archives require the frozen Spark attachment before staging or submission
+and refuse incompatible live attachments through the Session binding contract.
 
 `ArchiveStaging` can bind a staging Lakehouse outside the frozen plan. Staging
 uses the shared physical scope rules across aliases and workspace bindings and

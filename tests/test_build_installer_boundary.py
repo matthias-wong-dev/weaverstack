@@ -542,6 +542,68 @@ def test_archive_cleanup_failure_preserves_the_verified_outcome(
         assert any(stage.as_posix() in warning for warning in session.warnings)
 
 
+@pytest.mark.parametrize("lost_receipt", [False, True])
+@weaver_test()
+def test_public_archive_retains_verified_result_after_runtime_cleanup_failure(
+    tmp_path, monkeypatch, lost_receipt
+):
+    import hashlib
+    import json
+    import types
+
+    from weaver.sessions import ConsoleSession
+    from weaver.targets import ItemRef
+
+    location, store = _bundle(tmp_path)
+    bundle = load_bundle(location, store=store)
+    expected = given_installer(
+        store=store, executors={"spark_sql": Recorder()}
+    ).install(bundle)
+    resolver = given_resolver(root=tmp_path / "destination")
+    files = resolver.files_root(ItemRef(TARGET.item_id)).path
+    submissions = []
+
+    def submit(source, **options):
+        submissions.append(options)
+        stage = next(files.iterdir())
+        data = json.dumps(
+            {
+                "status": "completed",
+                "archive_sha256": hashlib.sha256(
+                    (stage / "carrier.zip").read_bytes()
+                ).hexdigest(),
+                "report": expected.to_mapping(),
+                "runtime_cleanup_failure": {
+                    "path": "private/runtime",
+                    "error": "private cleanup unavailable",
+                },
+            }
+        ).encode()
+        (stage / "result.json").write_bytes(data)
+        if lost_receipt:
+            raise TimeoutError("receipt lost")
+        return {"bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()}
+
+    scope = types.SimpleNamespace(
+        resolver=resolver, transport_store=FilesystemStore(), livy_run=submit
+    )
+    with ConsoleSession(progress=False) as session:
+        monkeypatch.setattr(session, "scope", lambda workspace=None: scope)
+        report = session.install_bundle(bundle, workspace=given_workspace())
+        assert report.to_mapping() == expected.to_mapping()
+        assert len(submissions) == 1
+        assert submissions[0]["retry_submission"] is False
+        assert len(session.archive_cleanup_failures) == 1
+        assert (
+            session.archive_cleanup_failures[0]["error_message"]
+            == "private cleanup unavailable"
+        )
+        assert any("private cleanup unavailable" in w for w in session.warnings)
+        stage = next(files.iterdir())
+        assert (stage / "carrier.zip").exists()
+        assert (stage / "result.json").exists()
+
+
 @pytest.mark.parametrize("receipt", ["valid", "lost", "wrong_selection"])
 @weaver_test()
 def test_console_archive_uses_borrowed_livy_for_selected_lakehouse_batches(

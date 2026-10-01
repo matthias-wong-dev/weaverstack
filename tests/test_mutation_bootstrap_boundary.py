@@ -3,7 +3,9 @@
 import importlib
 import shutil
 import sys
+from dataclasses import replace
 from importlib import metadata
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -13,7 +15,7 @@ from test_mutation_archive_install import legacy
 
 from weaver.locations import Location
 from weaver.mutation import BoundTarget
-from weaver.mutation.bundle import write_bundle
+from weaver.mutation.bundle import compute_bundle_id, write_bundle
 from weaver.mutation.compatibility import compile_legacy_build
 from weaver.sessions.install_archive import (
     ArchiveStaging,
@@ -32,8 +34,30 @@ from weaver.store import FilesystemStore
 def test_generic_bootstrap_runs_extracted_executor_and_restores_borrowed_namespace(
     tmp_path, monkeypatch, failure, late, cleanup
 ):
+    run_bootstrap(tmp_path, monkeypatch, failure=failure, late=late, cleanup=cleanup)
+
+
+@weaver_test()
+def test_catalogue_free_bootstrap_binds_physical_workspace(tmp_path, monkeypatch):
+    run_bootstrap(tmp_path, monkeypatch, catalogue=False)
+
+
+def run_bootstrap(
+    tmp_path, monkeypatch, *, failure=False, late=False, cleanup=False, catalogue=True
+):
     legacy_plan, payloads = legacy()
     plan = compile_legacy_build(legacy_plan)
+    if not catalogue:
+        plan = replace(
+            plan,
+            bundle_id="",
+            targets=(replace(plan.targets[0], item_name="Sales"),),
+            execution=replace(
+                plan.execution, catalogue_target_id=None, spark_home_target_id="sales"
+            ),
+            build_envelope=None,
+        )
+        plan = replace(plan, bundle_id=compute_bundle_id(plan))
     request = {
         "plan_id": plan.bundle_id,
         "invocation_id": "invocation",
@@ -78,7 +102,6 @@ def test_generic_bootstrap_runs_extracted_executor_and_restores_borrowed_namespa
         def make_directory(self, location):
             if late and not failure and location.name == "first":
                 import time
-                from pathlib import Path
 
                 active.append("worker started")
                 assert Path(loaded[0]).exists()
@@ -133,9 +156,14 @@ def test_generic_bootstrap_runs_extracted_executor_and_restores_borrowed_namespa
         module = original_import(name, *args, **kwargs)
         if name == "weaver.sessions.archive_runtime":
             loaded.append(module.__file__)
-            module.ArchiveSession = lambda **options: TestSession(
-                workspace=given_workspace(), store=store, resolver=Resolver()
-            )
+
+            def archive_session(**options):
+                assert (options["workspace"].catalogue is not None) == catalogue
+                return TestSession(
+                    workspace=options["workspace"], store=store, resolver=Resolver()
+                )
+
+            module.ArchiveSession = archive_session
         return module
 
     monkeypatch.setattr(importlib, "import_module", importing)
@@ -151,21 +179,24 @@ def test_generic_bootstrap_runs_extracted_executor_and_restores_borrowed_namespa
         if name == "weaver" or name.startswith("weaver.")
     }
     emitted = []
+    cleanup_faults = []
     original_cleanup = shutil.rmtree
     if cleanup:
 
         def fail_cleanup(path, **options):
-            if str(path).split("/")[-1].startswith("weaver-install-"):
+            if Path(path).name.startswith("weaver-install-"):
+                cleanup_faults.append(Path(path))
                 raise OSError("private runtime cleanup failed")
             return original_cleanup(path, **options)
 
         monkeypatch.setattr(shutil, "rmtree", fail_cleanup)
     exec(
-        bootstrap_source(carrier, str(incoming), str(output), workers=2),
+        bootstrap_source(carrier, str(incoming), output.as_posix(), workers=2),
         {"spark": object(), "emit": emitted.append},
     )
     result = read_receipt(emitted[0], output.read_bytes())
     assert result["status"] == "completed"
+    assert len(cleanup_faults) == int(cleanup)
     if cleanup:
         assert (
             result["runtime_cleanup_failure"]["error"]
@@ -214,7 +245,13 @@ def test_generic_bootstrap_runs_extracted_executor_and_restores_borrowed_namespa
         for name, module in sys.modules.items()
         if name == "weaver" or name.startswith("weaver.")
     }
-    assert "expanded/runtime/weaver" in loaded[0]
+    assert Path(loaded[0]).parts[-5:] == (
+        "expanded",
+        "runtime",
+        "weaver",
+        "sessions",
+        "archive_runtime.py",
+    )
 
 
 @weaver_test()

@@ -586,6 +586,7 @@ class _Invocation:
             if self.journal_errors:
                 for member in group:
                     if member.pending is None:
+                        self.record("admission_refused", member, self.journal_errors[0])
                         member.attempts = 0
                         self.terminal(
                             member,

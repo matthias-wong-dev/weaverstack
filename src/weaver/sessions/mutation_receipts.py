@@ -167,6 +167,15 @@ def decode_report(plan, mapping, *, invocation_id, selected=None, prerequisites=
         or report.invocation_id != invocation_id
     ):
         raise BuildError("mutation report identity differs")
+    if any(not isinstance(e, str) or not e for e in report.journal_errors):
+        raise BuildError("invalid journal diagnostic")
+    if any(
+        isinstance(e, LedgerEvent)
+        and e.kind == "admission_refused"
+        and e.value not in report.journal_errors
+        for e in report.ledger
+    ):
+        raise BuildError("refused admission lacks journal diagnostic")
     checked = recover(
         plan,
         report.ledger,
@@ -176,8 +185,6 @@ def decode_report(plan, mapping, *, invocation_id, selected=None, prerequisites=
     )
     if report.results != checked.results or report.operations != checked.operations:
         raise BuildError("mutation report differs from durable evidence")
-    if any(not isinstance(e, str) or not e for e in report.journal_errors):
-        raise BuildError("invalid journal diagnostic")
     actions = {a.id: a for _, _, a in plan.actions()}
     for exclusion, owner in report.retained_exclusions:
         if (

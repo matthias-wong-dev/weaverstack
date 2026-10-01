@@ -198,13 +198,19 @@ def execution_workspace(execution: BundleExecution, plan):
 
     from ..workspaces import Workspace
 
-    catalogue = next(
-        target for target in plan.targets if target.id == execution.catalogue_target_id
+    catalogue = (
+        None
+        if execution.catalogue_target_id is None
+        else next(
+            target
+            for target in plan.targets
+            if target.id == execution.catalogue_target_id
+        )
     )
     environment = execution.environment
     return Workspace(
         workspace=execution.workspace_name,
-        catalogue=f"Warehouse/{catalogue.name}",
+        catalogue=None if catalogue is None else f"Warehouse/{catalogue.name}",
         environment=None if environment is None else environment.reference,
     )
 

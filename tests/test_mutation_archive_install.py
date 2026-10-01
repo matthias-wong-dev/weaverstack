@@ -146,6 +146,53 @@ def test_gated_compiled_build_uses_shared_physical_executor_with_failure_parity(
 
 
 @weaver_test()
+def test_catalogue_free_native_plan_binds_physical_workspace(tmp_path):
+    from weaver.mutation.bundle import compute_bundle_id
+    from weaver.sessions.archive_runtime import execute_mutation
+    from weaver.sessions.mutation_receipts import decode_report, encode_report
+
+    legacy_plan, payloads = legacy()
+    plan = compile_legacy_build(legacy_plan)
+    plan = replace(
+        plan,
+        bundle_id="",
+        targets=(replace(plan.targets[0], item_name="Sales"),),
+        execution=replace(
+            plan.execution, catalogue_target_id=None, spark_home_target_id="sales"
+        ),
+        build_envelope=None,
+    )
+    plan = replace(plan, bundle_id=compute_bundle_id(plan))
+    root = tmp_path / "physical"
+
+    class Resolver:
+        def folder_object(self, target, schema, name):
+            return Location(str(root / "Files" / schema / name))
+
+        def files_root(self, item):
+            return Location(str(root / "Files"))
+
+        def folder_root(self, target):
+            return Location(str(root / "Files"))
+
+    with TestSession(store=FilesystemStore(), resolver=Resolver()) as session:
+        report = execute_mutation(plan, payloads, session)
+        from weaver.build_bundle.execution import execution_workspace
+
+        workspace = execution_workspace(plan.execution, plan)
+        assert workspace.catalogue is None
+        assert session.scope(workspace).spark_home == "Sales"
+    assert report.succeeded
+    assert (root / "Files/Incoming/binary.bin").read_bytes() == payloads[
+        "payload/binary.payload"
+    ]
+    assert (
+        decode_report(plan, encode_report(report), invocation_id=report.invocation_id)
+        == report
+    )
+
+
+@weaver_test()
 def test_native_invocation_retains_central_catalogue_and_publication_instant(tmp_path):
     import json
 

@@ -445,7 +445,7 @@ def execute_mutation_in_scope(
     from urllib.parse import urlsplit
     from uuid import uuid4
 
-    from ..build_bundle.execution import execution_workspace
+    from ..build_bundle.execution import execution_spark_home, execution_workspace
     from ..errors import BuildError
     from ..locations import Location
     from ..mutation.executor import validate_inputs
@@ -539,6 +539,9 @@ def execute_mutation_in_scope(
     carrier = pack_bundle(bundle, request=request)
     if carrier is None:
         return decline_mutation(session, "archive exceeds expanded size bound")
+    session.require_spark_home(
+        execution_spark_home(plan.execution, plan), workspace=frozen_workspace
+    )
     scope = session.scope(frozen_workspace)
     store = scope.transport_store
     root = scope.resolver.lakehouse(ItemRef(staging_target.item_id))
@@ -784,8 +787,11 @@ def install_in_scope(session, bundle, *, workspace=None, timeout=None, request=N
     settled = None
     verified_status = None
     received = False
+    runtime_cleanup_failure = None
 
     def record(result):
+        nonlocal runtime_cleanup_failure
+        runtime_cleanup_failure = result.get("runtime_cleanup_failure")
         if not hasattr(session, "archive_installations"):
             session.archive_installations = []
         session.archive_installations.append(
@@ -843,6 +849,8 @@ def install_in_scope(session, bundle, *, workspace=None, timeout=None, request=N
     finally:
         if verified_status is not None:
             try:
+                if runtime_cleanup_failure is not None:
+                    raise OSError(runtime_cleanup_failure["error"])
                 store.delete(stage, recursive=True)
             except Exception as cleanup_error:
                 failure = {

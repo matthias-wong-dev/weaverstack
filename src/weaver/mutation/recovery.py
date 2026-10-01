@@ -78,7 +78,7 @@ def _recover(plan, events, *, invocation_id, selected, external):
     if len(selected) != len(set(selected)) or not set(selected) <= actions.keys():
         raise BuildError("invalid recovered action selection")
     results = dict(external)
-    admitted, pending, operations = set(), set(), {}
+    admitted, refused, pending, operations = set(), set(), set(), {}
     observations = {}
     ledger = tuple(events)
     previous = -float("inf")
@@ -102,6 +102,8 @@ def _recover(plan, events, *, invocation_id, selected, external):
         contract = contracts.get(action.executor)
         if key in results:
             raise BuildError("journal event follows terminal action")
+        if key in refused and event.kind != "terminal":
+            raise BuildError("journal event follows refused admission")
         if event.kind == "dispatched":
             if key in admitted or event.value is not None:
                 raise BuildError("duplicate or malformed admission")
@@ -114,6 +116,18 @@ def _recover(plan, events, *, invocation_id, selected, external):
             ):
                 raise BuildError("admission lacks causal prerequisites")
             admitted.add(key)
+        elif event.kind == "admission_refused":
+            if (
+                key not in admitted
+                or key in pending
+                or key in operations
+                or key in observations
+                or not isinstance(event.value, str)
+                or not event.value
+            ):
+                raise BuildError("invalid refused admission")
+            admitted.remove(key)
+            refused.add(key)
         elif event.kind == "observed":
             if key not in pending or event.value is not None:
                 raise BuildError("observation lacks continuation")
@@ -154,6 +168,8 @@ def _recover(plan, events, *, invocation_id, selected, external):
         elif event.kind == "terminal":
             result = event.value
             validate_result(action, contract, result)
+            if key in refused and result.status != "not_dispatched":
+                raise BuildError("refused admission requires unstarted result")
             expected_attempts = (
                 0 if result.status in {"blocked", "not_dispatched"} else 1
             )
@@ -189,10 +205,11 @@ def _recover(plan, events, *, invocation_id, selected, external):
                 owner = action.result_from.action_id
                 if owner not in operations:
                     raise BuildError("settlement lacks operation acknowledgement")
-                operations[owner] = replace(
-                    operations[owner],
-                    status="settled" if result.status in TERMINAL else "uncertain",
-                )
+                if operations[owner].status != "settled":
+                    operations[owner] = replace(
+                        operations[owner],
+                        status="settled" if result.status in TERMINAL else "uncertain",
+                    )
             results[key] = result
         else:
             raise BuildError("unknown journal event kind")
@@ -228,6 +245,6 @@ def _recover(plan, events, *, invocation_id, selected, external):
         plan.bundle_id,
         tuple(results[k] for k in actions if k in selected),
         ledger,
-        tuple(operations.values()),
+        tuple(operations[k] for k in actions if k in operations),
         invocation_id,
     )

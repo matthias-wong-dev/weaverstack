@@ -130,13 +130,13 @@ class ConsoleSession(Session):
             return decline_mutation(self, "generic archive execution is gated")
         if (
             type(self) is not ConsoleSession
+            or not self._owns_executor
             or any(
                 value is not None
                 for value in (
                     self._given_store,
                     self._given_resolver,
                     self._given_credential,
-                    self._executor,
                 )
             )
             or (
