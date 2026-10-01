@@ -34,7 +34,9 @@ from .declaration.model import (
     LAKEHOUSE,
     LOGICAL_TARGET,
     OBJECT_SHAPE,
+    PHYSICAL_TARGET,
     SCHEMA_SHORTCUT,
+    TABLE_SHORTCUT,
     TABLES,
     WAREHOUSE,
     WeaverDocumentId,
@@ -680,6 +682,13 @@ def installed_shortcuts(catalogue: Catalogue) -> tuple[InstalledShortcut, ...]:
             )
             target_schema = str(row.get("target_schema_name") or "")
             target_object = str(row.get("target_object_name") or "") or None
+            if (
+                shortcut_type == TABLE_SHORTCUT
+                and target_type == PHYSICAL_TARGET
+                and stored_area(target_schema)[0] is None
+            ):
+                # Catalogues written before physical table targets kept their area.
+                target_schema = f"{TABLES}/{target_schema}"
             source = None
             if target_type == LOGICAL_TARGET:
                 if not target_object:

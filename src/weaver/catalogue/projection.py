@@ -297,7 +297,7 @@ def project_item_catalogue(
                 "target_type": declaration.target_type,
                 "target_item_type": declaration.target_item.item_type,
                 "target_item_name": declaration.target_item.item_name,
-                # Logical targets use Registry identity, including Folder area.
+                # Logical targets use Registry identity. Both keep a Lakehouse area.
                 "target_schema_name": (
                     _catalogue_schema(declaration.logical_source)
                     if declaration.is_logical

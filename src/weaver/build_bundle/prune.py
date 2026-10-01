@@ -26,9 +26,8 @@ from ..declaration.model import (
 from ..declaration.source import SourceDocument
 from ..errors import BuildError
 from ..etl import LOAD_ROOT, item_runtime_artefacts
-from ..resolution import TABLES_AREA
 from ..store import Store, StoreNotFoundError
-from ..targets import ItemRef
+from ..targets import TABLES_AREA, ItemRef
 from ..workspaces import CLI_AREA
 from .changes import (
     FOLDER as FOLDER_KIND,

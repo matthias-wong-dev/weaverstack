@@ -1822,17 +1822,8 @@ def _build_once(args: argparse.Namespace) -> int:
     return 0 if result.succeeded else 1
 
 
-def _action_counts(report) -> dict[str, int]:
-    statuses = ("succeeded", "failed", "skipped")
-    actions = tuple(report.action_results())
-    return {
-        status: sum(action.status == status for action in actions)
-        for status in statuses
-    }
-
-
 def _print_action_counts(report, *, indent: str = "  ") -> None:
-    counts = _action_counts(report)
+    counts = report.action_counts()
     for status in ("succeeded", "failed", "skipped"):
         print(
             _count_style(
@@ -1845,6 +1836,8 @@ def _print_build(result) -> None:
     if result.installation:
         print("Installation")
         _print_action_counts(result.installation_report)
+        if result.report_path:
+            print(f"  Report  {result.report_path}")
     else:
         selection = result.selection
         print("Bundle prepared")

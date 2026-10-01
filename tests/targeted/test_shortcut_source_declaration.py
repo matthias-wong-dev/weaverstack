@@ -77,7 +77,7 @@ def test_a_table_shortcut_resolves_a_warehouse_by_its_declared_type():
             declaration(
                 item="Warehouse/Upstream_WH",
                 shortcut_type="table",
-                tail="Source.Transaction",
+                tail="Tables/Source.Transaction",
             )
         ],
         resolver=resolver,
@@ -98,7 +98,7 @@ def test_a_table_shortcut_still_resolves_a_lakehouse_by_its_declared_type():
             declaration(
                 item="Lakehouse/Upstream_LH",
                 shortcut_type="table",
-                tail="Source.Customer",
+                tail="Tables/Source.Customer",
             )
         ],
         resolver=resolver,
