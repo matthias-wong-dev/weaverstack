@@ -56,10 +56,9 @@ def test_physical_only_plan_round_trips_binary_payload(tmp_path):
         plan=plan,
         payloads={action.payload: data},
         store=store,
-        allow_mutation=True,
     )
     assert bundle.plan == plan
-    assert load_bundle(location, store=store, allow_mutation=True).plan == plan
+    assert load_bundle(location, store=store).plan == plan
     assert store.read(location.join("payload", "runtime.payload")) == data
     assert plan.build_envelope is None
 
@@ -125,7 +124,7 @@ def test_direct_and_decoded_plans_reject_invalid_topology(dependencies, match):
     import yaml
 
     with pytest.raises(BuildError, match=match):
-        plan_from_yaml(yaml.safe_dump(mapping), allow_mutation=True)
+        plan_from_yaml(yaml.safe_dump(mapping))
 
 
 @weaver_test()
@@ -229,7 +228,7 @@ def test_dependency_permutations_have_one_owned_canonical_identity():
     actions.clear()
     envelope["selection"]["selected"].append("b")
     assert compute_bundle_id(plan) == identity
-    assert plan_from_yaml(plan_to_yaml(plan), allow_mutation=True) == plan
+    assert plan_from_yaml(plan_to_yaml(plan)) == plan
     assert MutationPlan.from_mapping(plan.to_mapping()) == plan
     with pytest.raises(TypeError):
         plan.build_envelope["selection"]["selected"] = ()
@@ -289,7 +288,7 @@ def test_typed_operation_contract_round_trips_completion_intent():
         driver_contracts=contracts,
         required_completion=("certify",),
     )
-    assert plan_from_yaml(plan_to_yaml(plan), allow_mutation=True) == plan
+    assert plan_from_yaml(plan_to_yaml(plan)) == plan
     assert compute_bundle_id(plan) != compute_bundle_id(
         replace(plan, required_completion=("await",))
     )

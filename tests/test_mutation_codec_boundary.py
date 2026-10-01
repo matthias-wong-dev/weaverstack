@@ -90,7 +90,6 @@ def test_mutation_writer_rejects_unreferenced_escape_before_manifest(
             plan=_plan(),
             payloads={"payload/runtime.payload": b"\x00\xff", "../escape": b"bad"},
             store=store,
-            allow_mutation=True,
         )
     assert written == []
 
@@ -114,14 +113,13 @@ def test_mutation_manifest_is_last_and_corrupt_payload_is_refused(
         plan=_plan(),
         payloads={"payload/runtime.payload": b"\x00\xff"},
         store=store,
-        allow_mutation=True,
     )
     assert written[-1].endswith("plan.yml")
     with pytest.raises(BuildError, match="format version 5"):
         load_bundle(location, store=store)
     store.write(location.join("payload", "runtime.payload"), b"corrupt")
     with pytest.raises(BuildError, match="checksum"):
-        load_bundle(location, store=store, allow_mutation=True)
+        load_bundle(location, store=store)
 
 
 @weaver_test()
@@ -159,7 +157,7 @@ def test_codec_refuses_ambiguous_legacy_or_serialized_intent(fault):
     else:
         text = plan_to_yaml(_legacy_plan()) + "format_version: 4\n"
     with pytest.raises(BuildError):
-        plan_from_yaml(text, allow_mutation=True)
+        plan_from_yaml(text)
 
 
 @weaver_test()
@@ -196,7 +194,6 @@ def test_frozen_mutation_manifest_binds_intent_to_its_identity(tmp_path):
         plan=_plan(),
         payloads={"payload/runtime.payload": b"\x00\xff"},
         store=store,
-        allow_mutation=True,
     )
     mapping = bundle.plan.to_mapping()
     mapping["sequences"][0]["batches"][0]["actions"][0]["resource_node_id"] = (
@@ -204,7 +201,7 @@ def test_frozen_mutation_manifest_binds_intent_to_its_identity(tmp_path):
     )
     store.write(location.join("plan.yml"), yaml.safe_dump(mapping).encode("utf-8"))
     with pytest.raises(BuildError, match="identity"):
-        load_bundle(location, store=store, allow_mutation=True)
+        load_bundle(location, store=store)
 
 
 @weaver_test()
@@ -259,6 +256,6 @@ def test_empty_drafting_identity_is_not_an_execution_bundle(tmp_path, boundary):
     store.write(location.join("plan.yml"), plan_to_yaml(draft).encode())
     with pytest.raises(BuildError, match="identity"):
         if boundary == "load":
-            load_bundle(location, store=store, allow_mutation=True)
+            load_bundle(location, store=store)
         else:
             validate_bundle(location, draft, store=store)

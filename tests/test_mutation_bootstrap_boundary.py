@@ -11,16 +11,15 @@ from types import SimpleNamespace
 import pytest
 from support.weaver_test import weaver_test
 from support.workspaces import given_workspace
-from test_mutation_archive_install import legacy
+from test_mutation_archive_install import build_plan_fixture as legacy
 
 from weaver.locations import Location
 from weaver.mutation import BoundTarget
-from weaver.mutation.bundle import compute_bundle_id, write_bundle
-from weaver.mutation.compatibility import compile_legacy_build
+from weaver.mutation.bundle import compute_bundle_id
 from weaver.sessions.install_archive import (
     ArchiveStaging,
     bootstrap_source,
-    pack_bundle,
+    pack_mutation,
     read_receipt,
 )
 from weaver.sessions.testing import TestSession
@@ -46,7 +45,7 @@ def run_bootstrap(
     tmp_path, monkeypatch, *, failure=False, late=False, cleanup=False, catalogue=True
 ):
     legacy_plan, payloads = legacy()
-    plan = compile_legacy_build(legacy_plan)
+    plan = legacy_plan
     if not catalogue:
         plan = replace(
             plan,
@@ -61,8 +60,6 @@ def run_bootstrap(
     request = {
         "plan_id": plan.bundle_id,
         "invocation_id": "invocation",
-        "selected": [a.id for _, _, a in plan.actions()],
-        "prerequisites": [],
         "staging": ArchiveStaging(
             BoundTarget("stage", "lakehouse", "stage-id"), "Files/stage"
         ).to_mapping(),
@@ -71,14 +68,7 @@ def run_bootstrap(
     }
     if late and not failure:
         request["timeout"] = 0.005
-    bundle = write_bundle(
-        Location(str(tmp_path / "bundle")),
-        plan=plan,
-        payloads=payloads,
-        store=FilesystemStore(),
-        allow_mutation=True,
-    )
-    carrier = pack_bundle(bundle, request=request)
+    carrier = pack_mutation(plan, payloads, request=request)
     incoming, output = tmp_path / "carrier.zip", tmp_path / "result.json"
     incoming.write_bytes(carrier.data)
     root = tmp_path / "physical"
@@ -119,23 +109,17 @@ def run_bootstrap(
         reference_store.make_directory(
             Location(str(reference_root / "Files/Incoming/first"))
         )
-    from weaver.build_bundle import Installer
+    from weaver.sessions.archive_runtime import execute_mutation
 
     with TestSession(
         workspace=given_workspace(),
         store=reference_store,
         resolver=Resolver(reference_root),
     ) as reference_session:
-        reference_bundle = write_bundle(
-            Location(str(tmp_path / "reference-bundle")),
-            plan=legacy_plan,
-            payloads=payloads,
-            store=reference_store,
+        reference = execute_mutation(
+            plan, payloads, reference_session, build_datetime=request["build_datetime"]
         )
-        reference = Installer(reference_session).install(
-            reference_bundle, build_datetime=request["build_datetime"]
-        )
-    expected = {r.action_id: r.status for s in reference.sequences for r in s.actions}
+    expected = {r.action_id: r.status for r in reference.results}
     native = SimpleNamespace(
         fs=SimpleNamespace(
             cp=lambda source, dest, recurse: shutil.copyfile(
@@ -169,7 +153,7 @@ def run_bootstrap(
     monkeypatch.setattr(importlib, "import_module", importing)
     monkeypatch.setattr(metadata, "version", lambda name: "1.5.0")
     from weaver.sessions.delta_profile import WRITER_VERSION
-    from weaver.sessions.mutation_receipts import decode_report
+    from weaver.sessions.mutation_report import decode_report
 
     monkeypatch.setattr(metadata, "version", lambda name: WRITER_VERSION)
     paths = list(sys.path)
@@ -216,12 +200,7 @@ def run_bootstrap(
         assert (root / "Files/Incoming/binary.bin").read_bytes() == payloads[
             "payload/binary.payload"
         ]
-        actual = {
-            r.action_id: "skipped" if r.status == "blocked" else r.status
-            for r in report.results
-            if not r.action_id.startswith("complete-batch:")
-        }
-        assert actual == expected
+        assert {r.action_id: r.status for r in report.results} == expected
 
         def physical_state(path):
             return sorted(
@@ -233,11 +212,6 @@ def run_bootstrap(
             )
 
         assert physical_state(root) == physical_state(reference_root)
-        assert [
-            (a.id, a.payload, a.payload_sha256)
-            for _, _, a in plan.actions()
-            if a.executor != "completion_gate"
-        ] == [(a.id, a.payload, a.payload_sha256) for _, _, a in legacy_plan.actions()]
 
     assert paths == sys.path
     assert modules == {
@@ -269,7 +243,7 @@ def test_bootstrap_serializes_borrowed_namespace_before_second_carrier_copy(
     files = {
         "runtime/weaver/__init__.py": b"",
         "runtime/weaver/sessions/__init__.py": b"",
-        "runtime/weaver/sessions/archive_runtime.py": b"def run_bundle(*args, **kwargs):\n    return {'status': 'completed'}\n",
+        "runtime/weaver/sessions/archive_runtime.py": b"def run_mutation(*args, **kwargs):\n    return {'status': 'completed'}\n",
     }
     stream = io.BytesIO()
     with zipfile.ZipFile(stream, "w") as zipped:

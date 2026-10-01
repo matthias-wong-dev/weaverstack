@@ -34,13 +34,13 @@ from __future__ import annotations
 import hashlib
 
 import yaml
+from support.bundles import given_build_plan as BuildPlan
 from support.bundles import given_execution
 from support.weaver_test import weaver_test
 
 from weaver.build_bundle import (
     BoundTarget,
     BuildBatch,
-    BuildPlan,
     BuildSelection,
     BuildSequence,
     Impact,

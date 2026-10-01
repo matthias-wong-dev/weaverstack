@@ -1,16 +1,9 @@
-"""One directory codec for legacy Build and gated physical mutation plans.
-
-Both formats retain plan.yml, SHA-256 payloads and manifest-last writes.
-"""
+"""Format-5 MutationPlan artifacts with checksummed payloads."""
 
 from __future__ import annotations
 
 import hashlib
 import json
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from ..build_bundle.models import BuildPlan
 from dataclasses import dataclass, field, replace
 from typing import Mapping
 
@@ -24,8 +17,8 @@ from .validation import validate_mutation_plan
 
 DELETE_FILE = "delete_file"
 
-#: Public Build format while mutation execution is gated.
-SUPPORTED_FORMAT_VERSION = 4
+#: Persisted MutationPlan format.
+SUPPORTED_FORMAT_VERSION = 5
 
 PLAN_FILENAME = "plan.yml"
 PAYLOAD_DIR = "payload"
@@ -81,12 +74,11 @@ class BuildBundle:
     The bundle store is independent of the target store. Inside
     Fabric, payloads live on the session driver's temporary filesystem while
     target Files mutations still use ``FabricStore``.
-    ``None`` remains accepted for compatibility with callers that reconstruct a
-    lightweight handle and let the installer use its environment store.
+    A metadata-only handle may omit its store; execution supplies payload bytes.
     """
 
     location: Location
-    plan: BuildPlan | MutationPlan
+    plan: MutationPlan
     store: Store | None = field(default=None, compare=False, repr=False)
 
     @property
@@ -105,7 +97,7 @@ def _canonical_bytes(mapping) -> bytes:
     ).encode("utf-8")
 
 
-def compute_bundle_id(plan: BuildPlan | MutationPlan) -> str:
+def compute_bundle_id(plan: MutationPlan) -> str:
     """The identity of a plan, independent of its stored ``bundle_id`` field.
 
     The field is blanked before hashing so a plan's id never depends on itself,
@@ -118,7 +110,7 @@ def compute_bundle_id(plan: BuildPlan | MutationPlan) -> str:
     return hashlib.sha256(_canonical_bytes(mapping)).hexdigest()
 
 
-def plan_to_yaml(plan: BuildPlan | MutationPlan) -> str:
+def plan_to_yaml(plan: MutationPlan) -> str:
     return yaml.safe_dump(
         plan.to_mapping(), sort_keys=False, default_flow_style=False, allow_unicode=True
     )
@@ -136,27 +128,15 @@ class _PlanLoader(yaml.SafeLoader):
         return mapping
 
 
-def plan_from_yaml(
-    text: str, *, allow_mutation: bool = False
-) -> BuildPlan | MutationPlan:
+def plan_from_yaml(text: str) -> MutationPlan:
     try:
         loaded = yaml.load(text, Loader=_PlanLoader)
     except (yaml.YAMLError, TypeError, ValueError) as exc:
         raise BuildError(f"invalid plan.yml: {exc}") from exc
     if not isinstance(loaded, dict):
         raise BuildError("plan.yml must be a mapping")
-    # Before deserialising: a bundle written by another format is reported as an
-    # unsupported format, not as a missing field of this one.
-    version = loaded.get("format_version")
-    if allow_mutation and type(version) is int and version == 5:
-        return MutationPlan.from_mapping(loaded)
-    check_format_version(version)
-    from ..build_bundle.models import BuildPlan
-
-    try:
-        return BuildPlan.from_mapping(loaded)
-    except KeyError as exc:
-        raise BuildError(f"plan.yml is missing a required field: {exc}") from exc
+    check_format_version(loaded.get("format_version"))
+    return MutationPlan.from_mapping(loaded)
 
 
 def check_format_version(version) -> None:
@@ -174,18 +154,16 @@ def check_format_version(version) -> None:
 def write_bundle(
     location: Location,
     *,
-    plan: BuildPlan | MutationPlan,
+    plan: MutationPlan,
     payloads: Mapping[str, bytes],
     store: Store,
-    allow_mutation: bool = False,
 ) -> BuildBundle:
     """Write a bundle, manifest last, then reload and validate it.
 
     ``payloads`` is keyed by each action's bundle-relative payload path.
     """
 
-    if not allow_mutation:
-        check_format_version(plan.format_version)
+    check_format_version(plan.format_version)
     validate_plan_structure(plan)
     if isinstance(plan, MutationPlan):
         plan = replace(plan, bundle_id=compute_bundle_id(plan))
@@ -220,31 +198,25 @@ def write_bundle(
     # The manifest goes last: until it exists, the directory is not a bundle.
     store.write(location.join(PLAN_FILENAME), plan_to_yaml(plan).encode("utf-8"))
 
-    return load_bundle(location, store=store, allow_mutation=allow_mutation)
+    return load_bundle(location, store=store)
 
 
 # --- loading and validation --------------------------------------------------
 
 
-def load_bundle(
-    location: Location, *, store: Store, allow_mutation: bool = False
-) -> BuildBundle:
+def load_bundle(location: Location, *, store: Store) -> BuildBundle:
     """Read a bundle and fully validate it before returning."""
 
     plan_location = location.join(PLAN_FILENAME)
     if not store.exists(plan_location):
         raise BuildError(f"no bundle manifest at {plan_location.value}")
 
-    plan = plan_from_yaml(
-        store.read(plan_location).decode("utf-8"), allow_mutation=allow_mutation
-    )
+    plan = plan_from_yaml(store.read(plan_location).decode("utf-8"))
     validate_bundle(location, plan, store=store)
     return BuildBundle(location=location, plan=plan, store=store)
 
 
-def validate_bundle(
-    location: Location, plan: BuildPlan | MutationPlan, *, store: Store
-) -> None:
+def validate_bundle(location: Location, plan: MutationPlan, *, store: Store) -> None:
     """Reject any structural or integrity fault before an action runs.
 
     Structure is checked first and needs no store, so a malformed manifest is
@@ -258,96 +230,13 @@ def validate_bundle(
     _validate_payload_integrity(location, plan, store)
 
 
-def validate_plan_structure(plan: BuildPlan | MutationPlan) -> None:
-    if isinstance(plan, MutationPlan):
-        validate_mutation_plan(plan)
-        return
-    from ..build_bundle.execution import validate_execution
-    from ..build_bundle.models import OMISSION_REASONS
-    from .models import MutationAction
-
-    if any(isinstance(action, MutationAction) for _, _, action in plan.actions()):
-        raise BuildError("format-4 actions cannot carry DAG fields")
-
+def validate_plan_structure(plan: MutationPlan) -> None:
+    if not isinstance(plan, MutationPlan):
+        raise BuildError(
+            "format-5 bundles require a MutationPlan. Regenerate the bundle."
+        )
     check_format_version(plan.format_version)
-
-    for node in plan.omitted_nodes:
-        if node.reason not in OMISSION_REASONS:
-            raise BuildError(
-                f"The build bundle is invalid: omitted item {node.node_id!r} has "
-                f"unsupported reason {node.reason!r}. Regenerate the bundle with "
-                "this Weaver version."
-            )
-    omitted_ids = {node.node_id for node in plan.omitted_nodes}
-
-    target_ids = plan.target_ids
-    if len(target_ids) != len(plan.targets):
-        raise BuildError(
-            "The build bundle contains duplicate targets. Regenerate it with this "
-            "Weaver version."
-        )
-    for target in plan.targets:
-        if (target.logical_item_type is None) != (target.logical_item_name is None):
-            raise BuildError(
-                f"The build bundle does not completely identify the Weaver item for "
-                f"target {target.id!r}. Regenerate it with this Weaver version."
-            )
-        if target.logical_item_type is not None:
-            expected = {
-                "Lakehouse": "lakehouse",
-                "Warehouse": "warehouse",
-            }.get(target.logical_item_type)
-            if expected != target.kind:
-                raise BuildError(
-                    f"The build bundle sends a {target.logical_item_type} item to "
-                    f"incompatible target {target.id!r} of type {target.kind!r}. "
-                    "Regenerate it with this Weaver version."
-                )
-
-    seen_numbers: list[int] = []
-    batch_ids: set[str] = set()
-    action_ids: set[str] = set()
-
-    for sequence in plan.sequences:
-        seen_numbers.append(sequence.number)
-        for batch in sequence.batches:
-            if not batch.target_id:
-                raise BuildError(
-                    f"The build bundle has an installation stage {batch.id!r} with "
-                    "no target. Regenerate it with this Weaver version."
-                )
-            if batch.target_id not in target_ids:
-                raise BuildError(
-                    f"The build bundle names unknown target {batch.target_id!r} in "
-                    f"installation stage {batch.id!r}. Regenerate it with this "
-                    "Weaver version."
-                )
-            if batch.id in batch_ids:
-                raise BuildError(
-                    f"The build bundle repeats installation stage {batch.id!r}. "
-                    "Regenerate it with this Weaver version."
-                )
-            batch_ids.add(batch.id)
-            for action in batch.actions:
-                if action.id in action_ids:
-                    raise BuildError(
-                        f"The build bundle repeats installation action {action.id!r}. "
-                        "Regenerate it with this Weaver version."
-                    )
-                action_ids.add(action.id)
-                _validate_action_shape(action, omitted_ids)
-
-    if seen_numbers != sorted(set(seen_numbers)) or len(seen_numbers) != len(
-        set(seen_numbers)
-    ):
-        raise BuildError(
-            f"The build bundle's installation stages are not uniquely ordered: "
-            f"{seen_numbers}. Regenerate it with this Weaver version."
-        )
-
-    # Last, so a descriptor is checked against targets and actions already known
-    # to be well formed.
-    validate_execution(plan.execution, plan)
+    validate_mutation_plan(plan)
 
 
 def _validate_action_shape(action, omitted_ids) -> None:
@@ -394,9 +283,7 @@ def _validate_action_shape(action, omitted_ids) -> None:
         )
 
 
-def _validate_payload_integrity(
-    location, plan: BuildPlan | MutationPlan, store: Store
-) -> None:
+def _validate_payload_integrity(location, plan: MutationPlan, store: Store) -> None:
     for _, _, action in plan.actions():
         if action.payload is None:
             continue

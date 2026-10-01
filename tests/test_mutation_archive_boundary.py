@@ -5,6 +5,7 @@ from support.weaver_test import weaver_test
 from test_mutation_executor_primitive import sealed
 from test_mutation_plan_representation import _action
 
+from weaver.errors import BuildError
 from weaver.mutation import BoundTarget, PhysicalScope
 from weaver.mutation.bundle import compute_bundle_id
 
@@ -58,76 +59,22 @@ def test_transitional_actions_without_write_scopes_require_disjoint_staging():
 def test_mutation_carrier_validates_payload_before_pack_and_carries_canonical_plan(
     tmp_path,
 ):
-    import hashlib
+    import io
+    import zipfile
 
-    from weaver.errors import BuildError
-    from weaver.locations import Location
-    from weaver.mutation.bundle import plan_to_yaml, write_bundle
-    from weaver.sessions.install_archive import extract_verified, pack_bundle
-    from weaver.store import FilesystemStore
+    from test_mutation_archive_install import build_plan_fixture
 
-    payload = b"\x00\xffruntime\r\n"
-    action = _action(
-        "file",
-        executor="load_file",
-        payload="payload/file.payload",
-        payload_sha256=hashlib.sha256(payload).hexdigest(),
-    )
-    plan = sealed((action,))
-    store = FilesystemStore()
-    bundle = write_bundle(
-        Location(str(tmp_path / "bundle")),
-        plan=plan,
-        payloads={action.payload: payload},
-        store=store,
-        allow_mutation=True,
-    )
-    request = {
-        "plan_id": plan.bundle_id,
-        "invocation_id": "invocation",
-        "selected": ["file"],
-        "prerequisites": [],
-        "staging": {
-            "target": BoundTarget("stage", "lakehouse", "stage-id").to_mapping(),
-            "path": "Files/stage",
-        },
-        "build_datetime": None,
-        "timeout": 600,
-    }
-    carrier = pack_bundle(bundle, request=request)
-    path = tmp_path / "carrier.zip"
-    path.write_bytes(carrier.data)
-    extract_verified(path, tmp_path / "expanded", carrier.manifest)
-    assert (tmp_path / "expanded/bundle/payload/file.payload").read_bytes() == payload
-    assert (tmp_path / "expanded/bundle/plan.yml").read_bytes() == plan_to_yaml(
-        plan
-    ).encode()
-    store.write(bundle.location / action.payload, b"tampered")
-    with pytest.raises(BuildError, match="checksum"):
-        pack_bundle(bundle, request=request)
+    from weaver.sessions.install_archive import pack_mutation
 
-
-@weaver_test()
-def test_carrier_refuses_duplicate_manifest_fields_before_pack(tmp_path):
-    from weaver.errors import BuildError
-    from weaver.locations import Location
-    from weaver.mutation.bundle import write_bundle
-    from weaver.sessions.install_archive import pack_bundle
-    from weaver.store import FilesystemStore
-
-    plan = sealed((_action("one"),))
-    store = FilesystemStore()
-    bundle = write_bundle(
-        Location(str(tmp_path / "bundle")),
-        plan=plan,
-        payloads={},
-        store=store,
-        allow_mutation=True,
-    )
-    manifest = bundle.location / "plan.yml"
-    store.write(manifest, b"bundle_id: forged\n" + store.read(manifest))
-    with pytest.raises(BuildError, match="duplicate"):
-        pack_bundle(bundle)
+    plan, payloads = build_plan_fixture()
+    damaged = {path: data + b"changed" for path, data in payloads.items()}
+    with pytest.raises(BuildError, match="invalid payload"):
+        pack_mutation(plan, damaged)
+    carrier = pack_mutation(plan, payloads)
+    with zipfile.ZipFile(io.BytesIO(carrier.data)) as archive:
+        for path, data in payloads.items():
+            assert archive.read("bundle/" + path) == data
+        assert "runtime/weaver/mutation/executor.py" in archive.namelist()
 
 
 @weaver_test()
@@ -186,57 +133,3 @@ def test_hashed_receipt_rejects_duplicate_json_fields():
         read_receipt(
             {"bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()}, data
         )
-
-
-@weaver_test()
-@pytest.mark.parametrize(
-    "fault",
-    [
-        "identity",
-        "selection",
-        "missing-dependency",
-        "staging",
-        "timeout",
-        "prerequisite-type",
-    ],
-)
-def test_mutation_carrier_refuses_invalid_hashed_request_before_pack(tmp_path, fault):
-    from weaver.errors import BuildError
-    from weaver.locations import Location
-    from weaver.mutation.bundle import write_bundle
-    from weaver.sessions.install_archive import ArchiveStaging, pack_bundle
-    from weaver.store import FilesystemStore
-
-    plan = sealed((_action("first"), _action("child", ("first",))))
-    bundle = write_bundle(
-        Location(str(tmp_path / "bundle")),
-        plan=plan,
-        payloads={},
-        store=FilesystemStore(),
-        allow_mutation=True,
-    )
-    request = {
-        "plan_id": plan.bundle_id,
-        "invocation_id": "invocation",
-        "selected": ["first", "child"],
-        "prerequisites": [],
-        "staging": ArchiveStaging(
-            BoundTarget("stage", "lakehouse", "stage-id"), "Files/stage"
-        ).to_mapping(),
-        "build_datetime": None,
-        "timeout": 600,
-    }
-    if fault == "identity":
-        request["plan_id"] = "forged"
-    elif fault == "selection":
-        request["selected"] = ["unknown"]
-    elif fault == "missing-dependency":
-        request["selected"] = ["child"]
-    elif fault == "staging":
-        request["staging"] = {"target_id": "sales", "path": "Files/stage"}
-    elif fault == "timeout":
-        request["timeout"] = True
-    else:
-        request["prerequisites"] = [{"type": "unknown", "fields": {}}]
-    with pytest.raises(BuildError):
-        pack_bundle(bundle, request=request)

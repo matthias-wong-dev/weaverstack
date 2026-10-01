@@ -47,9 +47,7 @@ def test_bundles_are_rejected_before_store_reads_or_driver_admission(
     store = RecordingStore()
     location = Location(str(tmp_path / "bundle"))
     payloads = {"payload/binary.payload": payload}
-    write_bundle(
-        location, plan=plan, payloads=payloads, store=store, allow_mutation=True
-    )
+    write_bundle(location, plan=plan, payloads=payloads, store=store)
     reads.clear()
     driver = MutationDriver(
         lambda request: calls.append(request) or Completed(),
@@ -94,10 +92,8 @@ def test_all_payloads_checked_before_physical_preflight(
     elif mode == "caller_loaded":
         location = Location(str(tmp_path / "bundle"))
         store = FilesystemStore()
-        write_bundle(
-            location, plan=plan, payloads=payloads, store=store, allow_mutation=True
-        )
-        bundle = load_bundle(location, store=store, allow_mutation=True)
+        write_bundle(location, plan=plan, payloads=payloads, store=store)
+        bundle = load_bundle(location, store=store)
         plan = bundle.plan
         assert isinstance(plan, MutationPlan)
         payloads = {

@@ -50,7 +50,7 @@ def spark_table_estate(
 
     from weaver.build_bundle import execute_install_action
     from weaver.build_bundle.executors.base import InstallationContext, ResolvedTarget
-    from weaver.build_bundle.installer import Installer
+    from weaver.build_bundle.installer import MutationBindings
     from weaver.fabric import FabricResolver, OneLakeDfsClient
     from weaver.targets import ItemRef
 
@@ -65,7 +65,7 @@ def spark_table_estate(
         "emit({'cleared': True})\n"
     )
 
-    installer = Installer(weaver_session).bind(fabric_workspace)
+    installer = MutationBindings(weaver_session).bind(fabric_workspace)
     target = ResolvedTarget(
         bound=bound_target(id="target-1", item_id=fabric_target_lakehouse.name),
         lakehouse=item,
@@ -73,7 +73,7 @@ def spark_table_estate(
         destination=destination,
     )
     context = InstallationContext(
-        # From the Installer, as every production context gets them. The executor
+        # From the MutationBindings, as every production context gets them. The executor
         # stays here and only its physical requests cross.
         create_delta_table=installer.delta_table_creator(),
         spark_sql=installer.spark_sql(),

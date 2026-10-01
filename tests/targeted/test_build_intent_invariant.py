@@ -214,7 +214,7 @@ def test_the_summary_travels_in_the_manifest(repository, tmp_path):
     and it survives the round trip that proves it.
     """
 
-    from weaver.build_bundle import BuildPlan
+    from support.bundles import given_build_plan as BuildPlan
 
     plan = build(repository, tmp_path).plan
     restored = BuildPlan.from_mapping(plan.to_mapping())

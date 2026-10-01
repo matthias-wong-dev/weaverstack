@@ -6,20 +6,13 @@ type serialises to the canonical manifest.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Mapping
 
-from ..catalogue.runtime_state import (
-    RuntimeStateEstablishment,
-    RuntimeStateInvalidation,
-)
+from ..mutation.models import BoundTarget as BoundTarget
 from ..mutation.models import BuildBatch as BuildBatch
-from ..mutation.models import BuildSequence
+from ..mutation.models import BuildSequence as BuildSequence
 from ..mutation.models import InstallAction as InstallAction
-from .changes import TargetChange
-from .execution import BundleExecution
-from .incremental import BuildSelection
-from .targets import BoundTarget
 
 #: Action kinds. Create kinds build structure; prune kinds reconcile the target.
 CREATE_SCHEMA = "create_schema"
@@ -113,102 +106,3 @@ class OmittedNode:
             reason=mapping["reason"],
             detail=mapping.get("detail"),
         )
-
-
-@dataclass(frozen=True)
-class BuildPlan:
-    """A whole deployment, fully bound and ordered."""
-
-    format_version: int
-    bundle_id: str
-    repository_name: str
-    repository_signature: str
-    targets: tuple[BoundTarget, ...]
-    sequences: tuple[BuildSequence, ...]
-    selection: BuildSelection
-    #: Where this bundle installs. Frozen at build time and never supplied by
-    #: the caller who installs it.
-    execution: BundleExecution
-    omitted_nodes: tuple[OmittedNode, ...] = ()
-    #: Added and removed objects by target id. This is part of the manifest and
-    #: bundle identity, so the certified summary cannot change independently.
-    target_changes: Mapping[str, tuple[TargetChange, ...]] = field(default_factory=dict)
-    #: Current-state rows invalidated by the plan, declared beside the action so
-    #: in-memory application does not parse DML.
-    runtime_state: tuple[RuntimeStateInvalidation, ...] = ()
-    runtime_state_established: tuple[RuntimeStateEstablishment, ...] = ()
-
-    def to_mapping(self) -> dict[str, Any]:
-        mapping = {
-            "format_version": self.format_version,
-            "bundle_id": self.bundle_id,
-            "repository_name": self.repository_name,
-            "repository_signature": self.repository_signature,
-            "targets": [target.to_mapping() for target in self.targets],
-            "execution": self.execution.to_mapping(),
-            "sequences": [sequence.to_mapping() for sequence in self.sequences],
-            "omitted_nodes": [node.to_mapping() for node in self.omitted_nodes],
-            "target_changes": {
-                target_id: [change.to_mapping() for change in changes]
-                for target_id, changes in sorted(self.target_changes.items())
-            },
-            "runtime_state": [one.to_mapping() for one in self.runtime_state],
-            "runtime_state_established": [
-                one.to_mapping() for one in self.runtime_state_established
-            ],
-        }
-        mapping["selection"] = self.selection.to_mapping()
-        return mapping
-
-    @classmethod
-    def from_mapping(cls, mapping: Mapping[str, Any]) -> "BuildPlan":
-        from dataclasses import fields
-
-        from ..errors import BuildError
-
-        unknown = set(mapping) - {f.name for f in fields(cls)}
-        if unknown:
-            raise BuildError(
-                f"BuildPlan has unknown fields: {sorted(unknown, key=str)!r}"
-            )
-        return cls(
-            format_version=mapping["format_version"],
-            bundle_id=mapping["bundle_id"],
-            repository_name=mapping["repository_name"],
-            repository_signature=mapping["repository_signature"],
-            targets=tuple(
-                BoundTarget.from_mapping(t) for t in mapping.get("targets", ())
-            ),
-            sequences=tuple(
-                BuildSequence.from_mapping(s) for s in mapping.get("sequences", ())
-            ),
-            selection=BuildSelection.from_mapping(mapping["selection"]),
-            execution=BundleExecution.from_mapping(mapping["execution"]),
-            omitted_nodes=tuple(
-                OmittedNode.from_mapping(n) for n in mapping.get("omitted_nodes", ())
-            ),
-            target_changes={
-                target_id: tuple(TargetChange.from_mapping(c) for c in changes)
-                for target_id, changes in mapping.get("target_changes", {}).items()
-            },
-            runtime_state=tuple(
-                RuntimeStateInvalidation.from_mapping(one)
-                for one in mapping.get("runtime_state", ())
-            ),
-            runtime_state_established=tuple(
-                RuntimeStateEstablishment.from_mapping(one)
-                for one in mapping.get("runtime_state_established", ())
-            ),
-        )
-
-    @property
-    def target_ids(self) -> frozenset[str]:
-        return frozenset(target.id for target in self.targets)
-
-    def actions(self):
-        """Every action, in manifest order."""
-
-        for sequence in self.sequences:
-            for batch in sequence.batches:
-                for action in batch.actions:
-                    yield sequence, batch, action

@@ -122,7 +122,7 @@ def test_settlement_links_have_owned_canonical_signature_bearing_identity():
     links.clear()
     actions.clear()
     assert compute_bundle_id(plan) == identity
-    assert plan_from_yaml(plan_to_yaml(plan), allow_mutation=True) == plan
+    assert plan_from_yaml(plan_to_yaml(plan)) == plan
     assert MutationPlan.from_mapping(plan.to_mapping()) == plan
     assert tuple(a.settle_after for _, _, a in plan.actions()) == ((), (), ("a", "b"))
 

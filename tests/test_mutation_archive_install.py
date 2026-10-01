@@ -2,6 +2,7 @@ import hashlib
 from dataclasses import replace
 
 import pytest
+from support.bundles import given_build_plan as BuildPlan
 from support.bundles import given_execution, with_catalogue
 from support.weaver_test import weaver_test
 from support.workspaces import given_workspace
@@ -9,21 +10,18 @@ from support.workspaces import given_workspace
 from weaver.build_bundle import (
     BoundTarget,
     BuildBatch,
-    BuildPlan,
     BuildSelection,
     BuildSequence,
     Impact,
     InstallAction,
-    Installer,
 )
 from weaver.locations import Location
 from weaver.mutation.bundle import write_bundle
-from weaver.mutation.compatibility import compile_legacy_build
 from weaver.sessions.testing import TestSession
 from weaver.store import FilesystemStore
 
 
-def legacy():
+def build_plan_fixture():
     target = BoundTarget("sales", "lakehouse", "sales-id")
 
     def folder(name):
@@ -57,33 +55,30 @@ def legacy():
         BuildSequence(20, "last", (BuildBatch("last", "sales", (folder("last"),)),)),
     )
     targets = with_catalogue((target,))
-    return BuildPlan(
-        4,
-        "",
-        "Source",
-        "signature",
-        targets,
-        sequences,
-        BuildSelection(Impact((), (), ()), (), (), ()),
-        given_execution(targets, sequences),
-    ), {file.payload: binary}
+    from weaver.mutation.bundle import compute_bundle_id
+
+    plan = BuildPlan(
+        format_version=5,
+        bundle_id="",
+        repository_name="Source",
+        repository_signature="signature",
+        targets=targets,
+        sequences=sequences,
+        selection=BuildSelection(Impact((), (), ()), (), (), ()),
+        execution=given_execution(targets, sequences),
+    )
+    return replace(plan, bundle_id=compute_bundle_id(plan)), {file.payload: binary}
 
 
 @weaver_test()
 @pytest.mark.parametrize("failure", [False, True])
-def test_gated_compiled_build_uses_shared_physical_executor_with_failure_parity(
-    tmp_path, failure
-):
+def test_native_and_extracted_plan_have_equal_physical_outcomes(tmp_path, failure):
+    from weaver.mutation.bundle import load_bundle
     from weaver.sessions import archive_runtime
 
-    assert hasattr(archive_runtime, "execute_mutation"), (
-        "generic native binding is missing"
-    )
-    plan, payloads = legacy()
-    compiled = compile_legacy_build(plan)
-    states = []
-    reports = []
-    for mode in ("legacy", "generic"):
+    plan, payloads = build_plan_fixture()
+    states, reports = [], []
+    for mode in ("direct", "extracted"):
         root = tmp_path / mode
         root.mkdir()
 
@@ -103,33 +98,21 @@ def test_gated_compiled_build_uses_shared_physical_executor_with_failure_parity(
         with TestSession(
             workspace=given_workspace(), store=store, resolver=Resolver()
         ) as session:
-            location = Location(str(tmp_path / (mode + "-bundle")))
-            bundle = write_bundle(
-                location,
-                plan=plan if mode == "legacy" else compiled,
-                payloads=payloads,
-                store=store,
-                allow_mutation=mode == "generic",
-            )
-            if mode == "legacy":
-                report = Installer(session).install(bundle)
-                outcomes = {
-                    r.action_id: r.status for s in report.sequences for r in s.actions
+            if mode == "extracted":
+                location = Location(str(tmp_path / "artifact"))
+                write_bundle(location, plan=plan, payloads=payloads, store=store)
+                loaded = load_bundle(location, store=store)
+                executing = loaded.plan
+                received = {
+                    path: store.read(location.join(*path.split("/")))
+                    for path in payloads
                 }
             else:
-                report = archive_runtime.execute_mutation(
-                    compiled,
-                    payloads,
-                    session,
-                    workers=2,
-                    build_datetime="2026-01-01 00:00:00.000000",
-                )
-                outcomes = {
-                    k: "skipped" if r.status == "blocked" else r.status
-                    for k, r in report.by_id.items()
-                    if not k.startswith("complete-batch:")
-                }
-            reports.append(outcomes)
+                executing, received = plan, payloads
+            report = archive_runtime.execute_mutation(
+                executing, received, session, workers=2
+            )
+            reports.append({key: r.status for key, r in report.by_id.items()})
         states.append(
             sorted(
                 (
@@ -139,20 +122,19 @@ def test_gated_compiled_build_uses_shared_physical_executor_with_failure_parity(
                 for p in root.rglob("*")
             )
         )
-    assert reports[0] == reports[1]
-    assert states[0] == states[1]
+    assert reports[0] == reports[1] and states[0] == states[1]
     assert reports[1]["second"] == "succeeded"
-    assert reports[1]["later"] == ("skipped" if failure else "succeeded")
+    assert reports[1]["later"] == ("blocked" if failure else "succeeded")
 
 
 @weaver_test()
 def test_catalogue_free_native_plan_binds_physical_workspace(tmp_path):
     from weaver.mutation.bundle import compute_bundle_id
     from weaver.sessions.archive_runtime import execute_mutation
-    from weaver.sessions.mutation_receipts import decode_report, encode_report
+    from weaver.sessions.mutation_report import decode_report, encode_report
 
-    legacy_plan, payloads = legacy()
-    plan = compile_legacy_build(legacy_plan)
+    legacy_plan, payloads = build_plan_fixture()
+    plan = legacy_plan
     plan = replace(
         plan,
         bundle_id="",
@@ -193,13 +175,16 @@ def test_catalogue_free_native_plan_binds_physical_workspace(tmp_path):
 
 
 @weaver_test()
-def test_native_invocation_retains_central_catalogue_and_publication_instant(tmp_path):
+@pytest.mark.parametrize("provided", [True, False])
+def test_native_invocation_retains_central_catalogue_and_publication_instant(
+    tmp_path, provided
+):
     import json
 
     from weaver.sessions.archive_runtime import execute_mutation
-    from weaver.sessions.mutation_receipts import decode_report, encode_report
+    from weaver.sessions.mutation_report import decode_report, encode_report
 
-    legacy_plan, payloads = legacy()
+    legacy_plan, payloads = build_plan_fixture()
     instant = "2026-01-01 00:00:00.000000"
     data = json.dumps(
         [
@@ -216,11 +201,18 @@ def test_native_invocation_retains_central_catalogue_and_publication_instant(tmp
         hashlib.sha256(data).hexdigest(),
     )
     batch = BuildBatch("publish", legacy_plan.execution.catalogue_target_id, (action,))
-    legacy_plan = replace(
+    from weaver.build_bundle.stages import _mutation_sequences
+    from weaver.mutation.bundle import compute_bundle_id
+
+    plan = replace(
         legacy_plan,
-        sequences=(*legacy_plan.sequences, BuildSequence(30, "publication", (batch,))),
+        bundle_id="",
+        sequences=(
+            *legacy_plan.sequences,
+            *_mutation_sequences((BuildSequence(30, "publication", (batch,)),)),
+        ),
     )
-    plan = compile_legacy_build(legacy_plan)
+    plan = replace(plan, bundle_id=compute_bundle_id(plan))
     payloads = payloads | {action.payload: data}
 
     class Resolver:
@@ -246,16 +238,28 @@ def test_native_invocation_retains_central_catalogue_and_publication_instant(tmp
     with RecordingSession(
         workspace=given_workspace(), resolver=Resolver(), store=FilesystemStore()
     ) as session:
-        report = execute_mutation(plan, payloads, session, build_datetime=instant)
+        report = execute_mutation(
+            plan, payloads, session, build_datetime=instant if provided else None
+        )
         assert report.succeeded, [
             (r.action_id, r.status, r.error)
             for r in report.results
             if r.status != "succeeded"
         ]
-        assert session.tsql == (
-            f"SELECT '{instant}' AS publication",
-            f"SELECT '{instant}' AS settlement",
-        )
+        if provided:
+            assert session.tsql == (
+                f"SELECT '{instant}' AS publication",
+                f"SELECT '{instant}' AS settlement",
+            )
+        else:
+            from datetime import datetime
+
+            actual = session.tsql[0].split("'")[1]
+            datetime.strptime(actual, "%Y-%m-%d %H:%M:%S.%f")
+            assert session.tsql == (
+                f"SELECT '{actual}' AS publication",
+                f"SELECT '{actual}' AS settlement",
+            )
         assert all(
             call.detail["target"] is not None
             for call in session.calls
@@ -267,3 +271,39 @@ def test_native_invocation_retains_central_catalogue_and_publication_instant(tmp
             ).results
             == report.results
         )
+
+
+@weaver_test()
+def test_build_report_keeps_physical_result_details(tmp_path):
+    from weaver.build_bundle.execution_plan import execute_bundle
+
+    plan, payloads = build_plan_fixture()
+
+    class Resolver:
+        def folder_object(self, target, schema, name):
+            return Location(str(tmp_path / "Files" / schema / name))
+
+        def files_root(self, item):
+            return Location(str(tmp_path / "Files"))
+
+        def folder_root(self, target):
+            return Location(str(tmp_path / "Files"))
+
+    store = FilesystemStore()
+    bundle = write_bundle(
+        Location(str(tmp_path / "artifact")), plan=plan, payloads=payloads, store=store
+    )
+    with TestSession(
+        workspace=given_workspace(), store=store, resolver=Resolver()
+    ) as session:
+        report = execute_bundle(bundle, session)
+    result = next(
+        r
+        for sequence in report.sequences
+        for r in sequence.actions
+        if r.action_id == "binary"
+    )
+    assert result.details == {
+        "written": (tmp_path / "Files/Incoming/binary.bin").as_posix(),
+        "bytes": len(payloads["payload/binary.payload"]),
+    }

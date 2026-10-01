@@ -11,23 +11,13 @@ resources; it does not decide where a frozen bundle installs.
 
 from __future__ import annotations
 
-import math
-from dataclasses import replace
-from datetime import datetime, timedelta, timezone
-from itertools import groupby
+from datetime import datetime, timezone
 from typing import Any, Mapping
 
 from ..delta_protocol import ProtocolMinima, ProtocolOptions
 from ..errors import InstallError
-from ..sessions.direct_delta import direct_profile_supported
 from ..store import Store
 from ..targets import ItemRef
-from .bundle import (
-    BuildBundle,
-    check_format_version,
-    validate_bundle,
-    validate_plan_structure,
-)
 from .executors import default_executors
 from .executors.base import (
     ActionExecutor,
@@ -35,43 +25,16 @@ from .executors.base import (
     ResolvedTarget,
     SkippedExecution,
 )
-from .executors.spark_sql import SparkSqlExecutor
-from .executors.spark_table import SparkTableExecutor
-from .models import BuildBatch, BuildSequence, InstallAction
+from .models import InstallAction
 from .report import (
     FAILED,
     SKIPPED,
     SUCCEEDED,
     ActionResult,
-    InstallationReport,
-    SequenceResult,
 )
 from .targets import WAREHOUSE_TARGET, BoundTarget
 
 REPORT_FILENAME = "install-report.yml"
-
-
-def select_install_batches(plan, *, sequence_number, batch_ids):
-    """Select contiguous Lakehouse batches from one frozen sequence."""
-    sequence = next(
-        (row for row in plan.sequences if row.number == sequence_number), None
-    )
-    if sequence is None or not batch_ids:
-        raise InstallError("installation batch selection is empty or unknown")
-    indexes = [
-        index for index, batch in enumerate(sequence.batches) if batch.id in batch_ids
-    ]
-    batches = tuple(sequence.batches[index] for index in indexes)
-    targets = {target.id: target for target in plan.targets}
-    if (
-        tuple(batch.id for batch in batches) != tuple(batch_ids)
-        or indexes != list(range(indexes[0], indexes[0] + len(indexes)))
-        or any(targets[batch.target_id].kind != "lakehouse" for batch in batches)
-    ):
-        raise InstallError(
-            "installation selection must name contiguous Lakehouse batches"
-        )
-    return replace(plan, sequences=(replace(sequence, batches=batches),))
 
 
 class _Deferred:
@@ -98,7 +61,7 @@ class _Deferred:
         return "<not yet acquired>" if acquired is None else repr(acquired)
 
 
-class Installer:
+class MutationBindings:
     """Execute an already-planned bundle through a Session."""
 
     def __init__(
@@ -115,7 +78,7 @@ class Installer:
         self.executors = default_executors() if executors is None else executors
         self.workspace: Any = None
 
-    def bind(self, workspace: Any) -> "Installer":
+    def bind(self, workspace: Any) -> "MutationBindings":
         """Reach this workspace's capabilities, for a caller with no bundle.
 
         A caller assembling one action's context by hand has no manifest to read
@@ -308,104 +271,9 @@ class Installer:
             return None
         return resolve(item)
 
-    def install(
-        self, bundle: BuildBundle, *, on_sequence=None, build_datetime=None
-    ) -> InstallationReport:
-        """Execute a loaded bundle.
-
-        A bundle rather than a location: reading one needs the store it lives
-        on, and a bundle's own store is not the workspace store it installs
-        into. ``load_bundle`` or ``materialise_bundle_archive`` is where a
-        caller says which.
-        """
-
-        check_format_version(bundle.plan.format_version)
-        validate_plan_structure(bundle.plan)
-        self._bind(bundle.plan)
-        # Revalidate immediately before execution.
-        validate_bundle(bundle.location, bundle.plan, store=bundle.store or self.store)
-
-        plan = bundle.plan
-        capability = getattr(self.session, "install_bundle", None)
-        builtins_only = all(
-            action.executor in self._default_executor_types
-            and type(self.executors.get(action.executor))
-            is self._default_executor_types[action.executor]
-            for sequence in plan.sequences
-            for batch in sequence.batches
-            for action in batch.actions
-        )
-        delegate = (
-            self._delegate_bundle
-            and builtins_only
-            and capability is not None
-            and on_sequence is None
-        )
-        if delegate:
-            report = capability(bundle, workspace=self.workspace)
-            if report is not None:
-                (bundle.store or self.store).write(
-                    bundle.location.join(REPORT_FILENAME),
-                    report.to_yaml().encode("utf-8"),
-                )
-                return report
-        resolved = {target.id: self.resolve_target(target) for target in plan.targets}
-
-        started = _now()
-        # All Registry rows from one build share an instant so shortcut freshness
-        # does not depend on statement timing.
-        build_datetime = build_datetime or _epoch(started)
-        sequence_results: list[SequenceResult] = []
-        stop = False
-
-        for sequence in plan.sequences:
-            if stop:
-                result = _skipped_sequence(sequence)
-            else:
-                result = _run_sequence(
-                    sequence,
-                    resolved,
-                    bundle,
-                    self,
-                    build_datetime=build_datetime,
-                    delegate_batches=delegate,
-                )
-            sequence_results.append(result)
-            if on_sequence is not None:
-                on_sequence(
-                    InstallationReport(
-                        bundle_id=plan.bundle_id,
-                        status="running",
-                        started_at=started,
-                        finished_at=None,
-                        sequences=tuple(sequence_results),
-                    )
-                )
-            if result.status == FAILED:
-                stop = True
-
-        finished = _now()
-        report = InstallationReport(
-            bundle_id=plan.bundle_id,
-            status=FAILED if stop else SUCCEEDED,
-            started_at=started,
-            finished_at=finished,
-            sequences=tuple(sequence_results),
-        )
-        (bundle.store or self.store).write(
-            bundle.location.join(REPORT_FILENAME), report.to_yaml().encode("utf-8")
-        )
-        return report
-
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
-
-
-def _epoch(started: datetime) -> str:
-    """Render UTC without an offset for Spark's zone-sensitive ``timestamp``."""
-
-    return started.strftime("%Y-%m-%d %H:%M:%S.%f")
 
 
 #: Fabric Warehouse snapshot isolation can abort concurrent DDL and DML that
@@ -425,435 +293,6 @@ _SEQUENCE_LABELS = {
 }
 
 
-def _sequence_label(sequence: BuildSequence, resolved: dict) -> str:
-    text = (sequence.description or "").strip()
-    said = _SEQUENCE_LABELS.get(text.casefold())
-    if said is None:
-        said = text[:1].upper() + text[1:] if text else "Install"
-    names: list[str] = []
-    for batch in sequence.batches:
-        target = resolved.get(batch.target_id)
-        name = target.bound.display if target is not None else batch.target_id
-        if name not in names:
-            names.append(name)
-    count = sum(len(batch.actions) for batch in sequence.batches)
-    actions = f"{count} {'action' if count == 1 else 'actions'}"
-    parts = [", ".join(names), said, actions]
-    return " · ".join(part for part in parts if part)
-
-
-def _run_batch(
-    batch: BuildBatch,
-    context: InstallationContext,
-    bundle: BuildBundle,
-    installer: "Installer",
-) -> list[ActionResult]:
-    """Run a batch serially in stable manifest order."""
-
-    results: list[ActionResult] = []
-    spark_actions: list[InstallAction] = []
-    spark_executor = installer.executors.get("spark_sql")
-    can_batch_spark = type(spark_executor) is SparkSqlExecutor
-    table_actions: list[InstallAction] = []
-    table_executor = installer.executors.get("spark_table")
-    can_batch_tables = type(table_executor) is SparkTableExecutor
-
-    def flush_spark() -> None:
-        if not spark_actions:
-            return
-        if len(spark_actions) == 1 or not can_batch_spark:
-            results.extend(
-                _run_action(action, batch, context, bundle, installer)
-                for action in spark_actions
-            )
-        else:
-            assert isinstance(spark_executor, SparkSqlExecutor)
-            results.extend(
-                _run_spark_actions(
-                    tuple(spark_actions),
-                    batch,
-                    context,
-                    bundle,
-                    installer,
-                    spark_executor,
-                )
-            )
-        spark_actions.clear()
-
-    def flush_tables() -> None:
-        if not table_actions:
-            return
-        if len(table_actions) == 1 or not can_batch_tables:
-            results.extend(
-                _run_action(action, batch, context, bundle, installer)
-                for action in table_actions
-            )
-        else:
-            assert isinstance(table_executor, SparkTableExecutor)
-            results.extend(
-                _run_table_actions(
-                    tuple(table_actions),
-                    batch,
-                    context,
-                    bundle,
-                    installer,
-                    table_executor,
-                )
-            )
-        table_actions.clear()
-
-    for action in batch.actions:
-        if action.executor == "spark_sql":
-            flush_tables()
-            spark_actions.append(action)
-            continue
-        if action.executor == "spark_table":
-            flush_spark()
-            table_actions.append(action)
-            continue
-        flush_spark()
-        flush_tables()
-        results.append(_run_action(action, batch, context, bundle, installer))
-    flush_spark()
-    flush_tables()
-    return results
-
-
-def _run_table_actions(
-    actions: tuple[InstallAction, ...],
-    batch: BuildBatch,
-    context: InstallationContext,
-    bundle: BuildBundle,
-    installer: "Installer",
-    executor: SparkTableExecutor,
-) -> list[ActionResult]:
-    """Prepare adjacent Tables, then retain one result for each remote create."""
-    store = bundle.store or installer.store
-    prepared: list[tuple[InstallAction, tuple, dict[str, Any]]] = []
-    results: dict[str, ActionResult] = {}
-    payloads: dict[str, bytes | None] = {}
-    shape_requests: list[tuple[str, list[str]]] = []
-    by_id = {action.id: action for action in actions}
-    for action in actions:
-        started = _now()
-        try:
-            payload = (
-                None
-                if action.payload is None
-                else store.read(bundle.location.join(*action.payload.split("/")))
-            )
-            shape_request = executor.shape_request(action, payload)
-        except Exception as exc:
-            results[action.id] = _failed(action, batch.target_id, started, exc)
-        else:
-            payloads[action.id] = payload
-            if shape_request is not None:
-                shape_requests.append((action.id, shape_request))
-
-    shape_rows: dict[str, list[dict]] = {}
-    if len(shape_requests) > 1:
-        started = _now()
-        try:
-            outcomes = installer.spark_query_shapes()(shape_requests)
-            indexed = _validated_spark_outcomes(
-                outcomes,
-                [
-                    (by_id[label], statements, {})
-                    for label, statements in shape_requests
-                ],
-            )
-            for label, _statements in shape_requests:
-                outcome = indexed[label]
-                if outcome["succeeded"]:
-                    rows = outcome.get("rows")
-                    if not isinstance(rows, list) or any(
-                        not isinstance(row, dict) for row in rows
-                    ):
-                        raise InstallError(
-                            f"labelled Spark query shape {label!r} returned invalid rows"
-                        )
-                    shape_rows[label] = rows
-        except Exception as exc:
-            for label, _statements in shape_requests:
-                results[label] = _failed(by_id[label], batch.target_id, started, exc)
-            shape_rows.clear()
-        else:
-            for label, _statements in shape_requests:
-                outcome = indexed[label]
-                if not outcome["succeeded"]:
-                    error = InstallError(
-                        f"spark_table action {label!r} could not read the query shape: "
-                        f"{outcome['error_type']}: {outcome['error_message']}"
-                    )
-                    results[label] = _failed(
-                        by_id[label], batch.target_id, started, error
-                    )
-
-    for action in actions:
-        if action.id in results:
-            continue
-        started = _now()
-        try:
-            specification, details = executor.prepare(
-                action,
-                payloads[action.id],
-                context,
-                query_rows=shape_rows.get(action.id),
-            )
-            direct_profile_supported(
-                specification[1], specification[2], specification[3]
-            )
-        except Exception as exc:
-            results[action.id] = _failed(action, batch.target_id, started, exc)
-        else:
-            prepared.append((action, specification, details))
-
-    if prepared:
-        submitted_at = _now()
-        try:
-            if all(
-                direct_profile_supported(
-                    specification[1], specification[2], specification[3]
-                )
-                for _action, specification, _details in prepared
-            ):
-                outcomes = installer.direct_delta_table_actions()(
-                    [
-                        (action.id, *specification[:3], *specification[4:])
-                        for action, specification, _ in prepared
-                    ]
-                )
-            else:
-                outcomes = installer.delta_table_actions()(
-                    [
-                        (action.id, *specification)
-                        for action, specification, _ in prepared
-                    ]
-                )
-            indexed = _validated_spark_outcomes(outcomes, prepared)
-            completed: dict[str, ActionResult] = {}
-            for action, _specification, details in prepared:
-                outcome = indexed[action.id]
-                started = submitted_at + timedelta(
-                    seconds=outcome["started_after_seconds"]
-                )
-                finished = started + timedelta(seconds=outcome["duration_seconds"])
-                completed[action.id] = ActionResult(
-                    action_id=action.id,
-                    resource_node_id=action.resource_node_id,
-                    source_path=action.source_path,
-                    target_id=batch.target_id,
-                    executor=action.executor,
-                    status=SUCCEEDED if outcome["succeeded"] else FAILED,
-                    started_at=started,
-                    finished_at=finished,
-                    duration_seconds=outcome["duration_seconds"],
-                    details=details if outcome["succeeded"] else None,
-                    error_type=None if outcome["succeeded"] else outcome["error_type"],
-                    error_message=None
-                    if outcome["succeeded"]
-                    else outcome["error_message"],
-                )
-        except Exception as exc:
-            for action, _specification, _details in prepared:
-                results[action.id] = _failed(action, batch.target_id, submitted_at, exc)
-        else:
-            results.update(completed)
-    return [results[action.id] for action in actions]
-
-
-def _run_spark_actions(
-    actions: tuple[InstallAction, ...],
-    batch: BuildBatch,
-    context: InstallationContext,
-    bundle: BuildBundle,
-    installer: "Installer",
-    executor: SparkSqlExecutor,
-) -> list[ActionResult]:
-    """Run consecutive Spark SQL actions through one labelled submission."""
-
-    store = bundle.store or installer.store
-    prepared: list[tuple[InstallAction, str, dict[str, Any]]] = []
-    results: dict[str, ActionResult] = {}
-    for action in actions:
-        started = _now()
-        try:
-            payload = (
-                None
-                if action.payload is None
-                else store.read(bundle.location.join(*action.payload.split("/")))
-            )
-            statement = executor.statement(action, payload)
-            details = executor.details(statement, context)
-        except Exception as exc:
-            results[action.id] = _failed(action, batch.target_id, started, exc)
-        else:
-            prepared.append((action, statement, details))
-
-    if prepared:
-        submitted_at = _now()
-        try:
-            outcomes = installer.spark_sql_actions()(
-                [(action.id, statement) for action, statement, _details in prepared],
-                exact_case=True,
-            )
-            indexed = _validated_spark_outcomes(outcomes, prepared)
-            completed: dict[str, ActionResult] = {}
-            for action, _statement, details in prepared:
-                outcome = indexed[action.id]
-                started = submitted_at + timedelta(
-                    seconds=outcome["started_after_seconds"]
-                )
-                finished = started + timedelta(seconds=outcome["duration_seconds"])
-                if outcome["succeeded"]:
-                    completed[action.id] = ActionResult(
-                        action_id=action.id,
-                        resource_node_id=action.resource_node_id,
-                        source_path=action.source_path,
-                        target_id=batch.target_id,
-                        executor=action.executor,
-                        status=SUCCEEDED,
-                        started_at=started,
-                        finished_at=finished,
-                        duration_seconds=outcome["duration_seconds"],
-                        details=details,
-                    )
-                else:
-                    completed[action.id] = ActionResult(
-                        action_id=action.id,
-                        resource_node_id=action.resource_node_id,
-                        source_path=action.source_path,
-                        target_id=batch.target_id,
-                        executor=action.executor,
-                        status=FAILED,
-                        started_at=started,
-                        finished_at=finished,
-                        duration_seconds=outcome["duration_seconds"],
-                        error_type=outcome["error_type"],
-                        error_message=outcome["error_message"],
-                    )
-        except Exception as exc:
-            for action, _statement, _details in prepared:
-                results[action.id] = _failed(action, batch.target_id, submitted_at, exc)
-        else:
-            results.update(completed)
-
-    return [results[action.id] for action in actions]
-
-
-def _validated_spark_outcomes(outcomes, prepared) -> dict[str, dict]:
-    expected = [action.id for action, _statement, _details in prepared]
-    if not isinstance(outcomes, list) or len(outcomes) != len(expected):
-        raise InstallError("labelled Spark action results are incomplete")
-    indexed: dict[str, dict] = {}
-    for expected_label, outcome in zip(expected, outcomes, strict=True):
-        if not isinstance(outcome, dict) or outcome.get("label") != expected_label:
-            raise InstallError("labelled Spark action results are out of order")
-        succeeded = outcome.get("succeeded")
-        started = outcome.get("started_after_seconds")
-        duration = outcome.get("duration_seconds")
-        if (
-            not isinstance(succeeded, bool)
-            or isinstance(started, bool)
-            or isinstance(duration, bool)
-            or not isinstance(started, (int, float))
-            or not isinstance(duration, (int, float))
-            or not math.isfinite(started)
-            or not math.isfinite(duration)
-            or started < 0
-            or duration < 0
-            or started > timedelta.max.total_seconds()
-            or duration > timedelta.max.total_seconds()
-        ):
-            raise InstallError(
-                f"labelled Spark action {expected_label!r} returned an invalid outcome"
-            )
-        if not succeeded and (
-            not isinstance(outcome.get("error_type"), str)
-            or not isinstance(outcome.get("error_message"), str)
-        ):
-            raise InstallError(
-                f"labelled Spark action {expected_label!r} returned no error"
-            )
-        indexed[expected_label] = outcome
-    return indexed
-
-
-def _run_sequence(
-    sequence: BuildSequence,
-    resolved: dict[str, ResolvedTarget],
-    bundle: BuildBundle,
-    installer: "Installer",
-    *,
-    build_datetime: str | None = None,
-    delegate_batches: bool = False,
-) -> SequenceResult:
-    action_results: list[ActionResult] = []
-    failed = False
-
-    with installer.session.substep(_sequence_label(sequence, resolved)):
-        for lakehouse, group in groupby(
-            sequence.batches,
-            key=lambda batch: resolved[batch.target_id].bound.kind == "lakehouse",
-        ):
-            batches = tuple(group)
-            capability = getattr(installer.session, "install_batches", None)
-            if not failed and lakehouse and delegate_batches and capability is not None:
-                started = _now()
-                try:
-                    report = capability(
-                        bundle,
-                        sequence_number=sequence.number,
-                        batch_ids=tuple(batch.id for batch in batches),
-                        build_datetime=build_datetime,
-                        workspace=installer.workspace,
-                    )
-                except Exception as error:
-                    results = [
-                        _failed(action, batch.target_id, started, error)
-                        for batch in batches
-                        for action in batch.actions
-                    ]
-                else:
-                    results = None if report is None else list(report.action_results())
-                if results is not None:
-                    action_results.extend(results)
-                    failed = any(result.status == FAILED for result in results)
-                    continue
-            for batch in batches:
-                if failed:
-                    action_results.extend(
-                        _skipped_action(one, batch) for one in batch.actions
-                    )
-                    continue
-                target = resolved[batch.target_id]
-                context = InstallationContext(
-                    create_delta_table=installer.delta_table_creator(),
-                    create_direct_delta_table=installer.direct_delta_table_creator(),
-                    spark_sql=installer.spark_sql(),
-                    spark_sql_batch=installer.spark_sql_batch(),
-                    resolver=installer.resolver,
-                    store=installer.store,
-                    target=target,
-                    sql=installer.sql_for(target.bound),
-                    targets=resolved,
-                    build_datetime=build_datetime,
-                )
-                results = _run_batch(batch, context, bundle, installer)
-                action_results.extend(results)
-                failed = any(result.status == FAILED for result in results)
-
-    skipped = bool(action_results) and all(
-        result.status == SKIPPED for result in action_results
-    )
-    return SequenceResult(
-        number=sequence.number,
-        description=sequence.description,
-        status=FAILED if failed else SKIPPED if skipped else SUCCEEDED,
-        actions=tuple(action_results),
-    )
-
-
 def execute_install_action(
     action: InstallAction,
     payload: bytes | None = None,
@@ -869,29 +308,6 @@ def execute_install_action(
         context=context,
         target_id=context.target.bound.id,
         executors=default_executors() if executors is None else executors,
-    )
-
-
-def _run_action(
-    action: InstallAction,
-    batch: BuildBatch,
-    context: InstallationContext,
-    bundle: BuildBundle,
-    installer: "Installer",
-) -> ActionResult:
-    def load_payload() -> bytes | None:
-        if action.payload is None:
-            return None
-        return (bundle.store or installer.store).read(
-            bundle.location.join(*action.payload.split("/"))
-        )
-
-    return _execute(
-        action,
-        load_payload,
-        context=context,
-        target_id=batch.target_id,
-        executors=installer.executors,
     )
 
 
@@ -952,29 +368,4 @@ def _failed(
         duration_seconds=(finished - started).total_seconds(),
         error_type=type(exc).__name__,
         error_message=str(exc),
-    )
-
-
-def _skipped_action(action: InstallAction, batch: BuildBatch) -> ActionResult:
-    return ActionResult(
-        action_id=action.id,
-        resource_node_id=action.resource_node_id,
-        source_path=action.source_path,
-        target_id=batch.target_id,
-        executor=action.executor,
-        status=SKIPPED,
-    )
-
-
-def _skipped_sequence(sequence: BuildSequence) -> SequenceResult:
-    actions = tuple(
-        _skipped_action(action, batch)
-        for batch in sequence.batches
-        for action in batch.actions
-    )
-    return SequenceResult(
-        number=sequence.number,
-        description=sequence.description,
-        status=SKIPPED,
-        actions=actions,
     )

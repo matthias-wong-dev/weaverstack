@@ -12,6 +12,7 @@ from dataclasses import replace
 from datetime import datetime, timezone
 
 import pytest
+from support.bundles import given_build_plan as BuildPlan
 from support.bundles import given_execution, with_catalogue
 from support.sessions import given_installer
 from support.weaver_test import weaver_test
@@ -20,7 +21,6 @@ from support.workspaces import given_resolver, given_workspace
 from weaver.build_bundle import (
     BoundTarget,
     BuildBatch,
-    BuildPlan,
     BuildSelection,
     BuildSequence,
     Impact,

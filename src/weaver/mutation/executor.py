@@ -225,18 +225,13 @@ class MutationExecutor:
         payloads: Mapping[str, bytes] | None = None,
         *,
         cancellation=None,
-        selected=None,
-        prerequisites=(),
         invocation_id=None,
     ):
         from ..errors import BuildError
-        from .fragments import validate_fragment
 
         payloads = validate_inputs(plan, payloads)
-        selected = (
-            tuple(a.id for _, _, a in plan.actions()) if selected is None else selected
-        )
-        external = validate_fragment(plan, selected, prerequisites)
+        selected = tuple(a.id for _, _, a in plan.actions())
+        external = {}
         if invocation_id is not None and (
             not isinstance(invocation_id, str) or not invocation_id
         ):

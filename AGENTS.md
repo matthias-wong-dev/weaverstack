@@ -56,7 +56,7 @@ Session         ConsoleSession   desktop → Fabric
 initialise      resolve request → read the workspace's items → create the
                 missing ones → write the project → optionally publish the Environment
 
-build           resolve request → read BuildState → Builder → Installer
+build           resolve request → read BuildState → Builder → MutationExecutor
 load / test     resolve request → read RunState   → Runner
 health          resolve request → read Catalogue  → HealthReport
 doctor          authenticate → list workspaces → discover items → probe OneLake, TDS and Spark
@@ -191,7 +191,7 @@ It is one product in two positions, because the doers do not know which one they
 are in.
 
 There is one `build`, one `load` and one `test`. Every build action runs in the
-`Installer` wherever that is, and the state a build plans against is read the same
+the mutation executor wherever that is, and the state a build plans against is read the same
 way: the catalogue over TDS, a Lakehouse's views over Spark SQL, a Lakehouse's
 objects from storage, a Warehouse over TDS. A desktop `weaver build` therefore
 needs no published wheel, because its Spark SQL and TableBuilder submissions
@@ -246,89 +246,61 @@ suite deleted files through the store directly and looked like it was testing
 
 ## Archived Lakehouse installation
 
-`Installer` offers a revalidated frozen bundle to `Session.install_bundle`.
-The concrete default returns `None` before installation and retains the local
-Installer loop. Custom executor registries retain that loop.
+Build emits a format-5 `MutationPlan` and optional payload bytes. Build selection,
+omissions, repository identity, runtime state and target changes are metadata in
+the plan's frozen Build envelope. The directory codec rejects older bundles with
+regeneration guidance. `BuildBundle` stores an artifact; execution consumes its
+plan and payload bytes through `Session.execute_mutation`.
 
-`ConsoleSession` carries eligible Lakehouse bundles into its existing Livy
-session. Eligibility requires the bundle's frozen Spark attachment, built-in
-executors, and Lakehouse destinations with the central catalogue Warehouse.
-Mixed installations offer contiguous Lakehouse batches from each sequence to
-`Session.install_batches`. Warehouse batches retain their existing execution
-path. Batch order and sequence barriers remain fixed, and every segment shares
-the installation's Registry timestamp. A borrowed `LivySession` uses the same
-archive path; custom sessions, stores, resolvers and Livy implementations retain
-their supplied capabilities.
+The Session owns execution routing. `ConsoleSession` executes Warehouse-only
+plans through the shared native executor and direct TDS. Lakehouse and mixed
+plans use `execute_mutation_remote(plan, payloads=None)`, which submits the whole
+plan once to Fabric. Native and remote execution both use `MutationExecutor` and
+the existing physical executors. The public Installer, partial-batch archive
+routing and legacy compiler have been removed.
 
-The carrier checks the stored manifest against the validated in-memory plan
-before acquiring the installation scope. It carries those checked bytes,
-referenced payload bytes and the
-caller's Python runtime sources and static SQL, YAML and JSON resources. The
-batch-selection request is a hashed carrier member; the frozen manifest and
-payloads remain unchanged. The remote installer validates the full bundle before
-executing the selected contiguous Lakehouse batches.
-The carrier and every member have a SHA-256 identity. Extraction validates the full
-inventory, paths, file kinds and content before creating the private tree. The
-expanded-size bound is 128 MiB; larger bundles retain the local Installer loop.
-The remote program imports the extracted runtime in an isolated namespace and
-restores previously loaded Weaver modules and import paths after installation.
+The internal carrier contains the canonical plan, optional payloads and matching
+Weaver runtime sources and static resources. It validates all payload hashes
+before staging. The carrier and every member have SHA-256 identities. Extraction
+validates inventory, paths, file kinds and content before creating the private
+tree. The expanded-size bound is 128 MiB; an oversized carrier is refused before
+submission. The generated bootstrap imports the extracted runtime under a
+process-shared namespace lock, drains execution, and restores borrowed modules
+and import paths.
 
-Runtime dependencies are checked before installation. Missing dependencies or a
-Delta writer version mismatch produce an explicit pre-mutation decline. The
-archive path retains the versioned direct-Delta writer and the caller's worker
-bound, supported Spark Views, dependency barriers, catalogue settlement and
-load-artefact installation. Build does not execute loads or validations.
+Runtime dependencies and the pinned Delta writer are checked before mutation.
+The archive retains direct-Delta creation, supported Views, catalogue settlement
+and load-artifact installation. Build does not run loads or validations.
+One Livy mutation submission has retries disabled and an allowance equal to the
+action count times the statement timeout. Its final result is a byte count and
+hash for the complete invocation report stored in OneLake. The desktop validates
+the result identity and full action inventory before producing the Build report.
 
-One mutation submission has retries disabled and an allowance equal to the
-planned action count times the per-action statement timeout. Complete sequence
-prefixes are journalled to the private OneLake result file. The final Livy result
-is a byte count and hash for that file. The desktop validates ordered action
-identities, outcomes and clocks and persists the normal installation report.
-An unavailable outcome retains validated prefixes and fails every unacknowledged
-action with an uncertainty marker. Completed and declined carriers are removed.
-Cleanup failures preserve the verified installation outcome, retain the carrier
-and result location, and are recorded separately in `archive_cleanup_failures`
-and surfaced as Session warnings. Uncertain carriers and journals remain at
-their report's recorded location.
+An ambiguous submission or lost result marks the invocation uncertain and is
+never replayed automatically. The carrier, result location and failure are
+retained for diagnosis. There are no durable checkpoint chains, prerequisite
+receipts, selected fragments or action-journal reconstruction. The next ordinary
+Build reads the actual catalogue and physical inventory and converges.
+Completed staging is removed; cleanup failures retain the verified report and
+are recorded separately from execution failure.
 
-## Gated physical mutation contract
+## Physical mutation contract
 
-`weaver.mutation` owns the physical action, target and execution identities and
-one directory codec. Build imports those representations and keeps its selection,
-omissions, repository identity, runtime state and target changes in `BuildPlan`.
-Normal Build writes format 4 and uses the existing Installer and archive path.
-
-Format 5 is available through the codec's explicit `allow_mutation=True` option.
-The legacy Installer rejects it before binding targets. Format 4 remains temporary
-public routing until the common executor and archive readers are qualified.
-Format 5 is the canonical Build bundle at that migration boundary; older bundles
-will be refused with regeneration guidance. Permanent format-4 readers and exact
-old YAML or bundle IDs are not compatibility requirements. Build behaviour,
-failure semantics and physical outcomes remain migration invariants.
 Every format-5 action supplies `depends_on` and `settle_after`, including empty
-lists for roots.
-Sequence and batch nesting is the authoritative action collection; batches decode
-target bindings, and sequences provide presentation grouping. The planner freezes
-both edge sets. Execution may use only those links.
+lists for roots. Sequence and batch nesting collect the actions; sequences also
+provide presentation grouping. The planner freezes both edge sets, and execution
+uses those links.
 
 `depends_on` requires successful predecessors. `settle_after` imposes order after
-a predecessor's known terminal outcome, including known failure or dependency
-blocking. It permits an otherwise admitted member to continue after failure.
-Pending or uncertain outcomes remain unsettled. Failed, blocked and uncertain
-actions provide no success evidence. Typed result references, certification and
-asynchronous required-completion proofs follow success paths only. Physical writer
-ordering may use the union of both edge sets. References must exist; self-links,
-duplicate edges within or across the sets, and cycles in their union are invalid.
+a known terminal outcome, including failure or dependency blocking. Pending and
+uncertain outcomes do not settle an ordering edge, and unsuccessful actions
+provide no success evidence. Typed results, certification and required completion
+follow success paths. The union of both edge sets must be acyclic.
 
-`compile_legacy_build` is transitional scaffolding that preserves member IDs,
-source paths, groups and the Build envelope. Each admitted batch has a linear
-settlement chain in manifest order and a success gate over every original member.
-Later batches and sequences require the preceding gate's success. A known failed
-member permits the remaining admitted
-members to run in order while blocking the next batch. The compatibility compiler
-serializes even legacy groups whose normal dispatch can overlap members. This
-bounded planning-only conversion has linear-sized links and gates. Normal format-4
-installation retains Spark grouping, bulk actions and direct-Delta concurrency.
+Build stages emit a settlement chain in each admitted batch and a success gate
+over its physical members. Later batches require the preceding gate. A known
+failed member permits its admitted siblings to run while blocking the next batch.
+This preserves order-sensitive pruning and batch failure barriers.
 
 A `MutationPlan` owns tuples and recursively frozen envelope mappings. Construction
 and decoding use the same structural validation and `weaver.graph.Graph`.
@@ -394,44 +366,18 @@ requires its journal diagnostic and rejects physical outcomes for that action.
 Checkpoint recovery without this final evidence retains admission uncertainty.
 Runtime clocks, handles and invocation IDs remain outside plan identity.
 
-The internal `Session.execute_mutation_archive` capability requires explicit
-`allow_mutation=True`. `ConsoleSession` offers stored format-5 plans through the
-existing carrier and generated bootstrap. Supplied custom capabilities retain
-direct execution. Normal Build retains the format-4 route during qualification.
-The native binding calls the shared `MutationExecutor` through the existing
-physical executors. Warehouse-only work retains direct TDS; eligible Lakehouse
-plans may include central-catalogue TDS. The caller supplies one publication
-instant, bounded workers and an authorised staging candidate.
-Catalogue-free physical plans bind a Workspace without a catalogue. Generic
-desktop archives require the frozen Spark attachment before staging or submission
-and refuse incompatible live attachments through the Session binding contract.
+`ArchiveStaging` may bind a staging Lakehouse outside the frozen plan. The
+shared physical scope rules keep staging outside protected sources, writes and
+destructive scopes. Physical actions without write scopes exclude their whole
+target. Automatic staging also excludes Lakehouses named by the frozen bindings.
+An execution with no safe candidate is refused before submission. Staging is an internal transport
+choice outside the plan identity and travels in the hashed invocation request.
+Catalogue-free physical plans bind a Workspace without a catalogue.
 
-`ArchiveStaging` can bind a staging Lakehouse outside the frozen plan. Staging
-uses the shared physical scope rules across aliases and workspace bindings and
-must be outside protected sources, writes and destructive scopes. Transitional
-physical actions without write scopes exclude their whole target. No safe
-candidate produces a recorded pre-mutation decline. Staging remains outside plan
-identity and is carried in the hashed fragment request.
-
-Fragment requests select frozen action IDs and supply exact prerequisite
-receipts. Each receipt binds the producer contract, invocation, selection and
-causal ledger. Known terminal evidence can satisfy settlement ordering; success
-edges and typed inputs require verified successful results. Start/await pairs
-stay together in one backend. Prerequisites that depend on an unfinished selected
-action are invalid.
-
-The buffered journal writes bounded hash-linked action checkpoints, durable
-admissions and operation acknowledgements. Recovery validates causal action
-evidence and preserves out-of-order successes. Missing final responses permit
-evidence recovery only; they grant no replay. Uncertain outcomes retain their
-carrier and journal locations. Cleanup diagnostics preserve settled results.
-Generated bootstraps serialize borrowed namespace changes and drain the shared
-executor before restoring modules or removing the private runtime.
-
-Recording resources qualify these internal paths locally. Fabric readiness,
-public adoption and performance remain unqualified. Shortcut and endpoint
-readiness retain their current implementations. Load and Test scheduling is
-unchanged.
+Real Fabric qualification covers desktop plan execution, binary payload delivery,
+physical actions and failures, lost-response uncertainty without replay, and
+ordinary Build convergence. Local executor and bootstrap tests establish their
+own boundaries, not Fabric readiness. Load and Test scheduling is unchanged.
 
 ## Architecture invariants
 

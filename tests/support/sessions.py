@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from weaver.build_bundle.installer import MutationBindings
 from weaver.sessions import TestSession
 from weaver.workspaces import Workspace
 
@@ -85,9 +86,7 @@ def given_installer(
 ):
     """An Installer over :func:`given_session`, for an installer-semantics test."""
 
-    from weaver.build_bundle import Installer
-
-    return Installer(
+    return PlanExecution(
         given_session(
             workspace=workspace,
             store=store,
@@ -101,3 +100,15 @@ def given_installer(
 
 
 __all__ = ["NOWHERE", "given_installer", "given_session"]
+
+
+class PlanExecution(MutationBindings):
+    def install(self, bundle, *, build_datetime=None):
+        from weaver.build_bundle.execution_plan import execute_bundle
+
+        return execute_bundle(
+            bundle,
+            self.session,
+            executors=self.executors,
+            build_datetime=build_datetime,
+        )

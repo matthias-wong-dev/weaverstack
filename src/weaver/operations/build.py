@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Sequence
 
+from ..build_bundle.execution_plan import execute_bundle
+from ..build_bundle.incremental import BuildSelection
 from ..errors import BuildError, CommandError
 from ..locations import Location
 from ..sessions.host import inside_fabric_session as _inside_fabric_session
@@ -256,7 +258,7 @@ def _result_from_item_build(source, bindings, result) -> BuildResult:
             for action in report.action_results()
             if action.status == "failed"
         ),
-        selection=result.plan.selection,
+        selection=BuildSelection.from_mapping(result.plan.build_envelope["selection"]),
         installation_report=report,
     )
 
@@ -276,7 +278,6 @@ def _run_build(
     present_selection=True,
 ) -> BuildResult:
     from ..build_bundle import (
-        Installer,
         build_repository_bundle,
         catalogue_items_for_build,
         read_build_state,
@@ -310,7 +311,14 @@ def _run_build(
                 output=output,
             )
         if present_selection:
-            session.report(_selection_lines(bundle.plan.selection, requested_bindings))
+            session.report(
+                _selection_lines(
+                    BuildSelection.from_mapping(
+                        bundle.plan.build_envelope["selection"]
+                    ),
+                    requested_bindings,
+                )
+            )
         return BuildResult(
             source=source,
             items=tuple(str(binding.item) for binding in requested_bindings.entries),
@@ -318,7 +326,9 @@ def _run_build(
             installation=False,
             bundle_path=bundle.location.value,
             status="succeeded",
-            selection=bundle.plan.selection,
+            selection=BuildSelection.from_mapping(
+                bundle.plan.build_envelope["selection"]
+            ),
         )
 
     with tempfile.TemporaryDirectory(prefix="weaver-build-") as temporary:
@@ -333,9 +343,16 @@ def _run_build(
                 output=Location((Path(temporary) / "bundle").as_posix()),
             )
         if present_selection:
-            session.report(_selection_lines(bundle.plan.selection, requested_bindings))
+            session.report(
+                _selection_lines(
+                    BuildSelection.from_mapping(
+                        bundle.plan.build_envelope["selection"]
+                    ),
+                    requested_bindings,
+                )
+            )
         with session.step("Install"):
-            report = Installer(session).install(bundle)
+            report = execute_bundle(bundle, session)
         result = BuildResult(
             source=source,
             items=tuple(str(binding.item) for binding in requested_bindings.entries),
@@ -354,7 +371,9 @@ def _run_build(
                 for action in report.action_results()
                 if action.status == "failed"
             ),
-            selection=bundle.plan.selection,
+            selection=BuildSelection.from_mapping(
+                bundle.plan.build_envelope["selection"]
+            ),
             installation_report=report,
             report_path=_keep_report(report),
         )

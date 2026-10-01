@@ -16,18 +16,18 @@ from dataclasses import replace
 import pytest
 import yaml
 from support.bundles import CATALOGUE_TARGET
+from support.bundles import given_build_plan as BuildPlan
+from support.sessions import PlanExecution as Installer
 from support.sessions import given_session
 from support.weaver_test import weaver_test
 
 from weaver.build_bundle import (
     BoundTarget,
     BuildBatch,
-    BuildPlan,
     BuildSelection,
     BuildSequence,
     Impact,
     InstallAction,
-    Installer,
     compute_bundle_id,
     load_bundle,
     write_bundle,

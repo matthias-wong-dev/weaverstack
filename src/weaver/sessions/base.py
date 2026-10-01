@@ -269,24 +269,10 @@ class Session(ABC):
 
     # --- execution capabilities ---------------------------------------------
 
-    def execute_mutation_archive(
-        self, bundle, *, staging, allow_mutation=False, **options
-    ):
-        from .install_archive import decline_mutation
+    def execute_mutation(self, plan, payloads=None, **options):
+        from .archive_runtime import execute_mutation
 
-        return decline_mutation(
-            self, "Session does not provide generic archive execution"
-        )
-
-    def install_bundle(self, bundle, *, workspace: Workspace | None = None):
-        """Install a frozen bundle as one host-owned unit, or decline before work."""
-        return None
-
-    def install_batches(
-        self, bundle, *, sequence_number, batch_ids, build_datetime, workspace=None
-    ):
-        """Install contiguous Lakehouse batches, or decline before work."""
-        return None
+        return execute_mutation(plan, payloads, self, **options)
 
     @abstractmethod
     def create_delta_table(

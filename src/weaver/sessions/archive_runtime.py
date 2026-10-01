@@ -115,19 +115,17 @@ def execute_mutation(
     session,
     *,
     workers=1,
-    journal=None,
-    selected=None,
-    prerequisites=(),
     invocation_id=None,
     timeout=600,
     build_datetime=None,
+    executors=None,
 ):
-    """Internal native binding; public Build still uses the format-4 Installer."""
+    """Bind physical capabilities and execute one complete MutationPlan."""
     from dataclasses import replace
 
-    from ..build_bundle import Installer
     from ..build_bundle.executors import default_executors
     from ..build_bundle.executors.base import InstallationContext
+    from ..build_bundle.installer import MutationBindings
     from ..errors import BuildError, InstallError
     from ..mutation.executor import (
         Failed,
@@ -135,35 +133,31 @@ def execute_mutation(
         physical_driver,
         validate_inputs,
     )
-    from ..mutation.fragments import validate_fragment
 
     payloads = validate_inputs(plan, payloads)
-    selected = (
-        tuple(a.id for _, _, a in plan.actions())
-        if selected is None
-        else tuple(selected)
-    )
-    validate_fragment(plan, selected, prerequisites)
-    executors = default_executors()
+    if build_datetime is None:
+        from datetime import datetime, timezone
+
+        build_datetime = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")
+    executors = default_executors() if executors is None else executors
     if any(
         a.executor not in executors and a.executor != "completion_gate"
         for _, _, a in plan.actions()
-        if a.id in selected
     ):
-        raise BuildError("native archive requires supported physical drivers")
-    installer = Installer(session)
-    installer._bind(plan)
-    resolved = {t.id: installer.resolve_target(t) for t in plan.targets}
+        raise BuildError("mutation execution requires supported physical drivers")
+    bindings = MutationBindings(session)
+    bindings._bind(plan)
+    resolved = {t.id: bindings.resolve_target(t) for t in plan.targets}
     contexts = {
         key: InstallationContext(
-            resolver=installer.resolver,
-            store=installer.store,
+            resolver=bindings.resolver,
+            store=bindings.store,
             target=target,
-            sql=installer.sql_for(target.bound),
-            spark_sql=installer.spark_sql(),
-            spark_sql_batch=installer.spark_sql_batch(),
-            create_delta_table=installer.delta_table_creator(),
-            create_direct_delta_table=installer.direct_delta_table_creator(),
+            sql=bindings.sql_for(target.bound),
+            spark_sql=bindings.spark_sql(),
+            spark_sql_batch=bindings.spark_sql_batch(),
+            create_delta_table=bindings.delta_table_creator(),
+            create_direct_delta_table=bindings.direct_delta_table_creator(),
             targets=resolved,
             build_datetime=build_datetime,
         )
@@ -186,129 +180,49 @@ def execute_mutation(
 
         drivers[name] = replace(driver, run=run)
     return MutationExecutor(
-        drivers,
-        workers=workers,
-        limits={"native-session": 1},
-        journal=journal,
-        timeout=timeout,
-    ).execute(
-        plan,
-        payloads,
-        selected=selected,
-        prerequisites=prerequisites,
-        invocation_id=invocation_id,
-    )
+        drivers, workers=workers, limits={"native-session": 1}, timeout=timeout
+    ).execute(plan, payloads, invocation_id=invocation_id)
 
 
-def run_mutation(bundle, root, spark, output, archive_sha256, *, workers):
-    from importlib import import_module
-
+def run_mutation(root, spark, output, archive_sha256, *, workers):
     from ..build_bundle.execution import execution_workspace
-    from ..mutation.executor import MutationJournal
-    from .mutation_receipts import DurableJournal, checked_request, encode_report, loads
+    from ..locations import Location
+    from ..mutation.bundle import load_bundle
+    from ..store import FilesystemStore
+    from .install_archive import ArchiveStaging, select_staging
+    from .mutation_report import encode_report, loads
 
     request = loads((root / "request.json").read_bytes())
-    prerequisites = checked_request(bundle.plan, request)
+    bundle = load_bundle(Location(str(root / "bundle")), store=FilesystemStore())
+    plan = bundle.plan
+    if request["plan_id"] != plan.bundle_id:
+        raise ValueError("mutation request plan differs")
+    stage = ArchiveStaging.from_mapping(request["staging"])
+    if select_staging(plan, (stage,)) != stage:
+        raise ValueError("unsafe mutation staging")
     payloads = {
         a.payload: bundle.store.read(bundle.location.join(*a.payload.split("/")))
-        for _, _, a in bundle.plan.actions()
+        for _, _, a in plan.actions()
         if a.payload is not None
     }
-    fs = import_module("notebookutils").fs
-    context = {"archive_sha256": archive_sha256, "request": request}
-    sink = DurableJournal(
-        lambda path, data: fs.put(path, data.decode("utf-8"), True),
-        output,
-        bundle.bundle_id,
-        request["invocation_id"],
-        context=context,
-    )
-    workspace = execution_workspace(bundle.plan.execution, bundle.plan)
+    workspace = execution_workspace(plan.execution, plan)
     with ArchiveSession(
         workspace=workspace, spark=spark, direct_delta_workers=workers
     ) as session:
         report = execute_mutation(
-            bundle.plan,
+            plan,
             payloads,
             session,
             workers=workers,
-            journal=MutationJournal(sink),
-            selected=request["selected"],
-            prerequisites=prerequisites,
             invocation_id=request["invocation_id"],
             timeout=request["timeout"],
             build_datetime=request["build_datetime"],
         )
-    return context | {
-        "status": "completed",
-        "plan_id": bundle.bundle_id,
-        "invocation_id": request["invocation_id"],
-        "report": encode_report(report),
-    }
-
-
-def run_bundle(root, spark, output, archive_sha256, *, workers):
-    import json
-    import time
-    from dataclasses import replace
-    from importlib import import_module
-
-    from ..build_bundle import Installer, load_bundle
-    from ..build_bundle.bundle import validate_bundle
-    from ..build_bundle.execution import execution_workspace
-    from ..build_bundle.installer import select_install_batches
-    from ..locations import Location
-    from ..store import FilesystemStore
-
-    bundle = load_bundle(
-        Location(str(root / "bundle")), store=FilesystemStore(), allow_mutation=True
-    )
-    from ..mutation.models import MutationPlan
-
-    if isinstance(bundle.plan, MutationPlan):
-        return run_mutation(
-            bundle, root, spark, output, archive_sha256, workers=workers
-        )
-    request_path = root / "request.json"
-    request = json.loads(request_path.read_text()) if request_path.exists() else None
-    build_datetime = None
-    if request is not None:
-        validate_bundle(bundle.location, bundle.plan, store=bundle.store)
-        selected = select_install_batches(
-            bundle.plan,
-            sequence_number=request["sequence_number"],
-            batch_ids=request["batch_ids"],
-        )
-        build_datetime = request["build_datetime"]
-        bundle = replace(bundle, plan=selected)
-    workspace = execution_workspace(bundle.plan.execution, bundle.plan)
-    fs = import_module("notebookutils").fs
-
-    def journal(report):
-        result = {
-            "status": "running",
-            "archive_sha256": archive_sha256,
-            "request": request,
-            "report": report.to_mapping(),
-        }
-        fs.put(output, json.dumps(result, separators=(",", ":"), allow_nan=False), True)
-
-    started = time.monotonic()
-    with ArchiveSession(
-        workspace=workspace, spark=spark, direct_delta_workers=workers
-    ) as session:
-        with session.task("Install", bundle.bundle_id):
-            report = Installer(session).install(
-                bundle, on_sequence=journal, build_datetime=build_datetime
-            )
-        profiles = list(getattr(session, "created_profiles", ()))
-        events = [event.to_mapping() for event in session.telemetry.events()]
     return {
         "status": "completed",
-        "request": request,
         "archive_sha256": archive_sha256,
-        "report": report.to_mapping(),
-        "install_seconds": time.monotonic() - started,
-        "direct_delta_tables": profiles,
-        "events": events,
+        "request": request,
+        "plan_id": plan.bundle_id,
+        "invocation_id": request["invocation_id"],
+        "report": encode_report(report),
     }

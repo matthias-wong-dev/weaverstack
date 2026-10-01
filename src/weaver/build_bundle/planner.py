@@ -19,7 +19,6 @@ from ..etl import item_runtime_artefacts, load_schemas, runtime_artefacts
 from ..locations import Location
 from ..store import Store
 from .bundle import (
-    SUPPORTED_FORMAT_VERSION,
     BuildBundle,
     compute_bundle_id,
     write_bundle,
@@ -35,7 +34,7 @@ from .drops import lakehouse_drop_stages, warehouse_drop_stages
 from .endpoints import lakehouse_endpoint_refresh_stage
 from .execution import BundleExecution, ExecutionIdentity, select_spark_home
 from .incremental import installed_as_pointer, select_build, stale_through_shortcuts
-from .models import OMIT_TARGET_UNBOUND, BuildPlan, OmittedNode
+from .models import OMIT_TARGET_UNBOUND, OmittedNode
 from .prune import TargetInventory, lakehouse_prune_stage, warehouse_prune_stage
 from .runtime import item_runtime_removals, item_runtime_stages
 from .runtime_tables import (
@@ -276,17 +275,11 @@ def generate_item_build_bundle(
         for identity in sorted(repository.source_documents, key=str)
         if identity not in certifiable_ids
     )
-    plan = BuildPlan(
-        format_version=SUPPORTED_FORMAT_VERSION,
-        bundle_id="",
-        repository_name=repository.name,
-        repository_signature=repository.signature,
+    from ..mutation.models import MutationPlan, PhysicalScope
+
+    plan = MutationPlan(
         targets=targets,
         sequences=sequences,
-        selection=selection,
-        # Warehouse-only work freezes no Lakehouse and therefore acquires no
-        # Spark session. The bound targets are read in the order ``build``
-        # reads its bindings, so the two cannot choose different attachments.
         execution=BundleExecution.of(
             execution,
             catalogue_target_id=catalogue_target.id,
@@ -294,12 +287,35 @@ def generate_item_build_bundle(
                 target_by_item.values(), needed=_needs_spark(sequences)
             ),
         ),
-        omitted_nodes=tuple(
-            sorted(omitted, key=lambda node: (node.node_id, node.reason))
+        build_envelope={
+            "repository_name": repository.name,
+            "repository_signature": repository.signature,
+            "selection": selection.to_mapping(),
+            "omitted_nodes": [
+                node.to_mapping()
+                for node in sorted(omitted, key=lambda n: (n.node_id, n.reason))
+            ],
+            "target_changes": {
+                key: [change.to_mapping() for change in value]
+                for key, value in sorted(target_changes.items())
+            },
+            "runtime_state": [one.to_mapping() for one in runtime_state],
+            "runtime_state_established": [
+                one.to_mapping() for one in (*established_state, *view_state)
+            ],
+        },
+        protected_scopes=tuple(
+            PhysicalScope(source.id, "")
+            for source in installed_sources.values()
+            if source.id not in {target.id for target in target_by_item.values()}
         ),
-        target_changes=target_changes,
-        runtime_state=runtime_state,
-        runtime_state_established=(*established_state, *view_state),
+        required_completion=tuple(
+            a.id
+            for sequence in sequences[-1:]
+            for batch in sequence.batches[-1:]
+            for a in batch.actions
+            if a.executor == "completion_gate"
+        ),
     )
     plan = replace(plan, bundle_id=compute_bundle_id(plan))
     return write_bundle(

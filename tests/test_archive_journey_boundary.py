@@ -7,18 +7,18 @@ from types import SimpleNamespace
 
 import pytest
 from support.acceptance import Acceptance
+from support.bundles import given_build_plan as BuildPlan
 from support.bundles import given_execution
+from support.sessions import PlanExecution as Installer
 from support.weaver_test import weaver_test
 
 from weaver.build_bundle import (
     BoundTarget,
     BuildBatch,
-    BuildPlan,
     BuildSelection,
     BuildSequence,
     Impact,
     InstallAction,
-    Installer,
 )
 from weaver.build_bundle.bundle import SUPPORTED_FORMAT_VERSION, BuildBundle
 from weaver.locations import Location

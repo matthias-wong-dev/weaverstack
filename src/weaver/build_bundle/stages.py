@@ -134,7 +134,7 @@ def enumerate_stages(
                 ),
             )
         )
-    return tuple(sequences), payloads, merge_changes(*changes)
+    return _mutation_sequences(sequences), payloads, merge_changes(*changes)
 
 
 def _numbered(
@@ -153,3 +153,42 @@ def _numbered(
             )
         actions.append(replace(action, payload=resolved))
     return replace(batch, id=f"{number:03d}-{batch.id}", actions=tuple(actions))
+
+
+def _mutation_sequences(sequences):
+    from ..mutation.models import MutationAction, MutationBatch, MutationSequence
+
+    previous = None
+    result = []
+    for sequence in sequences:
+        batches = []
+        for batch in sequence.batches:
+            actions = tuple(
+                MutationAction(
+                    **action.to_mapping(),
+                    target_id=batch.target_id,
+                    depends_on=() if previous is None else (previous,),
+                    settle_after=() if index == 0 else (batch.actions[index - 1].id,),
+                )
+                for index, action in enumerate(batch.actions)
+            )
+            batches.append(MutationBatch(batch.id, batch.target_id, actions))
+            if actions:
+                gate = MutationAction(
+                    id="complete-batch:" + batch.id,
+                    kind="completion_gate",
+                    resource_node_id=None,
+                    executor="completion_gate",
+                    payload=None,
+                    payload_sha256=None,
+                    target_id=batch.target_id,
+                    depends_on=tuple(a.id for a in actions),
+                )
+                batches.append(
+                    MutationBatch("completion:" + batch.id, batch.target_id, (gate,))
+                )
+                previous = gate.id
+        result.append(
+            MutationSequence(sequence.number, sequence.description, tuple(batches))
+        )
+    return tuple(result)

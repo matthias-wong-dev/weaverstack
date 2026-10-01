@@ -323,9 +323,7 @@ def test_all_inputs_are_validated_before_any_dispatch(tmp_path, mode, fault):
     payloads = {"payload/a.payload": data}
     store = FilesystemStore()
     location = Location(str(tmp_path / "bundle"))
-    write_bundle(
-        location, plan=plan, payloads=payloads, store=store, allow_mutation=True
-    )
+    write_bundle(location, plan=plan, payloads=payloads, store=store)
     calls = []
     driver = MutationDriver(lambda request: calls.append(request) or Completed())
     drivers = {"load_file": driver}
@@ -608,12 +606,11 @@ def test_execution_policy_requires_positive_finite_bounds(policy):
 
 @weaver_test()
 @pytest.mark.parametrize("outcome", ["success", "failure", "uncertain", "cancel"])
-def test_real_compiler_preserves_admitted_member_continuation(outcome):
+def test_build_planner_preserves_admitted_member_continuation(outcome):
     from threading import Event
 
-    from test_mutation_compatibility_representation import _warehouse_prune_plan
+    from support.mutation_plans import warehouse_prune_plan
 
-    from weaver.mutation import compile_legacy_build
     from weaver.mutation.executor import (
         Completed,
         Failed,
@@ -622,9 +619,8 @@ def test_real_compiler_preserves_admitted_member_continuation(outcome):
         Uncertain,
     )
 
-    legacy, payloads = _warehouse_prune_plan()
-    plan = compile_legacy_build(legacy)
-    members = legacy.sequences[0].batches[0].actions
+    plan, payloads = warehouse_prune_plan()
+    members = plan.sequences[0].batches[0].actions
     calls = []
     cancel = Event()
 
@@ -1128,9 +1124,8 @@ def test_successful_execution_preserves_frozen_binary_payloads(tmp_path, mode):
             plan=plan,
             payloads=payloads,
             store=store,
-            allow_mutation=True,
         )
-        bundle = load_bundle(bundle.location, store=store, allow_mutation=True)
+        bundle = load_bundle(bundle.location, store=store)
         plan = bundle.plan
         assert isinstance(plan, MutationPlan)
         payloads = {

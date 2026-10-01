@@ -25,13 +25,13 @@ from ..declaration.model import WeaverItemId, WeaverRepository
 from ..declaration.repository import parse_item_repository
 from ..errors import BuildError, DiscoveryError
 from ..locations import Location
+from ..mutation.models import MutationPlan
 from ..store import FilesystemStore, Store
 from ..targets import ItemRef
 from .builder import Builder
 from .bundle import BuildBundle, load_bundle
 from .execution import ExecutionIdentity, resolve_execution_identity
-from .installer import Installer
-from .models import BuildPlan
+from .execution_plan import execute_bundle
 from .prune import (
     TargetInventory,
     read_lakehouse_inventory,
@@ -66,7 +66,7 @@ class PreparedRepository:
 
 @dataclass(frozen=True)
 class ItemBuildResult:
-    plan: BuildPlan
+    plan: MutationPlan
     report: InstallationReport
     repository_signature: str
     item_signatures: Mapping[WeaverItemId, str]
@@ -470,7 +470,7 @@ def install_bundle_archive(
     """Install an archive against the execution context it froze."""
 
     with materialise_bundle_archive(archive, store=archive_store) as bundle:
-        return Installer(session, executors=executors).install(bundle)
+        return execute_bundle(bundle, session, executors=executors)
 
 
 def build_item_repository(
@@ -488,8 +488,6 @@ def build_item_repository(
 ) -> ItemBuildResult:
     """Build and install, optionally retaining the generated bundle at ``output``."""
 
-    installer = Installer(session, executors=executors)
-
     with tempfile.TemporaryDirectory(prefix="weaver-build-") as temporary:
         bundle = build_repository_bundle(
             repository,
@@ -505,7 +503,7 @@ def build_item_repository(
             source_store=source_store,
             output=output or Location((Path(temporary) / "bundle").as_posix()),
         )
-        report = installer.install(bundle)
+        report = execute_bundle(bundle, session, executors=executors)
         return ItemBuildResult(
             plan=bundle.plan,
             report=report,

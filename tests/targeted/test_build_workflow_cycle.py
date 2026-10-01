@@ -184,7 +184,11 @@ def test_every_planned_action_is_executed_exactly_once(estate):
 
     result = build(estate)
 
-    planned = [action.id for _s, _b, action in result.plan.actions()]
+    planned = [
+        action.id
+        for _s, _b, action in result.plan.actions()
+        if action.executor != "completion_gate"
+    ]
     ran = [
         action_id
         for executor in estate["executors"].values()

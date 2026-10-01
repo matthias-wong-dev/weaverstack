@@ -15,13 +15,13 @@ from dataclasses import replace
 
 import pytest
 import yaml
+from support.bundles import given_build_plan as BuildPlan
 from support.bundles import given_execution, with_catalogue
 from support.weaver_test import weaver_test
 
 from weaver.build_bundle import (
     BoundTarget,
     BuildBatch,
-    BuildPlan,
     BuildSelection,
     BuildSequence,
     Impact,

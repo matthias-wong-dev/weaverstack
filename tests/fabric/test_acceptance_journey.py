@@ -530,18 +530,18 @@ def test_a_realistic_estate_builds_from_nothing(acceptance, monkeypatch):
     acceptance.step("seed-neighbour", lambda: _seed_the_neighbour(acceptance))
     acceptance.require("seed-neighbour")
 
-    from weaver.build_bundle import Installer
-
     plans = []
-    install = Installer.install
+    remote = type(acceptance.session).execute_mutation_remote
 
-    def capture_install(installer, bundle, *args, **kwargs):
-        plans.append(bundle.plan)
-        return install(installer, bundle, *args, **kwargs)
+    def capture_remote(session, plan, payloads=None, **options):
+        plans.append(plan)
+        return remote(session, plan, payloads, **options)
 
-    archive_offset = len(getattr(acceptance.session, "archive_installations", ()))
+    archive_offset = len(getattr(acceptance.session, "archive_mutations", ()))
     with monkeypatch.context() as capture:
-        capture.setattr(Installer, "install", capture_install)
+        capture.setattr(
+            type(acceptance.session), "execute_mutation_remote", capture_remote
+        )
         step = acceptance.step(
             "build",
             lambda: weaver.build(
@@ -551,26 +551,11 @@ def test_a_realistic_estate_builds_from_nothing(acceptance, monkeypatch):
             ),
         )
     acceptance.require("build")
-
-    archives = acceptance.session.archive_installations[archive_offset:]
-    assert len(plans) == 1
-    plan = plans[0]
-    targets = {target.id: target for target in plan.targets}
-    expected = [
-        action.id
-        for _, batch, action in plan.actions()
-        if targets[batch.target_id].kind == "lakehouse"
-    ]
-    installed = [
-        action["action_id"]
-        for archive in archives
-        for sequence in archive["report"]["sequences"]
-        for action in sequence["actions"]
-    ]
-    assert expected and installed == expected, (
-        "mixed Build bypassed archived Lakehouse installation"
-    )
-    assert all(archive["request"] is not None for archive in archives)
+    archives = acceptance.session.archive_mutations[archive_offset:]
+    assert len(plans) == 1 and len(archives) == 1
+    expected = [action.id for _, _, action in plans[0].actions()]
+    assert archives[0]["status"] == "completed"
+    assert archives[0]["action_ids"] == expected
 
     landing = _item(acceptance, "Lakehouse/Landing")
     curated = _item(acceptance, "Lakehouse/Curated")

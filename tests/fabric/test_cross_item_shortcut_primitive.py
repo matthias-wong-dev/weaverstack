@@ -171,20 +171,20 @@ def run_from_here(
     **The Session is given, never built here.** This capacity permits one
     concurrent Livy session and the harness already holds it, so a Session that
     acquired its own would ask for a second and be handed one in state 'dead'.
-    That did not matter while the Installer ran inside Fabric and this helper
-    needed no Spark; it matters now that the desktop Installer reaches for one.
+    That did not matter while the MutationBindings ran inside Fabric and this helper
+    needed no Spark; it matters now that the desktop MutationBindings reaches for one.
     """
 
     from weaver.build_bundle import execute_install_action
     from weaver.build_bundle.executors.base import InstallationContext
-    from weaver.build_bundle.installer import Installer
+    from weaver.build_bundle.installer import MutationBindings
 
     if session is None:
         raise AssertionError(
             "run_from_here needs the harness's Session: building one here asks "
             "the capacity for a second Livy session and gets a dead one"
         )
-    installer = Installer(session).bind(workspace)
+    installer = MutationBindings(session).bind(workspace)
     resolved = {
         target.id: installer.resolve_target(target) for target in bundle.plan.targets
     }
@@ -195,7 +195,7 @@ def run_from_here(
         action,
         payload,
         context=InstallationContext(
-            # From the Installer, as every production context gets them. An
+            # From the MutationBindings, as every production context gets them. An
             # executor stays on the desktop and only its physical requests cross, a
             # table shortcut asking whether it has become readable, a table build
             # asking what shape its query has.

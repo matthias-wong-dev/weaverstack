@@ -74,3 +74,52 @@ def _needs_spark(sequences) -> bool:
 
 
 __all__ = ["CATALOGUE_TARGET", "WORKSPACE", "given_execution", "with_catalogue"]
+
+
+def given_build_plan(
+    *,
+    format_version=5,
+    bundle_id="",
+    targets=(),
+    sequences=(),
+    execution,
+    repository_name="",
+    repository_signature="",
+    selection,
+    omitted_nodes=(),
+    target_changes=None,
+    runtime_state=(),
+    runtime_state_established=(),
+):
+    """Build a forward MutationPlan from a test's draft physical stages."""
+    from weaver.build_bundle.stages import _mutation_sequences
+    from weaver.mutation import MutationAction, MutationPlan
+
+    if not all(
+        isinstance(action, MutationAction)
+        for sequence in sequences
+        for batch in sequence.batches
+        for action in batch.actions
+    ):
+        sequences = _mutation_sequences(sequences)
+    return MutationPlan(
+        format_version=format_version,
+        bundle_id=bundle_id,
+        targets=targets,
+        sequences=sequences,
+        execution=execution,
+        build_envelope={
+            "repository_name": repository_name,
+            "repository_signature": repository_signature,
+            "selection": selection.to_mapping(),
+            "omitted_nodes": [node.to_mapping() for node in omitted_nodes],
+            "target_changes": {
+                key: [change.to_mapping() for change in value]
+                for key, value in (target_changes or {}).items()
+            },
+            "runtime_state": [one.to_mapping() for one in runtime_state],
+            "runtime_state_established": [
+                one.to_mapping() for one in runtime_state_established
+            ],
+        },
+    )

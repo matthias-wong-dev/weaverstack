@@ -1,6 +1,5 @@
 """Gated shared physical mutation plan contract."""
 
-from .compatibility import compile_legacy_build
 from .execution import MutationExecution
 from .executor import MutationExecutor
 from .models import (
@@ -16,7 +15,6 @@ from .targets import BoundTarget
 
 __all__ = [
     "MutationExecutor",
-    "compile_legacy_build",
     "PhysicalScope",
     "DriverContract",
     "ResultReference",

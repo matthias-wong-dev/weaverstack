@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 import pytest
+from support.bundles import given_build_plan as BuildPlan
 from support.weaver_test import weaver_test
 from support.workspaces import WORKSPACE
 from test_item_dependencies_declaration import _dependency_estate
@@ -30,7 +31,6 @@ from weaver.build_bundle.models import (
     DROP_TABLE,
     PRUNE_FOLDER,
     PRUNE_TABLE,
-    BuildPlan,
 )
 from weaver.build_bundle.prune import TargetInventory
 from weaver.catalogue.projection import (

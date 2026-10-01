@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 from factories import full_estate
+from support.sessions import PlanExecution as Installer
 from support.sessions import given_session
 from support.weaver_test import weaver_test
 from support.workspaces import WORKSPACE
@@ -23,7 +24,7 @@ from test_build_fixed_point_cycle import (
 from test_build_fixed_point_cycle import build as generate_bundle
 
 import weaver.build_bundle as build_bundle
-from weaver.build_bundle import Installer, WarehouseBinding
+from weaver.build_bundle import WarehouseBinding
 from weaver.build_bundle.report import InstallationReport
 from weaver.catalogue.state import Catalogue
 from weaver.operations.build import _run_build
