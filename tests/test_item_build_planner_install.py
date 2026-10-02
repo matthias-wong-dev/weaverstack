@@ -345,6 +345,31 @@ def test_a_shortcut_is_materialised_before_the_documents_that_use_it(tmp_path):
 
 
 @weaver_test()
+def test_warehouse_runtime_procedures_wait_for_the_items_catalogue_surface(tmp_path):
+    """Fabric refuses a procedure while DDL on an object it reads is running."""
+
+    repository = _repository(_dependency_estate(tmp_path))
+    bundle = generate_item_build_bundle(
+        repository,
+        bindings=ItemBindings(
+            (
+                _binding("Lakehouse/Curated", "Curated_Dev"),
+                _binding("Warehouse/Reporting", "Reporting_Dev"),
+            )
+        ),
+        output=Location(str(tmp_path / "bundle")),
+        store=FilesystemStore(),
+    )
+
+    for procedure in ("_--Load", "_--Test", "_--Load-Sales.Customer"):
+        assert runs_before(
+            bundle.plan,
+            "shortcuts-Warehouse--Reporting",
+            f"runtime-Warehouse--Reporting--procedure-{procedure}",
+        )
+
+
+@weaver_test()
 def test_a_physical_shortcut_can_feed_a_logical_warehouse_shortcut(tmp_path):
     root = _estate(tmp_path)
     (root / "Lakehouse/Raw/Tables/Sales__Customer.py").unlink()

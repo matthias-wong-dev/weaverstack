@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from ..catalogue.builtin import standard_surface_references
 from ..declaration.metadata import ObjectId
 from ..declaration.model import WeaverDocumentId, WeaverItemId
 from ..etl import FILE_TYPE, PROCEDURE_TYPE
@@ -104,7 +105,8 @@ def _runtime_requirements(artefact, *, repository, target_id) -> tuple[str, ...]
     """What an artefact needs before it installs.
 
     A file needs the declared folder it is written into. A procedure needs its
-    schema and the objects its declaration reads.
+    schema, the objects its declaration reads and the item's ``_`` surface:
+    Fabric refuses a procedure while DDL on an object it references is running.
     """
 
     if artefact.is_file:
@@ -117,6 +119,10 @@ def _runtime_requirements(artefact, *, repository, target_id) -> tuple[str, ...]
             ),
         )
     keys = [schema_key(target_id, artefact.identity.object_id.schema)]
+    keys.extend(
+        object_key(pair.destination)
+        for pair in standard_surface_references(artefact.identity.item)[1]
+    )
     if artefact.origin is not None:
         keys.append(object_key(artefact.origin))
         if str(artefact.origin) in repository.dependency_graph:
