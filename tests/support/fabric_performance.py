@@ -221,7 +221,27 @@ class _Capturing:
         self.session.execute_mutation = self._original
 
 
-def _timed(run: EstateRun, operation: str, call, detail=lambda result: {}):
+def _crossings(events) -> dict:
+    """External time by resource and operation, and by step, largest first."""
+
+    by_operation: dict[str, list[float]] = defaultdict(list)
+    by_step: dict[str, float] = defaultdict(float)
+    for event in events:
+        by_operation[f"{event.resource}.{event.operation}"].append(event.seconds)
+        by_step[event.step or event.task or "-"] += event.seconds
+    detail = {}
+    for name in sorted(by_operation, key=lambda key: -sum(by_operation[key]))[:6]:
+        seconds = by_operation[name]
+        detail[f"crossing {name}"] = f"{len(seconds)} calls, {sum(seconds):.1f}s"
+    for step in sorted(by_step, key=lambda key: -by_step[key])[:4]:
+        detail[f"step {step}"] = f"{by_step[step]:.1f}s"
+    return detail
+
+
+def _timed(
+    run: EstateRun, operation: str, call, detail=lambda result: {}, session=None
+):
+    before = len(session.telemetry.events()) if session is not None else 0
     started = time.perf_counter()
     try:
         result = call()
@@ -237,7 +257,10 @@ def _timed(run: EstateRun, operation: str, call, detail=lambda result: {}):
         return None
     elapsed = time.perf_counter() - started
     succeeded = getattr(result, "succeeded", True)
-    run.timings.append(Timing(operation, elapsed, succeeded, detail(result)))
+    found = detail(result)
+    if session is not None:
+        found.update(_crossings(session.telemetry.events()[before:]))
+    run.timings.append(Timing(operation, elapsed, succeeded, found))
     return result
 
 
@@ -282,6 +305,7 @@ def run_estate(
                         environment=environment,
                     ),
                     _build_detail,
+                    session=session,
                 )
             elif operation == "mirror":
                 capturing = _Capturing(session)
@@ -300,6 +324,7 @@ def run_estate(
                             mirror=catalogue,
                             environment=environment,
                         ),
+                        session=session,
                     )
                 if capturing.executed:
                     plan, report = capturing.executed[-1]
@@ -312,6 +337,7 @@ def run_estate(
                         session=session, workspace=workspace_name, catalogue=catalogue
                     ),
                     lambda result: {"emptied": len(result.emptied)},
+                    session=session,
                 )
     return run
 
