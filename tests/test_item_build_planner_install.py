@@ -548,6 +548,7 @@ def test_installer_never_reopens_or_interprets_source_repository(tmp_path):
             "shortcut": noop,
             "tsql_batch": noop,
             "shortcut_readiness": noop,
+            "request_sql_endpoint_refresh": noop,
             "load_file": noop,
             "runtime_state": noop,
         },
@@ -817,7 +818,7 @@ def _refreshed(bundle):
         batch.target_id
         for sequence, batch, action in bundle.plan.actions()
         if action.executor != "completion_gate"
-        if action.kind == "start_sql_endpoint_refresh"
+        if action.kind in ("start_sql_endpoint_refresh", "request_sql_endpoint_refresh")
     }
 
 
@@ -967,11 +968,11 @@ def test_catalogue_tail_is_item_scoped_and_registry_is_last(tmp_path):
 
 
 @weaver_test()
-def test_each_affected_lakehouse_refreshes_once_before_publication(tmp_path):
-    """Each mutated Lakehouse refreshes after its own mutations.
+def test_each_affected_lakehouse_requests_one_refresh_nothing_waits_for(tmp_path):
+    """Each mutated Lakehouse requests a refresh after its own mutations.
 
-    A consumer reading through the endpoint waits for that Lakehouse's refresh;
-    publication waits for every refresh.
+    Nothing in this plan reads through an endpoint, so publication and the
+    Build's completion do not wait for the endpoint to catch up.
     """
 
     repository = _repository(_estate(tmp_path))
@@ -992,7 +993,7 @@ def test_each_affected_lakehouse_refreshes_once_before_publication(tmp_path):
         batch.target_id
         for _sequence, batch, action in bundle.plan.actions()
         if action.executor != "completion_gate"
-        if action.kind == "start_sql_endpoint_refresh"
+        if action.kind in ("start_sql_endpoint_refresh", "request_sql_endpoint_refresh")
     }
     # Both Lakehouses, and nothing else. A Warehouse is reached over SQL and has
     # no endpoint of its own to sync, and neither has the catalogue, which is a
@@ -1005,11 +1006,13 @@ def test_each_affected_lakehouse_refreshes_once_before_publication(tmp_path):
     assert runs_before(
         bundle.plan,
         "object-Lakehouse--Raw--Tables--Sales.Customer",
-        "start-sql-endpoint-refresh-Lakehouse--Raw",
+        "request-sql-endpoint-refresh-Lakehouse--Raw",
     )
-    assert runs_before(
-        bundle.plan, "await-sql-endpoint-refresh-Lakehouse--Raw", "publish-registry"
+    assert not any(
+        action.executor == "await_sql_endpoint_refresh"
+        for _s, _b, action in bundle.plan.actions()
     )
+    assert bundle.plan.driver_contracts == ()
 
 
 @weaver_test()
@@ -1054,7 +1057,7 @@ def test_a_lakehouse_without_delta_mutations_gets_no_refresh(tmp_path):
         batch.target_id
         for _sequence, batch, action in bundle.plan.actions()
         if action.executor != "completion_gate"
-        if action.kind == "start_sql_endpoint_refresh"
+        if action.kind in ("start_sql_endpoint_refresh", "request_sql_endpoint_refresh")
     }
     assert refreshed == {"Lakehouse-Raw--lakehouse-Raw_Dev"}
 

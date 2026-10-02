@@ -25,7 +25,8 @@ BUILD_VIEW = "build_view"
 AWAIT_TABLE_SHORTCUTS = "await_table_shortcuts"
 AWAIT_FILE_SHORTCUTS = "await_file_shortcuts"
 
-#: A SQL analytics endpoint refresh, started and then awaited.
+#: A SQL analytics endpoint refresh, requested alone, or started and awaited.
+REQUEST_ENDPOINT_REFRESH = "request_sql_endpoint_refresh"
 START_ENDPOINT_REFRESH = "start_sql_endpoint_refresh"
 AWAIT_ENDPOINT_REFRESH = "await_sql_endpoint_refresh"
 

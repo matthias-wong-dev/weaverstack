@@ -18,6 +18,7 @@ from .shortcut import ShortcutExecutor, ShortcutReadinessExecutor
 from .spark_sql import SparkSqlExecutor
 from .spark_sql_batch import SparkSqlBatchExecutor
 from .spark_table import SparkTableExecutor
+from .sql_endpoint_refresh import SqlEndpointRefreshRequestExecutor
 from .tsql import TSqlBatchExecutor, TSqlExecutor
 
 
@@ -33,6 +34,7 @@ def default_executors() -> dict[str, ActionExecutor]:
         ShortcutExecutor.name: ShortcutExecutor(),
         ShortcutReadinessExecutor.name: ShortcutReadinessExecutor(),
         RuntimeStateExecutor.name: RuntimeStateExecutor(),
+        SqlEndpointRefreshRequestExecutor.name: SqlEndpointRefreshRequestExecutor(),
     }
 
 
@@ -46,6 +48,7 @@ __all__ = [
     "SparkSqlExecutor",
     "SparkSqlBatchExecutor",
     "SparkTableExecutor",
+    "SqlEndpointRefreshRequestExecutor",
     "ShortcutReadinessExecutor",
     "FolderExecutor",
     "LoadFileExecutor",

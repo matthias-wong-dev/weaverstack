@@ -890,6 +890,7 @@ def test_the_bundle_freezes_the_attachment_the_build_already_required(tmp_path):
                 "folder",
                 "shortcut",
                 "shortcut_readiness",
+                "request_sql_endpoint_refresh",
                 "tsql",
                 "tsql_batch",
                 "load_file",

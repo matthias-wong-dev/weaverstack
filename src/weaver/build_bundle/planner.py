@@ -37,7 +37,7 @@ from .dependencies import (
 )
 from .documents import lakehouse_build_stages, warehouse_build_stages
 from .drops import lakehouse_drop_stages, warehouse_drop_stages
-from .endpoints import lakehouse_endpoint_refresh_stage
+from .endpoints import lakehouse_endpoint_refresh_stage, unawaited_refreshes
 from .execution import BundleExecution, ExecutionIdentity, select_spark_home
 from .executors.sql_endpoint_refresh import AWAIT_EXECUTOR, START_EXECUTOR
 from .executors.sql_endpoint_refresh import CONTRACTS as ENDPOINT_REFRESH_CONTRACTS
@@ -278,7 +278,9 @@ def generate_item_build_bundle(
         previous = catalogue_step_key(index)
 
     sequences, payloads, target_changes, required = enumerate_stages(
-        stages, targets=targets, completion_target_id=catalogue_target.id
+        unawaited_refreshes(stages),
+        targets=targets,
+        completion_target_id=catalogue_target.id,
     )
 
     omitted.extend(

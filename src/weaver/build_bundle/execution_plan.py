@@ -1,7 +1,7 @@
 """Execute a persisted Build plan and present its physical action results."""
 
 from collections.abc import Mapping
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from ..mutation.executor import TypedValue, validate_inputs
 from ..mutation.serialization import thaw_value
@@ -21,6 +21,7 @@ def execute_bundle(bundle, session, *, executors=None, build_datetime=None):
         options["executors"] = executors
     report = session.execute_mutation(bundle.plan, payloads, **options)
     finished = datetime.now(timezone.utc)
+    started_at, finished_at = _action_times(report, finished)
     sequences = []
     for sequence in bundle.plan.sequences:
         actions = []
@@ -48,8 +49,8 @@ def execute_bundle(bundle, session, *, executors=None, build_datetime=None):
                         target_id=action.target_id,
                         executor=action.executor,
                         status=status,
-                        started_at=None,
-                        finished_at=None,
+                        started_at=started_at.get(action.id),
+                        finished_at=finished_at.get(action.id),
                         duration_seconds=duration,
                         error_type=(
                             "UncertainMutation"
@@ -91,3 +92,25 @@ def execute_bundle(bundle, session, *, executors=None, build_datetime=None):
         bundle.location / "install-report.yml", presented.to_yaml().encode("utf-8")
     )
     return presented
+
+
+def _action_times(report, finished):
+    """Each action's first dispatch and terminal outcome, as wall-clock times.
+
+    Ledger instants come from the executing host's monotonic clock, so they are
+    placed relative to the invocation's last event, taken as ``finished``.
+    """
+
+    events = report.ledger
+    if not events:
+        return {}, {}
+    end = max(event.at for event in events)
+    started: dict[str, datetime] = {}
+    ended: dict[str, datetime] = {}
+    for event in events:
+        at = finished - timedelta(seconds=end - event.at)
+        if event.kind == "dispatched":
+            started.setdefault(event.action_id, at)
+        elif event.kind == "terminal":
+            ended[event.action_id] = at
+    return started, ended

@@ -234,9 +234,33 @@ def refresh_from_here(plan, *, naming: str, workspace, session):
     from weaver.build_bundle.installer import MutationBindings
     from weaver.mutation.executor import Completed, DriverRequest, Failed, Pending
 
+    requested = [
+        (batch, action)
+        for _s, batch, action in plan.actions()
+        if action.kind == "request_sql_endpoint_refresh" and naming in action.id
+    ]
+    installer = MutationBindings(session).bind(workspace)
+    if requested:
+        # Nothing in this plan reads through the endpoint, so it is only asked.
+        from weaver.build_bundle.executors.sql_endpoint_refresh import (
+            SqlEndpointRefreshRequestExecutor,
+        )
+
+        batch, request = requested[0]
+        target = installer.resolve_target(
+            next(t for t in plan.targets if t.id == batch.target_id)
+        )
+        try:
+            details = SqlEndpointRefreshRequestExecutor().execute(
+                request, None, InstallationContext(installer.resolver, None, target)
+            )
+        except Exception as error:  # noqa: BLE001 - reported to the test
+            return SimpleNamespace(
+                status="failed", error_message=str(error), details=None
+            )
+        return SimpleNamespace(status="succeeded", error_message=None, details=details)
     batch, start = action_of(plan, "start_sql_endpoint_refresh", naming=naming)
     _batch, finish = action_of(plan, "await_sql_endpoint_refresh", naming=naming)
-    installer = MutationBindings(session).bind(workspace)
     target = installer.resolve_target(
         next(t for t in plan.targets if t.id == batch.target_id)
     )

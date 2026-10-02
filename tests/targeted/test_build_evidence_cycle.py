@@ -41,6 +41,7 @@ EXECUTORS = (
     "shortcut",
     "tsql_batch",
     "shortcut_readiness",
+    "request_sql_endpoint_refresh",
     "load_file",
     "runtime_state",
 )

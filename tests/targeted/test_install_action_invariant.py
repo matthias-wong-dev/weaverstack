@@ -65,6 +65,9 @@ COVERED = {
     "prune_view": ("test_prune_table_action_removes_an_object_nothing_declares",),
     "prune_schema": ("test_prune_table_action_removes_an_object_nothing_declares",),
     "prune_folder": ("test_prune_table_action_removes_an_object_nothing_declares",),
+    "request_sql_endpoint_refresh": (
+        "test_each_mutated_lakehouse_had_its_endpoint_refreshed_for_real",
+    ),
     "start_sql_endpoint_refresh": (
         "test_each_mutated_lakehouse_had_its_endpoint_refreshed_for_real",
     ),

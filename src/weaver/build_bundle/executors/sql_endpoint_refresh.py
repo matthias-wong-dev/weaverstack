@@ -1,8 +1,9 @@
-"""Refresh a Lakehouse SQL analytics endpoint as a typed operation.
+"""Refresh a Lakehouse SQL analytics endpoint.
 
-Start returns once Fabric accepts the refresh. Await consumes that handle and
-stays ``Pending`` until the endpoint is known current, so unrelated work runs
-while Fabric syncs metadata.
+Where something in the plan reads through the endpoint, the refresh is a typed
+operation: start returns once Fabric accepts it, and await stays ``Pending``
+until the endpoint is current. Otherwise one request asks Fabric to refresh and
+finishes once Fabric accepts, and the endpoint catches up after the Build.
 """
 
 from __future__ import annotations
@@ -11,6 +12,7 @@ import time
 
 from ...mutation.models import DriverContract
 
+REQUEST_EXECUTOR = "request_sql_endpoint_refresh"
 START_EXECUTOR = "start_sql_endpoint_refresh"
 AWAIT_EXECUTOR = "await_sql_endpoint_refresh"
 REFRESH_RESULT = "sql_endpoint_refresh"
@@ -29,6 +31,18 @@ _UNSUPPORTED = {
     "skipped": True,
     "reason": "SQL endpoint refresh is unsupported in this environment",
 }
+
+
+class SqlEndpointRefreshRequestExecutor:
+    name = REQUEST_EXECUTOR
+
+    def execute(self, action, payload, context):
+        begin = getattr(context.resolver, "start_sql_endpoint_refresh", None)
+        if begin is None:
+            return dict(_UNSUPPORTED)
+        from ...fabric.resources import refresh_details
+
+        return refresh_details(begin(context.target.lakehouse))
 
 
 def endpoint_refresh_drivers(contexts, *, failed, clock=time):

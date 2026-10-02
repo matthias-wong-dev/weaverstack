@@ -1,12 +1,14 @@
 """Refresh a mutated Lakehouse's SQL analytics endpoint once, without a barrier.
 
 Endpoint metadata lags Delta mutations. The refresh starts after every mutation
-of its Lakehouse has a known outcome, and only work that reads through the
-endpoint waits for it to finish.
+of its Lakehouse has a known outcome. A plan waits for it to finish only where
+an action reads through the endpoint; otherwise the refresh is requested and the
+endpoint catches up after the Build.
 """
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Iterable
 
 from ..declaration.model import WeaverItemId
@@ -14,6 +16,7 @@ from .dependencies import OBJECT, action_key, endpoint_object_key
 from .executors.sql_endpoint_refresh import (
     AWAIT_EXECUTOR,
     REFRESH_RESULT,
+    REQUEST_EXECUTOR,
     START_EXECUTOR,
 )
 from .models import (
@@ -21,6 +24,7 @@ from .models import (
     AWAIT_FILE_SHORTCUTS,
     AWAIT_TABLE_SHORTCUTS,
     BUILD_TABLE,
+    REQUEST_ENDPOINT_REFRESH,
     BUILD_VIEW,
     CREATE_SHORTCUT,
     DROP_SHORTCUT,
@@ -121,3 +125,46 @@ def lakehouse_endpoint_refresh_stage(
         results={finish: (start, REFRESH_RESULT)},
         provides={finish: tuple(current)},
     )
+
+
+def unawaited_refreshes(stages) -> list:
+    """Replace each refresh nothing in the plan reads through with a request."""
+
+    required = {
+        key for stage in stages for keys in stage.requires.values() for key in keys
+    }
+    result = []
+    for stage in stages:
+        batches = []
+        follows = dict(stage.follows)
+        requires = dict(stage.requires)
+        results = dict(stage.results)
+        provides = dict(stage.provides)
+        for batch in stage.batches:
+            actions = {action.executor: action for action in batch.actions}
+            finish = actions.get(AWAIT_EXECUTOR)
+            if finish is None or required.intersection(provides.get(finish.id, ())):
+                batches.append(batch)
+                continue
+            start = actions[START_EXECUTOR]
+            request = replace(
+                start,
+                id=start.id.replace("start-", "request-", 1),
+                kind=REQUEST_ENDPOINT_REFRESH,
+                executor=REQUEST_EXECUTOR,
+            )
+            batches.append(replace(batch, actions=(request,)))
+            follows[request.id] = follows.pop(start.id)
+            for mapping in (requires, results, provides):
+                mapping.pop(finish.id, None)
+        result.append(
+            replace(
+                stage,
+                batches=tuple(batches),
+                follows=follows,
+                requires=requires,
+                results=results,
+                provides=provides,
+            )
+        )
+    return result
