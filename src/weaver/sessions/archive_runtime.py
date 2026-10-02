@@ -112,6 +112,8 @@ class ArchiveSession(NotebookSession):
 #: The executor's worker pool. Resource limits, not workers, bound each
 #: capability, so the pool is generous.
 WORKERS = 32
+#: Ready T-SQL actions on one Warehouse sent in one round trip.
+TSQL_ROUND_TRIP = 25
 
 
 def execution_capacity(plan, workspace=None) -> tuple[int, dict[str, int]]:
@@ -162,6 +164,8 @@ def execute_mutation(
     from ..build_bundle.executors import default_executors
     from ..build_bundle.executors.base import InstallationContext
     from ..build_bundle.executors.sql_endpoint_refresh import endpoint_refresh_drivers
+    from ..build_bundle.executors.tsql import TSqlBatchExecutor, TSqlExecutor
+    from ..build_bundle.executors.tsql_round_trip import round_trip_driver
     from ..build_bundle.installer import MutationBindings
     from ..errors import BuildError, WeaverError
     from ..mutation.executor import (
@@ -219,6 +223,12 @@ def execute_mutation(
                 return error_outcome(error)
 
         drivers[name] = replace(driver, run=run)
+        if type(executor) in (TSqlExecutor, TSqlBatchExecutor) and TSQL_ROUND_TRIP > 1:
+            drivers[name] = replace(
+                drivers[name],
+                batch=round_trip_driver(contexts, details=_tsql_details),
+                batch_size=TSQL_ROUND_TRIP,
+            )
     drivers.update(endpoint_refresh_drivers(contexts, outcome=error_outcome))
     return MutationExecutor(
         drivers, workers=workers, limits=limits, timeout=timeout
@@ -238,6 +248,17 @@ def error_outcome(error):
     return (
         Uncertain(reported) if isinstance(error, OutcomeUnknown) else Failed(reported)
     )
+
+
+def _tsql_details(action, payload):
+    if action.executor == "tsql":
+        script = payload.decode("utf-8")
+        return {
+            "statement_first_line": script.splitlines()[0] if script.strip() else ""
+        }
+    import json
+
+    return {"statements": len(json.loads(payload.decode("utf-8")))}
 
 
 def run_mutation(root, spark, output, archive_sha256, *, workers):

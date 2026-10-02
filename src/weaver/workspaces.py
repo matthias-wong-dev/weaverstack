@@ -156,10 +156,12 @@ class BuildConcurrency:
     ``warehouse_concurrency`` applies to each Warehouse, ``spark_concurrency`` to
     the Spark session, ``onelake_concurrency`` to storage operations and
     ``shortcut_concurrency`` to the shortcut API. The defaults suit a mid-sized
-    capacity; an F64 sustains twice as much.
+    capacity; an F64 sustains twice as much. Each Warehouse lane leases its own
+    pooled connection, and four concurrent DDL lanes on one Warehouse ran tables,
+    views and procedures without conflict on an F64.
     """
 
-    warehouse_concurrency: int = 1
+    warehouse_concurrency: int = 2
     spark_concurrency: int = 4
     onelake_concurrency: int = 8
     shortcut_concurrency: int = 2

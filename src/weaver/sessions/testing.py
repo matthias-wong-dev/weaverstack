@@ -234,6 +234,12 @@ class TestSession(Session):
                     statement, target=target, workspace=workspace, parameters=parameters
                 )
 
+            def execute_each(self, groups) -> list:
+                for group in groups:
+                    for statement in group:
+                        self.execute_script(statement)
+                return [None for _group in groups]
+
             def query(self, statement: str, parameters=()):
                 return session.query_tsql(
                     statement, target=target, workspace=workspace, parameters=parameters

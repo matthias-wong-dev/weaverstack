@@ -29,6 +29,8 @@ class SqlExecutor(Protocol):
 
     def execute_script(self, script: str) -> None: ...
 
+    def execute_each(self, groups: Sequence[Sequence[str]]) -> list[str | None]: ...
+
     def query(
         self, statement: str, parameters: Sequence[object] | None = None
     ) -> Sequence[SqlRow]: ...
@@ -68,6 +70,22 @@ class PooledSqlExecutor:
 
     def execute_script(self, script: str) -> None:
         self._run(script, parameters=None, query=False, drain=True)
+
+    def execute_each(self, groups: Sequence[Sequence[str]]) -> list[str | None]:
+        """Run independent statement groups in one round trip; each group's error."""
+
+        from .round_trip import read_outcomes, round_trip_script
+
+        # The outcome is the batch's last result set, after every group's own.
+        rows = self._run(
+            round_trip_script(groups),
+            parameters=None,
+            query=True,
+            drain=False,
+            last_result_set=True,
+        )
+        outcomes = read_outcomes(str(rows[0]["outcome"] or ""), len(groups))
+        return [outcomes[position] for position in range(len(groups))]
 
     def query(
         self, statement: str, parameters: Sequence[object] | None = None

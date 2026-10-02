@@ -8,7 +8,7 @@ catalogue: Warehouse/Weaver
 # sustains twice as much, and a small capacity may need less.
 execution:
   build:
-    warehouse_concurrency: 1   # per Warehouse
+    warehouse_concurrency: 2   # per Warehouse
     spark_concurrency: 4
     onelake_concurrency: 8
     shortcut_concurrency: 2

@@ -43,12 +43,18 @@ LAKEHOUSE_SQL = Path(__file__).parent / "fixtures" / "local-lakehouse"
 
 
 def pytest_addoption(parser):
-    """Register --runslow to opt into slow tests."""
+    """Register --runslow and --performance to opt into slow and timed tests."""
     parser.addoption(
         "--runslow",
         action="store_true",
         default=False,
         help="run slow tests",
+    )
+    parser.addoption(
+        "--performance",
+        action="store_true",
+        default=False,
+        help="time Build, Wipe and Mirror of the 1,000-object estates in Fabric",
     )
 
 
@@ -61,6 +67,11 @@ def pytest_collection_modifyitems(config, items):
         skip_marker = pytest.mark.skip(reason="need --runslow option to run")
         for item in items:
             if "slow" in item.keywords:
+                item.add_marker(skip_marker)
+    if not config.getoption("--performance"):
+        skip_marker = pytest.mark.skip(reason="need --performance option to run")
+        for item in items:
+            if "performance" in item.keywords:
                 item.add_marker(skip_marker)
 
     errors = []

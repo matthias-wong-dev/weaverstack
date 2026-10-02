@@ -19,8 +19,8 @@ WAREHOUSE = "warehouse"
 
 #: Wall-clock ceilings in seconds, by engine and operation.
 THRESHOLDS = {
-    WAREHOUSE: {"build": 6 * 60, "wipe": 60, "mirror": 3 * 60},
-    LAKEHOUSE: {"build": 10 * 60, "wipe": 2 * 60, "mirror": 5 * 60},
+    WAREHOUSE: {"build": 5 * 60, "noop": 30, "wipe": 60, "mirror": 2 * 60},
+    LAKEHOUSE: {"build": 10 * 60, "noop": 30, "wipe": 2 * 60, "mirror": 5 * 60},
 }
 
 #: The representative estates place motif 0 in item 000 and the rest in 001.
@@ -104,19 +104,40 @@ def write_estate(engine: str, declarations: int, root: Path) -> Path:
     return source
 
 
+#: The waits B moved out of their actions, reported whatever their share.
+WAITS = (
+    "shortcut",
+    "shortcut_readiness",
+    "sql_endpoint_refresh",
+    "start_sql_endpoint_refresh",
+    "await_sql_endpoint_refresh",
+)
+
+
 def _build_detail(result) -> dict:
+    """Action time by executor, and its total against the Build's wall time.
+
+    An action's time includes any wait it spent pending, so a total well above
+    the wall time is work that overlapped.
+    """
+
     report = result.installation_report
     if report is None:
         return {"actions": 0}
     by_executor: dict[str, list[float]] = defaultdict(list)
     for action in report.action_results():
         by_executor[action.executor].append(action.duration_seconds or 0.0)
-    detail = {"actions": sum(len(v) for v in by_executor.values())}
-    for executor, durations in sorted(
-        by_executor.items(), key=lambda pair: -sum(pair[1])
-    )[:6]:
+    total = sum(sum(v) for v in by_executor.values())
+    detail = {
+        "actions": sum(len(v) for v in by_executor.values()),
+        "action time": f"{total:.1f}s",
+    }
+    ranked = sorted(by_executor, key=lambda name: -sum(by_executor[name]))
+    shown = list(dict.fromkeys([*ranked[:5], *(w for w in WAITS if w in by_executor)]))
+    for executor in shown:
+        durations = by_executor[executor]
         detail[executor] = (
-            f"{len(durations)} actions, {sum(durations):.1f}s busy, "
+            f"{len(durations)} actions, {sum(durations):.1f}s, "
             f"max {max(durations):.1f}s"
         )
     if result.errors:
