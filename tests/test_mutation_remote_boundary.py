@@ -75,6 +75,7 @@ def test_lost_remote_response_is_uncertain_without_replay(tmp_path):
         scope=lambda workspace: scope,
         require_spark_home=lambda *args, **kwargs: None,
         direct_delta_workers=16,
+        workspace=None,
     )
     assert hasattr(install_archive, "execute_mutation_remote"), (
         "remote plan API is missing"
@@ -137,6 +138,7 @@ def test_carrier_is_staged_in_the_spark_home_lakehouse(tmp_path):
         scope=lambda _: scope,
         require_spark_home=lambda *a, **kw: None,
         direct_delta_workers=16,
+        workspace=None,
     )
     report = install_archive.execute_mutation_remote(session, plan)
     assert len(submissions) == 1

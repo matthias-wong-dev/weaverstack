@@ -36,7 +36,7 @@ from weaver.mutation.executor import (
     MutationExecutor,
     TypedValue,
 )
-from weaver.sessions.archive_runtime import resource_limits
+from weaver.sessions.archive_runtime import execution_capacity
 from weaver.store import FilesystemStore
 from weaver.targets import ItemRef
 
@@ -128,7 +128,7 @@ def test_representative_lakehouse_work_overlaps_without_exceeding_any_limit(tmp_
         if a.payload is not None
     }
     contracts = {c.executor: c for c in plan.driver_contracts}
-    limits = resource_limits(plan)
+    _workers, limits = execution_capacity(plan)
     # Gates complete inside the executor; their prerequisites are checked here.
     gates = {a.id for _s, _b, a in plan.actions() if a.executor == "completion_gate"}
     lock = threading.Lock()

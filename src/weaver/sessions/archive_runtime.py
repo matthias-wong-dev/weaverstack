@@ -109,9 +109,10 @@ class ArchiveSession(NotebookSession):
         )
 
 
-#: Concurrent actions by constrained capability. A Warehouse connection runs one
-#: statement at a time, and Fabric Warehouse snapshot isolation aborts concurrent
-#: DDL that contends on catalogue metadata, so each Warehouse has one lane.
+#: Concurrent actions by constrained capability, qualified on an F64 capacity.
+#: A Warehouse connection runs one statement at a time, and Fabric Warehouse
+#: snapshot isolation aborts concurrent DDL that contends on catalogue metadata,
+#: so each Warehouse has one lane.
 WAREHOUSE_LANES = 1
 SPARK_LANES = 8
 ONELAKE_LANES = 16
@@ -119,22 +120,48 @@ SHORTCUT_API_LANES = 4
 WORKERS = 32
 
 
-def resource_limits(plan) -> dict[str, int]:
-    """Capacity for every resource the plan's actions occupy."""
+def execution_capacity(plan, workspace=None) -> tuple[int, dict[str, int]]:
+    """The executor's workers and each resource's limit for this deployment.
+
+    The Workspace's ``parallel_workers`` caps the workers and every limit, and a
+    target's own setting caps the resources of its physical item. Capacity
+    changes how much runs at once, never what the plan orders.
+    """
 
     from ..build_bundle.stages import SPARK
+
+    lanes = {
+        "warehouse": WAREHOUSE_LANES,
+        SPARK: SPARK_LANES,
+        "onelake": ONELAKE_LANES,
+        "shortcuts": SHORTCUT_API_LANES,
+    }
+    overall = None if workspace is None else workspace.execution.parallel_workers
+    configured = (
+        {}
+        if workspace is None
+        else {
+            declaration.physical.casefold(): declaration.execution.parallel_workers
+            for declaration in workspace.targets.values()
+            if declaration.execution.parallel_workers is not None
+        }
+    )
+    by_item = {
+        target.item_id: configured[name.casefold()]
+        for target in plan.targets
+        for name in (target.item_id, target.item_name)
+        if name and name.casefold() in configured
+    }
+
+    def capped(*values):
+        return min(value for value in values if value is not None)
 
     limits = {}
     for _, _, action in plan.actions():
         for key in action.resources:
-            prefix = key.split(":", 1)[0]
-            limits[key] = {
-                "warehouse": WAREHOUSE_LANES,
-                SPARK: SPARK_LANES,
-                "onelake": ONELAKE_LANES,
-                "shortcuts": SHORTCUT_API_LANES,
-            }.get(prefix, 1)
-    return limits
+            prefix, _, item = key.partition(":")
+            limits[key] = capped(lanes.get(prefix, 1), overall, by_item.get(item))
+    return capped(WORKERS, overall), limits
 
 
 def execute_mutation(
@@ -142,7 +169,8 @@ def execute_mutation(
     payloads,
     session,
     *,
-    workers=WORKERS,
+    workers=None,
+    limits=None,
     invocation_id=None,
     timeout=600,
     build_datetime=None,
@@ -151,6 +179,7 @@ def execute_mutation(
     """Bind physical capabilities and execute one complete MutationPlan.
 
     Resource limits, not ``workers``, bound concurrency on each capability.
+    Unless given, both come from the Session's Workspace.
     """
     from dataclasses import replace
 
@@ -166,6 +195,9 @@ def execute_mutation(
     )
 
     payloads = validate_inputs(plan, payloads)
+    capacity, configured = execution_capacity(plan, session.workspace)
+    workers = capacity if workers is None else workers
+    limits = configured if limits is None else limits
     if build_datetime is None:
         from datetime import datetime, timezone
 
@@ -213,7 +245,7 @@ def execute_mutation(
         drivers[name] = replace(driver, run=run)
     drivers.update(endpoint_refresh_drivers(contexts, outcome=error_outcome))
     return MutationExecutor(
-        drivers, workers=workers, limits=resource_limits(plan), timeout=timeout
+        drivers, workers=workers, limits=limits, timeout=timeout
     ).execute(plan, payloads, invocation_id=invocation_id)
 
 
@@ -259,6 +291,8 @@ def run_mutation(root, spark, output, archive_sha256, *, workers):
             session,
             invocation_id=request["invocation_id"],
             timeout=request["timeout"],
+            workers=request["workers"],
+            limits=request["limits"],
             build_datetime=request["build_datetime"],
         )
     return {

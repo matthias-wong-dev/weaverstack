@@ -357,3 +357,102 @@ def test_a_lost_response_is_uncertain_and_a_refusal_is_a_known_failure(
     assert report.by_id["second"].status == (
         "succeeded" if status == "failed" else "not_dispatched"
     )
+
+
+def _capacity_plan():
+    from weaver.mutation import (
+        BoundTarget,
+        MutationAction,
+        MutationBatch,
+        MutationExecution,
+        MutationPlan,
+        MutationSequence,
+    )
+
+    def action(name, target, resources):
+        return MutationAction(
+            id=name,
+            kind="build_folder",
+            resource_node_id=None,
+            executor="folder",
+            payload=None,
+            payload_sha256=None,
+            target_id=target,
+            depends_on=(),
+            resources=resources,
+        )
+
+    return MutationPlan(
+        targets=(
+            BoundTarget("raw", "lakehouse", "raw-id", item_name="Raw_Dev"),
+            BoundTarget("sales", "warehouse", "sales-id", item_name="Sales_Dev"),
+        ),
+        sequences=(
+            MutationSequence(
+                1,
+                "work",
+                (
+                    MutationBatch(
+                        "raw",
+                        "raw",
+                        (
+                            action("files", "raw", ("onelake:raw-id",)),
+                            action("links", "raw", ("shortcuts:raw-id",)),
+                            action("tables", "raw", ("spark",)),
+                        ),
+                    ),
+                    MutationBatch(
+                        "sales",
+                        "sales",
+                        (action("views", "sales", ("warehouse:sales-id",)),),
+                    ),
+                ),
+            ),
+        ),
+        execution=MutationExecution(workspace_name="Analytics"),
+    )
+
+
+@weaver_test()
+def test_parallel_workers_caps_the_executor_and_a_target_caps_its_own_item():
+    from weaver.declaration.model import WeaverItemId
+    from weaver.sessions.archive_runtime import (
+        ONELAKE_LANES,
+        SHORTCUT_API_LANES,
+        SPARK_LANES,
+        WAREHOUSE_LANES,
+        WORKERS,
+        execution_capacity,
+    )
+    from weaver.workspaces import ExecutionSettings, TargetDeclaration, Workspace
+
+    plan = _capacity_plan()
+
+    assert execution_capacity(plan) == (
+        WORKERS,
+        {
+            "onelake:raw-id": ONELAKE_LANES,
+            "shortcuts:raw-id": SHORTCUT_API_LANES,
+            "spark": SPARK_LANES,
+            "warehouse:sales-id": WAREHOUSE_LANES,
+        },
+    )
+
+    throttled = Workspace(
+        workspace="Analytics",
+        execution=ExecutionSettings(parallel_workers=2),
+        targets={
+            WeaverItemId.parse("Lakehouse/Raw"): TargetDeclaration(
+                "Raw_Dev", ExecutionSettings(parallel_workers=1)
+            )
+        },
+    )
+    workers, limits = execution_capacity(plan, throttled)
+
+    assert workers == 2
+    assert limits == {
+        "onelake:raw-id": 1,
+        "shortcuts:raw-id": 1,
+        "spark": min(2, SPARK_LANES),
+        "warehouse:sales-id": min(2, WAREHOUSE_LANES),
+    }

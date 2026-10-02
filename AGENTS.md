@@ -329,9 +329,13 @@ over every success sink is the required completion.
 Platform limits are resources, not edges. An action names the capability it
 occupies: `warehouse:<item>` for TDS, `spark` for Spark SQL and table creation,
 `onelake:<item>` for storage, `shortcuts:<item>` for the shortcut API. The
-executing Session supplies the limits in `weaver.sessions.archive_runtime`: one
-statement at a time per Warehouse, since concurrent DDL on one Warehouse
-conflicts, and bounded concurrency elsewhere. Waiting work holds no resource.
+executing Session supplies the limits through
+`weaver.sessions.archive_runtime.execution_capacity`: defaults qualified on an
+F64 capacity, which the Workspace's `execution.parallel_workers` caps along with
+the executor's workers, and a target's own setting caps for its physical item.
+The limits travel with an invocation, outside plan identity. They throttle
+execution only; an ordering the plan needs is an edge, never a low limit.
+Waiting work holds no resource.
 `spark_table` actions with authored setup share an exclusion, because their
 temporary views are session-scoped. The identifier-case scope is shared by
 concurrent statements in one mode and exclusive between modes.

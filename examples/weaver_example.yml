@@ -3,6 +3,9 @@ workspace: Weaver Example
 environment: weaver
 catalogue: Warehouse/Weaver
 
+# The most physical actions a build runs at once, overall and against any one
+# Fabric capability. Lower it for a smaller capacity; unset, Weaver uses limits
+# qualified on an F64.
 execution:
   parallel_workers: 4
 
@@ -12,6 +15,7 @@ execution:
 targets:
   Lakehouse/Sales: Sales
 
+  # An item's own setting caps the actions run at once against its Fabric item.
   Warehouse/Reporting:
     name: Reporting
     execution:

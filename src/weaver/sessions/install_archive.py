@@ -231,11 +231,17 @@ def execute_mutation_remote(
     build_datetime = build_datetime or datetime.now(timezone.utc).strftime(
         "%Y-%m-%d %H:%M:%S.%f"
     )
+    from .archive_runtime import execution_capacity
+
+    # Fabric runs the plan with this deployment's capacity, which the plan omits.
+    workers, limits = execution_capacity(plan, session.workspace)
     request = {
         "plan_id": plan.bundle_id,
         "invocation_id": invocation_id,
         "build_datetime": build_datetime,
         "timeout": timeout,
+        "workers": workers,
+        "limits": limits,
     }
     carrier = pack_mutation(plan, payloads, request=request)
     if carrier is None:

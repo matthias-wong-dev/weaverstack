@@ -15,6 +15,7 @@ from test_mutation_archive_install import build_plan_fixture as legacy
 
 from weaver.locations import Location
 from weaver.mutation.bundle import compute_bundle_id
+from weaver.sessions.archive_runtime import execution_capacity
 from weaver.sessions.install_archive import (
     bootstrap_source,
     pack_mutation,
@@ -61,6 +62,7 @@ def run_bootstrap(
         "build_datetime": "2026-01-01 00:00:00.000000",
         "timeout": 600,
     }
+    request["workers"], request["limits"] = execution_capacity(plan)
     if late and not failure:
         request["timeout"] = 0.005
     carrier = pack_mutation(plan, payloads, request=request)
