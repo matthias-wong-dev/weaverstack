@@ -75,7 +75,6 @@ def estate(tmp_path):
             "folder",
             "shortcut",
             "shortcut_readiness",
-            "request_sql_endpoint_refresh",
             "tsql",
             "tsql_batch",
             "load_file",

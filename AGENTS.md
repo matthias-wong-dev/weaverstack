@@ -313,16 +313,15 @@ decertify → reset runtime state → every physical root
 schema ─→ table ─→ dependent view          drop consumer ─→ drop producer ─→ rebuild
 shortcut create ─→ readiness ─→ consumer   source object ─→ shortcut create
 Lakehouse mutations ··→ refresh start ─→ refresh await ─→ endpoint readers
-Lakehouse mutations ··→ refresh request     (when nothing reads through it)
 folder ─→ runtime file                     object ─→ Warehouse procedure
 every physical success sink ─→ physical gate ─→ catalogue publication ─→ Registry
 ```
 
-`··→` is `settle_after`: a refresh reflects whatever the mutations left. A plan
-waits for a refresh only where an action reads through that endpoint; otherwise
-it requests one and the endpoint catches up after the Build, and a load that
-reads through an endpoint refreshes it itself. Publication certifies objects,
-not endpoint metadata, so the physical gate excludes refreshes. A known
+`··→` is `settle_after`: a refresh reflects whatever the mutations left.
+Publication certifies objects, not endpoint metadata, so the physical gate
+excludes refreshes and publication runs beside them. The Build completes only
+once every refresh it started is current, so the next operation reads a current
+endpoint. A known
 failure blocks only its dependents; independent branches continue, and
 publication, which needs every physical success, does not run. The final gate
 over every success sink is the required completion.
@@ -339,8 +338,8 @@ concurrent statements in one mode and exclusive between modes.
 
 Slow Fabric convergence yields. Shortcut creation submits once and returns
 `Waiting` while a source is still reaching OneLake; readiness and name release
-are polled the same way, and an awaited SQL endpoint refresh is a typed
-start/await operation. A waiting state is plain data, because the invocation ledger records
+are polled the same way, and the SQL endpoint refresh is a typed start/await
+operation. A waiting state is plain data, because the invocation ledger records
 it. `execute_install_action`, which runs one action alone, resumes it in place.
 
 A `MutationPlan` owns tuples and recursively frozen envelope mappings. Construction
