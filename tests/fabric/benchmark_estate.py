@@ -25,15 +25,18 @@ def main(argv) -> int:
     workspace = os.environ.get("WEAVER_FABRIC_WORKSPACE", "PYTEST_WORKSPACE")
     use_credential(desktop_credential())
     options = {} if operations is None else {"operations": operations}
+    environment = os.environ.get("WEAVER_FABRIC_ENVIRONMENT", "weaver")
     with ConsoleSession(
-        workspace=Workspace(
-            workspace=workspace,
-            environment=os.environ.get("WEAVER_FABRIC_ENVIRONMENT", "weaver"),
-        ),
+        workspace=Workspace(workspace=workspace, environment=environment),
         progress=False,
     ) as session:
         run = run_estate(
-            engine, declarations, session=session, workspace_name=workspace, **options
+            engine,
+            declarations,
+            session=session,
+            workspace_name=workspace,
+            environment=environment,
+            **options,
         )
     print(run.describe())
     return 0 if all(t.succeeded for t in run.timings) else 1

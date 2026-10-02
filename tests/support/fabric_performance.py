@@ -140,6 +140,24 @@ def _build_detail(result) -> dict:
             f"{len(durations)} actions, {sum(durations):.1f}s, "
             f"max {max(durations):.1f}s"
         )
+    timed = [
+        action for action in report.action_results() if action.started_at is not None
+    ]
+    if timed:
+        origin = min(action.started_at for action in timed)
+
+        def span(action) -> str:
+            begin = (action.started_at - origin).total_seconds()
+            end = (action.finished_at - origin).total_seconds()
+            return f"{begin:6.1f}s to {end:6.1f}s"
+
+        for action in timed:
+            if action.executor in WAITS:
+                detail[f"  {action.action_id}"] = span(action)
+        last = sorted(timed, key=lambda action: action.finished_at)[-5:]
+        detail["last to finish"] = "; ".join(
+            f"{action.action_id} ({span(action)})" for action in last
+        )
     if result.errors:
         detail["errors"] = "; ".join(e.describe() for e in result.errors)[:600]
     return detail
@@ -171,10 +189,14 @@ def run_estate(
     *,
     session,
     workspace_name: str,
+    environment: str | None = None,
     operations=("build", "noop", "mirror", "wipe"),
 ) -> EstateRun:
-    """Empty the performance items, then time each operation in order."""
+    """Empty the performance items, then time each operation in order.
 
+    ``environment`` is the Fabric Environment a Lakehouse plan's Spark session
+    attaches, which supplies Weaver's dependencies.
+    """
     import weaver
 
     names = performance_names(engine)
@@ -199,6 +221,7 @@ def run_estate(
                         session=session,
                         workspace=workspace_name,
                         catalogue=catalogue,
+                        environment=environment,
                     ),
                     _build_detail,
                 )
@@ -215,6 +238,7 @@ def run_estate(
                         workspace=workspace_name,
                         catalogue=f"Warehouse/{names['fork']}",
                         mirror=catalogue,
+                        environment=environment,
                     ),
                 )
             elif operation == "wipe":

@@ -25,6 +25,7 @@ def warehouse_estate(fabric_workspace, warehouse_session):
         DECLARATIONS,
         session=warehouse_session,
         workspace_name=fabric_workspace.workspace,
+        environment=str(fabric_workspace.environment),
     )
 
 
@@ -36,6 +37,7 @@ def lakehouse_estate(fabric_workspace, weaver_session):
         DECLARATIONS,
         session=weaver_session,
         workspace_name=fabric_workspace.workspace,
+        environment=str(fabric_workspace.environment),
     )
 
 
