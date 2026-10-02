@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from datetime import datetime, timezone
 
 from ..mutation.executor import TypedValue, validate_inputs
+from ..mutation.serialization import thaw_value
 from .report import ActionResult, InstallationReport, SequenceResult
 
 
@@ -58,7 +59,10 @@ def execute_bundle(bundle, session, *, executors=None, build_datetime=None):
                         if result.error
                         else None,
                         error_message=result.error,
-                        details=dict(value) if isinstance(value, Mapping) else None,
+                        # A remote report's values arrive frozen.
+                        details=thaw_value(value)
+                        if isinstance(value, Mapping)
+                        else None,
                     )
                 )
         if actions:

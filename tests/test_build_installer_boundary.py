@@ -528,3 +528,47 @@ def test_spark_actions_are_not_run_concurrently(tmp_path):
     )
 
     assert recorder.peak == 1
+
+
+@weaver_test()
+def test_a_remote_reports_frozen_details_are_written_as_plain_yaml(tmp_path):
+    """A report decoded from Fabric carries frozen mappings inside its details."""
+
+    from weaver.build_bundle.execution_plan import execute_bundle
+    from weaver.mutation.executor import MutationReport, MutationResult
+    from weaver.mutation.serialization import freeze_value
+
+    sequence, contracts, required = endpoint_refresh_sequence(TARGET.id)
+    plan = BuildPlan(
+        targets=with_catalogue((TARGET,)),
+        sequences=(sequence,),
+        selection=BuildSelection(Impact((), (), ()), (), (), ()),
+        execution=given_execution(with_catalogue((TARGET,)), (sequence,)),
+        driver_contracts=contracts,
+        required_completion=required,
+    )
+    plan = replace(plan, bundle_id=compute_bundle_id(plan))
+    store = FilesystemStore()
+    bundle = write_bundle(
+        Location(str(tmp_path / "bundle")), plan=plan, payloads={}, store=store
+    )
+    details = freeze_value({"shortcuts": [{"path": "Tables/Sales/Landed"}]})
+
+    class Remote:
+        def execute_mutation(self, plan, payloads, **_options):
+            return MutationReport(
+                plan.bundle_id,
+                tuple(
+                    MutationResult(action.id, "succeeded", details)
+                    for _s, _b, action in plan.actions()
+                ),
+            )
+
+    report = execute_bundle(bundle, Remote())
+
+    written = store.read(bundle.location / "install-report.yml").decode()
+    assert "Tables/Sales/Landed" in written
+    assert all(
+        result.details == {"shortcuts": [{"path": "Tables/Sales/Landed"}]}
+        for result in report.action_results()
+    )

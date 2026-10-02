@@ -10,7 +10,7 @@ from ..targets import ItemRef
 from ..workspaces import Workspace
 from .onelake import abfss_root
 from .resolution import FabricResolver
-from .resources import LAKEHOUSE, WAREHOUSE, Item, WorkspaceItem, find_item
+from .resources import LAKEHOUSE, Item, WorkspaceItem, find_item
 
 
 def _value(record: Any, name: str) -> Any:
@@ -71,21 +71,14 @@ class FabricSessionResolver(FabricResolver):
         return Location(f"abfss://{self.workspace.id}@onelake.dfs.fabric.microsoft.com")
 
     def resolve(self, item: ItemRef, *, item_type: str) -> Item:
-        if item_type == WAREHOUSE:
-            key = f"{item.name}:{item_type}"
+        key = f"{item.name}:{item_type}"
+        if item_type != LAKEHOUSE:
+            # A Warehouse or SQL endpoint has no session-native lookup.
             if key not in self._items:
                 self._items[key] = find_item(
-                    self.workspace,
-                    item.name,
-                    item_type=WAREHOUSE,
-                    client=self.client,
+                    self.workspace, item.name, item_type=item_type, client=self.client
                 )
             return self._items[key]
-        if item_type != LAKEHOUSE:
-            raise CommandError(
-                f"session-native resolution for {item_type} is not implemented"
-            )
-        key = f"{item.name}:{item_type}"
         if key not in self._items:
             artifact = self._lakehouse_utils.get(
                 item.name, workspaceId=self.workspace.id
