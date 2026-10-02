@@ -299,10 +299,12 @@ def _compile(sequences, stages, payloads, *, targets, completion_target_id):
         # Success sinks carry every physical prerequisite through depends_on.
         # Publication certifies objects, not endpoint metadata, so refreshes
         # are outside its gate; the Build's completion still includes them.
+        # The preparation roots are inside it, so publication never writes
+        # the catalogue beside decertification, even with no physical work.
         physical = [
             a
             for a, stage in declared.items()
-            if stage.phase not in (CATALOGUE, REFRESH)
+            if a in roots or stage.phase not in (CATALOGUE, REFRESH)
         ]
         needed = {p for a in physical for p in depends[a]}
         gate = _gate(

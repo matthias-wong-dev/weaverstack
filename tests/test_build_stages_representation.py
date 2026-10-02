@@ -298,6 +298,39 @@ def test_physical_roots_wait_for_catalogue_preparation_and_publication_for_all()
 
 
 @weaver_test()
+def test_publication_without_physical_work_still_follows_preparation():
+    actions, _ = compiled(
+        [
+            _keyed(
+                CATALOGUE,
+                "decertify",
+                target="catalogue",
+                executor="tsql_batch",
+                provides=[DECERTIFIED, PREPARED],
+            ),
+            _keyed(
+                CATALOGUE,
+                "reset",
+                target="catalogue",
+                executor="runtime_state",
+                requires=[DECERTIFIED],
+                provides=[PREPARED],
+            ),
+            _keyed(
+                CATALOGUE,
+                "publish",
+                target="catalogue",
+                executor="tsql_batch",
+                requires=[PHYSICAL_COMPLETE],
+            ),
+        ]
+    )
+
+    assert actions["complete-physical-work"].depends_on == ("reset",)
+    assert actions["publish"].depends_on == ("complete-physical-work",)
+
+
+@weaver_test()
 def test_resources_name_the_capability_and_setup_tables_exclude_each_other():
     import json
 
