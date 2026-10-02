@@ -58,6 +58,36 @@ class EstateRun:
         return "\n".join(lines)
 
 
+#: When set, each estate run appends its timings here as one JSON line.
+RESULTS_ENV = "WEAVER_PERFORMANCE_RESULTS"
+
+
+def record(run: EstateRun) -> None:
+    import json
+    import os
+    from datetime import datetime, timezone
+
+    path = os.environ.get(RESULTS_ENV)
+    if not path:
+        return
+    line = {
+        "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "engine": run.engine,
+        "declarations": run.declarations,
+        "timings": [
+            {
+                "operation": timing.operation,
+                "seconds": round(timing.seconds, 1),
+                "succeeded": timing.succeeded,
+                "error": timing.detail.get("error"),
+            }
+            for timing in run.timings
+        ],
+    }
+    with open(path, "a", encoding="utf-8") as results:
+        results.write(json.dumps(line) + "\n")
+
+
 def performance_names(engine: str) -> dict[str, str]:
     import sys
 

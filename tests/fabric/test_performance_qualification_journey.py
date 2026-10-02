@@ -11,7 +11,13 @@ cross no resource themselves.
 from __future__ import annotations
 
 import pytest
-from support.fabric_performance import LAKEHOUSE, THRESHOLDS, WAREHOUSE, run_estate
+from support.fabric_performance import (
+    LAKEHOUSE,
+    THRESHOLDS,
+    WAREHOUSE,
+    record,
+    run_estate,
+)
 from support.weaver_test import register_session, weaver_test
 
 DECLARATIONS = 1_000
@@ -20,25 +26,29 @@ DECLARATIONS = 1_000
 @pytest.fixture(scope="module")
 def warehouse_estate(fabric_workspace, warehouse_session):
     register_session(warehouse_session)
-    return run_estate(
+    run = run_estate(
         WAREHOUSE,
         DECLARATIONS,
         session=warehouse_session,
         workspace_name=fabric_workspace.workspace,
         environment=str(fabric_workspace.environment),
     )
+    record(run)
+    return run
 
 
 @pytest.fixture(scope="module")
 def lakehouse_estate(fabric_workspace, weaver_session):
     register_session(weaver_session)
-    return run_estate(
+    run = run_estate(
         LAKEHOUSE,
         DECLARATIONS,
         session=weaver_session,
         workspace_name=fabric_workspace.workspace,
         environment=str(fabric_workspace.environment),
     )
+    record(run)
+    return run
 
 
 def _within(run, operation):
