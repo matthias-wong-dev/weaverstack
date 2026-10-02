@@ -236,13 +236,19 @@ def _holds(values: Iterable[str], qualified: str) -> bool:
 
 
 def read_lakehouse_inventory(
-    target: BoundTarget, *, resolver, store: Store, catalogue=None
+    target: BoundTarget,
+    *,
+    resolver,
+    store: Store,
+    catalogue=None,
+    known_views=None,
 ) -> TargetInventory:
     """Read every Weaver-manageable object in one Lakehouse.
 
     Storage answers everything but the views, which exist only in the
     catalogue, so ``catalogue`` is optional and its absence means the views cannot
-    be listed rather than that there are none.
+    be listed rather than that there are none. ``known_views`` names the
+    ``schema.name`` views Weaver recorded installing here.
     """
 
     lakehouse = ItemRef(target.item_id)
@@ -309,23 +315,20 @@ def read_lakehouse_inventory(
     )
     views: tuple[str, ...] = ()
     if catalogue is not None:
-        # Views exist only in the Spark catalogue. Storage and the shortcut API
-        # name every other relation, so the views are what remains. A registered
-        # table with no directory here reads as a view, and its prune fails.
-        named = {table.casefold() for table in tables} | {
-            f"{shortcut.path.split('/', 1)[1]}.{shortcut.name}".casefold()
-            for shortcut in shortcuts
-            if shortcut.path.strip("/")
-            .casefold()
-            .startswith(TABLES_AREA.casefold() + "/")
-        }
-        views = tuple(
-            f"{schema}.{relation}"
-            for schema in schemas
-            if schema.casefold() not in shortcut_schemas
-            for relation in catalogue.relations(schema)
-            if f"{schema}.{relation}".casefold() not in named
+        views, unstored = _catalogue_relations(
+            catalogue,
+            schemas=[s for s in schemas if s.casefold() not in shortcut_schemas],
+            named={table.casefold() for table in tables}
+            | {
+                f"{shortcut.path.split('/', 1)[1]}.{shortcut.name}".casefold()
+                for shortcut in shortcuts
+                if shortcut.path.strip("/")
+                .casefold()
+                .startswith(TABLES_AREA.casefold() + "/")
+            },
+            known_views={name.casefold() for name in known_views or ()},
         )
+        tables += unstored
     # Runtime references are shortcuts under Tables/_, whether or not Spark has
     # registered them as tables. The ordinary schema inventory excludes ``_``.
     references = tuple(
@@ -371,6 +374,36 @@ def _load_files(store: Store, files_root) -> tuple[str, ...]:
             key=str.casefold,
         )
     )
+
+
+def _catalogue_relations(catalogue, *, schemas, named, known_views):
+    """Split the relations storage does not name into views and unstored tables.
+
+    Views exist only in the Spark catalogue, and one relation listing names
+    them with every table. A relation Weaver recorded as a view is one; any
+    other is resolved by name, and a registered table whose storage is missing
+    is a table, so prune drops it as one.
+    """
+
+    views, unstored = [], []
+    for schema in schemas:
+        unresolved = []
+        for relation in catalogue.relations(schema):
+            qualified = f"{schema}.{relation}"
+            if qualified.casefold() in named:
+                continue
+            if qualified.casefold() in known_views:
+                views.append(qualified)
+            else:
+                unresolved.append(relation)
+        if unresolved:
+            resolved = {
+                name.casefold() for name in catalogue.views_among(schema, unresolved)
+            }
+            for relation in unresolved:
+                kind = views if relation.casefold() in resolved else unstored
+                kind.append(f"{schema}.{relation}")
+    return tuple(views), tuple(unstored)
 
 
 def read_warehouse_inventory(target: BoundTarget, *, sql) -> TargetInventory:

@@ -574,8 +574,14 @@ def test_timestamped_archive_name_is_utc_and_has_the_weaver_suffix():
 
 
 @weaver_test()
-def test_views_are_the_relations_neither_storage_nor_a_shortcut_names(tmp_path):
-    """One relation listing replaces the per-view listing Spark answers slowly."""
+def test_unrecorded_relations_are_resolved_and_a_table_without_storage_stays_one(
+    tmp_path,
+):
+    """One relation listing replaces the per-view listing Spark answers slowly.
+
+    A relation Weaver recorded as a view is one. Only the rest are resolved by
+    name, and a registered table whose storage is missing is still a table.
+    """
 
     from weaver.fabric.shortcuts import Shortcut
 
@@ -594,13 +600,18 @@ def test_views_are_the_relations_neither_storage_nor_a_shortcut_names(tmp_path):
     class Catalogue:
         def __init__(self):
             self.asked = []
+            self.resolved = []
 
         def schema_exists(self, schema):
             return False
 
         def relations(self, schema):
             self.asked.append(schema)
-            return ("customer", "Active", "Linked", "Summary")
+            return ("customer", "Active", "Linked", "Summary", "Broken")
+
+        def views_among(self, schema, names):
+            self.resolved.append((schema, sorted(names)))
+            return tuple(name for name in names if name == "Summary")
 
     store = FilesystemStore()
     tables = inner.tables_root(ItemRef("Raw_Dev"))
@@ -612,8 +623,10 @@ def test_views_are_the_relations_neither_storage_nor_a_shortcut_names(tmp_path):
         resolver=Resolver(),
         store=store,
         catalogue=catalogue,
+        known_views={"source.active"},
     )
 
-    assert inventory.tables == ("Source.Customer",)
+    assert inventory.tables == ("Source.Broken", "Source.Customer")
     assert inventory.views == ("Source.Active", "Source.Summary")
     assert catalogue.asked == ["Source"]
+    assert catalogue.resolved == [("Source", ["Broken", "Summary"])]
