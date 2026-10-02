@@ -101,17 +101,51 @@ class BulkSubmission:
     waiting: tuple[int, ...]
 
 
+#: Fabric refuses a bulk request of more than 100 shortcuts with a 400.
+BULK_LIMIT = 100
+#: Bulk requests for one destination in flight at once.
+BULK_REQUESTS = 4
+
+
 def submit_shortcuts(
     destination: Item,
     requests: Sequence[ShortcutRequest],
     *,
     client: FabricClient,
 ) -> BulkSubmission:
-    """Create or repoint shortcuts in one bulk request.
+    """Create or repoint shortcuts, at most ``BULK_LIMIT`` per bulk request.
 
     Successful members are kept. Permanent member failures raise.
     """
 
+    requests = list(requests)
+    if len(requests) <= BULK_LIMIT:
+        return _submit(destination, requests, client=client)
+    from concurrent.futures import ThreadPoolExecutor
+    from contextvars import copy_context
+
+    starts = range(0, len(requests), BULK_LIMIT)
+    with ThreadPoolExecutor(max_workers=BULK_REQUESTS) as pool:
+        submitted = [
+            pool.submit(
+                copy_context().run,
+                _submit,
+                destination,
+                requests[start : start + BULK_LIMIT],
+                client=client,
+            )
+            for start in starts
+        ]
+        outcomes = [each.result() for each in submitted]
+    created: dict[int, dict] = {}
+    waiting: list[int] = []
+    for start, outcome in zip(starts, outcomes):
+        created.update({start + i: detail for i, detail in outcome.created.items()})
+        waiting.extend(start + i for i in outcome.waiting)
+    return BulkSubmission(created=created, waiting=tuple(waiting))
+
+
+def _submit(destination: Item, requests, *, client) -> BulkSubmission:
     if not requests:
         return BulkSubmission(created={}, waiting=())
     endpoint = (

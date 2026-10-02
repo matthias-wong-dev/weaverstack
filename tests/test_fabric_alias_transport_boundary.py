@@ -398,3 +398,34 @@ def test_removing_an_absent_shortcut_is_the_intended_state_not_a_fault():
     )
 
     assert client.calls[0][0] == "DELETE"
+
+
+@weaver_test()
+def test_more_shortcuts_than_one_bulk_request_holds_are_sent_in_chunks():
+    """Fabric refuses a bulk request of more than 100 shortcuts."""
+
+    import threading
+
+    from weaver.fabric.shortcuts import submit_shortcuts
+
+    calls = []
+    lock = threading.Lock()
+
+    class Client:
+        def request(self, method, path, *, payload, expected):
+            members = payload["createShortcutRequests"]
+            with lock:
+                calls.append(len(members))
+            return _Response(
+                200,
+                body=_members(*((m["path"], m["name"], None) for m in members)),
+            )
+
+    requests = [_request(f"S{i:03d}", f"Tables/Sales/T{i:03d}") for i in range(250)]
+
+    result = submit_shortcuts(_lakehouse("Curated", "dest1"), requests, client=Client())
+
+    assert sorted(calls) == [50, 100, 100]
+    assert sorted(result.created) == list(range(250))
+    assert result.created[249]["path"] == "Tables/Sales/S249"
+    assert result.waiting == ()
