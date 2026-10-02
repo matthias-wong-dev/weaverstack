@@ -326,6 +326,23 @@ def _readiness_actions(create, payloads, *, item_slug):
     if create.executor != "shortcut":
         return ()
     frozen = json.loads(payloads[create.payload].decode("utf-8"))["shortcuts"]
+    return readiness_actions(
+        frozen, payloads, name=f"shortcuts-{item_slug}", file=item_slug
+    )
+
+
+#: Shortcuts one readiness action checks. Each check is one or two Spark reads,
+#: so chunks spread a large creation's wait across the Spark lanes.
+READINESS_CHUNK = 25
+
+
+def readiness_actions(frozen, payloads, *, name: str, file: str):
+    """Readiness actions for created shortcuts, by surface and in chunks.
+
+    ``name`` and ``file`` distinguish the action ids and payload names. Returns
+    each action with the destinations it makes readable.
+    """
+
     awaited = []
     for kind in (AWAIT_TABLE_SHORTCUTS, AWAIT_FILE_SHORTCUTS):
         members = [
@@ -333,32 +350,36 @@ def _readiness_actions(create, payloads, *, item_slug):
             for each in frozen
             if _READINESS.get(each.get("type", "table")) == kind
         ]
-        if not members:
-            continue
-        content = (
-            json.dumps(
-                {"surface": _SURFACE[kind], "shortcuts": members},
-                indent=2,
-                sort_keys=True,
-                ensure_ascii=False,
+        chunks = [
+            members[start : start + READINESS_CHUNK]
+            for start in range(0, len(members), READINESS_CHUNK)
+        ]
+        for index, chunk in enumerate(chunks):
+            suffix = "" if len(chunks) == 1 else f"-{index:03d}"
+            content = (
+                json.dumps(
+                    {"surface": _SURFACE[kind], "shortcuts": chunk},
+                    indent=2,
+                    sort_keys=True,
+                    ensure_ascii=False,
+                )
+                + "\n"
+            ).encode("utf-8")
+            filename = f"{_SURFACE[kind]}-{file}{suffix}.shortcut-readiness.json"
+            payloads[filename] = content
+            awaited.append(
+                (
+                    InstallAction(
+                        id=f"await-{_SURFACE[kind]}-{name}{suffix}",
+                        kind=kind,
+                        resource_node_id=None,
+                        executor="shortcut_readiness",
+                        payload=filename,
+                        payload_sha256=sha256_hex(content),
+                    ),
+                    tuple(each["shortcut"] for each in chunk),
+                )
             )
-            + "\n"
-        ).encode("utf-8")
-        filename = f"{_SURFACE[kind]}-{item_slug}.shortcut-readiness.json"
-        payloads[filename] = content
-        awaited.append(
-            (
-                InstallAction(
-                    id=f"await-{_SURFACE[kind]}-shortcuts-{item_slug}",
-                    kind=kind,
-                    resource_node_id=None,
-                    executor="shortcut_readiness",
-                    payload=filename,
-                    payload_sha256=sha256_hex(content),
-                ),
-                tuple(each["shortcut"] for each in members),
-            )
-        )
     return tuple(awaited)
 
 
