@@ -17,6 +17,8 @@ if TYPE_CHECKING:
 CATALOGUE_KIND = "Warehouse"
 
 CLI_AREA = "cli"
+#: Lakehouse Files area holding in-flight remote mutation carriers.
+CARRIER_AREA = "_weaver_carriers"
 
 
 @dataclass(frozen=True)

@@ -46,7 +46,7 @@ def test_lost_remote_response_is_uncertain_without_replay(tmp_path):
     from types import SimpleNamespace
 
     from weaver.locations import Location
-    from weaver.mutation import BoundTarget, MutationExecution
+    from weaver.mutation import MutationExecution
     from weaver.store import FilesystemStore
 
     plan = sealed((_action(),))
@@ -68,7 +68,7 @@ def test_lost_remote_response_is_uncertain_without_replay(tmp_path):
 
     scope = SimpleNamespace(
         transport_store=FilesystemStore(),
-        resolver=SimpleNamespace(lakehouse=lambda item: Location(tmp_path.as_posix())),
+        resolver=SimpleNamespace(files_root=lambda item: Location(tmp_path.as_posix())),
         livy_run=lost,
     )
     session = SimpleNamespace(
@@ -76,24 +76,19 @@ def test_lost_remote_response_is_uncertain_without_replay(tmp_path):
         require_spark_home=lambda *args, **kwargs: None,
         direct_delta_workers=16,
     )
-    stage = install_archive.ArchiveStaging(
-        BoundTarget("stage", "lakehouse", "stage-id"), "Files/carriers"
-    )
     assert hasattr(install_archive, "execute_mutation_remote"), (
         "remote plan API is missing"
     )
-    report = install_archive.execute_mutation_remote(session, plan, staging=(stage,))
+    report = install_archive.execute_mutation_remote(session, plan)
     assert len(calls) == 1 and calls[0]["retry_submission"] is False
     assert all(result.status == "uncertain" for result in report.results)
     assert session.archive_mutations[0]["status"] == "uncertain"
     assert "remote response lost" in session.archive_mutations[0]["error"]
-    assert scope.transport_store.exists(
-        Location(session.archive_mutations[0]["carrier"])
-    )
+    assert not (tmp_path / "_weaver_carriers").exists()
 
 
 @weaver_test()
-def test_default_staging_uses_discovered_name_with_real_fabric_resolver(tmp_path):
+def test_carrier_is_staged_in_the_spark_home_lakehouse(tmp_path):
     from dataclasses import replace
     from types import SimpleNamespace
 
@@ -107,23 +102,20 @@ def test_default_staging_uses_discovered_name_with_real_fabric_resolver(tmp_path
         def paged(self, path, **options):
             if path == "workspaces":
                 return [{"id": "workspace-id", "displayName": "Demo"}]
-            assert path == "workspaces/workspace-id/items", path
+            assert path == "workspaces/workspace-id/items?type=Lakehouse", path
             return [
                 {
                     "id": plan.targets[0].item_id,
                     "displayName": "Sales",
                     "type": "Lakehouse",
-                },
-                {
-                    "id": "stage-id",
-                    "displayName": "Carrier Storage",
-                    "type": "Lakehouse",
-                },
+                }
             ]
 
+    plan = sealed((_action(),))
     plan = replace(
-        sealed((_action(),)),
+        plan,
         bundle_id="",
+        targets=(replace(plan.targets[0], item_name="Sales"),),
         execution=MutationExecution("Demo", spark_home_target_id="sales"),
     )
     plan = replace(plan, bundle_id=compute_bundle_id(plan))
@@ -150,7 +142,7 @@ def test_default_staging_uses_discovered_name_with_real_fabric_resolver(tmp_path
     assert len(submissions) == 1
     assert all(result.status == "uncertain" for result in report.results)
     assert (
-        "/workspace-id/stage-id.Lakehouse/Files/_weaver_carriers/"
+        f"/workspace-id/{plan.targets[0].item_id}.Lakehouse/Files/_weaver_carriers/"
         in session.archive_mutations[0]["carrier"]
     )
 

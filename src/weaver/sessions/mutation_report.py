@@ -31,7 +31,6 @@ _TUPLES = {
     "ledger",
     "results",
     "operations",
-    "journal_errors",
     "exclusions",
     "retained_exclusions",
 }

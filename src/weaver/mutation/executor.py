@@ -130,15 +130,12 @@ class MutationReport:
     ledger: tuple[LedgerEvent, ...] = ()
     operations: tuple[Operation, ...] = ()
     invocation_id: str = ""
-    journal_errors: tuple[str, ...] = ()
     retained_exclusions: tuple[tuple[str, str], ...] = ()
 
     @property
     def succeeded(self):
-        return (
-            not self.journal_errors
-            and all(r.status == "succeeded" for r in self.results)
-            and all(op.status == "settled" for op in self.operations)
+        return all(r.status == "succeeded" for r in self.results) and all(
+            op.status == "settled" for op in self.operations
         )
 
     @property
@@ -198,7 +195,6 @@ class MutationExecutor:
         clock=time,
         limits=None,
         timeout=600,
-        journal=None,
         failure_policy="continue_independent",
     ):
         from ..errors import BuildError
@@ -216,7 +212,6 @@ class MutationExecutor:
         self.clock = clock
         self.limits = dict(limits or {})
         self.timeout = timeout
-        self.journal = journal
         self.failure_policy = failure_policy
 
     def execute(
@@ -231,7 +226,6 @@ class MutationExecutor:
 
         payloads = validate_inputs(plan, payloads)
         selected = tuple(a.id for _, _, a in plan.actions())
-        external = {}
         if invocation_id is not None and (
             not isinstance(invocation_id, str) or not invocation_id
         ):
@@ -262,7 +256,7 @@ class MutationExecutor:
                     action, None if action.payload is None else payloads[action.payload]
                 )
         return _Invocation(
-            self, plan, payloads, cancellation, selected, external, invocation_id
+            self, plan, payloads, cancellation, selected, invocation_id
         ).execute()
 
 
@@ -275,12 +269,9 @@ class _Task:
 
 
 class _Invocation:
-    def __init__(
-        self, executor, plan, payloads, cancellation, selected, external, invocation_id
-    ):
+    def __init__(self, executor, plan, payloads, cancellation, selected, invocation_id):
         self.executor = executor
         self.invocation_id = invocation_id or uuid4().hex
-        self.journal_errors = []
         self.plan = plan
         self.payloads = payloads
         self.cancellation = cancellation
@@ -291,7 +282,7 @@ class _Invocation:
         }
         self.order = {key: i for i, key in enumerate(self.states)}
         self.contracts = {c.executor: c for c in plan.driver_contracts}
-        self.results = dict(external)
+        self.results = {}
         self.operations = {}
         self.ledger = []
         self.leases = {}
@@ -329,23 +320,7 @@ class _Invocation:
             self.plan.bundle_id,
             self.invocation_id,
         )
-        if self.executor.journal is not None and not self.journal_errors:
-            try:
-                self.executor.journal(event)
-            except Exception as exc:
-                self.journal_errors.append(str(exc))
         self.ledger.append(event)
-        return not self.journal_errors
-
-    def flush_journal(self):
-        if (
-            isinstance(self.executor.journal, MutationJournal)
-            and not self.journal_errors
-        ):
-            try:
-                self.executor.journal.flush()
-            except Exception as exc:
-                self.journal_errors.append(str(exc))
 
     def terminal(self, state, status, value=None, error=None):
         key = state.action.id
@@ -402,11 +377,7 @@ class _Invocation:
             self.operations[action.id] = Operation(
                 action.id, outcome.value, state.deadline, action.exclusions
             )
-            if not self.record("acknowledged", state, self.operations[action.id]):
-                self.operations[action.id] = replace(
-                    self.operations[action.id], status="uncertain"
-                )
-                outcome = Uncertain("operation acknowledgement was not persisted")
+            self.record("acknowledged", state, self.operations[action.id])
         status = (
             "succeeded"
             if isinstance(outcome, Completed)
@@ -508,15 +479,9 @@ class _Invocation:
         )
 
     def stopped(self):
-        return (
-            bool(self.journal_errors)
-            or (self.cancellation is not None and self.cancellation.is_set())
-            or (
-                self.executor.failure_policy == "fail_fast"
-                and any(
-                    r.status in {"failed", "uncertain"} for r in self.results.values()
-                )
-            )
+        return (self.cancellation is not None and self.cancellation.is_set()) or (
+            self.executor.failure_policy == "fail_fast"
+            and any(r.status in {"failed", "uncertain"} for r in self.results.values())
         )
 
     def dispatch(self, pool):
@@ -577,22 +542,6 @@ class _Invocation:
             task = _Task(tuple(group), keys, len(group) > 1)
             task_id = key
             requests = tuple(self.request(member) for member in group)
-            self.flush_journal()
-            if self.journal_errors:
-                for member in group:
-                    if member.pending is None:
-                        self.record("admission_refused", member, self.journal_errors[0])
-                        member.attempts = 0
-                        self.terminal(
-                            member,
-                            "not_dispatched",
-                            error="dispatch journal unavailable",
-                        )
-                    else:
-                        self.finish(
-                            member, Uncertain("observation journal unavailable")
-                        )
-                continue
             for member in group:
                 self.active.add(member.action.id)
                 for exclusion in member.action.exclusions:
@@ -726,12 +675,7 @@ class _Invocation:
                     for key, state in self.states.items():
                         if key not in self.results and key not in self.active:
                             driver = self.executor.drivers.get(state.action.executor)
-                            if (
-                                state.pending
-                                and driver
-                                and driver.cancel
-                                and not self.journal_errors
-                            ):
+                            if state.pending and driver and driver.cancel:
                                 state.cancelling = True
                                 state.pending = replace(
                                     state.pending, next_poll_at=self.now()
@@ -784,7 +728,6 @@ class _Invocation:
                                 "not_dispatched",
                                 error="unsettled prerequisite or exclusion",
                             )
-        self.flush_journal()
         return MutationReport(
             self.plan.bundle_id,
             tuple(self.results[key] for key in self.states),
@@ -793,30 +736,10 @@ class _Invocation:
                 self.operations[key] for key in self.states if key in self.operations
             ),
             self.invocation_id,
-            tuple(self.journal_errors),
             tuple(
                 sorted(set(self.leases.items()) | set(self.operation_leases.items()))
             ),
         )
-
-
-class MutationJournal:
-    """Checkpoint ordinary events and persist operation acknowledgements inline."""
-
-    def __init__(self, write, *, checkpoint_size=64):
-        self.write = write
-        self.checkpoint_size = checkpoint_size
-        self.buffer = []
-
-    def __call__(self, event):
-        self.buffer.append(event)
-        if event.kind == "acknowledged" or len(self.buffer) >= self.checkpoint_size:
-            self.flush()
-
-    def flush(self):
-        if self.buffer:
-            self.write(tuple(self.buffer))
-            self.buffer.clear()
 
 
 def physical_driver(

@@ -3,19 +3,8 @@ from .models import PhysicalScope
 
 
 class ScopeRules:
-    def __init__(self, plan, *, extra_targets=()):
+    def __init__(self, plan):
         self.targets = {target.id: target for target in plan.targets}
-        from .serialization import require_string
-        from .targets import BoundTarget
-
-        for target in extra_targets:
-            if not isinstance(target, BoundTarget) or target.kind != "lakehouse":
-                raise BuildError("archive staging requires a bound Lakehouse")
-            for name, value in target.to_mapping().items():
-                require_string(value, what=f"staging target {name}")
-            if target.id in self.targets and self.targets[target.id] != target:
-                raise BuildError("staging target identity collides with plan target")
-            self.targets[target.id] = target
         self.workspace = plan.execution.workspace_id
         for value in (
             self.workspace,

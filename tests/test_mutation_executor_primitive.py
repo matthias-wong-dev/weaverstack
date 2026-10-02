@@ -249,7 +249,6 @@ def test_typed_operation_acknowledgement_retains_lease_until_settlement():
     assert hasattr(runtime, "TypedValue"), "operation result ledger is missing"
     clock = Clock()
     calls = []
-    persisted = []
     plan = operation_plan()
     contracts = {c.executor: c for c in plan.driver_contracts}
 
@@ -260,11 +259,6 @@ def test_typed_operation_acknowledgement_retains_lease_until_settlement():
                 runtime.TypedValue("refresh-handle", "handle-" + request.action.id)
             )
         if request.action.executor == "refresh_await":
-            assert any(
-                e.kind == "acknowledged"
-                and e.action_id == request.action.result_from.action_id
-                for e in persisted
-            )
             assert (
                 request.input.value == "handle-" + request.action.result_from.action_id
             )
@@ -277,9 +271,7 @@ def test_typed_operation_acknowledgement_retains_lease_until_settlement():
         name: runtime.MutationDriver(run, contract=c) for name, c in contracts.items()
     }
     drivers["folder"] = runtime.MutationDriver(run)
-    report = runtime.MutationExecutor(
-        drivers, clock=clock, timeout=5, journal=persisted.append
-    ).execute(plan, {})
+    report = runtime.MutationExecutor(drivers, clock=clock, timeout=5).execute(plan, {})
     assert calls == [
         ("start", 0),
         ("await", 0),
@@ -291,7 +283,11 @@ def test_typed_operation_acknowledgement_retains_lease_until_settlement():
     ]
     assert all(r.status == "succeeded" for r in report.results)
     assert all(op.status == "settled" for op in report.operations)
-    assert persisted == list(report.ledger)
+    events = [(e.kind, e.action_id) for e in report.ledger]
+    for starter, settler in (("start", "await"), ("second", "second-await")):
+        assert events.index(("acknowledged", starter)) < events.index(
+            ("dispatched", settler)
+        )
 
 
 @weaver_test()
@@ -375,7 +371,7 @@ def test_stop_policy_drains_dispatched_work_and_stops_new_admission(policy):
 
     cancellation = Event()
     second_running = Event()
-    released = Event()
+    third_started = Event()
     calls = []
 
     def run(request):
@@ -387,18 +383,17 @@ def test_stop_policy_drains_dispatched_work_and_stops_new_admission(policy):
             return Failed("known failure")
         if request.action.id == "second":
             second_running.set()
-            assert released.wait(2)
+            # Hold until admission after the failure is settled: third starts, or
+            # the stop policy has had ample time to refuse it.
+            third_started.wait(1)
+        if request.action.id == "third":
+            third_started.set()
         return Completed()
 
     report = MutationExecutor(
         {"folder": MutationDriver(run)},
         workers=2,
         failure_policy="continue_independent" if policy == "cancel" else policy,
-        journal=lambda event: (
-            released.set()
-            if event.kind == "terminal" and event.action_id == "first"
-            else None
-        ),
     ).execute(
         sealed((_action("first"), _action("second"), _action("third"))),
         {},
@@ -701,86 +696,6 @@ def test_physical_adapter_runs_existing_executor_on_owned_lane(missing):
 
 
 @weaver_test()
-def test_failed_durable_acknowledgement_preserves_handle_without_replay():
-    from weaver.mutation.executor import (
-        Completed,
-        MutationDriver,
-        MutationExecutor,
-        TypedValue,
-    )
-
-    plan = operation_plan()
-    calls = []
-
-    def run(request):
-        calls.append(request.action.id)
-        return Completed(TypedValue("refresh-handle", "known-handle"))
-
-    def journal(event):
-        if event.kind == "acknowledged":
-            raise OSError("journal unavailable")
-
-    drivers = {
-        c.executor: MutationDriver(run, contract=c) for c in plan.driver_contracts
-    }
-    drivers["folder"] = MutationDriver(run)
-    report = MutationExecutor(drivers, journal=journal).execute(plan, {})
-    assert calls == ["start"]
-    assert report.by_id["start"].status == "uncertain"
-    assert report.operations[0].handle.value == "known-handle"
-    assert report.operations[0].status == "uncertain"
-    assert report.journal_errors == ("journal unavailable",)
-
-
-@weaver_test()
-def test_journal_checkpoints_completions_and_flushes_before_handle_consumption(
-    tmp_path,
-):
-    import json
-    from dataclasses import asdict
-
-    import weaver.mutation.executor as runtime
-
-    assert hasattr(runtime, "MutationJournal"), "buffered invocation journal is missing"
-    path = tmp_path / "ledger.jsonl"
-    chunks = []
-
-    def write(events):
-        chunks.append(events)
-        with path.open("a") as stream:
-            for event in events:
-                stream.write(json.dumps(asdict(event)) + "\n")
-
-    plan = operation_plan()
-
-    def run(request):
-        if request.action.executor == "refresh_start":
-            return runtime.Completed(runtime.TypedValue("refresh-handle", "known"))
-        if request.action.executor == "refresh_await":
-            rows = [json.loads(line) for line in path.read_text().splitlines()]
-            assert any(
-                row["kind"] == "acknowledged"
-                and row["action_id"] == request.action.result_from.action_id
-                for row in rows
-            )
-        return runtime.Completed()
-
-    drivers = {
-        c.executor: runtime.MutationDriver(run, contract=c)
-        for c in plan.driver_contracts
-    }
-    drivers["folder"] = runtime.MutationDriver(run)
-    report = runtime.MutationExecutor(
-        drivers, journal=runtime.MutationJournal(write)
-    ).execute(plan, {})
-    rows = [json.loads(line) for line in path.read_text().splitlines()]
-    assert len(rows) == len(report.ledger)
-    assert {row["plan_id"] for row in rows} == {plan.bundle_id}
-    assert {row["invocation_id"] for row in rows} == {report.invocation_id}
-    assert len(chunks) < len(rows)
-
-
-@weaver_test()
 def test_supported_pending_cancellation_uses_owned_lane_and_known_outcome():
     from threading import Event
 
@@ -970,28 +885,6 @@ def test_shared_inner_pool_lane_prevents_outer_pool_multiplication():
     ).execute(plan, {})
     assert peak == 2
     assert all(r.status == "succeeded" for r in report.results)
-
-
-@weaver_test()
-def test_failed_dispatch_journal_prevents_mutation_admission():
-    from weaver.mutation.executor import Completed, MutationDriver, MutationExecutor
-
-    calls = []
-
-    def run(request):
-        calls.append(request.action.id)
-        return Completed()
-
-    def journal(event):
-        raise OSError("dispatch journal unavailable")
-
-    report = MutationExecutor({"folder": MutationDriver(run)}, journal=journal).execute(
-        sealed((_action("a"), _action("b"))), {}
-    )
-    assert calls == []
-    assert report.by_id["a"].status == "not_dispatched"
-    assert report.by_id["a"].attempts == 0
-    assert not report.succeeded
 
 
 @weaver_test()

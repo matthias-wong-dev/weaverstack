@@ -92,59 +92,6 @@ def test_same_operation_writers_keep_individual_exclusions_across_pending(
     assert report.operations[0].status == "settled"
 
 
-@weaver_test()
-@pytest.mark.parametrize("broken", [False, True])
-def test_buffered_journal_persists_group_admission_before_physical_dispatch(broken):
-    from weaver.mutation.executor import MutationJournal
-
-    persisted = []
-    chunks = []
-    calls = []
-
-    def write(events):
-        chunks.append(events)
-        if broken:
-            raise OSError("durable sink unavailable")
-        persisted.extend(events)
-
-    def batch(requests, emit):
-        calls.append(tuple(r.action.id for r in requests))
-        assert {r.action.id for r in requests} <= {
-            e.action_id for e in persisted if e.kind == "dispatched"
-        }, "physical mutation preceded durable admission"
-        assert not any(e.kind == "terminal" for e in persisted)
-        return [(r.action.id, Completed()) for r in requests]
-
-    def run(request):
-        raise AssertionError("compatible roots should be grouped")
-
-    report = MutationExecutor(
-        {"folder": MutationDriver(run, batch=batch, batch_size=2)},
-        journal=MutationJournal(write, checkpoint_size=64),
-    ).execute(
-        sealed(
-            (
-                _action("a"),
-                _action("b"),
-                _action("certify", ("a", "b"), executor="completion_gate"),
-            )
-        ),
-        {},
-    )
-    if broken:
-        assert calls == []
-        assert report.journal_errors == ("durable sink unavailable",)
-        assert report.by_id["a"].status == report.by_id["b"].status == "not_dispatched"
-        assert report.by_id["certify"].status == "blocked"
-        assert report.by_id["a"].attempts == report.by_id["b"].attempts == 0
-    else:
-        assert calls == [("a", "b")]
-        assert report.succeeded
-        assert persisted == list(report.ledger)
-        assert [e.action_id for e in chunks[0]] == ["a", "b"]
-        assert len(chunks) == 3
-
-
 def with_actions(plan, actions, *, required_completion=()):
     sequence = plan.sequences[0]
     plan = replace(
@@ -343,10 +290,6 @@ def test_one_settler_finishing_cannot_release_another_running_writer(mode):
     overlap = []
     calls = []
 
-    def journal(event):
-        if event.kind == "dispatched" and event.action_id == "third":
-            overlap.append(b_live.is_set())
-
     def run(request):
         name = request.action.id
         calls.append(name)
@@ -361,82 +304,19 @@ def test_one_settler_finishing_cannot_release_another_running_writer(mode):
             b_live.clear()
         elif name == "release-b":
             release_b.set()
+        elif name == "third":
+            overlap.append(b_live.is_set())
         return Completed()
 
     drivers = {
         c.executor: MutationDriver(run, contract=c) for c in plan.driver_contracts
     }
     drivers["folder"] = MutationDriver(run)
-    report = MutationExecutor(drivers, workers=3, journal=journal).execute(plan, {})
+    report = MutationExecutor(drivers, workers=3).execute(plan, {})
     assert report.succeeded, report
     assert overlap == [False]
     assert calls.index("release-b") < calls.index("third")
     assert report.retained_exclusions == ()
-
-
-@weaver_test()
-@pytest.mark.parametrize("fault", ["acknowledgement", "checkpoint", "final"])
-def test_buffered_journal_faults_stop_admission_without_erasing_observed_truth(fault):
-    from weaver.mutation.executor import MutationJournal
-
-    base = settlers_plan()
-    start, a, _, _ = (a for _, _, a in base.actions())
-    plan = (
-        with_actions(base, (start, a), required_completion=("a",))
-        if fault == "acknowledgement"
-        else sealed((_action("root"), _action("child", ("root",))))
-    )
-    persisted = []
-    calls = []
-
-    def write(events):
-        if (
-            fault == "acknowledgement"
-            and any(e.kind == "acknowledged" for e in events)
-            or fault == "checkpoint"
-            and any(e.kind == "terminal" for e in events)
-            or fault == "final"
-            and events[-1].kind == "terminal"
-            and events[-1].action_id == "child"
-        ):
-            raise OSError(fault + " sink unavailable")
-        persisted.extend(events)
-
-    def run(request):
-        calls.append(request.action.id)
-        assert any(
-            e.kind == "dispatched" and e.action_id == request.action.id
-            for e in persisted
-        )
-        if request.action.id == "start":
-            return Completed(TypedValue("handle", "known"))
-        return Completed()
-
-    drivers = {
-        c.executor: MutationDriver(run, contract=c) for c in plan.driver_contracts
-    }
-    drivers["folder"] = MutationDriver(run)
-    report = MutationExecutor(
-        drivers,
-        journal=MutationJournal(
-            write, checkpoint_size=1 if fault == "checkpoint" else 64
-        ),
-    ).execute(plan, {})
-    assert report.journal_errors == (fault + " sink unavailable",)
-    assert not report.succeeded
-    if fault == "acknowledgement":
-        assert calls == ["start"]
-        assert report.by_id["start"].status == "uncertain"
-        assert report.by_id["a"].status == "blocked"
-        assert report.operations[0].handle.value == "known"
-        assert report.retained_exclusions == (("endpoint", "start"),)
-    elif fault == "checkpoint":
-        assert calls == ["root"]
-        assert report.by_id["root"].status == "succeeded"
-        assert report.by_id["child"].status == "not_dispatched"
-    else:
-        assert calls == ["root", "child"]
-        assert all(r.status == "succeeded" for r in report.results)
 
 
 @weaver_test()

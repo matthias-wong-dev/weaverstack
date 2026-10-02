@@ -9,10 +9,6 @@ import stat
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from ..mutation.targets import BoundTarget
 
 MAX_EXPANDED_BYTES = 128 * 1024 * 1024
 
@@ -47,57 +43,6 @@ def extract_verified(archive_path: Path, destination: Path, manifest: dict[str, 
             if hashlib.sha256(archive.read(name)).hexdigest() != manifest[name]:
                 raise ValueError("archive content differs from manifest")
         archive.extractall(destination)
-
-
-@dataclass(frozen=True)
-class ArchiveStaging:
-    target: BoundTarget
-    path: str
-
-    @property
-    def target_id(self):
-        return self.target.id
-
-    def to_mapping(self):
-        return {"target": self.target.to_mapping(), "path": self.path}
-
-    @classmethod
-    def from_mapping(cls, mapping):
-        from ..errors import BuildError
-        from ..mutation.targets import BoundTarget
-
-        if not isinstance(mapping, dict) or set(mapping) != {"target", "path"}:
-            raise BuildError("invalid authorised archive staging")
-        return cls(BoundTarget.from_mapping(mapping["target"]), mapping["path"])
-
-
-def select_staging(plan, candidates):
-    """Candidates authorise writable backend locations outside mutation and source scopes."""
-    from ..mutation.scopes import ScopeRules
-    from ..mutation.validation import validate_mutation_plan
-
-    validate_mutation_plan(plan)
-    rules = ScopeRules(plan)
-    forbidden = list(plan.protected_scopes)
-    from ..mutation.models import PhysicalScope
-
-    for _, _, action in plan.actions():
-        forbidden.extend((*action.writes, *action.destructive_scopes))
-        if not action.writes and action.executor != "completion_gate":
-            forbidden.append(PhysicalScope(action.target_id, ""))
-    for candidate in candidates:
-        if isinstance(candidate, ArchiveStaging):
-            rules = ScopeRules(plan, extra_targets=(candidate.target,))
-            checked = PhysicalScope(candidate.target_id, candidate.path)
-        else:
-            rules = ScopeRules(plan)
-            checked = candidate
-        rules.check(checked)
-        if rules.targets[candidate.target_id].kind != "lakehouse" or not candidate.path:
-            continue
-        if not any(rules.overlaps(checked, scope) for scope in forbidden):
-            return candidate
-    return None
 
 
 def read_receipt(receipt, data: bytes):
@@ -248,25 +193,23 @@ emit({{"sha256": hashlib.sha256(_archive_bytes).hexdigest(), "bytes": len(_archi
 
 
 def execute_mutation_remote(
-    session,
-    plan,
-    payloads=None,
-    *,
-    staging=None,
-    workspace=None,
-    timeout=600,
-    build_datetime=None,
+    session, plan, payloads=None, *, workspace=None, timeout=600, build_datetime=None
 ):
-    """Submit one complete plan and retain uncertain invocations for diagnosis."""
+    """Submit one complete plan once; an uncertain invocation is never replayed.
+
+    The carrier is staged under the plan's Spark-home Lakehouse and removed after
+    every outcome. It is transport, not a mutation target, so it is outside the
+    plan's physical scopes.
+    """
     from datetime import datetime, timezone
     from urllib.parse import urlsplit
     from uuid import uuid4
 
-    from ..build_bundle.execution import execution_spark_home, execution_workspace
+    from ..build_bundle.execution import execution_workspace, spark_home_of
     from ..errors import BuildError
     from ..mutation.executor import MutationReport, MutationResult, validate_inputs
-    from ..mutation.targets import BoundTarget
     from ..targets import ItemRef
+    from ..workspaces import CARRIER_AREA
     from .mutation_report import decode_report
 
     payloads = validate_inputs(plan, payloads)
@@ -277,64 +220,41 @@ def execute_mutation_remote(
     frozen_workspace = execution_workspace(plan.execution, plan)
     if workspace is not None and workspace != frozen_workspace:
         raise BuildError("mutation workspace differs from sealed plan")
-    scope = session.scope(frozen_workspace)
-    if staging is None:
-        bound = {
-            token.casefold()
-            for target in plan.targets
-            if target.kind == "lakehouse"
-            for token in (target.item_id, target.item_name)
-            if token
-        }
-        staging = tuple(
-            ArchiveStaging(
-                BoundTarget(
-                    "archive-staging:" + item.id,
-                    "lakehouse",
-                    item.id,
-                    workspace_name=plan.execution.workspace_name,
-                    workspace_id=plan.execution.workspace_id,
-                    item_name=item.name,
-                ),
-                "Files/_weaver_carriers",
-            )
-            for item in scope.resolver.discover()
-            if item.type == "Lakehouse"
-            and item.id.casefold() not in bound
-            and item.name.casefold() not in bound
-        )
-    stage_scope = select_staging(plan, staging)
-    if stage_scope is None:
-        raise BuildError("no safe staging outside mutation and protected source scopes")
-    targets = {t.id: t for t in plan.targets}
-    staging_target = (
-        stage_scope.target
-        if isinstance(stage_scope, ArchiveStaging)
-        else targets[stage_scope.target_id]
+    home_id = plan.execution.spark_home_target_id
+    home = (
+        spark_home_of(plan.targets)
+        if home_id is None
+        else next(t for t in plan.targets if t.id == home_id)
     )
-    stage_scope = ArchiveStaging(staging_target, stage_scope.path)
+    if home is None:
+        raise BuildError("remote mutation requires a Lakehouse target")
     build_datetime = build_datetime or datetime.now(timezone.utc).strftime(
         "%Y-%m-%d %H:%M:%S.%f"
     )
     request = {
         "plan_id": plan.bundle_id,
         "invocation_id": invocation_id,
-        "staging": stage_scope.to_mapping(),
         "build_datetime": build_datetime,
         "timeout": timeout,
     }
     carrier = pack_mutation(plan, payloads, request=request)
     if carrier is None:
         raise BuildError("mutation carrier exceeds expanded size bound")
-    home = execution_spark_home(plan.execution, plan)
-    if home is not None:
-        session.require_spark_home(home, workspace=frozen_workspace)
+    if home_id is not None:
+        session.require_spark_home(home.name, workspace=frozen_workspace)
+    scope = session.scope(frozen_workspace)
     store = scope.transport_store
-    root = scope.resolver.lakehouse(
-        ItemRef(staging_target.item_name or staging_target.item_id)
-    )
-    stage = root.join(*stage_scope.path.split("/"), invocation_id)
+    area = scope.resolver.files_root(ItemRef(home.name)) / CARRIER_AREA
+    stage = area / invocation_id
     incoming, output = stage / "carrier.zip", stage / "result.json"
+
+    def remove_stage():
+        store.delete(stage, recursive=True)
+        try:
+            # Non-recursive, so another invocation's carrier keeps the area.
+            store.delete(area)
+        except Exception:
+            pass
 
     def native(location):
         value = location.value
@@ -360,7 +280,7 @@ def execute_mutation_remote(
     try:
         store.write(incoming, carrier.data)
     except BaseException:
-        store.delete(stage, recursive=True)
+        remove_stage()
         raise
     record = {
         "plan_id": plan.bundle_id,
@@ -368,7 +288,6 @@ def execute_mutation_remote(
         "request": request,
         "archive_sha256": carrier.sha256,
         "carrier": incoming.value,
-        "remote_result": output.value,
         "status": "uncertain",
     }
     if not hasattr(session, "archive_mutations"):
@@ -402,8 +321,7 @@ def execute_mutation_remote(
             invocation_id=invocation_id,
         )
     finally:
-        if record["status"] == "completed":
-            try:
-                store.delete(stage, recursive=True)
-            except Exception as error:
-                record["cleanup_error"] = str(error)
+        try:
+            remove_stage()
+        except Exception as error:
+            record["cleanup_error"] = str(error)

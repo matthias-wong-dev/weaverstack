@@ -125,7 +125,6 @@ def test_all_payloads_checked_before_physical_preflight(
     executor = MutationExecutor(
         {"load_file": driver, "folder": driver},
         limits={"physical": 1},
-        journal=lambda event: events.append("journal"),
     )
     with pytest.raises(BuildError, match="invalid payload for action 'second'"):
         executor.execute(plan, payloads)

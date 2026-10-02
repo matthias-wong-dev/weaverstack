@@ -99,6 +99,9 @@ def test_desktop_plan_delivers_binary_bytes_and_reports_physical_failure(
     )
     assert store.read(deployed) == data
     assert store.exists(resolver.files_root(ItemRef(target.name)).join("A3", "Remote"))
+    assert not store.exists(
+        resolver.files_root(ItemRef(target.name)).join("_weaver_carriers")
+    )
     assert weaver_session.archive_mutations[-1]["action_ids"] == ["mkdir", "bytes"]
     failed = weaver_session.execute_mutation_remote(
         physical_plan(fabric_workspace, fabric_workspace_item, target, (folder,))
@@ -163,39 +166,29 @@ def test_lost_response_is_uncertain_without_replay_and_normal_build_converges(
         run(source, **options)
         raise OSError("qualification lost response after remote completion")
 
-    try:
-        with monkeypatch.context() as patcher:
-            patcher.setattr(scope, "livy_run", lost_response)
-            uncertain = weaver_session.execute_mutation_remote(bundle.plan, payloads)
-        record = weaver_session.archive_mutations[-1]
-        assert len(submissions) == 1 and submissions[0]["retry_submission"] is False
-        assert all(r.status == "uncertain" for r in uncertain.results)
-        assert record["status"] == "uncertain" and "lost response" in record["error"]
-        store = weaver_session.transport_store(fabric_workspace)
-        folder = (
-            weaver_session.resolver(fabric_workspace)
-            .files_root(ItemRef(target.name))
-            .join("A3", "Remote")
-        )
-        assert store.exists(folder)
-        assert store.exists(Location(record["carrier"]))
-        # A real physical/catalogue disagreement must be repaired by ordinary planning.
-        store.delete(folder, recursive=True)
-        assert not store.exists(folder)
-        repaired = weaver.build(str(root), items=bindings, session=weaver_session)
-        assert repaired.succeeded, repaired.errors
-        assert store.exists(folder)
-        assert "Lakehouse/Remote/Files/A3.Remote" in {
-            str(identity) for identity in repaired.selection.selected_for_build
-        }
-        unchanged = weaver.build(str(root), items=bindings, session=weaver_session)
-        assert unchanged.succeeded and unchanged.selection.selected_for_build == ()
-        assert unchanged.selection.selected_for_drop == ()
-        assert tuple(unchanged.installation_report.action_results()) == ()
-        assert len(submissions) == 1
-    finally:
-        # This injected loss happens after confirmed server completion.
-        if "record" in locals():
-            weaver_session.transport_store(fabric_workspace).delete(
-                Location(record["carrier"].rsplit("/", 1)[0]), recursive=True
-            )
+    with monkeypatch.context() as patcher:
+        patcher.setattr(scope, "livy_run", lost_response)
+        uncertain = weaver_session.execute_mutation_remote(bundle.plan, payloads)
+    record = weaver_session.archive_mutations[-1]
+    assert len(submissions) == 1 and submissions[0]["retry_submission"] is False
+    assert all(r.status == "uncertain" for r in uncertain.results)
+    assert record["status"] == "uncertain" and "lost response" in record["error"]
+    store = weaver_session.transport_store(fabric_workspace)
+    files = weaver_session.resolver(fabric_workspace).files_root(ItemRef(target.name))
+    folder = files.join("A3", "Remote")
+    assert store.exists(folder)
+    assert not store.exists(files.join("_weaver_carriers"))
+    # A real physical/catalogue disagreement must be repaired by ordinary planning.
+    store.delete(folder, recursive=True)
+    assert not store.exists(folder)
+    repaired = weaver.build(str(root), items=bindings, session=weaver_session)
+    assert repaired.succeeded, repaired.errors
+    assert store.exists(folder)
+    assert "Lakehouse/Remote/Files/A3.Remote" in {
+        str(identity) for identity in repaired.selection.selected_for_build
+    }
+    unchanged = weaver.build(str(root), items=bindings, session=weaver_session)
+    assert unchanged.succeeded and unchanged.selection.selected_for_build == ()
+    assert unchanged.selection.selected_for_drop == ()
+    assert tuple(unchanged.installation_report.action_results()) == ()
+    assert len(submissions) == 1

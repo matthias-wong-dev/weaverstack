@@ -28,7 +28,7 @@ from ..errors import BuildError
 from ..etl import LOAD_ROOT, item_runtime_artefacts
 from ..store import Store, StoreNotFoundError
 from ..targets import TABLES_AREA, ItemRef
-from ..workspaces import CLI_AREA
+from ..workspaces import CARRIER_AREA, CLI_AREA
 from .changes import (
     FOLDER as FOLDER_KIND,
 )
@@ -62,7 +62,7 @@ from .stages import PRUNE, PlannedStage
 from .targets import WAREHOUSE_TARGET, BoundTarget
 
 #: Weaver-owned Files areas that are not item Folder objects.
-_RESERVED_FILES_AREAS = frozenset({CLI_AREA})
+_RESERVED_FILES_AREAS = frozenset({CLI_AREA, CARRIER_AREA})
 
 #: Delta schemas Weaver does not manage.
 _RESERVED_SCHEMAS = frozenset({"dbo", CATALOGUE_SCHEMA})

@@ -190,7 +190,6 @@ def run_mutation(root, spark, output, archive_sha256, *, workers):
     from ..locations import Location
     from ..mutation.bundle import load_bundle
     from ..store import FilesystemStore
-    from .install_archive import ArchiveStaging, select_staging
     from .mutation_report import encode_report, loads
 
     request = loads((root / "request.json").read_bytes())
@@ -198,9 +197,6 @@ def run_mutation(root, spark, output, archive_sha256, *, workers):
     plan = bundle.plan
     if request["plan_id"] != plan.bundle_id:
         raise ValueError("mutation request plan differs")
-    stage = ArchiveStaging.from_mapping(request["staging"])
-    if select_staging(plan, (stage,)) != stage:
-        raise ValueError("unsafe mutation staging")
     payloads = {
         a.payload: bundle.store.read(bundle.location.join(*a.payload.split("/")))
         for _, _, a in plan.actions()

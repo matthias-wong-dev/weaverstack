@@ -191,7 +191,7 @@ It is one product in two positions, because the doers do not know which one they
 are in.
 
 There is one `build`, one `load` and one `test`. Every build action runs in the
-the mutation executor wherever that is, and the state a build plans against is read the same
+mutation executor wherever that is, and the state a build plans against is read the same
 way: the catalogue over TDS, a Lakehouse's views over Spark SQL, a Lakehouse's
 objects from storage, a Warehouse over TDS. A desktop `weaver build` therefore
 needs no published wheel, because its Spark SQL and TableBuilder submissions
@@ -256,8 +256,7 @@ The Session owns execution routing. `ConsoleSession` executes Warehouse-only
 plans through the shared native executor and direct TDS. Lakehouse and mixed
 plans use `execute_mutation_remote(plan, payloads=None)`, which submits the whole
 plan once to Fabric. Native and remote execution both use `MutationExecutor` and
-the existing physical executors. The public Installer, partial-batch archive
-routing and legacy compiler have been removed.
+the existing physical executors.
 
 The internal carrier contains the canonical plan, optional payloads and matching
 Weaver runtime sources and static resources. It validates all payload hashes
@@ -268,6 +267,14 @@ submission. The generated bootstrap imports the extracted runtime under a
 process-shared namespace lock, drains execution, and restores borrowed modules
 and import paths.
 
+The carrier is staged in the plan's Spark-home Lakehouse, under
+`Files/_weaver_carriers/<invocation-id>/`, so a Lakehouse plan needs no other
+item. That area is transport, not a plan target: it is outside plan identity and
+physical scopes, and prune does not inventory it. The bootstrap copies the
+carrier into private storage before any action runs. Every invocation removes its
+directory when it returns, whatever the outcome, and removes the area once no
+other carrier is in it.
+
 Runtime dependencies and the pinned Delta writer are checked before mutation.
 The archive retains direct-Delta creation, supported Views, catalogue settlement
 and load-artifact installation. Build does not run loads or validations.
@@ -276,13 +283,10 @@ action count times the statement timeout. Its final result is a byte count and
 hash for the complete invocation report stored in OneLake. The desktop validates
 the result identity and full action inventory before producing the Build report.
 
-An ambiguous submission or lost result marks the invocation uncertain and is
-never replayed automatically. The carrier, result location and failure are
-retained for diagnosis. There are no durable checkpoint chains, prerequisite
-receipts, selected fragments or action-journal reconstruction. The next ordinary
-Build reads the actual catalogue and physical inventory and converges.
-Completed staging is removed; cleanup failures retain the verified report and
-are recorded separately from execution failure.
+An ambiguous submission or lost result marks the invocation uncertain, and it is
+never replayed. The next ordinary Build reads the actual catalogue and physical
+inventory and converges. A carrier cleanup failure is recorded on the invocation
+and does not change its report.
 
 ## Physical mutation contract
 
@@ -353,26 +357,8 @@ default clock or bounded sleeps on supplied clocks. Blocking driver calls must
 drain through their own contracts. Supported cancellation requires a
 driver-confirmed outcome. A valid known failure retains its error and settlement
 evidence after deadline expiry; late success cannot certify completion.
-Recovery accepts a zero-attempt uncertain settler after its acknowledged
-operation deadline expires and its causal prerequisites are satisfied. It retains
-confirmed starter results and preserves known operation settlement.
-Provided buffered journals persist each dispatch group's admission before its
-drivers run and operation acknowledgements before result consumers run. Ordinary
-completion events are checkpointed in bounded groups and flushed with subsequent
-admissions or at invocation completion.
-An admission checkpoint failure records `admission_refused` in the final ledger
-before the action's zero-attempt `not_dispatched` result. Final receipt validation
-requires its journal diagnostic and rejects physical outcomes for that action.
-Checkpoint recovery without this final evidence retains admission uncertainty.
-Runtime clocks, handles and invocation IDs remain outside plan identity.
-
-`ArchiveStaging` may bind a staging Lakehouse outside the frozen plan. The
-shared physical scope rules keep staging outside protected sources, writes and
-destructive scopes. Physical actions without write scopes exclude their whole
-target. Automatic staging also excludes Lakehouses named by the frozen bindings.
-An execution with no safe candidate is refused before submission. Staging is an internal transport
-choice outside the plan identity and travels in the hashed invocation request.
-Catalogue-free physical plans bind a Workspace without a catalogue.
+The report's ledger is in-memory evidence for one invocation. Runtime clocks, handles and invocation IDs remain outside
+plan identity. Catalogue-free physical plans bind a Workspace without a catalogue.
 
 Real Fabric qualification covers desktop plan execution, binary payload delivery,
 physical actions and failures, lost-response uncertainty without replay, and
@@ -480,7 +466,10 @@ Weaver's own dependency resolver   EnvironmentPackageConflict
 SUPPORTED_FABRIC_RUNTIMES          per-runtime wheel ABI selection
 initialise --no-input              a wipe dry run as its own preflight
 a per-command interaction check    workspace-config as the wiped estate
-weaver.test(strict=True)
+weaver.test(strict=True)           format-4 bundles / compile_legacy_build
+the public Installer               partial-batch archive routing
+DurableJournal / MutationJournal   checkpoint recovery and receipts
+ArchiveStaging / select_staging    a separate carrier Lakehouse
 ```
 
 The `provision` scope went when the suite moved to fixed items. Standing the

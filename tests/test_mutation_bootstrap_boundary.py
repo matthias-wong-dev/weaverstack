@@ -14,10 +14,8 @@ from support.workspaces import given_workspace
 from test_mutation_archive_install import build_plan_fixture as legacy
 
 from weaver.locations import Location
-from weaver.mutation import BoundTarget
 from weaver.mutation.bundle import compute_bundle_id
 from weaver.sessions.install_archive import (
-    ArchiveStaging,
     bootstrap_source,
     pack_mutation,
     read_receipt,
@@ -60,9 +58,6 @@ def run_bootstrap(
     request = {
         "plan_id": plan.bundle_id,
         "invocation_id": "invocation",
-        "staging": ArchiveStaging(
-            BoundTarget("stage", "lakehouse", "stage-id"), "Files/stage"
-        ).to_mapping(),
         "build_datetime": "2026-01-01 00:00:00.000000",
         "timeout": 600,
     }
