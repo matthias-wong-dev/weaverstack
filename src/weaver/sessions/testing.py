@@ -220,6 +220,27 @@ class TestSession(Session):
         )
         return None
 
+    def sql_executor(self, target: Any, *, workspace: Workspace | None = None):
+        """A Warehouse connection whose statements are recorded."""
+
+        session = self
+
+        class _Recorded:
+            def execute_script(self, script: str) -> None:
+                session.execute_tsql(script, target=target, workspace=workspace)
+
+            def execute(self, statement: str, parameters=()) -> None:
+                session.execute_tsql(
+                    statement, target=target, workspace=workspace, parameters=parameters
+                )
+
+            def query(self, statement: str, parameters=()):
+                return session.query_tsql(
+                    statement, target=target, workspace=workspace, parameters=parameters
+                )
+
+        return _Recorded()
+
     def query_tsql(
         self,
         statement: str,

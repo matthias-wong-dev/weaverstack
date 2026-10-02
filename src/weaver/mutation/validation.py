@@ -165,6 +165,7 @@ def validate_mutation_plan(plan: MutationPlan) -> None:
     if (
         any(
             a.executor in {"spark_sql", "spark_sql_batch", "spark_table"}
+            or a.kind == "await_table_shortcuts"
             for a in actions
         )
         and home_id is None

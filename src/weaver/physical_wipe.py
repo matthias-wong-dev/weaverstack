@@ -42,7 +42,7 @@ class WipeReport:
 
 
 #: Fabric owns the default ``dbo`` schema. Wipe empties it but does not remove it.
-_KEPT_SCHEMAS = ("dbo",)
+KEPT_SCHEMAS = ("dbo",)
 
 
 def _guard(location: Location, root: Location) -> None:
@@ -57,13 +57,17 @@ def _guard(location: Location, root: Location) -> None:
         )
 
 
-def _clear(
+#: Recursive deletes issued at once while clearing one area.
+ENTRY_DELETIONS = 16
+
+
+def clear_area(
     store: Store, location: Location, root: Location, *, dry_run: bool, keep=()
 ) -> tuple[str, ...]:
     """Remove the contents of a location, keeping the location itself.
 
     ``keep`` names entries the wipe passes over: not everything under an area
-    belongs to the target. See :data:`_KEPT_SCHEMAS`.
+    belongs to the target. See :data:`KEPT_SCHEMAS`.
     """
 
     _guard(location, root)
@@ -76,29 +80,57 @@ def _clear(
         if entry.location.name.casefold() not in kept
     ]
     removed = tuple(sorted(entry.location.name for entry in entries))
-    if not dry_run:
+    if not dry_run and entries:
         for entry in entries:
             _guard(entry.location, root)
-            store.delete(entry.location, recursive=entry.is_directory)
+        from concurrent.futures import ThreadPoolExecutor
+        from contextvars import copy_context
+
+        # Each entry is one recursive delete, independent of the others.
+        with ThreadPoolExecutor(max_workers=min(ENTRY_DELETIONS, len(entries))) as pool:
+            for done in [
+                pool.submit(
+                    copy_context().run,
+                    store.delete,
+                    entry.location,
+                    recursive=entry.is_directory,
+                )
+                for entry in entries
+            ]:
+                done.result()
     return removed
 
 
-def _remove_shortcuts(
-    resolver, lakehouse: ItemRef, *, prefix: str, dry_run: bool
-) -> tuple[str, ...]:
-    """Remove this Lakehouse's shortcuts beneath ``prefix`` before storage is swept.
+#: Shortcut removals are independent REST calls, so a wipe issues several at once.
+SHORTCUT_REMOVALS = 8
+
+#: OneLake may answer for a removed shortcut's path after Fabric stops listing it.
+NAME_RELEASE_TIMEOUT = 300.0
+NAME_RELEASE_POLL_INTERVAL = 3.0
+
+
+@dataclass(frozen=True)
+class DetachedShortcuts:
+    """Removed shortcuts, reported as ``shortcut:<path>/<name>``, and their paths."""
+
+    removed: tuple[str, ...]
+    locations: tuple[Location, ...]
+
+
+def detach_shortcuts(
+    resolver, lakehouse: ItemRef, *, prefix: str, dry_run: bool = False
+) -> DetachedShortcuts:
+    """Remove this Lakehouse's shortcuts beneath ``prefix`` through the workspace.
 
     The path prefix keeps a wipe of one area from removing the other's shortcuts.
-
-    Reports use ``shortcut:<path>/<name>`` to distinguish pointers from deleted
-    directories. Removing a shortcut does not delete its source data.
-
+    Removing a shortcut does not delete its source data; deleting through a path
+    that still resolves to one would, so a sweep waits for :func:`released`.
     """
 
     enumerate_shortcuts = getattr(resolver, "onelake_shortcuts", None)
     remove = getattr(resolver, "remove_onelake_shortcut", None)
     if enumerate_shortcuts is None or remove is None:
-        return ()
+        return DetachedShortcuts((), ())
 
     within = prefix.strip("/").casefold()
     shortcuts = tuple(
@@ -107,10 +139,68 @@ def _remove_shortcuts(
         if shortcut.path.casefold() == within
         or shortcut.path.casefold().startswith(within + "/")
     )
+    if not shortcuts:
+        return DetachedShortcuts((), ())
     if not dry_run:
-        for shortcut in shortcuts:
-            remove(lakehouse, path=shortcut.path, name=shortcut.name)
-    return tuple(f"shortcut:{shortcut.qualified}" for shortcut in shortcuts)
+        from concurrent.futures import ThreadPoolExecutor
+        from contextvars import copy_context
+
+        with ThreadPoolExecutor(
+            max_workers=min(SHORTCUT_REMOVALS, len(shortcuts))
+        ) as pool:
+            for done in [
+                pool.submit(
+                    copy_context().run,
+                    remove,
+                    lakehouse,
+                    path=shortcut.path,
+                    name=shortcut.name,
+                )
+                for shortcut in shortcuts
+            ]:
+                done.result()
+    root = resolver.lakehouse(lakehouse)
+    return DetachedShortcuts(
+        removed=tuple(f"shortcut:{shortcut.qualified}" for shortcut in shortcuts),
+        locations=tuple(
+            root.join(*shortcut.path.split("/"), shortcut.name)
+            for shortcut in shortcuts
+        ),
+    )
+
+
+def released(store: Store, locations) -> bool:
+    """Whether OneLake has released every removed shortcut's path."""
+
+    return not any(store.exists(location) for location in locations)
+
+
+def _await_release(store: Store, detached: DetachedShortcuts) -> None:
+    import time
+
+    deadline = time.monotonic() + NAME_RELEASE_TIMEOUT
+    while not released(store, detached.locations):
+        if time.monotonic() >= deadline:
+            raise unreleased(detached)
+        time.sleep(NAME_RELEASE_POLL_INTERVAL)
+
+
+def unreleased(detached: DetachedShortcuts) -> CommandError:
+    return CommandError(
+        "OneLake still answers for removed shortcut(s) "
+        + ", ".join(detached.removed)
+        + f" after {NAME_RELEASE_TIMEOUT:.0f}s, so their area was not swept. "
+        "Run the wipe again."
+    )
+
+
+def _remove_shortcuts(
+    resolver, lakehouse: ItemRef, *, prefix: str, dry_run: bool, store: Store
+) -> tuple[str, ...]:
+    detached = detach_shortcuts(resolver, lakehouse, prefix=prefix, dry_run=dry_run)
+    if not dry_run:
+        _await_release(store, detached)
+    return detached.removed
 
 
 def _store_for(workspace: Workspace, session):
@@ -144,12 +234,12 @@ def wipe_folder_target(
     resolver = _resolver_for(workspace, session)
     location = resolver.folder_root(target)
     shortcuts = _remove_shortcuts(
-        resolver, target.lakehouse, prefix=FILES_AREA, dry_run=dry_run
+        resolver, target.lakehouse, prefix=FILES_AREA, dry_run=dry_run, store=store
     )
     return WipeReport(
         target=f"folder:{target}",
         location=location,
-        removed=shortcuts + _clear(store, location, resolver.root, dry_run=dry_run),
+        removed=shortcuts + clear_area(store, location, resolver.root, dry_run=dry_run),
         dry_run=dry_run,
     )
 
@@ -172,13 +262,15 @@ def wipe_delta_target(
     resolver = _resolver_for(workspace, session)
     location = resolver.tables_root(target.lakehouse)
     shortcuts = _remove_shortcuts(
-        resolver, target.lakehouse, prefix=TABLES_AREA, dry_run=dry_run
+        resolver, target.lakehouse, prefix=TABLES_AREA, dry_run=dry_run, store=store
     )
     return WipeReport(
         target=f"delta:{target}",
         location=location,
         removed=shortcuts
-        + _clear(store, location, resolver.root, dry_run=dry_run, keep=_KEPT_SCHEMAS),
+        + clear_area(
+            store, location, resolver.root, dry_run=dry_run, keep=KEPT_SCHEMAS
+        ),
         dry_run=dry_run,
     )
 

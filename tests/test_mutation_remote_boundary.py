@@ -214,11 +214,14 @@ def test_a_failure_blocks_only_the_actions_that_depend_on_it():
 
 @weaver_test()
 @pytest.mark.parametrize(
-    "kind,route", [("warehouse", "native"), ("lakehouse", "remote")]
+    "kind,spark,route",
+    [
+        ("warehouse", False, "native"),
+        ("lakehouse", False, "native"),
+        ("lakehouse", True, "remote"),
+    ],
 )
-def test_console_owns_whole_plan_routing_without_warehouse_spark_requirement(
-    monkeypatch, kind, route
-):
+def test_console_carries_only_spark_plans_into_fabric(monkeypatch, kind, spark, route):
     from dataclasses import replace
 
     from weaver.mutation import BoundTarget
@@ -228,7 +231,12 @@ def test_console_owns_whole_plan_routing_without_warehouse_spark_requirement(
 
     plan = sealed((_action(),))
     plan = replace(
-        plan, bundle_id="", targets=(BoundTarget("sales", kind, "sales-id"),)
+        plan,
+        bundle_id="",
+        targets=(BoundTarget("sales", kind, "sales-id"),),
+        execution=replace(
+            plan.execution, spark_home_target_id="sales" if spark else None
+        ),
     )
     plan = replace(plan, bundle_id=compute_bundle_id(plan))
     calls = []

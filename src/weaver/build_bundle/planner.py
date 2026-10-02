@@ -351,10 +351,10 @@ REFRESH_EXECUTORS = frozenset({START_EXECUTOR, AWAIT_EXECUTOR})
 def _needs_spark(sequences) -> bool:
     """Whether any planned action has to run through a Spark session."""
 
-    from .execution import SPARK_EXECUTORS
+    from .execution import needs_spark
 
     return any(
-        action.executor in SPARK_EXECUTORS
+        needs_spark(action)
         for sequence in sequences
         for batch in sequence.batches
         for action in batch.actions

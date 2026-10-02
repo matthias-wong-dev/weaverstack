@@ -122,7 +122,9 @@ class ConsoleSession(Session):
         return execute_mutation_remote(self, plan, payloads, **options)
 
     def execute_mutation(self, plan, payloads=None, **options):
-        if not any(target.kind == "lakehouse" for target in plan.targets):
+        # Only Spark work needs the plan carried into Fabric. TDS, OneLake and
+        # REST are reached from here, so a plan without Spark starts no session.
+        if plan.execution.spark_home_target_id is None:
             return super().execute_mutation(plan, payloads, **options)
         return self.execute_mutation_remote(plan, payloads, **options)
 

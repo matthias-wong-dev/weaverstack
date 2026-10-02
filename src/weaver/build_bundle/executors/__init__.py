@@ -19,6 +19,7 @@ from .spark_sql import SparkSqlExecutor
 from .spark_sql_batch import SparkSqlBatchExecutor
 from .spark_table import SparkTableExecutor
 from .tsql import TSqlBatchExecutor, TSqlExecutor
+from .wipe import LakehouseWipeExecutor
 
 
 def default_executors() -> dict[str, ActionExecutor]:
@@ -33,6 +34,7 @@ def default_executors() -> dict[str, ActionExecutor]:
         ShortcutExecutor.name: ShortcutExecutor(),
         ShortcutReadinessExecutor.name: ShortcutReadinessExecutor(),
         RuntimeStateExecutor.name: RuntimeStateExecutor(),
+        LakehouseWipeExecutor.name: LakehouseWipeExecutor(),
     }
 
 
@@ -48,6 +50,7 @@ __all__ = [
     "SparkTableExecutor",
     "ShortcutReadinessExecutor",
     "FolderExecutor",
+    "LakehouseWipeExecutor",
     "LoadFileExecutor",
     "TSqlExecutor",
     "TSqlBatchExecutor",

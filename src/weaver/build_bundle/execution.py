@@ -20,6 +20,12 @@ from .targets import LAKEHOUSE_TARGET, WAREHOUSE_TARGET
 
 #: Executors whose actions cannot run without a Spark session.
 SPARK_EXECUTORS = frozenset({"spark_sql", "spark_sql_batch", "spark_table"})
+#: Table shortcut readiness asks Spark whether a relation reads.
+SPARK_KINDS = frozenset({"await_table_shortcuts"})
+
+
+def needs_spark(action) -> bool:
+    return action.executor in SPARK_EXECUTORS or action.kind in SPARK_KINDS
 
 
 @dataclass(frozen=True)
@@ -90,10 +96,7 @@ def _environment_id(reference, workspace, *, session) -> str | None:
 def plan_needs_spark(plan) -> bool:
     """Whether any planned action has to run through a Spark session."""
 
-    return any(
-        action.executor in SPARK_EXECUTORS
-        for _sequence, _batch, action in plan.actions()
-    )
+    return any(needs_spark(action) for _sequence, _batch, action in plan.actions())
 
 
 def spark_home_of(targets):
@@ -235,6 +238,7 @@ __all__ = [
     "resolve_execution_identity",
     "execution_spark_home",
     "execution_workspace",
+    "needs_spark",
     "plan_needs_spark",
     "select_spark_home",
     "spark_home_of",

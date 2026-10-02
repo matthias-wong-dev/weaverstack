@@ -252,11 +252,12 @@ the plan's frozen Build envelope. The directory codec rejects older bundles with
 regeneration guidance. `BuildBundle` stores an artifact; execution consumes its
 plan and payload bytes through `Session.execute_mutation`.
 
-The Session owns execution routing. `ConsoleSession` executes Warehouse-only
-plans through the shared native executor and direct TDS. Lakehouse and mixed
-plans use `execute_mutation_remote(plan, payloads=None)`, which submits the whole
-plan once to Fabric. Native and remote execution both use `MutationExecutor` and
-the existing physical executors.
+The Session owns execution routing. `ConsoleSession` executes a plan with no
+frozen Spark attachment through the shared native executor, reaching TDS,
+OneLake and REST from the desktop, so it starts no Spark session. A plan that
+attaches Spark uses `execute_mutation_remote(plan, payloads=None)`, which submits
+the whole plan once to Fabric. Native and remote execution both use
+`MutationExecutor` and the existing physical executors.
 
 The internal carrier contains the canonical plan, optional payloads and matching
 Weaver runtime sources and static resources. It validates all payload hashes

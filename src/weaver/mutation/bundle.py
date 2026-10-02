@@ -33,6 +33,7 @@ SHORTCUT_EXECUTOR = "shortcut"
 SHORTCUT_READINESS_EXECUTOR = "shortcut_readiness"
 LOAD_FILE_EXECUTOR = "load_file"
 RUNTIME_STATE_EXECUTOR = "runtime_state"
+LAKEHOUSE_WIPE_EXECUTOR = "lakehouse_wipe"
 #: Executors accepted in a bundle manifest. Batch executors preserve statement
 #: order; target-only executors carry no payload.
 VALID_EXECUTORS = frozenset(
@@ -47,6 +48,7 @@ VALID_EXECUTORS = frozenset(
         SHORTCUT_READINESS_EXECUTOR,
         LOAD_FILE_EXECUTOR,
         RUNTIME_STATE_EXECUTOR,
+        LAKEHOUSE_WIPE_EXECUTOR,
     }
 )
 #: Required payload extension by executor.
@@ -63,7 +65,7 @@ _EXECUTOR_EXTENSION = {
     LOAD_FILE_EXECUTOR: ".payload",
     RUNTIME_STATE_EXECUTOR: ".runtime-state.json",
 }
-_PAYLOADLESS_EXECUTORS = frozenset({FOLDER_EXECUTOR})
+_PAYLOADLESS_EXECUTORS = frozenset({FOLDER_EXECUTOR, LAKEHOUSE_WIPE_EXECUTOR})
 #: Payloadless exceptions for executors that otherwise require one.
 _PAYLOADLESS_KINDS = frozenset({DELETE_FILE})
 
