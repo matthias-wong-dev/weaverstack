@@ -539,6 +539,8 @@ def _lakehouse(
         ),
     )
     recreatable = _recreatable(each, bindings=resolved.bindings)
+    # This plan builds these destinations, under their recorded spellings.
+    built_here = {other.destination.casefold() for other in resolved.items}
     recreated = []
     for pointer in recreatable:
         item = resolver.external_item(
@@ -546,17 +548,20 @@ def _lakehouse(
             item_type=pointer.shortcut.target_item.item_type,
             workspace=pointer.target_workspace,
         )
-        recreated.append(
-            shortcut_request(
-                pointer,
-                source=item,
-                source_path=names.resolve(
-                    resolver.external_root(item),
-                    pointer.source_components,
-                    what=f"mirror recreates {pointer.destination}, which reads "
-                    f"{pointer.target_name}",
-                ),
+        if (
+            pointer.target_workspace is None
+            and pointer.target_name.casefold() in built_here
+        ):
+            source_path = "/".join(pointer.source_components)
+        else:
+            source_path = names.resolve(
+                resolver.external_root(item),
+                pointer.source_components,
+                what=f"mirror recreates {pointer.destination}, which reads "
+                f"{pointer.target_name}",
             )
+        recreated.append(
+            shortcut_request(pointer, source=item, source_path=source_path)
         )
     surface = surface_shortcuts(
         each.item,

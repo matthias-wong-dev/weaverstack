@@ -192,3 +192,64 @@ def test_a_lakehouse_mirror_resolves_case_exact_sources_and_awaits_its_shortcuts
     assert plan.execution.spark_home_target_id == "lakehouse-Input_Dev"
     assert summary["Lakehouse/Input"]["files"] == 1
     assert summary["Lakehouse/Input"]["views"] == 1
+
+
+@weaver_test()
+def test_a_shortcut_into_another_mirrored_item_reads_what_this_plan_builds(tmp_path):
+    """The producer's destination is empty until this plan fills it."""
+
+    import json
+    from dataclasses import replace
+
+    from weaver.catalogue.borrow import Borrowed
+    from weaver.installed import InstalledShortcut
+
+    (tmp_path / "Input" / "Tables" / "Sales" / "Customer").mkdir(parents=True)
+    producer = _resolved(
+        "Input",
+        "Lakehouse",
+        relations=(
+            Borrowed(
+                WeaverDocumentId.parse("Lakehouse/Input/Tables/Sales.Customer"),
+                "table",
+                "table",
+            ),
+        ),
+    )
+    consumer_item = WeaverItemId.parse("Lakehouse/Model")
+    shortcut = InstalledShortcut(
+        destination=WeaverDocumentId.parse("Lakehouse/Model/Tables/Sales.Upstream"),
+        source=WeaverDocumentId.parse("Lakehouse/Input/Tables/Sales.Customer"),
+        shortcut_type="table",
+        target_type="logical",
+        target_item=WeaverItemId.parse("Lakehouse/Input"),
+        target_schema="Sales",
+        target_object="Customer",
+    )
+    consumer = MirrorItem(
+        item=consumer_item,
+        source_target="Model",
+        destination="Model_Dev",
+        shortcuts=(shortcut,),
+    )
+    resolved = replace(
+        producer,
+        items=(*producer.items, consumer),
+        bindings={**producer.bindings, consumer_item: "Model_Dev"},
+        installations={**producer.installations, consumer_item: {}},
+    )
+    session = _Session(resolver=_Resolver(tmp_path), store=FilesystemStore())
+
+    plan, payloads, _summary = mirror_mutation_plan(resolved, session=session)
+
+    actions = _actions(plan)
+    recreated = json.loads(
+        payloads[actions["mirror-recreated-lakehouse-Model_Dev"].payload]
+    )
+    assert recreated["shortcuts"][0]["source_path"] == "Tables/Sales/Customer"
+    assert recreated["shortcuts"][0]["source_item_name"] == "Input_Dev"
+    assert runs_before(
+        plan,
+        "mirror-await-pointers-tables-lakehouse-Input_Dev",
+        "mirror-recreated-lakehouse-Model_Dev",
+    )
