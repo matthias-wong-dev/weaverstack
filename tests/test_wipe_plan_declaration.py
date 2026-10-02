@@ -361,19 +361,22 @@ def test_an_unknown_disposition_names_the_ones_there_are():
 
 
 @weaver_test()
-def test_mirror_asks_for_the_physical_only_disposition():
-    """Read off the wiring, so the estate semantics cannot reach mirror."""
+def test_mirror_empties_physical_targets_without_estate_semantics():
+    """Read off the wiring, so estate discovery and claims cannot reach mirror."""
 
     import inspect
     import sys
 
+    import weaver.mirror_plan  # noqa: F401 - imported for sys.modules
     import weaver.operations.mirror  # noqa: F401 - imported for sys.modules
 
-    source = inspect.getsource(sys.modules["weaver.operations.mirror"])
-
-    assert source.count("catalogue_action=PHYSICAL_ONLY") == 2
-    assert "catalogue_action=UNBIND" not in source
-    assert "plan_wipe" not in source
+    for module in ("weaver.mirror_plan", "weaver.operations.mirror"):
+        source = inspect.getsource(sys.modules[module])
+        assert "plan_wipe" not in source
+        assert "UNBIND" not in source
+    assert inspect.getsource(sys.modules["weaver.mirror_plan"]).count(
+        "target_wipe_actions("
+    ) == 2
 
 
 # --- estate discovery ---------------------------------------------------------

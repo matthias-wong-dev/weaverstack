@@ -39,7 +39,6 @@ def wipe_mutation_plan(plan, *, unbind_statements=()) -> tuple[MutationPlan, dic
     """The plan's physical wipe as a sealed MutationPlan and its payloads."""
 
     from .operations.wipe import LAKEHOUSE, REMOVE, UNBIND
-    from .sql import generate_warehouse_wipe_sql
 
     workspace = str(plan.workspace.workspace)
     payloads: dict[str, bytes] = {}
@@ -66,28 +65,13 @@ def wipe_mutation_plan(plan, *, unbind_statements=()) -> tuple[MutationPlan, dic
         last = plan.catalogue_action == REMOVE and plan.is_catalogue(target)
         if last:
             catalogue_id = physical.id
-        after = tuple(completed) if last else ()
-        if physical.kind == "warehouse":
-            script = generate_warehouse_wipe_sql().encode("utf-8")
-            path = f"payload/{number:03d}-wipe/{physical.id}.sql"
-            payloads[path] = script
-            actions = (
-                _action(
-                    f"wipe-{physical.id}",
-                    WIPE_WAREHOUSE,
-                    physical,
-                    executor="tsql",
-                    payload=path,
-                    payload_sha256=sha256_hex(script),
-                    depends_on=after,
-                    resources=(f"warehouse:{physical.item_id}",),
-                    scope="",
-                ),
-            )
-        else:
-            actions = _lakehouse_actions(physical, after)
-        # A sweep follows its detach, so the sweeps and Warehouse wipes finish a target.
-        completed.extend(a.id for a in actions if a.kind not in _DETACHES)
+        actions, written = target_wipe_actions(
+            physical,
+            payload_dir=f"payload/{number:03d}-wipe",
+            depends_on=tuple(completed) if last else (),
+        )
+        payloads.update(written)
+        completed.extend(finishing(actions))
         sequences.append(
             MutationSequence(
                 number,
@@ -142,6 +126,38 @@ def wipe_mutation_plan(plan, *, unbind_statements=()) -> tuple[MutationPlan, dic
 
 
 _DETACHES = frozenset({DETACH_FILE_SHORTCUTS, DETACH_TABLE_SHORTCUTS})
+
+
+def target_wipe_actions(physical: BoundTarget, *, payload_dir: str, depends_on=()):
+    """The actions that empty one physical target, and their payloads."""
+
+    if physical.kind == "lakehouse":
+        return _lakehouse_actions(physical, tuple(depends_on)), {}
+    from .sql import generate_warehouse_wipe_sql
+
+    script = generate_warehouse_wipe_sql().encode("utf-8")
+    path = f"{payload_dir}/{physical.id}.sql"
+    action = _action(
+        f"wipe-{physical.id}",
+        WIPE_WAREHOUSE,
+        physical,
+        executor="tsql",
+        payload=path,
+        payload_sha256=sha256_hex(script),
+        depends_on=tuple(depends_on),
+        resources=(f"warehouse:{physical.item_id}",),
+        scope="",
+    )
+    return (action,), {path: script}
+
+
+def finishing(actions) -> tuple[str, ...]:
+    """The actions whose success leaves their target empty.
+
+    A sweep follows its detach, so sweeps and Warehouse wipes finish a target.
+    """
+
+    return tuple(a.id for a in actions if a.kind not in _DETACHES)
 
 
 def _lakehouse_actions(physical: BoundTarget, after) -> tuple[MutationAction, ...]:

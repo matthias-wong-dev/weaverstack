@@ -11,6 +11,7 @@ create-or-alter scripts.
 from __future__ import annotations
 
 from .base import ActionExecutor, InstallationContext, ResolvedTarget, SkippedExecution
+from .copy_files import CopyFilesExecutor
 from .folder import FolderExecutor
 from .load_file import LoadFileExecutor
 from .runtime_state import RuntimeStateExecutor
@@ -28,6 +29,7 @@ def default_executors() -> dict[str, ActionExecutor]:
         SparkSqlBatchExecutor.name: SparkSqlBatchExecutor(),
         SparkTableExecutor.name: SparkTableExecutor(),
         FolderExecutor.name: FolderExecutor(),
+        CopyFilesExecutor.name: CopyFilesExecutor(),
         LoadFileExecutor.name: LoadFileExecutor(),
         TSqlExecutor.name: TSqlExecutor(),
         TSqlBatchExecutor.name: TSqlBatchExecutor(),
@@ -40,6 +42,7 @@ def default_executors() -> dict[str, ActionExecutor]:
 
 __all__ = [
     "ActionExecutor",
+    "CopyFilesExecutor",
     "InstallationContext",
     "ResolvedTarget",
     "RuntimeStateExecutor",

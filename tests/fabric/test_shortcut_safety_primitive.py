@@ -62,7 +62,7 @@ def probe(
             """One shortcut, through the product path the installer uses."""
 
             made.append((path, name))
-            return resolver.create_onelake_shortcuts(
+            return resolver.submit_onelake_shortcuts(
                 target,
                 [
                     {
@@ -73,7 +73,7 @@ def probe(
                         "source_path": source_path,
                     }
                 ],
-            )[0]
+            ).created[0]
 
         def local(self, relative: str):
             return resolver.lakehouse(target) / relative

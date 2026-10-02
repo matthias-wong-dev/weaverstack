@@ -295,42 +295,6 @@ def readiness_sweep(pending: dict, *, context) -> tuple[dict, str | None]:
     return remaining, failure
 
 
-def await_addressable(frozen, *, destination, location, spark_sql) -> float | None:
-    """Block until every table shortcut is readable, for Mirror."""
-
-    tables = [each for each in frozen if each.get("type", "table") == "table"]
-    if not tables:
-        return None
-    context = _AddressContext(destination, location, spark_sql)
-    pending = readiness_checks(TABLES_SURFACE, tables, context=context)
-    started = time.monotonic()
-    failure = None
-    while True:
-        pending, failure = readiness_sweep(pending, context=context)
-        if not pending:
-            return round(time.monotonic() - started, 1)
-        if time.monotonic() - started >= ADDRESSABLE_TIMEOUT:
-            raise InstallError(
-                f"shortcut(s) {', '.join(sorted(pending))} were created but did "
-                f"not become readable within {int(ADDRESSABLE_TIMEOUT)}s: {failure}"
-            )
-        time.sleep(ADDRESSABLE_POLL_INTERVAL)
-
-
-@dataclass(frozen=True)
-class _AddressTarget:
-    destination: Any
-    location: Any
-    bound: Any = None
-
-
-class _AddressContext:
-    def __init__(self, destination, location, spark_sql) -> None:
-        self.target = _AddressTarget(destination, location)
-        self.spark_sql = spark_sql
-        self.store = None
-
-
 @dataclass(frozen=True)
 class ExternalItem:
     """The shortcut API identity of an unbound item outside this build."""

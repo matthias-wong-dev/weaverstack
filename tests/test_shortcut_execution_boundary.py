@@ -294,16 +294,16 @@ def test_the_fabric_transport_resolves_a_bound_warehouse_by_its_declared_kind(
     resolver = given_resolver(lakehouses=("Curated_LH",), warehouses=("Serving_WH",))
     captured = {}
 
-    def create(destination, requests, *, client):
+    def submit(destination, requests, *, client):
         captured.update(destination=destination, requests=requests)
-        return shortcuts.BulkShortcutResult(
-            created=tuple({"path": each.qualified} for each in requests),
-            calls=1,
+        return shortcuts.BulkSubmission(
+            created={i: {"path": each.qualified} for i, each in enumerate(requests)},
+            waiting=(),
         )
 
-    monkeypatch.setattr(shortcuts, "create_shortcuts", create)
+    monkeypatch.setattr(shortcuts, "submit_shortcuts", submit)
 
-    resolver.create_onelake_shortcuts(
+    resolver.submit_onelake_shortcuts(
         ItemRef("Curated_LH"),
         [
             {

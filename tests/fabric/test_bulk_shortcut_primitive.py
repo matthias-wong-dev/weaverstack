@@ -51,7 +51,9 @@ def batch(
             """One bulk request, through the product path the installer uses."""
 
             made.extend((each["path"], each["name"]) for each in requests)
-            return resolver.create_onelake_shortcuts(target, requests)
+            submitted = resolver.submit_onelake_shortcuts(target, requests)
+            assert submitted.waiting == (), "a source was not yet in OneLake"
+            return tuple(submitted.created[i] for i in range(len(requests)))
 
         def member(self, *, path: str, name: str, source_path: str) -> dict:
             return {

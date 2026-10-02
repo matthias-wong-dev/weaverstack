@@ -158,25 +158,12 @@ class FabricResolver:
     # These REST operations belong to the desktop workspace adapter. An
     # in-Fabric resolver records them as skipped.
 
-    def create_onelake_shortcuts(self, item: ItemRef, shortcuts) -> tuple[dict, ...]:
-        """Point each shortcut's ``path/name`` at its source, waiting for sources.
-
-        Each shortcut names a source that is either a name in this workspace or
-        an item already resolved elsewhere. A direct shortcut may point outside
-        the workspace the build is bound to, and that address is settled when the
-        bundle is generated, so there is nothing left to look up here.
-        """
-
-        from .shortcuts import create_shortcuts
-
-        return create_shortcuts(
-            self.resolve(item, item_type=LAKEHOUSE),
-            self._shortcut_requests(shortcuts),
-            client=self.client,
-        ).created
-
     def submit_onelake_shortcuts(self, item: ItemRef, shortcuts):
-        """Submit shortcuts in one bulk call; see :class:`.shortcuts.BulkSubmission`."""
+        """Point each shortcut's ``path/name`` at its source, in one bulk call.
+
+        Each source is a name in this workspace or an item already resolved
+        elsewhere; see :class:`.shortcuts.BulkSubmission` for the outcome.
+        """
 
         from .shortcuts import submit_shortcuts
 

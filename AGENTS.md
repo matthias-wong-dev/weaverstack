@@ -515,6 +515,8 @@ weaver.test(strict=True)           format-4 bundles / compile_legacy_build
 the public Installer               partial-batch archive routing
 DurableJournal / MutationJournal   checkpoint recovery and receipts
 ArchiveStaging / select_staging    a separate carrier Lakehouse
+procedural Wipe and Mirror runs    create_onelake_shortcuts / await_addressable
+per-batch settlement chains        the native-session lane
 ```
 
 The `provision` scope went when the suite moved to fixed items. Standing the
@@ -526,9 +528,22 @@ Interaction is one CLI-wide policy. `--non-interactive` is the only spelling,
 confirmation is read, and `--yes` grants authorisation and nothing else.
 
 A wipe plans before it acts. `plan_wipe` settles the estate and the catalogue
-disposition, `wipe` empties the plan it is given, and the physical mechanics in
-`physical_wipe` know nothing about authorisation or estate discovery. The estate
-an unscoped wipe empties is what `_.Installation` records.
+disposition, `wipe_mutation_plan` freezes each target's destructive scope into a
+MutationPlan, and `wipe` executes it through the Session. The physical mechanics
+in `physical_wipe` know nothing about authorisation or estate discovery; they
+enumerate inside the frozen scope when an action runs. A Warehouse is one
+dynamic-SQL action. A Lakehouse area detaches its shortcuts, waits for OneLake to
+release their paths, and is swept only after a successful detach. Targets are
+independent; a removed catalogue or an unbind follows them all. The estate an
+unscoped wipe empties is what `_.Installation` records.
+
+A mirror plans before it acts too. `check_mirror` proves the source and refuses
+unsafe destinations, then `mirror_mutation_plan` reads what the mirror needs,
+source code definitions, case-exact source paths and the deployed load tree,
+and compiles one plan: the destination catalogue is emptied, built against its
+known-empty state and forked, while each item's destination is emptied and
+reconstructed. An item is recorded and bound to its mirror last, only after its
+own reconstruction and the fork succeed.
 
 One disposition, one meaning. `REMOVE` takes the catalogue last, `UNBIND` keeps
 it and deletes its claims for the targets emptied and is never handed it as a

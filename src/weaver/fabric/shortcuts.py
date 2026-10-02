@@ -1,12 +1,12 @@
 """Create, inspect and delete Fabric OneLake shortcuts.
 
-Build planning decides which shortcuts change. Creation submits those shortcuts
-as one long-running bulk operation and handles each member's outcome separately.
+Planning decides which shortcuts change. A submission sends them as one
+long-running bulk operation and reports each member's outcome; the caller
+resubmits members whose sources are still reaching OneLake.
 """
 
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass
 from typing import Mapping, Sequence
 from urllib.parse import quote
@@ -76,17 +76,6 @@ class ShortcutRequest:
     @property
     def key(self) -> tuple[str, str]:
         return (self.path.strip("/"), self.name)
-
-
-@dataclass(frozen=True)
-class BulkShortcutResult:
-    """Results in request order and the number of bulk calls made.
-
-    A source still being published to OneLake can require another bulk call.
-    """
-
-    created: tuple[dict, ...]
-    calls: int
 
 
 @dataclass(frozen=True)
@@ -185,39 +174,6 @@ def _submit(destination: Item, requests, *, client) -> BulkSubmission:
         _refuse_permanent(destination, request, member)
         waiting.append(position)
     return BulkSubmission(created=created, waiting=tuple(waiting))
-
-
-def create_shortcuts(
-    destination: Item,
-    requests: Sequence[ShortcutRequest],
-    *,
-    client: FabricClient,
-) -> BulkShortcutResult:
-    """Submit until every source has reached OneLake, under one deadline."""
-
-    made: dict[int, dict] = {}
-    pending = list(range(len(requests)))
-    deadline: float | None = None
-    calls = 0
-    while pending:
-        submitted = submit_shortcuts(
-            destination, [requests[i] for i in pending], client=client
-        )
-        calls += 1
-        made.update({pending[i]: detail for i, detail in submitted.created.items()})
-        pending = [pending[i] for i in submitted.waiting]
-        if not pending:
-            break
-        if deadline is None:
-            deadline = time.monotonic() + SOURCE_TIMEOUT
-        if time.monotonic() >= deadline:
-            raise sources_not_published(
-                destination.name, [requests[i].qualified for i in pending]
-            )
-        time.sleep(SOURCE_POLL_INTERVAL)
-    return BulkShortcutResult(
-        created=tuple(made[i] for i in range(len(requests))), calls=calls
-    )
 
 
 def sources_not_published(destination: str, shortcuts) -> CommandError:
