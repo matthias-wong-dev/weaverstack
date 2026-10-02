@@ -413,10 +413,11 @@ def _warehouse(
     session,
 ):
     from .catalogue.borrow import (
+        catalogue_schema_statements,
         missing_programmables,
         programmable_statements,
         schema_statements,
-        surface_statements,
+        surface_view_statements,
     )
     from .catalogue.borrow import view_statement as borrowed_view
     from .catalogue.shortcuts import schemas_of, view_statement
@@ -424,43 +425,7 @@ def _warehouse(
     from .targets import ItemRef, WarehouseTarget
 
     slug = destination.id
-    relations = [
-        *schema_statements(each.schema for each in each.relations),
-        *(
-            borrowed_view(borrowed.identity, source_target=each.source_target)
-            for borrowed in each.relations
-        ),
-    ]
-    actions = _scripts(
-        compiling,
-        f"mirror-relations-{slug}",
-        destination,
-        relations,
-        kind="borrow_relations",
-        depends_on=after,
-    )
-    # The ``_`` surface views read the destination catalogue's tables.
-    surface = _scripts(
-        compiling,
-        f"mirror-surface-{slug}",
-        destination,
-        surface_statements(resolved.destination.name),
-        kind="borrow_surface",
-        depends_on=(*after, catalogue_built),
-    )
     pointers = _recreatable(each, bindings=resolved.bindings)
-    recreated = _scripts(
-        compiling,
-        f"mirror-pointers-{slug}",
-        destination,
-        [
-            *schema_statements(schemas_of(pointers)),
-            *(view_statement(p) for p in pointers),
-        ],
-        kind="recreate_shortcuts",
-        depends_on=(*after, *producers),
-    )
-
     rows = tuple(
         session.sql_executor(
             WarehouseTarget(ItemRef(each.source_target)), workspace=resolved.workspace
@@ -482,17 +447,79 @@ def _warehouse(
             + ", ".join(identity.object_id.qualified for identity in absent)
             + f". Build {each.item} before mirroring it."
         )
+
+    # Every schema is established once, before any branch writes into it, so
+    # concurrent Warehouse lanes never race the same schema creation.
+    schemas = _scripts(
+        compiling,
+        f"mirror-schemas-{slug}",
+        destination,
+        [
+            *catalogue_schema_statements(),
+            *schema_statements(
+                [
+                    *(borrowed.schema for borrowed in each.relations),
+                    *schemas_of(pointers),
+                    *(str(row["schema_name"]) for row in rows),
+                ]
+            ),
+        ],
+        kind="create_schemas",
+        depends_on=after,
+    )
+    ready = tuple(a.id for a in schemas[-1:])
+    actions = _scripts(
+        compiling,
+        f"mirror-relations-{slug}",
+        destination,
+        [
+            borrowed_view(borrowed.identity, source_target=each.source_target)
+            for borrowed in each.relations
+        ],
+        kind="borrow_relations",
+        depends_on=ready,
+    )
+    relations_built = tuple(a.id for a in actions[-1:])
+    # The ``_`` surface views read the destination catalogue's tables.
+    surface = _scripts(
+        compiling,
+        f"mirror-surface-{slug}",
+        destination,
+        surface_view_statements(resolved.destination.name),
+        kind="borrow_surface",
+        depends_on=(*ready, catalogue_built),
+    )
+    # A pointer into this same destination reads a relation rebuilt above.
+    reads_here = any(
+        p.target_workspace is None
+        and p.target_name.casefold() == each.destination.casefold()
+        for p in pointers
+    )
+    recreated = _scripts(
+        compiling,
+        f"mirror-pointers-{slug}",
+        destination,
+        [view_statement(p) for p in pointers],
+        kind="recreate_shortcuts",
+        depends_on=(*ready, *producers, *(relations_built if reads_here else ())),
+    )
+    # Copied code may read any local relation, pointer or surface view, and
+    # Fabric refuses a definition while DDL on an object it references runs.
     code = programmable_statements(str(row["definition"]) for row in rows)
     programmables = _scripts(
         compiling,
         f"mirror-code-{slug}",
         destination,
-        [*schema_statements(str(row["schema_name"]) for row in rows), *code],
+        code,
         kind="copy_programmables",
-        # Load procedures live in ``_``, which the surface creates.
-        depends_on=(*after, *(a.id for a in surface[-1:])),
+        depends_on=(
+            *ready,
+            *relations_built,
+            *(a.id for a in surface[-1:]),
+            *(a.id for a in recreated[-1:]),
+        ),
     )
-    every = [*actions, *surface, *recreated, *programmables]
+    every = [*schemas, *actions, *surface, *recreated, *programmables]
     compiling.stage(f"reconstruct {each.target}", destination, every)
     return every, {
         "source": each.source,
@@ -653,8 +680,25 @@ def _lakehouse(
             )
         return made
 
+    created = len(actions)
     create("pointers", pointers, (*after, *schemas_ready))
-    create("recreated", recreated, (*after, *schemas_ready, *producers))
+    pointers_ready = tuple(a.id for a in actions[created:])
+    # A recreated shortcut into this same destination reads a pointer above.
+    reads_here = any(
+        p.target_workspace is None
+        and p.target_name.casefold() == each.destination.casefold()
+        for p in recreatable
+    )
+    create(
+        "recreated",
+        recreated,
+        (
+            *after,
+            *schemas_ready,
+            *producers,
+            *(pointers_ready if reads_here else ()),
+        ),
+    )
     # The ``_`` surface reads the destination catalogue's tables.
     create("surface", surface, (*after, catalogue_built))
 

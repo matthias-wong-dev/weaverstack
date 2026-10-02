@@ -124,6 +124,63 @@ def test_a_warehouse_mirror_binds_last_after_its_reconstruction_and_the_fork():
     assert summary["Warehouse/Model"]["programmables"] == 1
 
 
+@weaver_test()
+def test_a_warehouse_mirror_orders_same_item_reads_and_creates_each_schema_once():
+    """Reconstruction branches run on concurrent Warehouse lanes."""
+
+    from dataclasses import replace
+
+    from weaver.declaration.model import LOGICAL_TARGET, VIEW_SHORTCUT
+    from weaver.installed import InstalledShortcut
+
+    relation = Borrowed(
+        WeaverDocumentId.parse("Warehouse/Model/Rpt.Sales"), "table", "view"
+    )
+    resolved = _resolved("Model", "Warehouse", relations=(relation,))
+    alias = InstalledShortcut(
+        destination=WeaverDocumentId.parse("Warehouse/Model/Mart.Sales"),
+        source=WeaverDocumentId.parse("Warehouse/Model/Rpt.Sales"),
+        shortcut_type=VIEW_SHORTCUT,
+        target_type=LOGICAL_TARGET,
+        target_item=WeaverItemId.parse("Warehouse/Model"),
+        target_schema="Rpt",
+        target_object="Sales",
+    )
+    resolved = replace(
+        resolved, items=(replace(resolved.items[0], shortcuts=(alias,)),)
+    )
+    session = _Session(
+        rows=[
+            {
+                "schema_name": "Code",
+                "object_name": "Refresh",
+                "definition": "CREATE PROCEDURE [Code].[Refresh] AS SELECT * "
+                "FROM [Mart].[Sales]",
+            }
+        ]
+    )
+
+    plan, payloads, _summary = mirror_mutation_plan(resolved, session=session)
+
+    actions = _actions(plan)
+    schemas = "mirror-schemas-warehouse-Model_Dev-000"
+    relations = "mirror-relations-warehouse-Model_Dev-000"
+    surface = "mirror-surface-warehouse-Model_Dev-000"
+    pointers = "mirror-pointers-warehouse-Model_Dev-000"
+    code = "mirror-code-warehouse-Model_Dev-000"
+    for branch in (relations, surface, pointers, code):
+        assert runs_before(plan, schemas, branch), branch
+        assert b"create schema" not in payloads[actions[branch].payload], branch
+    created = payloads[actions[schemas].payload]
+    for schema in (b"[_]", b"[Rpt]", b"[Mart]", b"[Code]"):
+        assert schema in created
+    # The pointer reads a relation rebuilt in this same destination.
+    assert runs_before(plan, relations, pointers)
+    assert not runs_before(plan, surface, pointers)
+    for branch in (relations, surface, pointers):
+        assert runs_before(plan, branch, code), branch
+
+
 class _Resolver:
     def __init__(self, root):
         self.root = root
@@ -252,6 +309,54 @@ def test_a_shortcut_into_another_mirrored_item_reads_what_this_plan_builds(tmp_p
         plan,
         "mirror-await-tables-pointers-lakehouse-Input_Dev",
         "mirror-recreated-lakehouse-Model_Dev",
+    )
+
+
+@weaver_test()
+def test_a_shortcut_into_its_own_destination_waits_for_what_it_reads(tmp_path):
+    import json
+    from dataclasses import replace
+
+    from weaver.installed import InstalledShortcut
+
+    (tmp_path / "Input" / "Tables" / "Sales" / "Customer").mkdir(parents=True)
+    resolved = _resolved(
+        "Input",
+        "Lakehouse",
+        relations=(
+            Borrowed(
+                WeaverDocumentId.parse("Lakehouse/Input/Tables/Sales.Customer"),
+                "table",
+                "table",
+            ),
+        ),
+    )
+    alias = InstalledShortcut(
+        destination=WeaverDocumentId.parse("Lakehouse/Input/Tables/Sales.Alias"),
+        source=WeaverDocumentId.parse("Lakehouse/Input/Tables/Sales.Customer"),
+        shortcut_type="table",
+        target_type="logical",
+        target_item=WeaverItemId.parse("Lakehouse/Input"),
+        target_schema="Sales",
+        target_object="Customer",
+    )
+    resolved = replace(
+        resolved, items=(replace(resolved.items[0], shortcuts=(alias,)),)
+    )
+    session = _Session(resolver=_Resolver(tmp_path), store=FilesystemStore())
+
+    plan, payloads, _summary = mirror_mutation_plan(resolved, session=session)
+
+    actions = _actions(plan)
+    recreated = "mirror-recreated-lakehouse-Input_Dev"
+    assert (
+        json.loads(payloads[actions[recreated].payload])["shortcuts"][0][
+            "source_item_name"
+        ]
+        == "Input_Dev"
+    )
+    assert runs_before(
+        plan, "mirror-await-tables-pointers-lakehouse-Input_Dev", recreated
     )
 
 
