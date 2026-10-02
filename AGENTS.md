@@ -301,10 +301,42 @@ uncertain outcomes do not settle an ordering edge, and unsuccessful actions
 provide no success evidence. Typed results, certification and required completion
 follow success paths. The union of both edge sets must be acyclic.
 
-Build stages emit a settlement chain in each admitted batch and a success gate
-over its physical members. Later batches require the preceding gate. A known
-failed member permits its admitted siblings to run while blocking the next batch.
-This preserves order-sensitive pruning and batch failure barriers.
+Build stages and item layers order presentation only. Each planner declares,
+per action, the keys it provides and the keys it `requires` or `follows`
+(`weaver.build_bundle.dependencies`), and `enumerate_stages` compiles them into
+`depends_on` and `settle_after`. A key nothing in the plan provides is already
+satisfied by the target and adds no edge. The edges are the real physical
+dependencies:
+
+```text
+decertify → reset runtime state → every physical root
+schema ─→ table ─→ dependent view          drop consumer ─→ drop producer ─→ rebuild
+shortcut create ─→ readiness ─→ consumer   source object ─→ shortcut create
+Lakehouse mutations ··→ refresh start ─→ refresh await ─→ endpoint readers
+folder ─→ runtime file                     object ─→ Warehouse procedure
+every physical success sink ─→ physical gate ─→ catalogue publication ─→ Registry
+```
+
+`··→` is `settle_after`: a refresh reflects whatever the mutations left. A known
+failure blocks only its dependents; independent branches continue, and
+publication, which needs every physical success, does not run. The final gate
+over every success sink is the required completion.
+
+Platform limits are resources, not edges. An action names the capability it
+occupies: `warehouse:<item>` for TDS, `spark` for Spark SQL and table creation,
+`onelake:<item>` for storage, `shortcuts:<item>` for the shortcut API. The
+executing Session supplies the limits in `weaver.sessions.archive_runtime`: one
+statement at a time per Warehouse, since concurrent DDL on one Warehouse
+conflicts, and bounded concurrency elsewhere. Waiting work holds no resource.
+`spark_table` actions with authored setup share an exclusion, because their
+temporary views are session-scoped. The identifier-case scope is shared by
+concurrent statements in one mode and exclusive between modes.
+
+Slow Fabric convergence yields. Shortcut creation submits once and returns
+`Waiting` while a source is still reaching OneLake; readiness and name release
+are polled the same way, and the SQL endpoint refresh is a typed start/await
+operation. A waiting state is plain data, because the invocation ledger records
+it. `execute_install_action`, which runs one action alone, resumes it in place.
 
 A `MutationPlan` owns tuples and recursively frozen envelope mappings. Construction
 and decoding use the same structural validation and `weaver.graph.Graph`.
@@ -346,8 +378,8 @@ starters until settlement. Settlers can access their operation's leases while
 their own exclusions serialize shared writers. Uncertainty retains the affected
 leases. Typed runtime drivers match the frozen
 contracts. Bound physical adapters call the existing executors through supplied
-contexts, capability requirements and one owned lane per shared connection,
-Session or inner pool.
+contexts and capability requirements; a shared connection, Session or inner pool
+that no per-action resource owns takes one driver lane.
 
 Reports retain action-keyed success, known failure, dependency blocking,
 not-dispatched and uncertain outcomes in frozen action order. Independent work

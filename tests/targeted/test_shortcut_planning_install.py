@@ -84,12 +84,18 @@ def plan_shortcuts(repository, *, selected=(SHORTCUT,)):
 
 
 @weaver_test()
-def test_a_selected_shortcut_is_planned_as_one_action(estate):
+def test_a_selected_shortcut_is_one_creation_and_one_readiness_wait(estate):
     planned = plan_shortcuts(estate)
 
     assert planned.stage is not None
-    kinds = [action.kind for batch in planned.stage.batches for action in batch.actions]
-    assert kinds == ["create_shortcut"]
+    actions = [action for batch in planned.stage.batches for action in batch.actions]
+    assert [action.kind for action in actions] == [
+        "create_shortcut",
+        "await_table_shortcuts",
+    ]
+    create, ready = actions
+    assert planned.stage.requires[ready.id] == (f"action:{create.id}",)
+    assert planned.stage.provides[ready.id] == (f"object:{SHORTCUT}",)
 
 
 @weaver_test()

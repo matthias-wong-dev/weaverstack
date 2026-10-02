@@ -109,24 +109,56 @@ class ArchiveSession(NotebookSession):
         )
 
 
+#: Concurrent actions by constrained capability. A Warehouse connection runs one
+#: statement at a time, and Fabric Warehouse snapshot isolation aborts concurrent
+#: DDL that contends on catalogue metadata, so each Warehouse has one lane.
+WAREHOUSE_LANES = 1
+SPARK_LANES = 8
+ONELAKE_LANES = 16
+SHORTCUT_API_LANES = 4
+WORKERS = 32
+
+
+def resource_limits(plan) -> dict[str, int]:
+    """Capacity for every resource the plan's actions occupy."""
+
+    from ..build_bundle.stages import SPARK
+
+    limits = {}
+    for _, _, action in plan.actions():
+        for key in action.resources:
+            prefix = key.split(":", 1)[0]
+            limits[key] = {
+                "warehouse": WAREHOUSE_LANES,
+                SPARK: SPARK_LANES,
+                "onelake": ONELAKE_LANES,
+                "shortcuts": SHORTCUT_API_LANES,
+            }.get(prefix, 1)
+    return limits
+
+
 def execute_mutation(
     plan,
     payloads,
     session,
     *,
-    workers=1,
+    workers=WORKERS,
     invocation_id=None,
     timeout=600,
     build_datetime=None,
     executors=None,
 ):
-    """Bind physical capabilities and execute one complete MutationPlan."""
+    """Bind physical capabilities and execute one complete MutationPlan.
+
+    Resource limits, not ``workers``, bound concurrency on each capability.
+    """
     from dataclasses import replace
 
     from ..build_bundle.executors import default_executors
     from ..build_bundle.executors.base import InstallationContext
+    from ..build_bundle.executors.sql_endpoint_refresh import endpoint_refresh_drivers
     from ..build_bundle.installer import MutationBindings
-    from ..errors import BuildError, InstallError
+    from ..errors import BuildError, WeaverError
     from ..mutation.executor import (
         Failed,
         MutationExecutor,
@@ -140,8 +172,11 @@ def execute_mutation(
 
         build_datetime = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")
     executors = default_executors() if executors is None else executors
+    contracts = {contract.executor for contract in plan.driver_contracts}
     if any(
-        a.executor not in executors and a.executor != "completion_gate"
+        a.executor not in executors
+        and a.executor not in contracts
+        and a.executor != "completion_gate"
         for _, _, a in plan.actions()
     ):
         raise BuildError("mutation execution requires supported physical drivers")
@@ -163,25 +198,26 @@ def execute_mutation(
         )
         for key, target in resolved.items()
     }
+
+    def failed(error):
+        return Failed(f"{type(error).__name__}: {error}")
+
     drivers = {}
     for name, executor in executors.items():
         driver = physical_driver(
-            executor,
-            contexts,
-            lane="native-session",
-            required_capabilities=("resolver", "store"),
-            allow_skipped=name == "sql_endpoint_refresh",
+            executor, contexts, required_capabilities=("resolver", "store")
         )
 
         def run(request, physical=driver.run):
             try:
                 return physical(request)
-            except (InstallError, BuildError, ValueError) as error:
-                return Failed(f"{type(error).__name__}: {error}")
+            except (WeaverError, ValueError) as error:
+                return failed(error)
 
         drivers[name] = replace(driver, run=run)
+    drivers.update(endpoint_refresh_drivers(contexts, failed=failed))
     return MutationExecutor(
-        drivers, workers=workers, limits={"native-session": 1}, timeout=timeout
+        drivers, workers=workers, limits=resource_limits(plan), timeout=timeout
     ).execute(plan, payloads, invocation_id=invocation_id)
 
 
@@ -210,7 +246,6 @@ def run_mutation(root, spark, output, archive_sha256, *, workers):
             plan,
             payloads,
             session,
-            workers=workers,
             invocation_id=request["invocation_id"],
             timeout=request["timeout"],
             build_datetime=request["build_datetime"],

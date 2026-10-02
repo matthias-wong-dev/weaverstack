@@ -83,7 +83,7 @@ def estate(tmp_path):
             "spark_table",
             "folder",
             "shortcut",
-            "sql_endpoint_refresh",
+            "shortcut_readiness",
             "tsql",
             "tsql_batch",
             "load_file",
@@ -184,10 +184,12 @@ def test_every_planned_action_is_executed_exactly_once(estate):
 
     result = build(estate)
 
+    # Typed operations run on Session-owned drivers, not these executors.
+    typed = {contract.executor for contract in result.plan.driver_contracts}
     planned = [
         action.id
         for _s, _b, action in result.plan.actions()
-        if action.executor != "completion_gate"
+        if action.executor != "completion_gate" and action.executor not in typed
     ]
     ran = [
         action_id

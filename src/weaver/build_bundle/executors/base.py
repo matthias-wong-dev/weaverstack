@@ -84,6 +84,22 @@ class SkippedExecution:
     details: dict[str, Any] | None = None
 
 
+@dataclass(frozen=True)
+class Waiting:
+    """Fabric has not converged. Resume with ``state`` after ``delay`` seconds.
+
+    Only executors marked ``resumable`` return it; they accept ``state=`` on
+    ``execute`` and receive ``None`` on the first call.
+    """
+
+    state: Any
+    delay: float
+
+    def __post_init__(self) -> None:
+        if self.state is None:
+            raise InstallError("a waiting executor must return resumable state")
+
+
 class ActionExecutor(Protocol):
     name: str
 

@@ -11,6 +11,7 @@ from .changes import FOLDER as FOLDER_KIND
 from .changes import TABLE as TABLE_KIND
 from .changes import VIEW as VIEW_KIND
 from .changes import added
+from .dependencies import dropped_key, object_key, schema_key
 from .models import (
     BUILD_FOLDER,
     BUILD_TABLE,
@@ -123,12 +124,18 @@ def _item_build_stages(
         payloads: dict[str, bytes] = {}
         actions = []
         changes = []
+        provides = {}
+        requires = {}
         for node in sorted(layer):
             identity = identities[node]
             source = repository.source_documents[identity]
             rendered = renderer(identity, source, target=target)
             payloads.update(rendered.payloads)
             actions.append(rendered.action)
+            provides[rendered.action.id] = (object_key(identity),)
+            requires[rendered.action.id] = document_requirements(
+                repository, identity, target_id=target.id
+            )
             changes.append(
                 added(
                     _CHANGE_KIND[source.kind],
@@ -151,6 +158,25 @@ def _item_build_stages(
                         actions=tuple(actions),
                     ),
                 ),
+                provides=provides,
+                requires=requires,
             )
         )
     return tuple(stages)
+
+
+def document_requirements(repository, identity, *, target_id) -> tuple[str, ...]:
+    """What must exist before ``identity`` is created in its target.
+
+    Its upstream objects, including shortcut destinations, its schema, and the
+    release of its own name when it is dropped for rebuild.
+    """
+
+    keys = [
+        object_key(upstream)
+        for upstream in repository.dependency_graph.upstream_of(str(identity))
+    ]
+    if not identity.is_files:
+        keys.append(schema_key(target_id, identity.object_id.schema))
+    keys.append(dropped_key(identity))
+    return tuple(keys)

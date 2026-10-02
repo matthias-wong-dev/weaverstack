@@ -1,8 +1,8 @@
-"""Plan an item-oriented repository as an ordered build bundle.
+"""Plan an item-oriented repository as a build bundle.
 
-Item dependency layers are the outer barriers; document dependencies order work
-within each item. Items in one layer share stage barriers, while a consumer waits
-for every producer item, including endpoint refreshes, to finish.
+Item dependency layers and stages order the presentation. Execution order is the
+physical DAG compiled from each action's dependency keys, so independent items
+and branches overlap.
 """
 
 from __future__ import annotations
@@ -29,10 +29,18 @@ from .catalogue_actions import (
     render_catalogue_before_build,
     render_mirror_deregistration,
 )
+from .dependencies import (
+    DECERTIFIED,
+    PHYSICAL_COMPLETE,
+    PREPARED,
+    catalogue_step_key,
+)
 from .documents import lakehouse_build_stages, warehouse_build_stages
 from .drops import lakehouse_drop_stages, warehouse_drop_stages
 from .endpoints import lakehouse_endpoint_refresh_stage
 from .execution import BundleExecution, ExecutionIdentity, select_spark_home
+from .executors.sql_endpoint_refresh import AWAIT_EXECUTOR, START_EXECUTOR
+from .executors.sql_endpoint_refresh import CONTRACTS as ENDPOINT_REFRESH_CONTRACTS
 from .incremental import installed_as_pointer, select_build, stale_through_shortcuts
 from .models import OMIT_TARGET_UNBOUND, OmittedNode
 from .prune import TargetInventory, lakehouse_prune_stage, warehouse_prune_stage
@@ -172,7 +180,7 @@ def generate_item_build_bundle(
         stale_claims=stale_claims,
     )
     if catalogue_before is not None:
-        stages.append(catalogue_before)
+        stages.append(catalogue_before.declaring(provides=(DECERTIFIED, PREPARED)))
 
     # Runtime state is reset here, between decertification and the first
     # physical action, and never after it. See
@@ -195,7 +203,9 @@ def generate_item_build_bundle(
         establishment=established_state,
     )
     if reconciliation is not None:
-        stages.append(reconciliation)
+        stages.append(
+            reconciliation.declaring(requires=(DECERTIFIED,), provides=(PREPARED,))
+        )
 
     view_state = view_state_establishment(
         repository,
@@ -233,38 +243,43 @@ def generate_item_build_bundle(
 
     _refuse_selected_omissions(omitted)
 
-    recorded_views = render_runtime_state_reconciliation(
-        (),
-        catalogue_target=catalogue_target,
-        establishment=view_state,
-        slug=VIEW_STATE_SLUG,
-        description="record the Views this build created",
-        index=1,
-    )
-    if recorded_views is not None:
-        stages.append(recorded_views)
-
-    # Deregister a mirror only after physical work gives the object its own rows.
-    deregistered = render_mirror_deregistration(
-        catalogue,
-        selected_for_build,
-        catalogue_target=catalogue_target,
-    )
-    if deregistered is not None:
-        stages.append(deregistered)
-
-    stages.extend(
-        render_catalogue_after_build(
+    published = [
+        render_runtime_state_reconciliation(
+            (),
+            catalogue_target=catalogue_target,
+            establishment=view_state,
+            slug=VIEW_STATE_SLUG,
+            description="record the Views this build created",
+            index=1,
+        ),
+        # Deregister a mirror only after physical work gives the object its own
+        # rows.
+        render_mirror_deregistration(
+            catalogue,
+            selected_for_build,
+            catalogue_target=catalogue_target,
+        ),
+        *render_catalogue_after_build(
             repository,
             certifiable_ids,
             target_by_item,
             catalogue_target=catalogue_target,
             # Compare publication against the catalogue after claim deletion.
             current=catalogue_after_deletions,
+        ),
+    ]
+    # Publication certifies only physical work that succeeded, and the Registry
+    # is published last.
+    previous = PHYSICAL_COMPLETE
+    for index, stage in enumerate(stage for stage in published if stage is not None):
+        stages.append(
+            stage.declaring(requires=(previous,), provides=(catalogue_step_key(index),))
         )
-    )
+        previous = catalogue_step_key(index)
 
-    sequences, payloads, target_changes = enumerate_stages(stages)
+    sequences, payloads, target_changes, required = enumerate_stages(
+        stages, targets=targets, completion_target_id=catalogue_target.id
+    )
 
     omitted.extend(
         OmittedNode(
@@ -309,12 +324,16 @@ def generate_item_build_bundle(
             for source in installed_sources.values()
             if source.id not in {target.id for target in target_by_item.values()}
         ),
-        required_completion=tuple(
-            a.id
-            for sequence in sequences[-1:]
-            for batch in sequence.batches[-1:]
-            for a in batch.actions
-            if a.executor == "completion_gate"
+        required_completion=required,
+        driver_contracts=(
+            ENDPOINT_REFRESH_CONTRACTS
+            if any(
+                a.executor in REFRESH_EXECUTORS
+                for sequence in sequences
+                for batch in sequence.batches
+                for a in batch.actions
+            )
+            else ()
         ),
     )
     plan = replace(plan, bundle_id=compute_bundle_id(plan))
@@ -324,6 +343,9 @@ def generate_item_build_bundle(
         payloads=payloads,
         store=store,
     )
+
+
+REFRESH_EXECUTORS = frozenset({START_EXECUTOR, AWAIT_EXECUTOR})
 
 
 def _needs_spark(sequences) -> bool:
@@ -618,7 +640,13 @@ def _plan_item(
     # Runtime installation follows structure and endpoint refresh.
     # Removals come from prior Registry rows, not the target diff.
     stages.extend(
-        item_runtime_stages(artefacts, selected_loads, item=item, target=target)
+        item_runtime_stages(
+            artefacts,
+            selected_loads,
+            item=item,
+            target=target,
+            repository=repository,
+        )
     )
     stages.extend(
         item_runtime_removals(removed, item=item, target=target, registered=registered)

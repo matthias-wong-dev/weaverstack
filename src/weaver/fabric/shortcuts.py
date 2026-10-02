@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
-from typing import Sequence
+from typing import Mapping, Sequence
 from urllib.parse import quote
 
 from ..errors import CommandError
@@ -89,82 +89,108 @@ class BulkShortcutResult:
     calls: int
 
 
+@dataclass(frozen=True)
+class BulkSubmission:
+    """One bulk call's outcome by request position.
+
+    ``waiting`` holds the positions whose sources are still being published to
+    OneLake; submit them again.
+    """
+
+    created: Mapping[int, dict]
+    waiting: tuple[int, ...]
+
+
+def submit_shortcuts(
+    destination: Item,
+    requests: Sequence[ShortcutRequest],
+    *,
+    client: FabricClient,
+) -> BulkSubmission:
+    """Create or repoint shortcuts in one bulk request.
+
+    Successful members are kept. Permanent member failures raise.
+    """
+
+    if not requests:
+        return BulkSubmission(created={}, waiting=())
+    endpoint = (
+        f"workspaces/{destination.workspace_id}/items/{destination.id}"
+        f"/shortcuts/bulkCreate?shortcutConflictPolicy={OVERWRITE_POLICY}"
+    )
+    try:
+        response = client.request(
+            "POST",
+            endpoint,
+            payload={
+                "createShortcutRequests": [
+                    _request_payload(request) for request in requests
+                ]
+            },
+            expected=(200, 202),
+        )
+    except FabricError as exc:
+        # The whole batch failed before Fabric produced member outcomes.
+        raise CommandError(
+            f"could not create {len(requests)} shortcut(s) in {destination.name}: {exc}"
+        ) from exc
+    members = _members(response, client=client)
+    created: dict[int, dict] = {}
+    waiting: list[int] = []
+    for position, request in enumerate(requests):
+        member = members.get(request.key)
+        if member is None:
+            raise CommandError(
+                f"Fabric reported no outcome for the shortcut "
+                f"{request.qualified} in {destination.name}, so whether it "
+                "was created is unknown."
+            )
+        if not member.get("error") and member.get("status") == _SUCCEEDED:
+            created[position] = _detail(destination, request)
+            continue
+        _refuse_permanent(destination, request, member)
+        waiting.append(position)
+    return BulkSubmission(created=created, waiting=tuple(waiting))
+
+
 def create_shortcuts(
     destination: Item,
     requests: Sequence[ShortcutRequest],
     *,
     client: FabricClient,
 ) -> BulkShortcutResult:
-    """Create or repoint shortcuts in one bulk request.
+    """Submit until every source has reached OneLake, under one deadline."""
 
-    Successful members are kept. Members waiting for their sources in OneLake are
-    retried under one deadline; permanent failures stop the batch.
-    """
-
-    if not requests:
-        return BulkShortcutResult(created=(), calls=0)
-
-    endpoint = (
-        f"workspaces/{destination.workspace_id}/items/{destination.id}"
-        f"/shortcuts/bulkCreate?shortcutConflictPolicy={OVERWRITE_POLICY}"
-    )
-    made: dict[tuple[str, str], dict] = {}
-    pending = list(requests)
+    made: dict[int, dict] = {}
+    pending = list(range(len(requests)))
     deadline: float | None = None
     calls = 0
-
     while pending:
-        try:
-            response = client.request(
-                "POST",
-                endpoint,
-                payload={
-                    "createShortcutRequests": [
-                        _request_payload(request) for request in pending
-                    ]
-                },
-                expected=(200, 202),
-            )
-        except FabricError as exc:
-            # The whole batch failed before Fabric produced member outcomes.
-            raise CommandError(
-                f"could not create {len(pending)} shortcut(s) in "
-                f"{destination.name}: {exc}"
-            ) from exc
-        members = _members(response, client=client)
+        submitted = submit_shortcuts(
+            destination, [requests[i] for i in pending], client=client
+        )
         calls += 1
-        retry: list[ShortcutRequest] = []
-        for request in pending:
-            member = members.get(request.key)
-            if member is None:
-                raise CommandError(
-                    f"Fabric reported no outcome for the shortcut "
-                    f"{request.qualified} in {destination.name}, so whether it "
-                    "was created is unknown."
-                )
-            if not member.get("error") and member.get("status") == _SUCCEEDED:
-                made[request.key] = _detail(destination, request)
-                continue
-            _refuse_permanent(destination, request, member)
-            retry.append(request)
-
-        if not retry:
+        made.update({pending[i]: detail for i, detail in submitted.created.items()})
+        pending = [pending[i] for i in submitted.waiting]
+        if not pending:
             break
         if deadline is None:
             deadline = time.monotonic() + SOURCE_TIMEOUT
         if time.monotonic() >= deadline:
-            raise CommandError(
-                "could not create the shortcut(s) "
-                + ", ".join(sorted(request.qualified for request in retry))
-                + f" in {destination.name}: their sources did not appear in "
-                f"OneLake within {SOURCE_TIMEOUT:.0f}s."
+            raise sources_not_published(
+                destination.name, [requests[i].qualified for i in pending]
             )
         time.sleep(SOURCE_POLL_INTERVAL)
-        pending = retry
-
     return BulkShortcutResult(
-        created=tuple(made[request.key] for request in requests),
-        calls=calls,
+        created=tuple(made[i] for i in range(len(requests))), calls=calls
+    )
+
+
+def sources_not_published(destination: str, shortcuts) -> CommandError:
+    return CommandError(
+        f"could not create the shortcut(s) {', '.join(sorted(shortcuts))} in "
+        f"{destination}: their sources did not appear in OneLake within "
+        f"{SOURCE_TIMEOUT:.0f}s."
     )
 
 

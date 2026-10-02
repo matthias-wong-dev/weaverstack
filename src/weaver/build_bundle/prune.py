@@ -48,6 +48,7 @@ from .changes import (
     TargetChange,
     removed,
 )
+from .dependencies import pruned_objects_key
 from .models import (
     PRUNE_FOLDER,
     PRUNE_SCHEMA,
@@ -774,6 +775,9 @@ def _item_prune_stage(
         return None
 
     item_slug = _slug(item)
+    prefixed = tuple(_prefixed(action, item_slug) for action in actions)
+    # A schema drop needs its remaining objects gone; other prunes are independent.
+    objects = pruned_objects_key(target.id)
     return PlannedStage(
         phase=PRUNE,
         slug="item-prune",
@@ -789,9 +793,17 @@ def _item_prune_stage(
             BuildBatch(
                 id=f"item-prune-{item_slug}",
                 target_id=target.id,
-                actions=tuple(_prefixed(action, item_slug) for action in actions),
+                actions=prefixed,
             ),
         ),
+        provides={
+            action.id: (objects,)
+            for action in prefixed
+            if action.kind in (PRUNE_TABLE, PRUNE_VIEW)
+        },
+        requires={
+            action.id: (objects,) for action in prefixed if action.kind == PRUNE_SCHEMA
+        },
     )
 
 

@@ -1,8 +1,9 @@
 """Execute a persisted Build plan and present its physical action results."""
 
+from collections.abc import Mapping
 from datetime import datetime, timezone
 
-from ..mutation.executor import validate_inputs
+from ..mutation.executor import TypedValue, validate_inputs
 from .report import ActionResult, InstallationReport, SequenceResult
 
 
@@ -27,10 +28,12 @@ def execute_bundle(bundle, session, *, executors=None, build_datetime=None):
                 if action.executor == "completion_gate":
                     continue
                 result = report.by_id[action.id]
+                value = result.value
+                if isinstance(value, TypedValue):
+                    value = value.value
                 status = (
                     "skipped"
-                    if isinstance(result.value, dict)
-                    and result.value.get("skipped") is True
+                    if isinstance(value, Mapping) and value.get("skipped") is True
                     else result.status
                     if result.status in {"succeeded", "failed"}
                     else ("failed" if result.status == "uncertain" else "skipped")
@@ -55,9 +58,7 @@ def execute_bundle(bundle, session, *, executors=None, build_datetime=None):
                         if result.error
                         else None,
                         error_message=result.error,
-                        details=result.value
-                        if isinstance(result.value, dict)
-                        else None,
+                        details=dict(value) if isinstance(value, Mapping) else None,
                     )
                 )
         if actions:

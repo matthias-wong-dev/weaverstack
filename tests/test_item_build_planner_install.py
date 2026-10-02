@@ -7,7 +7,7 @@ import shutil
 
 import pytest
 from factories import FixtureInventory, lakehouse_catalogue
-from support.bundles import build_metadata
+from support.bundles import build_metadata, runs_before
 from support.sessions import given_installer
 from support.weaver_test import weaver_test
 from support.workspaces import WORKSPACE
@@ -329,18 +329,18 @@ def test_a_shortcut_is_materialised_before_the_documents_that_use_it(tmp_path):
         store=FilesystemStore(),
     )
 
-    at = {
-        action.id: sequence.number
-        for sequence, _batch, action in bundle.plan.actions()
-        if action.executor != "completion_gate"
-    }
     # The source item produces the table, its endpoint catches up, and only then
     # does the consuming item's shortcut, and the document reading it, exist.
-    assert (
-        at["object-Lakehouse--Curated--Tables--Sales.Customer"]
-        < at["refresh-sql-endpoint-Lakehouse--Curated"]
-        < at["shortcuts-Warehouse--Reporting"]
-        < at["object-Warehouse--Reporting--Sales.Customer"]
+    chain = (
+        "object-Lakehouse--Curated--Tables--Sales.Customer",
+        "start-sql-endpoint-refresh-Lakehouse--Curated",
+        "await-sql-endpoint-refresh-Lakehouse--Curated",
+        "shortcuts-Warehouse--Reporting",
+        "object-Warehouse--Reporting--Sales.Customer",
+    )
+    assert all(
+        runs_before(bundle.plan, first, second)
+        for first, second in zip(chain, chain[1:])
     )
 
 
@@ -403,15 +403,18 @@ def test_a_physical_shortcut_can_feed_a_logical_warehouse_shortcut(tmp_path):
         "[Raw_Dev].[Sales].[Customer];"
     ) in statements
 
-    at = {
-        action.id: sequence.number
-        for sequence, _batch, action in bundle.plan.actions()
-        if action.executor != "completion_gate"
-    }
-    assert (
-        at["shortcuts-Lakehouse--Raw"]
-        < at["refresh-sql-endpoint-Lakehouse--Raw"]
-        < at["shortcuts-Warehouse--Reporting"]
+    assert runs_before(
+        bundle.plan, "shortcuts-Lakehouse--Raw", "await-tables-shortcuts-Lakehouse--Raw"
+    )
+    assert runs_before(
+        bundle.plan,
+        "await-tables-shortcuts-Lakehouse--Raw",
+        "start-sql-endpoint-refresh-Lakehouse--Raw",
+    )
+    assert runs_before(
+        bundle.plan,
+        "await-sql-endpoint-refresh-Lakehouse--Raw",
+        "shortcuts-Warehouse--Reporting",
     )
 
 
@@ -544,7 +547,7 @@ def test_installer_never_reopens_or_interprets_source_repository(tmp_path):
             "folder": noop,
             "shortcut": noop,
             "tsql_batch": noop,
-            "sql_endpoint_refresh": noop,
+            "shortcut_readiness": noop,
             "load_file": noop,
             "runtime_state": noop,
         },
@@ -814,7 +817,7 @@ def _refreshed(bundle):
         batch.target_id
         for sequence, batch, action in bundle.plan.actions()
         if action.executor != "completion_gate"
-        if action.kind == "refresh_sql_endpoint"
+        if action.kind == "start_sql_endpoint_refresh"
     }
 
 
@@ -956,7 +959,7 @@ def test_catalogue_tail_is_item_scoped_and_registry_is_last(tmp_path):
     # What no longer happens is a refresh after the catalogue: it is written
     # over TDS into the Warehouse that holds it, and is readable when it commits.
     assert not any(
-        action.kind == "refresh_sql_endpoint"
+        action.kind == "start_sql_endpoint_refresh"
         for sequence, _b, action in bundle.plan.actions()
         if action.executor != "completion_gate"
         if sequence.number >= registry.number
@@ -964,13 +967,11 @@ def test_catalogue_tail_is_item_scoped_and_registry_is_last(tmp_path):
 
 
 @weaver_test()
-def test_each_affected_lakehouse_refreshes_inside_its_own_item_group(tmp_path):
-    """The refresh moved from a global tail into each item's group.
+def test_each_affected_lakehouse_refreshes_once_before_publication(tmp_path):
+    """Each mutated Lakehouse refreshes after its own mutations.
 
-    A single barrier after all physical work is correct for one item and wrong the
-    moment a second reads the first: the consumer would be built against endpoint
-    metadata that had not caught up. So each mutated Lakehouse is closed by its own
-    refresh, before anything in a later item layer starts.
+    A consumer reading through the endpoint waits for that Lakehouse's refresh;
+    publication waits for every refresh.
     """
 
     repository = _repository(_estate(tmp_path))
@@ -991,7 +992,7 @@ def test_each_affected_lakehouse_refreshes_inside_its_own_item_group(tmp_path):
         batch.target_id
         for _sequence, batch, action in bundle.plan.actions()
         if action.executor != "completion_gate"
-        if action.kind == "refresh_sql_endpoint"
+        if action.kind == "start_sql_endpoint_refresh"
     }
     # Both Lakehouses, and nothing else. A Warehouse is reached over SQL and has
     # no endpoint of its own to sync, and neither has the catalogue, which is a
@@ -1001,16 +1002,13 @@ def test_each_affected_lakehouse_refreshes_inside_its_own_item_group(tmp_path):
         "Lakehouse-Curated--lakehouse-Curated_Dev",
     }
 
-    at = {
-        action.id: sequence.number
-        for sequence, _batch, action in bundle.plan.actions()
-        if action.executor != "completion_gate"
-    }
-    # Each item's refresh closes that item, before the catalogue tail.
-    assert (
-        at["object-Lakehouse--Raw--Tables--Sales.Customer"]
-        < at["refresh-sql-endpoint-Lakehouse--Raw"]
-        < at["publish-registry"]
+    assert runs_before(
+        bundle.plan,
+        "object-Lakehouse--Raw--Tables--Sales.Customer",
+        "start-sql-endpoint-refresh-Lakehouse--Raw",
+    )
+    assert runs_before(
+        bundle.plan, "await-sql-endpoint-refresh-Lakehouse--Raw", "publish-registry"
     )
 
 
@@ -1056,7 +1054,7 @@ def test_a_lakehouse_without_delta_mutations_gets_no_refresh(tmp_path):
         batch.target_id
         for _sequence, batch, action in bundle.plan.actions()
         if action.executor != "completion_gate"
-        if action.kind == "refresh_sql_endpoint"
+        if action.kind == "start_sql_endpoint_refresh"
     }
     assert refreshed == {"Lakehouse-Raw--lakehouse-Raw_Dev"}
 

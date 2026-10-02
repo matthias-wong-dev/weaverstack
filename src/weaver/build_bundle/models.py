@@ -1,7 +1,7 @@
-"""Immutable BuildBundle plan, sequence, batch, and action types.
+"""Build action vocabulary over the shared mutation types.
 
-Sequences are execution barriers, batches bind actions to one target, and every
-type serialises to the canonical manifest.
+Sequences group actions for presentation, batches bind actions to one target,
+and every type serialises to the canonical manifest.
 """
 
 from __future__ import annotations
@@ -21,8 +21,13 @@ BUILD_FOLDER = "build_folder"
 BUILD_TABLE = "build_table"
 BUILD_VIEW = "build_view"
 
-#: Refresh the SQL analytics endpoint before dependent items read its metadata.
-REFRESH_SQL_ENDPOINT = "refresh_sql_endpoint"
+#: Created shortcuts become readable to their consumers.
+AWAIT_TABLE_SHORTCUTS = "await_table_shortcuts"
+AWAIT_FILE_SHORTCUTS = "await_file_shortcuts"
+
+#: A SQL analytics endpoint refresh, started and then awaited.
+START_ENDPOINT_REFRESH = "start_sql_endpoint_refresh"
+AWAIT_ENDPOINT_REFRESH = "await_sql_endpoint_refresh"
 
 #: Runtime artefacts installed in an item's final layer.
 WRITE_FILE = "write_file"
@@ -48,9 +53,6 @@ PRUNE_TABLE = "prune_table"
 PRUNE_VIEW = "prune_view"
 PRUNE_SCHEMA = "prune_schema"
 PRUNE_FOLDER = "prune_folder"
-
-#: Target-bound, payloadless endpoint refresh after Delta changes.
-REFRESH_SQL_ENDPOINT = "refresh_sql_endpoint"
 
 #: Catalogue actions target the central Warehouse. Claim deletion precedes
 #: physical work; publication follows it with Registry last.

@@ -1,7 +1,8 @@
-"""Place Lakehouse SQL endpoint refreshes at item boundaries.
+"""Refresh a mutated Lakehouse's SQL analytics endpoint once, without a barrier.
 
-Endpoint metadata lags Delta mutations, so refresh must complete before a later
-item layer builds against it. The executor owns the refresh mechanism.
+Endpoint metadata lags Delta mutations. The refresh starts after every mutation
+of its Lakehouse has a known outcome, and only work that reads through the
+endpoint waits for it to finish.
 """
 
 from __future__ import annotations
@@ -9,14 +10,23 @@ from __future__ import annotations
 from typing import Iterable
 
 from ..declaration.model import WeaverItemId
+from .dependencies import OBJECT, action_key, endpoint_object_key
+from .executors.sql_endpoint_refresh import (
+    AWAIT_EXECUTOR,
+    REFRESH_RESULT,
+    START_EXECUTOR,
+)
 from .models import (
+    AWAIT_ENDPOINT_REFRESH,
+    AWAIT_FILE_SHORTCUTS,
+    AWAIT_TABLE_SHORTCUTS,
     BUILD_TABLE,
     BUILD_VIEW,
     CREATE_SHORTCUT,
     DROP_SHORTCUT,
     DROP_TABLE,
     DROP_VIEW,
-    REFRESH_SQL_ENDPOINT,
+    START_ENDPOINT_REFRESH,
     BuildBatch,
     InstallAction,
 )
@@ -35,6 +45,8 @@ _ENDPOINT_MUTATING_KINDS = frozenset(
         "prune_schema",
         CREATE_SHORTCUT,
         DROP_SHORTCUT,
+        AWAIT_TABLE_SHORTCUTS,
+        AWAIT_FILE_SHORTCUTS,
     }
 )
 
@@ -45,14 +57,37 @@ def lakehouse_endpoint_refresh_stage(
     item: WeaverItemId,
     target: BoundTarget,
 ) -> PlannedStage | None:
-    if not any(
-        action.kind in _ENDPOINT_MUTATING_KINDS
+    stages = tuple(stages)
+    mutations = [
+        action
         for stage in stages
         for batch in stage.batches
         for action in batch.actions
-    ):
+        if action.kind in _ENDPOINT_MUTATING_KINDS
+    ]
+    if not mutations:
         return None
+    mutated = {action.id for action in mutations}
+    # Every object these actions establish or remove, including shortcut
+    # destinations, is current in the endpoint once the refresh completes.
+    current = sorted(
+        {
+            endpoint_object_key(key.removeprefix(OBJECT))
+            for stage in stages
+            for action_id, keys in stage.provides.items()
+            if action_id in mutated
+            for key in keys
+            if key.startswith(OBJECT)
+        }
+        | {
+            endpoint_object_key(action.resource_node_id)
+            for action in mutations
+            if action.resource_node_id is not None
+        }
+    )
     slug = str(item).replace("/", "--").replace(" ", "-")
+    start = f"start-sql-endpoint-refresh-{slug}"
+    finish = f"await-sql-endpoint-refresh-{slug}"
     return PlannedStage(
         phase=REFRESH,
         slug="refresh-endpoints",
@@ -63,14 +98,26 @@ def lakehouse_endpoint_refresh_stage(
                 target_id=target.id,
                 actions=(
                     InstallAction(
-                        id=f"refresh-sql-endpoint-{slug}",
-                        kind=REFRESH_SQL_ENDPOINT,
+                        id=start,
+                        kind=START_ENDPOINT_REFRESH,
                         resource_node_id=None,
-                        executor="sql_endpoint_refresh",
+                        executor=START_EXECUTOR,
+                        payload=None,
+                        payload_sha256=None,
+                    ),
+                    InstallAction(
+                        id=finish,
+                        kind=AWAIT_ENDPOINT_REFRESH,
+                        resource_node_id=None,
+                        executor=AWAIT_EXECUTOR,
                         payload=None,
                         payload_sha256=None,
                     ),
                 ),
             ),
         ),
+        follows={start: tuple(action_key(action.id) for action in mutations)},
+        requires={finish: (action_key(start),)},
+        results={finish: (start, REFRESH_RESULT)},
+        provides={finish: tuple(current)},
     )

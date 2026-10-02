@@ -12,8 +12,12 @@ from dataclasses import replace
 from datetime import datetime, timezone
 
 import pytest
+from support.bundles import (
+    endpoint_refresh_sequence,
+    given_execution,
+    with_catalogue,
+)
 from support.bundles import given_build_plan as BuildPlan
-from support.bundles import given_execution, with_catalogue
 from support.sessions import given_installer
 from support.weaver_test import weaver_test
 from support.workspaces import given_resolver, given_workspace
@@ -282,19 +286,7 @@ def test_an_endpoint_refresh_a_host_cannot_perform_is_skipped_not_failed(tmp_pat
     Builder and out of the host.
     """
 
-    action = InstallAction(
-        id="refresh-application-sql-endpoint",
-        kind="refresh_sql_endpoint",
-        resource_node_id=None,
-        executor="sql_endpoint_refresh",
-        payload=None,
-        payload_sha256=None,
-    )
-    sequence = BuildSequence(
-        number=8990,
-        description="refresh affected application Lakehouse SQL endpoints",
-        batches=(BuildBatch(id="refresh", target_id=TARGET.id, actions=(action,)),),
-    )
+    sequence, contracts, required = endpoint_refresh_sequence(TARGET.id, number=8990)
     plan = BuildPlan(
         format_version=SUPPORTED_FORMAT_VERSION,
         bundle_id="",
@@ -304,6 +296,8 @@ def test_an_endpoint_refresh_a_host_cannot_perform_is_skipped_not_failed(tmp_pat
         sequences=(sequence,),
         selection=BuildSelection(Impact((), (), ()), (), (), ()),
         execution=given_execution(with_catalogue((TARGET,)), (sequence,)),
+        driver_contracts=contracts,
+        required_completion=required,
     )
     plan = replace(plan, bundle_id=compute_bundle_id(plan))
     store = FilesystemStore()
@@ -318,7 +312,7 @@ def test_an_endpoint_refresh_a_host_cannot_perform_is_skipped_not_failed(tmp_pat
             self._inner = inner
 
         def __getattr__(self, name):
-            if name == "refresh_sql_endpoint":
+            if name == "start_sql_endpoint_refresh":
                 raise AttributeError(name)
             return getattr(self._inner, name)
 
@@ -330,9 +324,9 @@ def test_an_endpoint_refresh_a_host_cannot_perform_is_skipped_not_failed(tmp_pat
 
     assert report.status == SUCCEEDED
     assert report.sequences[0].status == SKIPPED
-    result = next(report.action_results())
-    assert result.status == SKIPPED
-    assert "unsupported" in result.details["reason"]
+    results = list(report.action_results())
+    assert [result.status for result in results] == [SKIPPED, SKIPPED]
+    assert "unsupported" in results[1].details["reason"]
 
 
 # --- capabilities are acquired by need, not by batch --------------------------
@@ -349,21 +343,8 @@ def test_an_install_that_needs_no_spark_never_starts_one(tmp_path):
     SparkContext should be running in this JVM*.
     """
 
-    action = InstallAction(
-        id="refresh-application-sql-endpoint",
-        kind="refresh_sql_endpoint",
-        resource_node_id=None,
-        executor="sql_endpoint_refresh",
-        payload=None,
-        payload_sha256=None,
-    )
-    sequences = (
-        BuildSequence(
-            number=8990,
-            description="refresh endpoints",
-            batches=(BuildBatch(id="refresh", target_id=TARGET.id, actions=(action,)),),
-        ),
-    )
+    sequence, contracts, required = endpoint_refresh_sequence(TARGET.id, number=8990)
+    sequences = (sequence,)
     targets = with_catalogue((TARGET,))
     plan = BuildPlan(
         format_version=SUPPORTED_FORMAT_VERSION,
@@ -374,6 +355,8 @@ def test_an_install_that_needs_no_spark_never_starts_one(tmp_path):
         sequences=sequences,
         selection=BuildSelection(Impact((), (), ()), (), (), ()),
         execution=given_execution(targets, sequences),
+        driver_contracts=contracts,
+        required_completion=required,
     )
     plan = replace(plan, bundle_id=compute_bundle_id(plan))
     store = FilesystemStore()

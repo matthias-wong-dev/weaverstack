@@ -40,7 +40,7 @@ EXECUTORS = (
     "folder",
     "shortcut",
     "tsql_batch",
-    "sql_endpoint_refresh",
+    "shortcut_readiness",
     "load_file",
     "runtime_state",
 )

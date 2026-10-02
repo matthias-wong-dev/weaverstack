@@ -889,7 +889,7 @@ def test_the_bundle_freezes_the_attachment_the_build_already_required(tmp_path):
                 "spark_table",
                 "folder",
                 "shortcut",
-                "sql_endpoint_refresh",
+                "shortcut_readiness",
                 "tsql",
                 "tsql_batch",
                 "load_file",

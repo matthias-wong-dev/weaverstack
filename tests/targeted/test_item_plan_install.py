@@ -126,7 +126,7 @@ def test_an_item_with_nothing_selected_plans_no_work_at_all(customer):
 
 @weaver_test()
 def test_a_delta_mutation_closes_the_item_with_an_endpoint_refresh(customer):
-    """A Lakehouse's SQL endpoint lags its Delta tables, so the item ends here."""
+    """A Lakehouse's SQL endpoint lags its Delta tables, so a refresh follows."""
 
     identity = document_id("DWG.Customer")
 
@@ -135,15 +135,18 @@ def test_a_delta_mutation_closes_the_item_with_an_endpoint_refresh(customer):
     )
 
     assert phases(planned)[-1] == "refresh"
-    assert kinds(planned)[-1] == "refresh_sql_endpoint"
+    assert kinds(planned)[-2:] == [
+        "start_sql_endpoint_refresh",
+        "await_sql_endpoint_refresh",
+    ]
 
 
 # --- prune and drop -----------------------------------------------------------
 
 
 @weaver_test()
-def test_an_unmanaged_object_is_pruned_before_anything_is_built(customer):
-    """Prune is the destructive direction and must precede the constructive one."""
+def test_an_unmanaged_object_is_pruned_and_the_endpoint_refreshed_after(customer):
+    """Prune removes only undeclared names, so it is independent of the build."""
 
     identity = document_id("DWG.Customer")
 
@@ -154,7 +157,12 @@ def test_an_unmanaged_object_is_pruned_before_anything_is_built(customer):
         selected_for_build={identity},
     )
 
-    assert kinds(planned) == ["prune_table", "build_table", "refresh_sql_endpoint"]
+    assert kinds(planned) == [
+        "prune_table",
+        "build_table",
+        "start_sql_endpoint_refresh",
+        "await_sql_endpoint_refresh",
+    ]
 
 
 @weaver_test()

@@ -148,12 +148,17 @@ def test_carrier_is_staged_in_the_spark_home_lakehouse(tmp_path):
 
 
 @weaver_test()
-def test_numbered_build_stages_emit_dag_with_batch_failure_barrier():
+def test_a_failure_blocks_only_the_actions_that_depend_on_it():
+    from dataclasses import replace
+
     from test_mutation_plan_representation import _plan
 
+    from weaver.build_bundle.dependencies import object_key
     from weaver.build_bundle.models import BuildBatch, InstallAction
     from weaver.build_bundle.stages import BUILD, PlannedStage, enumerate_stages
-    from weaver.mutation import MutationAction, MutationExecutor
+    from weaver.build_bundle.targets import BoundTarget
+    from weaver.mutation import MutationExecutor
+    from weaver.mutation.bundle import compute_bundle_id
     from weaver.mutation.executor import Completed, Failed, MutationDriver
 
     def action(name):
@@ -166,23 +171,28 @@ def test_numbered_build_stages_emit_dag_with_batch_failure_barrier():
             BUILD,
             "first",
             (BuildBatch("first", "sales", (action("fail"), action("sibling"))),),
+            provides={"fail": (object_key("Failed"),)},
         ),
         PlannedStage(
-            BUILD, "later", (BuildBatch("later", "sales", (action("later"),)),), index=1
+            BUILD,
+            "later",
+            (
+                BuildBatch(
+                    "later", "sales", (action("dependent"), action("independent"))
+                ),
+            ),
+            index=1,
+            requires={"dependent": (object_key("Failed"),)},
         ),
     )
-    sequences, payloads, changes = enumerate_stages(stages)
-    physical = [
-        a for sequence in sequences for batch in sequence.batches for a in batch.actions
-    ]
-    assert all(isinstance(a, MutationAction) for a in physical), (
-        "Build still emits legacy actions"
+    sequences, payloads, _changes, required = enumerate_stages(
+        stages,
+        targets=(BoundTarget("sales", "lakehouse", "Sales"),),
+        completion_target_id="sales",
     )
-    from dataclasses import replace
-
-    from weaver.mutation.bundle import compute_bundle_id
-
-    plan = replace(_plan(()), bundle_id="", sequences=sequences)
+    plan = replace(
+        _plan(()), bundle_id="", sequences=sequences, required_completion=required
+    )
     plan = replace(plan, bundle_id=compute_bundle_id(plan))
     calls = []
 
@@ -192,9 +202,12 @@ def test_numbered_build_stages_emit_dag_with_batch_failure_barrier():
             Failed("physical failure") if request.action.id == "fail" else Completed()
         )
 
-    report = MutationExecutor({"folder": MutationDriver(run)}).execute(plan, payloads)
-    assert calls == ["fail", "sibling"]
-    assert report.by_id["later"].status == "blocked"
+    report = MutationExecutor(
+        {"folder": MutationDriver(run)}, limits={"onelake:Sales": 1}
+    ).execute(plan, payloads)
+    assert calls == ["fail", "sibling", "independent"]
+    assert report.by_id["dependent"].status == "blocked"
+    assert report.by_id["complete-build"].status == "blocked"
 
 
 @weaver_test()

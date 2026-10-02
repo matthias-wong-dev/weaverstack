@@ -1,8 +1,7 @@
-"""Validate and execute planned build bundles.
+"""Bind a frozen Build plan's targets to Session capabilities.
 
-Sequences are barriers. A failed sequence skips all later sequences, and every
-planned action receives one result. The installer resolves target capabilities
-through the Session; it never reads the source repository or changes the plan.
+Every planned action receives one result. Capabilities resolve through the
+Session; nothing here reads the source repository or changes the plan.
 
 The workspace every capability is reached through comes from the bundle, not
 from the Session. A Session supplies credentials, transport and reusable
@@ -11,6 +10,7 @@ resources; it does not decide where a frozen bundle installs.
 
 from __future__ import annotations
 
+import time
 from datetime import datetime, timezone
 from typing import Any, Mapping
 
@@ -24,6 +24,7 @@ from .executors.base import (
     InstallationContext,
     ResolvedTarget,
     SkippedExecution,
+    Waiting,
 )
 from .models import InstallAction
 from .report import (
@@ -276,23 +277,6 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-#: Fabric Warehouse snapshot isolation can abort concurrent DDL and DML that
-#: contend on catalogue metadata or rows, so actions within a batch are serial.
-_WHY_SERIAL = "concurrent T-SQL deadlocked a real Warehouse; see the note above"
-
-
-_SEQUENCE_LABELS = {
-    "reconcile and remove catalogue claims before physical work": "Removing superseded catalogue entries",
-    "reconcile runtime state before physical work": "Updating load and test state",
-    "drop selected rebuild dependency layer": "Removing objects for rebuild",
-    "build dependency layer": "Building objects",
-    "install runtime artefacts": "Installing load and test artefacts",
-    "publish catalogue dictionaries and installations": "Updating catalogue definitions",
-    "publish item registry last": "Finalising catalogue",
-    "refresh mutated lakehouse sql endpoints": "Refreshing SQL endpoint",
-}
-
-
 def execute_install_action(
     action: InstallAction,
     payload: bytes | None = None,
@@ -332,7 +316,17 @@ def _execute(
         )
 
     try:
-        execution = executor.execute(action, load_payload(), context)
+        payload = load_payload()
+        if getattr(executor, "resumable", False):
+            execution = executor.execute(action, payload, context, state=None)
+            # A standalone action has nothing else to run, so it waits here.
+            while isinstance(execution, Waiting):
+                time.sleep(execution.delay)
+                execution = executor.execute(
+                    action, payload, context, state=execution.state
+                )
+        else:
+            execution = executor.execute(action, payload, context)
     except Exception as exc:  # a failing action is data, not a crash
         return _failed(action, target_id, started, exc)
 

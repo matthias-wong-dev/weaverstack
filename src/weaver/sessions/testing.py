@@ -114,6 +114,11 @@ class TestSession(Session):
             store=self._store,
         )
 
+    def execute_mutation(self, plan, payloads=None, **options):
+        # One worker keeps recorded calls in plan order; the DAG is unchanged.
+        options.setdefault("workers", 1)
+        return super().execute_mutation(plan, payloads, **options)
+
     def create_delta_table(
         self,
         qualified_name: str,

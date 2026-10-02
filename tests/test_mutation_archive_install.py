@@ -201,7 +201,8 @@ def test_native_invocation_retains_central_catalogue_and_publication_instant(
         hashlib.sha256(data).hexdigest(),
     )
     batch = BuildBatch("publish", legacy_plan.execution.catalogue_target_id, (action,))
-    from weaver.build_bundle.stages import _mutation_sequences
+    from support.bundles import serial_sequences
+
     from weaver.mutation.bundle import compute_bundle_id
 
     plan = replace(
@@ -209,7 +210,7 @@ def test_native_invocation_retains_central_catalogue_and_publication_instant(
         bundle_id="",
         sequences=(
             *legacy_plan.sequences,
-            *_mutation_sequences((BuildSequence(30, "publication", (batch,)),)),
+            *serial_sequences((BuildSequence(30, "publication", (batch,)),)),
         ),
     )
     plan = replace(plan, bundle_id=compute_bundle_id(plan))

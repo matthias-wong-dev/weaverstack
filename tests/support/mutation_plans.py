@@ -2,6 +2,7 @@
 
 from dataclasses import fields, replace
 
+from support.bundles import serial_sequences
 from weaver.build_bundle.models import BuildBatch, BuildSequence, InstallAction
 from weaver.build_bundle.prune import (
     TargetInventory,
@@ -10,7 +11,6 @@ from weaver.build_bundle.prune import (
 )
 from weaver.build_bundle.stages import (
     PlannedStage,
-    _mutation_sequences,
     enumerate_stages,
 )
 from weaver.mutation import BoundTarget, MutationExecution, MutationPlan
@@ -33,7 +33,7 @@ def warehouse_prune_plan():
         managed_warehouse_sets({}),
         payloads,
     )
-    numbered, payloads, _ = enumerate_stages(
+    numbered, payloads, _, _ = enumerate_stages(
         (
             PlannedStage(
                 "prune",
@@ -41,14 +41,16 @@ def warehouse_prune_plan():
                 (BuildBatch("prune", target.id, tuple(actions)),),
                 payloads=payloads,
             ),
-        )
+        ),
+        targets=(target,),
+        completion_target_id=target.id,
     )
     members = tuple(
         InstallAction(**{f.name: getattr(a, f.name) for f in fields(InstallAction)})
         for a in numbered[0].batches[0].actions
         if a.executor != "completion_gate"
     )
-    sequences = _mutation_sequences(
+    sequences = serial_sequences(
         (
             BuildSequence(
                 10,

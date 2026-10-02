@@ -30,7 +30,7 @@ TSQL_EXECUTOR = "tsql"
 TSQL_BATCH_EXECUTOR = "tsql_batch"
 FOLDER_EXECUTOR = "folder"
 SHORTCUT_EXECUTOR = "shortcut"
-SQL_ENDPOINT_REFRESH_EXECUTOR = "sql_endpoint_refresh"
+SHORTCUT_READINESS_EXECUTOR = "shortcut_readiness"
 LOAD_FILE_EXECUTOR = "load_file"
 RUNTIME_STATE_EXECUTOR = "runtime_state"
 #: Executors accepted in a bundle manifest. Batch executors preserve statement
@@ -44,7 +44,7 @@ VALID_EXECUTORS = frozenset(
         TSQL_BATCH_EXECUTOR,
         FOLDER_EXECUTOR,
         SHORTCUT_EXECUTOR,
-        SQL_ENDPOINT_REFRESH_EXECUTOR,
+        SHORTCUT_READINESS_EXECUTOR,
         LOAD_FILE_EXECUTOR,
         RUNTIME_STATE_EXECUTOR,
     }
@@ -57,12 +57,13 @@ _EXECUTOR_EXTENSION = {
     TSQL_EXECUTOR: ".sql",
     TSQL_BATCH_EXECUTOR: ".tsql-batch.json",
     SHORTCUT_EXECUTOR: ".shortcut.json",
+    SHORTCUT_READINESS_EXECUTOR: ".shortcut-readiness.json",
     # Load payloads contain exact bytes of several content types. The extension
     # therefore identifies the load role.
     LOAD_FILE_EXECUTOR: ".payload",
     RUNTIME_STATE_EXECUTOR: ".runtime-state.json",
 }
-_PAYLOADLESS_EXECUTORS = frozenset({FOLDER_EXECUTOR, SQL_ENDPOINT_REFRESH_EXECUTOR})
+_PAYLOADLESS_EXECUTORS = frozenset({FOLDER_EXECUTOR})
 #: Payloadless exceptions for executors that otherwise require one.
 _PAYLOADLESS_KINDS = frozenset({DELETE_FILE})
 

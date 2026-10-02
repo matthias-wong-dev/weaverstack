@@ -743,18 +743,26 @@ class _Invocation:
 
 
 def physical_driver(
-    executor, contexts, *, lane, required_capabilities, allow_skipped=False
+    executor,
+    contexts,
+    *,
+    required_capabilities,
+    lane=None,
+    allow_skipped=False,
+    clock=time,
 ):
-    """Bind existing executors to one owned runtime lane.
+    """Bind an existing executor to supplied contexts.
 
-    Use the same lane for a shared Spark Session, TDS connection or inner pool.
-    Contexts and capability requirements are supplied before dispatch.
+    ``lane`` serialises every action of this driver, for a shared Session, TDS
+    connection or inner pool that no per-action resource already owns. A
+    ``resumable`` executor's ``Waiting`` becomes ``Pending`` on ``clock``.
     """
-    from ..build_bundle.executors.base import SkippedExecution
+    from ..build_bundle.executors.base import SkippedExecution, Waiting
     from ..errors import BuildError
 
     contexts = dict(contexts)
     capabilities = tuple(required_capabilities)
+    resumable = getattr(executor, "resumable", False)
 
     def preflight(action, payload):
         context = contexts.get(action.target_id)
@@ -767,15 +775,24 @@ def physical_driver(
                 )
 
     def run(request):
+        options = {"state": request.continuation} if resumable else {}
         result = executor.execute(
-            request.action, request.payload, contexts[request.action.target_id]
+            request.action,
+            request.payload,
+            contexts[request.action.target_id],
+            **options,
         )
+        if isinstance(result, Waiting):
+            # The executor refuses a poll time already past when it accepts the
+            # outcome, so the minimum leaves room for thread scheduling.
+            return Pending(result.state, clock.monotonic() + max(result.delay, 0.5))
         if isinstance(result, SkippedExecution):
             if allow_skipped:
                 return Completed({**(result.details or {}), "skipped": True})
             return Failed("required physical action was skipped")
         return Completed(result)
 
+    lanes = () if lane is None else (lane,)
     return MutationDriver(
-        run, resources=(lane,), serial_resources=(lane,), preflight=preflight
+        run, resources=lanes, serial_resources=lanes, preflight=preflight
     )

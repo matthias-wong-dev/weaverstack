@@ -102,7 +102,7 @@ class BuildBatch:
 
 @dataclass(frozen=True)
 class BuildSequence:
-    """One barrier. Every batch here completes before the next sequence starts."""
+    """Numbered presentation grouping; actions carry their own edges."""
 
     number: int
     description: str
