@@ -321,7 +321,8 @@ every physical success sink ─→ physical gate ─→ catalogue publication �
 `··→` is `settle_after`: a refresh reflects whatever the mutations left. A plan
 waits for a refresh only where an action reads through that endpoint; otherwise
 it requests one and the endpoint catches up after the Build, and a load that
-reads through an endpoint refreshes it itself. A known
+reads through an endpoint refreshes it itself. Publication certifies objects,
+not endpoint metadata, so the physical gate excludes refreshes. A known
 failure blocks only its dependents; independent branches continue, and
 publication, which needs every physical success, does not run. The final gate
 over every success sink is the required completion.

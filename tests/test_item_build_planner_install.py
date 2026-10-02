@@ -1013,6 +1013,12 @@ def test_each_affected_lakehouse_requests_one_refresh_nothing_waits_for(tmp_path
         for _s, _b, action in bundle.plan.actions()
     )
     assert bundle.plan.driver_contracts == ()
+    assert not runs_before(
+        bundle.plan, "request-sql-endpoint-refresh-Lakehouse--Raw", "publish-registry"
+    )
+    assert runs_before(
+        bundle.plan, "request-sql-endpoint-refresh-Lakehouse--Raw", "complete-build"
+    )
 
 
 @weaver_test()
