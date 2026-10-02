@@ -1,49 +1,43 @@
-"""Build, Wipe and Mirror of the 1,000-object estates finish within their ceilings.
+"""Build, Wipe and Mirror of the representative estates finish within their ceilings.
 
-Opt in with ``--performance``. Each run empties the performance items, builds
-the representative estate, builds it again unchanged, mirrors it and wipes it,
-timing each from the caller. A failure prints where Build time went by executor.
+The ceilings were qualified on an F64 capacity with the default concurrency.
 
-The run happens in a module fixture, so the claims below read its timings and
-cross no resource themselves.
+Opt in with ``--performance``. Each estate run empties the performance items,
+builds the estate, builds it again unchanged, mirrors it and wipes it, timing
+each from the caller. A failure prints where Build time went by executor.
+
+The runs happen in a module fixture, one per estate, so the claims below read
+its timings and cross no resource themselves. The estates share the
+performance items, so they run one after another.
 """
 
 from __future__ import annotations
 
 import pytest
-from support.fabric_performance import (
-    LAKEHOUSE,
-    THRESHOLDS,
-    WAREHOUSE,
-    record,
-    run_estate,
-)
+from support.fabric_performance import LAKEHOUSE, WAREHOUSE, record, run_estate
 from support.weaver_test import register_session, weaver_test
 
-DECLARATIONS = 1_000
+ESTATES = (
+    (WAREHOUSE, 50),
+    (LAKEHOUSE, 50),
+    (WAREHOUSE, 1_000),
+    (LAKEHOUSE, 1_000),
+)
 
 
-@pytest.fixture(scope="module")
-def warehouse_estate(fabric_workspace, warehouse_session):
-    register_session(warehouse_session)
-    run = run_estate(
-        WAREHOUSE,
-        DECLARATIONS,
-        session=warehouse_session,
-        workspace_name=fabric_workspace.workspace,
-        environment=str(fabric_workspace.environment),
+@pytest.fixture(
+    scope="module", params=ESTATES, ids=lambda estate: f"{estate[0]}-{estate[1]}"
+)
+def estate(request, fabric_workspace):
+    engine, declarations = request.param
+    session = request.getfixturevalue(
+        "warehouse_session" if engine == WAREHOUSE else "weaver_session"
     )
-    record(run)
-    return run
-
-
-@pytest.fixture(scope="module")
-def lakehouse_estate(fabric_workspace, weaver_session):
-    register_session(weaver_session)
+    register_session(session)
     run = run_estate(
-        LAKEHOUSE,
-        DECLARATIONS,
-        session=weaver_session,
+        engine,
+        declarations,
+        session=session,
         workspace_name=fabric_workspace.workspace,
         environment=str(fabric_workspace.environment),
     )
@@ -54,34 +48,19 @@ def lakehouse_estate(fabric_workspace, weaver_session):
 def _within(run, operation):
     timing = next(t for t in run.timings if t.operation == operation)
     assert timing.succeeded, run.describe()
-    assert timing.seconds < THRESHOLDS[run.engine][operation], run.describe()
+    assert timing.seconds < run.ceiling(operation), run.describe()
 
 
 @pytest.mark.performance
 @pytest.mark.parametrize("operation", ["build", "wipe", "mirror"])
 @weaver_test(integration=True)
-def test_the_warehouse_estate_is_within_its_ceiling(warehouse_estate, operation):
-    _within(warehouse_estate, operation)
+def test_the_estate_is_within_its_ceiling(estate, operation):
+    _within(estate, operation)
 
 
 @pytest.mark.performance
 @weaver_test(integration=True)
-def test_an_unchanged_warehouse_estate_builds_nothing_quickly(warehouse_estate):
-    _within(warehouse_estate, "noop")
-    timing = next(t for t in warehouse_estate.timings if t.operation == "noop")
-    assert timing.detail["actions"] == 0, warehouse_estate.describe()
-
-
-@pytest.mark.performance
-@pytest.mark.parametrize("operation", ["build", "wipe", "mirror"])
-@weaver_test(integration=True)
-def test_the_lakehouse_estate_is_within_its_ceiling(lakehouse_estate, operation):
-    _within(lakehouse_estate, operation)
-
-
-@pytest.mark.performance
-@weaver_test(integration=True)
-def test_an_unchanged_lakehouse_estate_builds_nothing_quickly(lakehouse_estate):
-    _within(lakehouse_estate, "noop")
-    timing = next(t for t in lakehouse_estate.timings if t.operation == "noop")
-    assert timing.detail["actions"] == 0, lakehouse_estate.describe()
+def test_an_unchanged_estate_builds_nothing_quickly(estate):
+    _within(estate, "noop")
+    timing = next(t for t in estate.timings if t.operation == "noop")
+    assert timing.detail["actions"] == 0, estate.describe()

@@ -17,10 +17,19 @@ from pathlib import Path
 LAKEHOUSE = "lakehouse"
 WAREHOUSE = "warehouse"
 
-#: Wall-clock ceilings in seconds, by engine and operation.
+#: Wall-clock ceilings in seconds, by estate size, engine and operation, set
+#: above the slowest of repeated runs on an F64 capacity with the default
+#: concurrency. They qualify that capacity; a smaller one, or a Workspace that
+#: lowers ``parallel_workers``, is expected to be slower.
 THRESHOLDS = {
-    WAREHOUSE: {"build": 5 * 60, "noop": 30, "wipe": 60, "mirror": 2 * 60},
-    LAKEHOUSE: {"build": 10 * 60, "noop": 30, "wipe": 2 * 60, "mirror": 5 * 60},
+    50: {
+        WAREHOUSE: {"build": 60, "noop": 15, "wipe": 15, "mirror": 45},
+        LAKEHOUSE: {"build": 180, "noop": 45, "wipe": 60, "mirror": 150},
+    },
+    1_000: {
+        WAREHOUSE: {"build": 420, "noop": 30, "wipe": 60, "mirror": 105},
+        LAKEHOUSE: {"build": 420, "noop": 45, "wipe": 60, "mirror": 270},
+    },
 }
 
 #: The representative estates place motif 0 in item 000 and the rest in 001.
@@ -44,10 +53,13 @@ class EstateRun:
     def seconds(self, operation: str) -> float:
         return next(t.seconds for t in self.timings if t.operation == operation)
 
+    def ceiling(self, operation: str) -> float:
+        return THRESHOLDS[self.declarations][self.engine][operation]
+
     def describe(self) -> str:
         lines = [f"{self.engine} estate, {self.declarations} declarations"]
         for timing in self.timings:
-            ceiling = THRESHOLDS[self.engine].get(timing.operation)
+            ceiling = self.ceiling(timing.operation)
             bound = f" (limit {ceiling}s)" if ceiling else ""
             state = "ok" if timing.succeeded else "FAILED"
             lines.append(
