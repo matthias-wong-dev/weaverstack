@@ -163,6 +163,64 @@ def _build_detail(result) -> dict:
     return detail
 
 
+def _report_detail(report, plan) -> dict:
+    """Action time by executor and the last actions to finish, from a report."""
+
+    executors = {action.id: action.executor for _s, _b, action in plan.actions()}
+    by_executor: dict[str, list[float]] = defaultdict(list)
+    for result in report.results:
+        if executors[result.action_id] != "completion_gate":
+            by_executor[executors[result.action_id]].append(
+                result.active_seconds + result.wait_seconds
+            )
+    detail = {
+        "actions": sum(len(v) for v in by_executor.values()),
+        "action time": f"{sum(sum(v) for v in by_executor.values()):.1f}s",
+    }
+    for executor in sorted(by_executor, key=lambda name: -sum(by_executor[name]))[:6]:
+        durations = by_executor[executor]
+        detail[executor] = (
+            f"{len(durations)} actions, {sum(durations):.1f}s, "
+            f"max {max(durations):.1f}s"
+        )
+    if report.ledger:
+        origin = min(event.at for event in report.ledger)
+        began: dict[str, float] = {}
+        ended: dict[str, float] = {}
+        for event in report.ledger:
+            if event.kind == "dispatched":
+                began.setdefault(event.action_id, event.at - origin)
+            elif event.kind == "terminal":
+                ended[event.action_id] = event.at - origin
+        last = sorted(ended, key=ended.get)[-6:]
+        detail["last to finish"] = "; ".join(
+            f"{key} ({began.get(key, ended[key]):.1f}s to {ended[key]:.1f}s)"
+            for key in last
+        )
+    return detail
+
+
+class _Capturing:
+    """Keep the plan and report of each mutation a Session executes."""
+
+    def __init__(self, session):
+        self.session = session
+        self.executed = []
+        self._original = session.execute_mutation
+
+    def __enter__(self):
+        def execute(plan, payloads=None, **options):
+            report = self._original(plan, payloads, **options)
+            self.executed.append((plan, report))
+            return report
+
+        self.session.execute_mutation = execute
+        return self
+
+    def __exit__(self, *_exc):
+        self.session.execute_mutation = self._original
+
+
 def _timed(run: EstateRun, operation: str, call, detail=lambda result: {}):
     started = time.perf_counter()
     try:
@@ -226,21 +284,26 @@ def run_estate(
                     _build_detail,
                 )
             elif operation == "mirror":
-                _timed(
-                    run,
-                    operation,
-                    lambda: weaver.mirror(
-                        [
-                            f"{kind}/{item}={kind}/{target}"
-                            for item, target in zip(ITEMS, names["mirrors"])
-                        ],
-                        session=session,
-                        workspace=workspace_name,
-                        catalogue=f"Warehouse/{names['fork']}",
-                        mirror=catalogue,
-                        environment=environment,
-                    ),
-                )
+                capturing = _Capturing(session)
+                with capturing:
+                    _timed(
+                        run,
+                        operation,
+                        lambda: weaver.mirror(
+                            [
+                                f"{kind}/{item}={kind}/{target}"
+                                for item, target in zip(ITEMS, names["mirrors"])
+                            ],
+                            session=session,
+                            workspace=workspace_name,
+                            catalogue=f"Warehouse/{names['fork']}",
+                            mirror=catalogue,
+                            environment=environment,
+                        ),
+                    )
+                if capturing.executed:
+                    plan, report = capturing.executed[-1]
+                    run.timings[-1].detail.update(_report_detail(report, plan))
             elif operation == "wipe":
                 _timed(
                     run,
