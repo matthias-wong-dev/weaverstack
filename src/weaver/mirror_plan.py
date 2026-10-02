@@ -38,6 +38,8 @@ from .wipe_plan import finishing, target_wipe_actions
 LOAD_TREE = "_/Load"
 #: Statements in one Warehouse round trip. Each runs as its own dynamic batch.
 STATEMENTS_PER_SCRIPT = 200
+#: Lakehouse wrapper views created by one Spark action.
+VIEWS_PER_ACTION = 10
 
 
 def dynamic_script(statements) -> str:
@@ -512,7 +514,8 @@ def _lakehouse(
     producers,
     session,
 ):
-    from .build_bundle.models import AWAIT_FILE_SHORTCUTS, AWAIT_TABLE_SHORTCUTS
+    from .build_bundle.models import AWAIT_TABLE_SHORTCUTS
+    from .build_bundle.shortcuts import readiness_actions
     from .catalogue.borrow import wrapper_view_statement
     from .fabric.resources import LAKEHOUSE as LAKEHOUSE_ITEM
     from .fabric.resources import WAREHOUSE as WAREHOUSE_ITEM
@@ -629,34 +632,22 @@ def _lakehouse(
             resources=(f"shortcuts:{destination.item_id}",),
         )
         actions.append(made)
-        for kind, surface_name, wanted in (
-            (AWAIT_TABLE_SHORTCUTS, "tables", "table"),
-            (AWAIT_FILE_SHORTCUTS, "files", "folder"),
+        local: dict[str, bytes] = {}
+        for waiting, _names in readiness_actions(
+            frozen, local, name=f"{name}-{slug}", file=f"{name}-{slug}"
         ):
-            members = [
-                {key: each[key] for key in ("shortcut", "path", "name")}
-                for each in frozen
-                if each["type"] == wanted
-            ]
-            if not members:
-                continue
-            path, digest = compiling.payload(
-                f"{name}-{surface_name}-{slug}.shortcut-readiness.json",
-                json.dumps(
-                    {"surface": surface_name, "shortcuts": members}, sort_keys=True
-                ).encode(),
-            )
+            path, digest = compiling.payload(waiting.payload, local[waiting.payload])
             actions.append(
                 _action(
-                    f"mirror-await-{name}-{surface_name}-{slug}",
-                    kind,
+                    f"mirror-{waiting.id}",
+                    waiting.kind,
                     destination,
                     executor="shortcut_readiness",
                     payload=path,
                     digest=digest,
                     depends_on=(made.id,),
                     resources=spark
-                    if kind == AWAIT_TABLE_SHORTCUTS
+                    if waiting.kind == AWAIT_TABLE_SHORTCUTS
                     else (f"onelake:{destination.item_id}",),
                 )
             )
@@ -683,13 +674,17 @@ def _lakehouse(
         for borrowed in each.relations
         if not borrowed.is_pointer
     ]
-    if wrapped:
+    # Each action is one Spark submission, so views spread across the lanes.
+    for index in range(0, len(wrapped), VIEWS_PER_ACTION):
+        chunk = wrapped[index : index + VIEWS_PER_ACTION]
+        number = index // VIEWS_PER_ACTION
         path, digest = compiling.payload(
-            f"views-{slug}.spark-sql-batch.json", json.dumps(wrapped).encode()
+            f"views-{slug}-{number:03d}.spark-sql-batch.json",
+            json.dumps(chunk).encode(),
         )
         actions.append(
             _action(
-                f"mirror-views-{slug}",
+                f"mirror-views-{slug}-{number:03d}",
                 "build_view",
                 destination,
                 executor="spark_sql_batch",

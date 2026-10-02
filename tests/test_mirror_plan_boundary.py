@@ -169,7 +169,7 @@ def test_a_lakehouse_mirror_resolves_case_exact_sources_and_awaits_its_shortcuts
     assert runs_before(
         plan,
         "mirror-pointers-lakehouse-Input_Dev",
-        "mirror-await-pointers-tables-lakehouse-Input_Dev",
+        "mirror-await-tables-pointers-lakehouse-Input_Dev",
     )
     # The ``_`` surface reads the destination catalogue, so it follows its build.
     assert runs_before(plan, "complete-build", "mirror-surface-lakehouse-Input_Dev")
@@ -186,7 +186,7 @@ def test_a_lakehouse_mirror_resolves_case_exact_sources_and_awaits_its_shortcuts
     assert runs_before(plan, copy_id, "mirror-bind-lakehouse-Input_Dev")
     assert runs_before(
         plan,
-        "mirror-await-pointers-tables-lakehouse-Input_Dev",
+        "mirror-await-tables-pointers-lakehouse-Input_Dev",
         "mirror-bind-lakehouse-Input_Dev",
     )
     assert plan.execution.spark_home_target_id == "lakehouse-Input_Dev"
@@ -250,6 +250,44 @@ def test_a_shortcut_into_another_mirrored_item_reads_what_this_plan_builds(tmp_p
     assert recreated["shortcuts"][0]["source_item_name"] == "Input_Dev"
     assert runs_before(
         plan,
-        "mirror-await-pointers-tables-lakehouse-Input_Dev",
+        "mirror-await-tables-pointers-lakehouse-Input_Dev",
         "mirror-recreated-lakehouse-Model_Dev",
     )
+
+
+@weaver_test()
+def test_a_wide_lakehouse_mirror_spreads_its_views_and_waits_across_actions(tmp_path):
+    from weaver.build_bundle.shortcuts import READINESS_CHUNK
+    from weaver.mirror_plan import VIEWS_PER_ACTION
+
+    tables = tmp_path / "Input" / "Tables" / "Sales"
+    relations = []
+    for n in range(2 * READINESS_CHUNK + 10):
+        (tables / f"T{n:03d}").mkdir(parents=True)
+        relations.append(
+            Borrowed(
+                WeaverDocumentId.parse(f"Lakehouse/Input/Tables/Sales.T{n:03d}"),
+                "table",
+                "table",
+            )
+        )
+    for n in range(3 * VIEWS_PER_ACTION):
+        relations.append(
+            Borrowed(
+                WeaverDocumentId.parse(f"Lakehouse/Input/Tables/Sales.V{n:03d}"),
+                "view",
+                "view",
+            )
+        )
+    resolved = _resolved("Input", "Lakehouse", relations=relations)
+    session = _Session(resolver=_Resolver(tmp_path), store=FilesystemStore())
+
+    plan, _payloads, _summary = mirror_mutation_plan(resolved, session=session)
+
+    actions = _actions(plan)
+    views = [a for a in actions if a.startswith("mirror-views-")]
+    waits = [a for a in actions if a.startswith("mirror-await-tables-pointers-")]
+    assert len(views) == 3 and len(waits) == 3
+    for each in (*views, *waits):
+        assert runs_before(plan, each, "mirror-bind-lakehouse-Input_Dev")
+    assert not any(runs_before(plan, a, b) for a in views for b in views if a != b)

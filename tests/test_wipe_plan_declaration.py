@@ -374,9 +374,12 @@ def test_mirror_empties_physical_targets_without_estate_semantics():
         source = inspect.getsource(sys.modules[module])
         assert "plan_wipe" not in source
         assert "UNBIND" not in source
-    assert inspect.getsource(sys.modules["weaver.mirror_plan"]).count(
-        "target_wipe_actions("
-    ) == 2
+    assert (
+        inspect.getsource(sys.modules["weaver.mirror_plan"]).count(
+            "target_wipe_actions("
+        )
+        == 2
+    )
 
 
 # --- estate discovery ---------------------------------------------------------
