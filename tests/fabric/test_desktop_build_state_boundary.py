@@ -107,7 +107,7 @@ def test_build_state_is_read_without_importing_weaver_in_fabric(
     assert "Sales" in inventory.schemas, inventory
 
     submitted = recorded_session.submitted
-    assert any(statement.startswith("SHOW VIEWS") for statement in submitted), submitted
+    assert any(statement.startswith("SHOW TABLES") for statement in submitted), submitted
     assert not any("import weaver" in statement for statement in submitted), submitted
     assert all(
         statement.split()[0] in {"SELECT", "SHOW", "DESCRIBE"}
