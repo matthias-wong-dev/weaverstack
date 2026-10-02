@@ -31,10 +31,10 @@ _UNSUPPORTED = {
 }
 
 
-def endpoint_refresh_drivers(contexts, *, failed, clock=time):
+def endpoint_refresh_drivers(contexts, *, outcome, clock=time):
     """Bind the start and await drivers to resolved target contexts.
 
-    ``failed`` converts a known Weaver failure into the executor outcome.
+    ``outcome`` converts a Weaver error into the executor outcome.
     """
 
     from ...errors import WeaverError
@@ -53,7 +53,7 @@ def endpoint_refresh_drivers(contexts, *, failed, clock=time):
         try:
             refresh = _UNSUPPORTED if begin is None else begin(context.target.lakehouse)
         except WeaverError as error:
-            return failed(error)
+            return outcome(error)
         return Completed(TypedValue(REFRESH_RESULT, refresh))
 
     def observe(request):
@@ -65,7 +65,7 @@ def endpoint_refresh_drivers(contexts, *, failed, clock=time):
             try:
                 refresh = context.resolver.observe_sql_endpoint_refresh(refresh)
             except WeaverError as error:
-                return failed(error)
+                return outcome(error)
         if refresh["done"]:
             from ...fabric.resources import refresh_details
 

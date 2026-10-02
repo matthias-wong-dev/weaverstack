@@ -6,7 +6,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-from .errors import SqlError, SqlExecutionError
+from .errors import SqlError, SqlExecutionError, SqlOutcomeUnknown
 from .pool import SqlConnectionPool
 
 SqlRow = dict[str, Any]
@@ -195,7 +195,8 @@ class PooledSqlExecutor:
                 lease.discard()
                 _rollback(connection)
                 operation = "query" if query else "SQL execution"
-                raise SqlExecutionError(
+                error = SqlOutcomeUnknown if _response_lost(exc) else SqlExecutionError
+                raise error(
                     f"{operation} failed on {self.pool.endpoint}: {exc}"
                 ) from exc
             finally:
@@ -215,6 +216,26 @@ class PooledSqlExecutor:
     def __exit__(self, *exc) -> bool:
         self.close()
         return False
+
+
+#: ``mssql-python`` driver errors raised after a statement may have been sent
+#: (SQLSTATE 08S01, 08003, 08007, HYT00, HYT01 and 01002). A server's own
+#: refusal, a serialization failure included, is a known failure.
+_LOST_RESPONSE = (
+    "Communication link failure",
+    "Connection not open",
+    "Connection failure during transaction",
+    "Timeout expired",
+    "Connection timeout expired",
+    "Disconnect error",
+)
+
+
+def _response_lost(exc: BaseException) -> bool:
+    if isinstance(exc, (ConnectionError, TimeoutError)):
+        return True
+    message = str(exc.args[0]) if exc.args else str(exc)
+    return any(f"Driver Error: {lost};" in message for lost in _LOST_RESPONSE)
 
 
 def _output_parameter_batch(

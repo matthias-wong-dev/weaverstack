@@ -386,7 +386,10 @@ contexts and capability requirements; a shared connection, Session or inner pool
 that no per-action resource owns takes one driver lane.
 
 Reports retain action-keyed success, known failure, dependency blocking,
-not-dispatched and uncertain outcomes in frozen action order. Independent work
+not-dispatched and uncertain outcomes in frozen action order. A refused request
+is a known failure. A lost response after a request may have been sent raises
+`weaver.errors.OutcomeUnknown`, and its action is uncertain: the mutation may
+have been applied, so it settles nothing, and the next Build reconciles it. Independent work
 continues by default; fail-fast and cancellation stop new admissions and drain
 running work. Idle waits observe cancellation through event interruption on the
 default clock or bounded sleeps on supplied clocks. Blocking driver calls must

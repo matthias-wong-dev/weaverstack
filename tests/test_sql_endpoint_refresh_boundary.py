@@ -35,11 +35,11 @@ from weaver.mutation import (
 from weaver.mutation.bundle import compute_bundle_id
 from weaver.mutation.executor import (
     Completed,
-    Failed,
     MutationDriver,
     MutationExecutor,
 )
 from weaver.mutation.models import ResultReference
+from weaver.sessions.archive_runtime import error_outcome
 from weaver.store import FilesystemStore
 from weaver.targets import ItemRef
 from weaver.workspaces import Workspace
@@ -132,7 +132,7 @@ class _Resolver:
 def _execute(resolver, clock):
     drivers = endpoint_refresh_drivers(
         {"sales": _context(resolver)},
-        failed=lambda error: Failed(f"{type(error).__name__}: {error}"),
+        outcome=error_outcome,
         clock=clock,
     )
     ran = []

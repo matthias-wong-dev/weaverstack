@@ -160,7 +160,6 @@ def execute_mutation(
     from ..build_bundle.installer import MutationBindings
     from ..errors import BuildError, WeaverError
     from ..mutation.executor import (
-        Failed,
         MutationExecutor,
         physical_driver,
         validate_inputs,
@@ -199,9 +198,6 @@ def execute_mutation(
         for key, target in resolved.items()
     }
 
-    def failed(error):
-        return Failed(f"{type(error).__name__}: {error}")
-
     drivers = {}
     for name, executor in executors.items():
         driver = physical_driver(
@@ -212,13 +208,28 @@ def execute_mutation(
             try:
                 return physical(request)
             except (WeaverError, ValueError) as error:
-                return failed(error)
+                return error_outcome(error)
 
         drivers[name] = replace(driver, run=run)
-    drivers.update(endpoint_refresh_drivers(contexts, failed=failed))
+    drivers.update(endpoint_refresh_drivers(contexts, outcome=error_outcome))
     return MutationExecutor(
         drivers, workers=workers, limits=resource_limits(plan), timeout=timeout
     ).execute(plan, payloads, invocation_id=invocation_id)
+
+
+def error_outcome(error):
+    """A refused request is a known failure; a lost response leaves it uncertain.
+
+    An uncertain mutation may have been applied, so it settles no ordering edge.
+    """
+
+    from ..errors import OutcomeUnknown
+    from ..mutation.executor import Failed, Uncertain
+
+    reported = f"{type(error).__name__}: {error}"
+    return (
+        Uncertain(reported) if isinstance(error, OutcomeUnknown) else Failed(reported)
+    )
 
 
 def run_mutation(root, spark, output, archive_sha256, *, workers):

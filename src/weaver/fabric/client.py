@@ -8,7 +8,7 @@ from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import Any
 
-from ..errors import WeaverError, reported_message
+from ..errors import OutcomeUnknown, WeaverError, reported_message
 from .auth import FABRIC_SCOPE, token_source
 
 FABRIC_API = "https://api.fabric.microsoft.com/v1"
@@ -40,6 +40,16 @@ class FabricError(WeaverError):
     def __init__(self, message: str, *, status_code: int | None = None) -> None:
         super().__init__(message)
         self.status_code = status_code
+
+
+class FabricOutcomeUnknown(FabricError, OutcomeUnknown):
+    """The request may have been acted on, and its response was lost."""
+
+
+def outcome_unknown(method: str, status_code: int) -> bool:
+    """Whether a mutation's failed reply leaves open that Fabric acted on it."""
+
+    return method not in READ_METHODS and status_code == 500
 
 
 def _response_message(response) -> str:
@@ -203,12 +213,16 @@ class FabricClient:
                     timeout=self.timeout,
                 )
             except requests.exceptions.RequestException as exc:
-                raise FabricError(
-                    f"{method} {url} could not be reached: {exc}"
-                ) from exc
+                error = FabricError if never_sent(exc) else FabricOutcomeUnknown
+                raise error(f"{method} {url} could not be reached: {exc}") from exc
             if response.status_code in expected:
                 return response
-            raise FabricError(
+            error = (
+                FabricOutcomeUnknown
+                if outcome_unknown(method, response.status_code)
+                else FabricError
+            )
+            raise error(
                 f"{method} {url} returned {response.status_code}: "
                 f"{_response_message(response)}",
                 status_code=response.status_code,

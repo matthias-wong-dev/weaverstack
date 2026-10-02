@@ -308,3 +308,52 @@ def test_build_report_keeps_physical_result_details(tmp_path):
         "written": (tmp_path / "Files/Incoming/binary.bin").as_posix(),
         "bytes": len(payloads["payload/binary.payload"]),
     }
+
+
+@weaver_test()
+@pytest.mark.parametrize(
+    ("error", "status"),
+    [("StoreOutcomeUnknown", "uncertain"), ("StoreError", "failed")],
+)
+def test_a_lost_response_is_uncertain_and_a_refusal_is_a_known_failure(
+    tmp_path, error, status
+):
+    import weaver.store
+    from weaver.sessions import archive_runtime
+
+    plan, payloads = build_plan_fixture()
+
+    class Folder:
+        name = "folder"
+
+        def execute(self, action, payload, context):
+            if action.id == "first":
+                raise getattr(weaver.store, error)("PUT Files/Incoming/first")
+            return {}
+
+    class File:
+        name = "load_file"
+
+        def execute(self, action, payload, context):
+            return {}
+
+    class Resolver:
+        def files_root(self, item):
+            return Location(str(tmp_path / "Files"))
+
+    with TestSession(
+        workspace=given_workspace(), store=FilesystemStore(), resolver=Resolver()
+    ) as session:
+        report = archive_runtime.execute_mutation(
+            plan,
+            payloads,
+            session,
+            workers=1,
+            executors={"folder": Folder(), "load_file": File()},
+        )
+
+    assert report.by_id["first"].status == status
+    # An uncertain write keeps its resource, so nothing else writes there.
+    assert report.by_id["second"].status == (
+        "succeeded" if status == "failed" else "not_dispatched"
+    )

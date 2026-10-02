@@ -13,12 +13,16 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
-from .errors import CommandError, WeaverError
+from .errors import CommandError, OutcomeUnknown, WeaverError
 from .locations import Location
 
 
 class StoreError(WeaverError):
     pass
+
+
+class StoreOutcomeUnknown(StoreError, OutcomeUnknown):
+    """A storage request may have been acted on, and its response was lost."""
 
 
 class StoreNotFoundError(StoreError):

@@ -232,7 +232,8 @@ def refresh_from_here(plan, *, naming: str, workspace, session):
         endpoint_refresh_drivers,
     )
     from weaver.build_bundle.installer import MutationBindings
-    from weaver.mutation.executor import Completed, DriverRequest, Failed, Pending
+    from weaver.mutation.executor import Completed, DriverRequest, Pending
+    from weaver.sessions.archive_runtime import error_outcome
 
     batch, start = action_of(plan, "start_sql_endpoint_refresh", naming=naming)
     _batch, finish = action_of(plan, "await_sql_endpoint_refresh", naming=naming)
@@ -242,7 +243,7 @@ def refresh_from_here(plan, *, naming: str, workspace, session):
     )
     drivers = endpoint_refresh_drivers(
         {batch.target_id: InstallationContext(installer.resolver, None, target)},
-        failed=lambda error: Failed(f"{type(error).__name__}: {error}"),
+        outcome=error_outcome,
     )
     started = drivers[START_EXECUTOR].run(DriverRequest(start, None))
     if not isinstance(started, Completed):
