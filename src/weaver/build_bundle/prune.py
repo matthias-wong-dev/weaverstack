@@ -309,11 +309,22 @@ def read_lakehouse_inventory(
     )
     views: tuple[str, ...] = ()
     if catalogue is not None:
+        # Views exist only in the Spark catalogue. Storage and the shortcut API
+        # name every other relation, so the views are what remains. A registered
+        # table with no directory here reads as a view, and its prune fails.
+        named = {table.casefold() for table in tables} | {
+            f"{shortcut.path.split('/', 1)[1]}.{shortcut.name}".casefold()
+            for shortcut in shortcuts
+            if shortcut.path.strip("/")
+            .casefold()
+            .startswith(TABLES_AREA.casefold() + "/")
+        }
         views = tuple(
-            f"{schema}.{view}"
+            f"{schema}.{relation}"
             for schema in schemas
             if schema.casefold() not in shortcut_schemas
-            for view in catalogue.views(schema)
+            for relation in catalogue.relations(schema)
+            if f"{schema}.{relation}".casefold() not in named
         )
     # Runtime references are shortcuts under Tables/_, whether or not Spark has
     # registered them as tables. The ordinary schema inventory excludes ``_``.

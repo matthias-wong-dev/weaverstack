@@ -92,6 +92,17 @@ class SparkCatalogue:
 
         return self._named(f"SHOW VIEWS IN {self.qualified_schema(schema)}", "viewName")
 
+    def relations(self, schema: str) -> tuple[str, ...]:
+        """Every persistent table and view name in one schema, in one listing.
+
+        ``SHOW VIEWS`` resolves each view and took 30s over 234 of them, where
+        ``SHOW TABLES`` names all 781 relations in 4s.
+        """
+
+        return self._named(
+            f"SHOW TABLES IN {self.qualified_schema(schema)}", "tableName"
+        )
+
     def tables(self, schema: str) -> tuple[str, ...]:
         """Table names in one schema of this destination.
 

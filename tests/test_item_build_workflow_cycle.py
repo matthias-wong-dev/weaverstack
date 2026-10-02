@@ -460,7 +460,7 @@ def test_a_catalogue_recovered_schema_keeps_its_existence_check(tmp_path):
         def schema_exists(self, schema):
             return schema == "_"
 
-        def views(self, schema):
+        def relations(self, schema):
             return ()
 
     class CountingInventoryStore(CountingStore):
@@ -572,3 +572,49 @@ def test_archive_rejects_traversal_before_extracting(tmp_path):
 def test_timestamped_archive_name_is_utc_and_has_the_weaver_suffix():
     at = datetime(2026, 7, 27, 1, 2, 3, 4, tzinfo=timezone.utc)
     assert timestamped_archive_name(at) == "20260727T010203000004Z.weaver.zip"
+
+
+@weaver_test()
+def test_views_are_the_relations_neither_storage_nor_a_shortcut_names(tmp_path):
+    """One relation listing replaces the per-view listing Spark answers slowly."""
+
+    from weaver.fabric.shortcuts import Shortcut
+
+    workspace = given_workspace(catalogue="Warehouse/Control")
+    inner = given_resolver(
+        workspace=workspace, lakehouses=("Weaver", "Raw_Dev"), root=tmp_path
+    )
+
+    class Resolver:
+        def __getattr__(self, name):
+            return getattr(inner, name)
+
+        def onelake_shortcuts(self, _item):
+            return (Shortcut(path="Tables/Source", name="Linked"),)
+
+    class Catalogue:
+        def __init__(self):
+            self.asked = []
+
+        def schema_exists(self, schema):
+            return False
+
+        def relations(self, schema):
+            self.asked.append(schema)
+            return ("customer", "Active", "Linked", "Summary")
+
+    store = FilesystemStore()
+    tables = inner.tables_root(ItemRef("Raw_Dev"))
+    store.make_directory(tables.join("Source", "Customer"))
+    catalogue = Catalogue()
+
+    inventory = read_lakehouse_inventory(
+        _bindings().entries[0].to_bound_target(),
+        resolver=Resolver(),
+        store=store,
+        catalogue=catalogue,
+    )
+
+    assert inventory.tables == ("Source.Customer",)
+    assert inventory.views == ("Source.Active", "Source.Summary")
+    assert catalogue.asked == ["Source"]
