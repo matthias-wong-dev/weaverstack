@@ -20,6 +20,9 @@ from .client import (
 
 DEFAULT_LIVY_API_VERSION = "2023-12-01"
 DEFAULT_POLL_INTERVAL = 3.0
+#: A statement's first poll waits this long, and each later one twice as long
+#: up to the poll interval, so a short statement is not held for a whole interval.
+FIRST_STATEMENT_POLL = 0.1
 DEFAULT_SESSION_TIMEOUT = 600.0
 DEFAULT_STATEMENT_TIMEOUT = 900.0
 #: A close waits for Fabric to release the session's capacity slot.
@@ -433,6 +436,7 @@ class LivySession:
         statement_url = f"{self.session_url}/statements/{submitted['id']}"
 
         deadline = time.time() + timeout
+        wait = min(FIRST_STATEMENT_POLL, self.poll_interval)
         while time.time() < deadline:
             statement = _call("GET", statement_url, self.token, expected=(200,))
             if (statement.get("state") or "").lower() in {
@@ -441,7 +445,8 @@ class LivySession:
                 "cancelled",
             }:
                 return _result(statement)
-            time.sleep(self.poll_interval)
+            time.sleep(wait)
+            wait = min(wait * 2, self.poll_interval)
         raise LivyError(f"Livy statement did not finish within {int(timeout)}s")
 
     def close(self, *, timeout: float = DEFAULT_CLOSE_TIMEOUT) -> None:
