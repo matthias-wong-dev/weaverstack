@@ -524,3 +524,45 @@ def test_suppression_needs_no_ipython(monkeypatch, capsys):
         print("the mount table")
 
     assert "the mount table" not in capsys.readouterr().out
+
+
+@weaver_test()
+def test_loads_reaching_one_lakehouse_at_once_mount_it_once(monkeypatch):
+    """A mount still being made has no path, so a second caller waits for it."""
+
+    import threading
+    import time
+
+    import weaver.lakehouse as module
+
+    mounts = []
+    ready: set = set()
+
+    class FakeFs:
+        def mount(self, source, point, options=None):
+            mounts.append(point)
+            time.sleep(0.05)
+            ready.add(point)
+
+        def getMountPath(self, point):
+            if point not in ready:
+                raise FileNotFoundError(f"The mount path {point} doesn't exist")
+            return f"/synfs/notebook/session-1{point}"
+
+    monkeypatch.setattr(
+        module, "_notebook_utils", lambda: type("U", (), {"fs": FakeFs()})()
+    )
+    monkeypatch.setattr(module, "_MOUNTS", {})
+    paths = []
+
+    def mount():
+        paths.append(module._mounted("Sales_LH", "abfss://ws@host/lh"))
+
+    threads = [threading.Thread(target=mount) for _ in range(4)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert mounts == ["/weaver/lh"]
+    assert paths == ["/synfs/notebook/session-1/weaver/lh"] * 4
