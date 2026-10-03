@@ -52,6 +52,9 @@ TARGET_COLUMNS = (
 BUSINESS = ("Customer id", "Customer name", "Email")
 
 #: The suffixes that must never appear in a durable write on a clean load.
+#: Fabric's CTE cache, which keeps a CTE a later query repeats.
+CTE_CACHE = "spark.sql.optimizer.cte.cache.enabled"
+
 WORKING = ("_Staging", "_Reject", "_Delete", "_Upsert", "_Change", "_StagingKeep")
 
 
@@ -138,6 +141,8 @@ class _Spark:
     views: list = field(default_factory=list)
     dropped_views: list = field(default_factory=list)
     identifier_case: list = field(default_factory=list)
+    #: Fabric's CTE cache setting in force for each statement, absent off Fabric.
+    cte_cache: list = field(default_factory=list)
 
     def __post_init__(self) -> None:
         self.catalog = _Catalog(self)
@@ -170,6 +175,7 @@ class _Spark:
 
     def sql(self, text: str) -> _Frame:
         self.resolve(text)
+        self.cte_cache.append(self.conf.values.get(CTE_CACHE))
         if text.startswith(("CREATE TABLE", "DROP TABLE")):
             self.identifier_case.append(
                 (text.split("`", 6)[5], self.conf.get("spark.sql.caseSensitive"))
@@ -264,7 +270,9 @@ class _Conf:
     def __init__(self) -> None:
         self.values = {"spark.sql.caseSensitive": "false"}
 
-    def get(self, key: str):
+    def get(self, key: str, *default):
+        if default and key not in self.values:
+            return default[0]
         return self.values[key]
 
     def set(self, key: str, value) -> None:
@@ -904,6 +912,69 @@ def test_mixed_case_runtime_tables_are_created_in_an_exact_case_scope():
         ("CustomerOrder_Delete", "true"),
     ]
     assert spark.conf.get("spark.sql.caseSensitive") == "false"
+
+
+@weaver_test()
+def test_every_statement_runs_with_fabrics_cte_cache_off_and_it_is_restored():
+    """Reject discovery and the purge repeat one chain, which Fabric would keep."""
+
+    spark = _Spark(counts=dict(BUSY, reject=2, clean=1))
+    spark.conf.set(CTE_CACHE, "true")
+
+    load_table(
+        spark,
+        contract=_contract(),
+        lakehouse=_Lakehouse(),
+        staging_frame=_Staged(),
+        fault_tolerant=True,
+    )
+
+    # The evidence drops come before the hold; everything that reads staging after.
+    assert spark.cte_cache[:3] == ["true"] * 3
+    assert set(spark.cte_cache[3:]) == {"false"}
+    assert spark.conf.get(CTE_CACHE) == "true"
+
+
+@weaver_test()
+def test_a_refused_load_restores_fabrics_cte_cache():
+    spark = _Spark(counts=dict(NO_OP, reject=2))
+    spark.conf.set(CTE_CACHE, "true")
+
+    with pytest.raises(LoadError):
+        load_table(
+            spark,
+            contract=_contract(),
+            lakehouse=_Lakehouse(),
+            staging_frame=_Staged(),
+        )
+
+    assert spark.conf.get(CTE_CACHE) == "true"
+
+
+@weaver_test()
+def test_a_session_without_fabrics_cte_cache_is_left_without_it():
+    spark, _result = _load(BUSY)
+
+    assert CTE_CACHE not in spark.conf.values
+    assert set(spark.cte_cache) == {None}
+
+
+@weaver_test()
+def test_overlapping_loads_restore_fabrics_cte_cache_when_the_last_one_leaves():
+    """A first load leaving must not re-enable it under one still running."""
+
+    from weaver.runtime.table_load import _without_cte_cache
+
+    spark = _Spark()
+    spark.conf.set(CTE_CACHE, "true")
+    first, second = _without_cte_cache(spark), _without_cte_cache(spark)
+
+    first.__enter__()
+    second.__enter__()
+    first.__exit__(None, None, None)
+    assert spark.conf.get(CTE_CACHE) == "false"
+    second.__exit__(None, None, None)
+    assert spark.conf.get(CTE_CACHE) == "true"
 
 
 @weaver_test()

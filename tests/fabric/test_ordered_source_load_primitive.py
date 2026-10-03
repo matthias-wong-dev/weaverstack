@@ -4,7 +4,9 @@
 through an aliasing projection. Fabric's Spark 4.1 cannot canonicalise a cached
 relation with an ordering once an inlined CTE references it twice
 (SPARK-59009), which is what reject discovery does over staging. The load must
-still settle every phase, and give back everything it held.
+still settle every phase, and give back everything it held. That includes the
+CTE results Fabric's ``spark.sql.optimizer.cte.cache.enabled`` would keep after
+the purge repeats reject discovery's chain.
 
 The frames are what a Table's ``read()`` returns; nothing else about the
 object matters here. One submission: a range-sourced load, then a sorted range
@@ -71,20 +73,15 @@ def arrange():
     )
 
 
-#: Caches the engine keeps for itself: Delta's snapshots, and the CTE results
-#: Fabric's ``spark.sql.optimizer.cte.cache.enabled`` retains after a query.
-ENGINE_CACHES = ("Delta Table State", "In-memory table cte")
-
-
 def persistent_rdds():
-    """Persisted RDDs by id, without the engine's own caches."""
+    """Persisted RDDs by id, without Delta's own snapshot cache."""
 
     rdds = spark.sparkContext._jsc.getPersistentRDDs()
     named = {int(key): str(rdds[key].name()) for key in rdds.keys()}
     return {
         key: name
         for key, name in named.items()
-        if not name.startswith(ENGINE_CACHES)
+        if not name.startswith("Delta Table State")
     }
 
 
@@ -191,7 +188,8 @@ def test_a_delta_load_settles_a_staging_frame_that_reports_an_ordering(
     assert changed["result"]["rows_deleted"] == 2
     assert seen["sorted_contents"] == [[2, 1], [3, 1], [4, 1], [5, 1]]
 
-    # Every relation either load materialised was given back.
+    # Every relation either load materialised was given back, and no CTE cache
+    # outlived the tolerant load.
     for outcome in (loaded, changed):
         assert outcome["leaked_rdds"] == []
         assert outcome["held_views"] == []

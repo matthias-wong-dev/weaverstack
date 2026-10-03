@@ -6,6 +6,7 @@ Delta tables are reserved for failure evidence.
 
 from __future__ import annotations
 
+import threading
 from contextlib import contextmanager
 
 from ..errors import LoadError
@@ -53,6 +54,39 @@ def _exact_case(spark):
     finally:
         if restore:
             spark.conf.set(_CASE_SENSITIVE, previous)
+
+
+#: Fabric caches a CTE that a later query repeats, and keeps the cache after both
+#: queries with no name to release it by. Reject discovery and the purge repeat
+#: the validation chain, so the cache is off while any load in a session runs.
+_CTE_CACHE = "spark.sql.optimizer.cte.cache.enabled"
+_CTE_CACHE_HOLDS: dict = {}
+_CTE_CACHE_LOCK = threading.Lock()
+
+
+@contextmanager
+def _without_cte_cache(spark):
+    """Hold Fabric's CTE cache off, restoring it when the last holder leaves."""
+
+    key = id(spark)
+    with _CTE_CACHE_LOCK:
+        hold = _CTE_CACHE_HOLDS.get(key)
+        if hold is None:
+            previous = spark.conf.get(_CTE_CACHE, None)
+            restore = previous if str(previous).lower() == "true" else None
+            if restore is not None:
+                spark.conf.set(_CTE_CACHE, "false")
+            hold = _CTE_CACHE_HOLDS[key] = {"holders": 0, "restore": restore}
+        hold["holders"] += 1
+    try:
+        yield
+    finally:
+        with _CTE_CACHE_LOCK:
+            hold["holders"] -= 1
+            if not hold["holders"]:
+                del _CTE_CACHE_HOLDS[key]
+                if hold["restore"] is not None:
+                    spark.conf.set(_CTE_CACHE, hold["restore"])
 
 
 #: Weaver-owned columns carried only by working relations.
@@ -127,30 +161,33 @@ def load_table(
     # working the state machine out a second time.
     kept: set = set()
     evidence: dict = {}
-    try:
-        return _reconcile(
-            spark,
-            held,
-            kept=kept,
-            evidence=evidence,
-            names=names,
-            contract=contract,
-            columns=columns,
-            types=types,
-            staging_frame=staging_frame,
-            deletes=deletes,
-            fault_tolerant=fault_tolerant,
-            ignore_stability_threshold=ignore_stability_threshold,
-        )
-    except Exception:
-        # An outcome Weaver did not classify, so the relations it had settled are
-        # all there is to read afterwards. Written here, and the original failure
-        # goes out unchanged.
-        _keep_unclassified_evidence(spark, names, kept, evidence)
-        raise
-    finally:
-        # Every exit: a clean load, a refusal at any gate, an unexpected failure.
-        _release(spark, held)
+    with _without_cte_cache(spark):
+        try:
+            return _reconcile(
+                spark,
+                held,
+                kept=kept,
+                evidence=evidence,
+                names=names,
+                contract=contract,
+                columns=columns,
+                types=types,
+                staging_frame=staging_frame,
+                deletes=deletes,
+                fault_tolerant=fault_tolerant,
+                ignore_stability_threshold=ignore_stability_threshold,
+            )
+        except Exception:
+            # An outcome Weaver did not classify, so the relations it had settled
+            # are all there is to read afterwards. Written here, and the original
+            # failure goes out unchanged.
+            _keep_unclassified_evidence(spark, names, kept, evidence)
+            raise
+        finally:
+            # Every exit: a clean load, a refusal at any gate, an unexpected
+            # failure. Inside the hold, because releasing staging re-caches what
+            # was built over it.
+            _release(spark, held)
 
 
 def _reconcile(
