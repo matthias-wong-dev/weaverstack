@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Mapping
 
 from ..errors import BuildError
-from ..targets import WAREHOUSE_TARGET
+from ..targets import LAKEHOUSE_TARGET
 from .serialization import checked_mapping
 
 if TYPE_CHECKING:
@@ -42,10 +42,8 @@ class BoundTarget:
 
         from ..spark import FabricSparkTarget
 
-        if self.kind == WAREHOUSE_TARGET:
-            raise BuildError(
-                f"{self.display} is a Warehouse and has no Spark destination"
-            )
+        if self.kind != LAKEHOUSE_TARGET:
+            raise BuildError(f"{self.display} has no Spark destination")
         if not self.workspace_name:
             raise BuildError(
                 f"cannot render a Fabric Spark statement for {self.display} "

@@ -305,16 +305,21 @@ class NotebookScope(WorkspaceScope):
         return self._spark
 
     def sql_for(self, target: Any):
+        from ..sql import SqlEndpoint
         from ..targets import ItemRef, WarehouseTarget
 
         warehouse = (
             target
-            if isinstance(target, WarehouseTarget)
+            if isinstance(target, (WarehouseTarget, SqlEndpoint))
             else WarehouseTarget(
                 target if isinstance(target, ItemRef) else ItemRef(str(target))
             )
         )
-        name = warehouse.warehouse.name
+        name = (
+            warehouse.pool_key
+            if isinstance(warehouse, SqlEndpoint)
+            else warehouse.warehouse.name
+        )
         with self._lock:
             resource = self._sql.get(name)
             if resource is None:
@@ -328,6 +333,21 @@ class NotebookScope(WorkspaceScope):
                 )
                 self.track(resource)
         return resource.get()
+
+    def _power_bi_client(self):
+        from ..fabric.auth import TokenProvider
+        from ..fabric.client import FabricClient
+        from ..fabric.semantic_model import POWER_BI_API
+
+        fabric = self.resolver.client
+        if isinstance(getattr(fabric, "_token_source", None), TokenProvider):
+            return super()._power_bi_client()
+        # The notebook's Fabric client already uses the native pbi audience.
+        return FabricClient(
+            api_base_url=POWER_BI_API,
+            token=lambda: fabric.token,
+            telemetry=self.telemetry,
+        )
 
     def _acquire_sql(self, warehouse):
         from ..fabric.sql import fabric_sql_executor

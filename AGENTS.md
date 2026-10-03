@@ -162,6 +162,100 @@ keeps the second in `~/.weaver/authentication-record.json`. An unencrypted cache
 is never asked for. The Fabric suite installs the same `desktop_credential()`
 chain, so a sign-in performed by `weaver doctor` runs it.
 
+`Session.semantic_model()` resolves a typed SemanticModel and owns its Fabric
+and Power BI clients. The desktop clients share one credential with separate
+API audiences; a notebook obtains its native Power BI token through Session.
+Definition updates and refresh submissions disable HTTP-response retries.
+Refresh waits for its request ID to reach terminal completion through the
+canonical Power BI endpoint.
+
+Semantic models share the ordinary repository, graph, format-5 MutationPlan,
+MutationExecutor and catalogue owners. The shared codec validates their targets
+and payloads. `Session.execute_mutation` binds `Session.semantic_model` through
+MutationBindings and the physical drivers. A semantic-only Build starts no Spark.
+`SemanticModel/Name` is the model-root document identity. Desired state is a
+TMDL definition-part package; observed state is Fabric-returned TMSL. Store source
+bytes, requested edits and provenance beside the package. `semantic_models.source`
+selects the PBIP or empty base; `extensions` applies organisation then item
+`extension.tmdl`. The source-span editor changes addressed native fragments and
+preserves unrelated bytes. The hierarchy supplies object identity; missing refs,
+ambiguous targets and unsupported existing-object collisions fail with source
+locations. Complete new non-colliding native objects can pass without a bounded
+Python schema. `extension_expectations` projects known requested values for
+readback. Known generated objects use `render` and `patching`. Ordinary PBIP
+deployment requires no complete TMDL parser.
+Package paths/bytes and resolved source metadata determine the desired signature.
+
+`initialise` alone creates semantic items. Build binds the existing typed item
+and freezes its workspace/item IDs in the bundle. Definition updates permit
+required clearing of processed semantic data; source data is outside that action. Declared success edges require deployment before effective-definition
+readback and all five semantic catalogue projections before Registry publication. The readback
+checks requested properties and inferred calculated columns. Publication also
+requires the shared physical completion gate. Failed or uncertain deployment
+and failed readback cannot certify a model; independent physical branches continue.
+Catalogue identity upgrades precede preparation and publication through the same
+dependency planner. Planning resolves the
+item without fetching its existing definition. There is no live partition
+comparison or retention step. Semantic DAX Tests and full semantic Health remain
+later feature work.
+
+Shared M expressions identify optional logical Warehouse or Lakehouse sources.
+Session resolves the typed physical item and its connector metadata before pure
+Build planning. Observable table navigation joins managed source declarations
+or installed catalogue identities. Semantic deployment requires successful
+selected source Table/View actions and, for Lakehouse SQL sources, the existing
+SQL endpoint refresh completion. Authored partitions, storage modes, columns and
+descriptions remain unchanged by shared-expression substitution. Column generation
+and catalogue-description propagation belong to the separate Weaver.Source
+annotation feature. The former YAML .source and .dax directives are removed.
+Microsoft's [Direct Lake limits](https://learn.microsoft.com/en-us/fabric/fundamentals/direct-lake-overview#considerations-and-limitations)
+apply, including single-source and composite-model constraints for Direct Lake
+on SQL. Views use the native DirectQuery fallback; Weaver retains `directLake`.
+
+`_.SemanticModel` retains the native definition, model description and provenance.
+`_.SemanticModelTable`, `_.SemanticModelMeasure`, `_.SemanticModelRelationship`
+and `_.SemanticModelColumn` expose typed child metadata. Models, tables, measures
+and columns include native descriptions. `SemanticModelTable.Source binding`
+retains source metadata. Join its item identity and Table name to Dependency
+item identity and Referencing object name. Each semantic
+table publishes its exact producer in `_.Dependency`; two consuming tables keep
+separate rows even when they share a producer. The installed DAG reads those rows
+and derives the single model-refresh node's upstream edges. Lakehouse SQL endpoint
+refresh and Warehouse OneLake publication use the existing Load barriers. Sources
+with simple shared-M navigation can also publish observable managed edges.
+Unknown navigation contributes no guessed relation. Normal Load item/name
+selection still controls which producers run.
+
+Shared M environment mappings run after native extensions. Explicit `data_sources` values
+from the API/CLI override workspace config; logical `Warehouse/Name` and
+`Lakehouse/Name` expressions can resolve from workspace targets. Only selected
+expressions are rewritten. SQL expressions resolve SQL endpoints; native
+`Lakehouse.Contents` expressions resolve item/workspace IDs. Session owns both
+lookups. Source substitution does not bind runtime connections.
+
+Load reads the certified model root and its typed workspace/item IDs from the
+catalogue. The installed graph, load planner and Runner dispatch a built-in
+semantic refresh through `Session.semantic_model().refresh()`. Request ID,
+service timing and outcome belong to the normal Log and LoadStatus record.
+Semantic refresh has no row counts or bookmarks. A changed Build invalidates
+LoadStatus; an unchanged Build preserves it. Semantic-only Load uses REST/TDS
+and needs neither source files nor a deployed runtime module.
+
+Connection binding is a separate planned operation. `semantic-model bind`
+will resolve installed model IDs and bind explicit source references to existing
+approved connection IDs through Session. Its plan must expose ambiguous matches
+and required permissions before any write. The operation may use an existing
+cloud, gateway or SSO connection; credential creation/rotation and gateway
+administration stay outside Weaver. An optional Build binding phase will share
+that operation and report its result separately from definition deployment.
+Non-interactive execution must never prompt or bind implicitly. Semantic wipe
+owns no shared connection or gateway. Binding, automatic bind offers and
+binding preservation are not implemented in this branch.
+
+`doctor --semantic-model NAME` checks Power BI authentication, the model's
+TMSL definition and DAX access through REST. This mode starts no Spark session.
+The semantic check reads only; refresh belongs to the runtime load operation.
+
 ### Fabric is the reference
 
 Weaver is Fabric-first. The behaviour that must be right is the behaviour inside
@@ -196,7 +290,8 @@ way: the catalogue over TDS, a Lakehouse's views over Spark SQL, a Lakehouse's
 objects from storage, a Warehouse over TDS. A desktop `weaver build` therefore
 needs no published wheel, because its Spark SQL and TableBuilder submissions
 import no Weaver, and no Fabric Environment either, because they run on the
-workspace default. `load` and `test` ask for `--environment`. `install` asks
+workspace default. Loads and tests of deployed Python modules use an Environment.
+`install` asks
 for nothing: a bundle carries the workspace, the catalogue, the Environment and
 the Lakehouse a Spark session attaches to, frozen when it was generated, and the
 Session that installs it supplies credentials and transport and no decision.
@@ -206,8 +301,8 @@ Livy submissions. Catalogue reads, publication, `_.Log` writes and `_.Bookmark`
 reads and writes must never be the reason a Spark session starts.
 
 What crosses as a program is a run's Python primitives, which are deployed
-modules imported where Spark is. `weaver load` therefore requires the published
-wheel.
+modules imported where Spark is. Loading those modules requires the published
+wheel. Warehouse and semantic-only Loads use TDS and REST without Spark.
 
 A Fabric test that runs Weaver on the laptop tests the desktop position, not the
 in-Fabric one. That is what the `remote` and `hosted` markers are for, and why a

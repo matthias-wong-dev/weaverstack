@@ -706,6 +706,7 @@ class ConsoleScope(WorkspaceScope):
         self._sql: dict[str, Resource] = {}
         #: None defers credential selection and token acquisition until use.
         self._credential = credential
+        self._given_credential = credential
         self._transport_store = None
         self._version_checked = False
         #: The Lakehouse this scope's Livy session was acquired against.
@@ -837,14 +838,34 @@ class ConsoleScope(WorkspaceScope):
         # Share one renewing token source across this Session's REST calls.
         return FabricClient(token=self.token_provider(), telemetry=self.telemetry)
 
-    def token_provider(self):
+    def token_provider(self, scope=None):
         from ..fabric.auth import FABRIC_SCOPE, TokenProvider
 
         if self._credential is None:
             from ..fabric.auth import credential
 
             self._credential = credential()
-        return TokenProvider(FABRIC_SCOPE, self._credential)
+        return TokenProvider(scope or FABRIC_SCOPE, self._credential)
+
+    def _power_bi_client(self):
+        from ..fabric.auth import POWER_BI_SCOPE, TokenProvider
+        from ..fabric.client import FabricClient
+        from ..fabric.semantic_model import POWER_BI_API
+
+        source = getattr(self.resolver.client, "_token_source", None)
+        if isinstance(source, TokenProvider):
+            return super()._power_bi_client()
+        if self._given_credential is None:
+            raise CommandError(
+                "Semantic model access with a borrowed resolver requires "
+                "an explicit credential for Power BI."
+            )
+        token = self.token_provider(POWER_BI_SCOPE)
+        return FabricClient(
+            api_base_url=POWER_BI_API,
+            token=token,
+            telemetry=self.telemetry,
+        )
 
     def _acquire_token_provider(self):
         provider = self.token_provider()
@@ -990,14 +1011,20 @@ class ConsoleScope(WorkspaceScope):
     # --- SQL ----------------------------------------------------------------
 
     def sql_for(self, target: Any):
+        from ..sql import SqlEndpoint
+
         warehouse = (
             target
-            if isinstance(target, WarehouseTarget)
+            if isinstance(target, (WarehouseTarget, SqlEndpoint))
             else WarehouseTarget(
                 target if isinstance(target, ItemRef) else ItemRef(str(target))
             )
         )
-        name = warehouse.warehouse.name
+        name = (
+            warehouse.pool_key
+            if isinstance(warehouse, SqlEndpoint)
+            else warehouse.warehouse.name
+        )
         with self._lock:
             resource = self._sql.get(name)
             if resource is None:

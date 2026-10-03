@@ -1,0 +1,30 @@
+/// Sales entered for the importer boundary.
+table Sales
+
+	/// Revenue from the two probe rows.
+	measure Revenue = SUM(Sales[Amount])
+		formatString: $#,##0.00
+
+	column Id
+		dataType: int64
+		sourceColumn: Id
+		summarizeBy: none
+
+	column ProductId
+		dataType: int64
+		sourceColumn: ProductId
+		summarizeBy: none
+
+	column Amount
+		dataType: decimal
+		sourceColumn: Amount
+		formatString: $#,##0.00
+		summarizeBy: sum
+
+	partition Sales = m
+		mode: import
+		source =
+				let
+				    Source = #table(type table [Id = Int64.Type, ProductId = Int64.Type, Amount = Currency.Type], {{1, 10, 12.5}, {2, 20, 7.5}})
+				in
+				    Source

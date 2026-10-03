@@ -85,7 +85,10 @@ Check Microsoft Fabric connectivity.
 Name a workspace to probe its items: TDS for a Warehouse; OneLake and Livy for
 a Lakehouse. Project configuration is not read.
 
-Checking a Lakehouse starts a Fabric Spark session and can take a minute.\
+Checking a Lakehouse starts a Fabric Spark session and can take a minute.
+
+Use --semantic-model NAME to check only Power BI authentication, model definition
+and DAX access through REST.\
 """
 
 
@@ -111,6 +114,8 @@ def _kind_requirements(values) -> set[str]:
     wanted: set[str] = set()
     for value in values or ():
         kind, _name = _kind_and_name(value)
+        if kind == "semanticmodel":
+            continue
         if kind.startswith("warehouse"):
             wanted.add(TDS)
         else:
@@ -146,7 +151,7 @@ def _requires_run(args) -> frozenset[str]:
 
 
 def _requires_build(args) -> frozenset[str]:
-    """Avoid Spark for Warehouse-only builds.
+    """Avoid Spark for Warehouse and SemanticModel builds.
 
     An unscoped build needs the superset because arguments do not reveal source
     or configured items.
@@ -238,6 +243,8 @@ def _requires_doctor(args) -> frozenset[str]:
         requirements,
     )
 
+    if getattr(args, "semantic_model", None) is not None:
+        return requirements(AUTH, RESOLVER)
     return requirements(AUTH, RESOLVER, ONELAKE, LIVY, TDS)
 
 
@@ -374,6 +381,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     doctor.add_argument("--json", action="store_true", help="Emit the result as JSON.")
     doctor.add_argument("--workspace", required=True, help="Fabric workspace to check.")
+    doctor.add_argument(
+        "--semantic-model",
+        metavar="NAME",
+        help="Check this semantic model's authentication, definition and DAX access only.",
+    )
     add_non_interactive(doctor)
     doctor.set_defaults(handler=handle_doctor, requires=_requires_doctor)
 
@@ -424,6 +436,13 @@ def build_parser() -> argparse.ArgumentParser:
         dest="retired_target",
         action="append",
         help=argparse.SUPPRESS,
+    )
+    build.add_argument(
+        "--data-source",
+        dest="data_sources",
+        action="append",
+        metavar="EXPRESSION=KIND/NAME",
+        help="Substitute a shared M source expression with a Warehouse or Lakehouse.",
     )
     build.add_argument(
         "--bundle-only",
@@ -989,6 +1008,7 @@ def _add_initialise_args(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument("--lakehouse", help="Lakehouse for Delta tables and files.")
     parser.add_argument("--warehouse", help="Warehouse for SQL tables and views.")
+    parser.add_argument("--semantic-model", help="SemanticModel for the project.")
     parser.add_argument(
         "--example",
         dest="example",
@@ -1382,7 +1402,13 @@ def _print_load_summary(report) -> None:
     if counts[SKIPPED]:
         print(f"  {counts[SKIPPED]:>3} skipped")
 
-    executed_loaders = [node for node in loaders if node.executed]
+    from weaver.installed import SEMANTIC_REFRESH
+
+    executed_loaders = [
+        node
+        for node in loaders
+        if node.executed and node.primitive_kind != SEMANTIC_REFRESH
+    ]
     if not executed_loaders:
         return
     print("  Rows")
@@ -1801,6 +1827,7 @@ def _build_once(args: argparse.Namespace) -> int:
             result = weaver.build(
                 args.source,
                 items=args.items,
+                data_sources=args.data_sources,
                 bundle_only=args.bundle_only,
                 bundle_path=args.bundle_path,
                 session=opened,
@@ -1942,6 +1969,7 @@ def _initialise_once(args: argparse.Namespace, *, session):
         workspace=args.workspace,
         lakehouse=args.lakehouse,
         warehouse=args.warehouse,
+        semantic_model=getattr(args, "semantic_model", None),
         example=bool(args.example),
         publish_environment=args.publish_environment,
         dry_run=args.dry_run,
@@ -1957,10 +1985,16 @@ def handle_doctor(args: argparse.Namespace) -> int:
 
     from .doctor import render
 
+    named = (
+        {"semantic_model": args.semantic_model}
+        if args.semantic_model is not None
+        else {}
+    )
     _prefer_desktop_credential(args)
     report = doctor(
         workspace=args.workspace,
         session=_session(args),
+        **named,
     )
     if args.json:
         print(json.dumps(report.to_mapping(), indent=2))

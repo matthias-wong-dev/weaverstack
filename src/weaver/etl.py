@@ -170,6 +170,14 @@ def item_view_objects(
     return tuple(sorted(found, key=str))
 
 
+def item_loadable_objects(
+    repository: WeaverRepository, *, item: WeaverItemId
+) -> tuple[WeaverDocumentId, ...]:
+    if item in repository.semantic_models:
+        return (WeaverDocumentId.model_root(item),)
+    return item_bookmarkable_objects(repository, item=item)
+
+
 def item_data_nodes(
     repository: WeaverRepository, *, item: WeaverItemId
 ) -> tuple[WeaverDocumentId, ...]:
@@ -178,7 +186,7 @@ def item_data_nodes(
     return tuple(
         sorted(
             {
-                *item_bookmarkable_objects(repository, item=item),
+                *item_loadable_objects(repository, item=item),
                 *item_view_objects(repository, item=item),
             },
             key=str,

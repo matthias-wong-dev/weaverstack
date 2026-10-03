@@ -9,11 +9,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Mapping
 
-from ..declaration.model import LAKEHOUSE, WAREHOUSE, WeaverItemId
+from ..declaration.model import LAKEHOUSE, SEMANTIC_MODEL, WAREHOUSE, WeaverItemId
 from ..errors import BuildError
 from ..mutation.targets import BoundTarget
 from ..targets import (
     LAKEHOUSE_TARGET,
+    SEMANTIC_MODEL_TARGET,
     WAREHOUSE_TARGET,
     ItemRef,
     physical_item,
@@ -90,9 +91,36 @@ class WarehouseBinding:
 
 
 @dataclass(frozen=True)
+class SemanticModelBinding:
+    kind = SEMANTIC_MODEL_TARGET
+    model: ItemRef
+    workspace_id: str | None = None
+    workspace_name: str | None = None
+    item_id: str | None = None
+
+    @property
+    def item(self) -> ItemRef:
+        return self.model
+
+    @property
+    def physical_kind(self) -> str:
+        return SEMANTIC_MODEL
+
+    def to_bound_target(self) -> BoundTarget:
+        return BoundTarget(
+            id=f"{self.kind}-{self.model.name}",
+            kind=self.kind,
+            item_id=self.item_id or self.model.name,
+            item_name=self.model.name,
+            workspace_id=self.workspace_id,
+            workspace_name=self.workspace_name,
+        )
+
+
+@dataclass(frozen=True)
 class ItemBinding:
     item: WeaverItemId
-    target: LakehouseBinding | WarehouseBinding
+    target: LakehouseBinding | WarehouseBinding | SemanticModelBinding
 
     def __post_init__(self) -> None:
         if self.item.item_type != self.target.physical_kind:
@@ -224,11 +252,11 @@ def parse_build_item(text: str, *, workspace=None) -> ItemBinding:
         physical_type, physical = physical_kind(target), physical_item(target)
 
     workspace_name = getattr(workspace, "workspace", None)
-    binding = (
-        LakehouseBinding(physical, workspace_name=workspace_name)
-        if physical_type == LAKEHOUSE
-        else WarehouseBinding(physical, workspace_name=workspace_name)
-    )
+    binding = {
+        LAKEHOUSE: LakehouseBinding,
+        WAREHOUSE: WarehouseBinding,
+        SEMANTIC_MODEL: SemanticModelBinding,
+    }[physical_type](physical, workspace_name=workspace_name)
     return ItemBinding(item, binding)
 
 

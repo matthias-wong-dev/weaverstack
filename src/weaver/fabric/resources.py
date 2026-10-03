@@ -13,6 +13,7 @@ from .client import FabricClient, FabricError
 
 LAKEHOUSE = "Lakehouse"
 WAREHOUSE = "Warehouse"
+SEMANTIC_MODEL = "SemanticModel"
 ENVIRONMENT = "Environment"
 NOTEBOOK = "Notebook"
 SQL_ENDPOINT = "SQLEndpoint"
@@ -172,6 +173,33 @@ def create_warehouse(
         return _await_item(workspace, name, WAREHOUSE, client=client)
     body = response.json()
     return Item(id=body["id"], name=name, type=WAREHOUSE, workspace_id=workspace.id)
+
+
+def create_semantic_model(
+    workspace: WorkspaceItem, name: str, *, definition: dict, client=None
+) -> Item:
+    """Create a semantic item with a definition, or reuse its typed match."""
+    client = client or FabricClient()
+    try:
+        return find_item(workspace, name, item_type="SemanticModel", client=client)
+    except ItemNotFoundError:
+        pass
+    response = client.request(
+        "POST",
+        f"workspaces/{workspace.id}/semanticModels",
+        payload={"displayName": name, "definition": definition},
+        expected=(201, 202),
+        retry_transient=False,
+    )
+    if response.status_code == 202:
+        client.wait_for_operation(response)
+        return _await_item(workspace, name, "SemanticModel", client=client)
+    return Item(
+        id=response.json()["id"],
+        name=name,
+        type="SemanticModel",
+        workspace_id=workspace.id,
+    )
 
 
 def delete_item(item: Item, *, client: FabricClient | None = None) -> None:

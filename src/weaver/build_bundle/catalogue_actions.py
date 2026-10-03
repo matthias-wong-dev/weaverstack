@@ -141,6 +141,28 @@ def _stage(
     )
 
 
+def render_catalogue_upgrade(catalogue, *, catalogue_target):
+    statements = []
+    for table, column in catalogue.schema_additions:
+        if table != INSTALLATION.name or column not in {"Workspace ID", "Item ID"}:
+            from ..errors import BuildError
+
+            raise BuildError(f"Unsupported catalogue column upgrade {table}.{column}")
+        statements.append(
+            "IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID(N'[_].[Installation]') "
+            f"AND name = {literal(column)})\n"
+            f"ALTER TABLE [_].[Installation] ADD {identifier(column)} varchar(128) NULL"
+        )
+    return _stage(
+        index=0,
+        slug="upgrade-catalogue",
+        description="Add catalogue identity columns",
+        kind=PUBLISH_CATALOGUE,
+        statements=statements,
+        catalogue_target=catalogue_target,
+    )
+
+
 def render_catalogue_before_build(
     catalogue: Catalogue,
     identities: Iterable[WeaverDocumentId],
@@ -206,6 +228,8 @@ def desired_catalogue(
                 "item_type": item.item_type,
                 "item_name": item.item_name,
                 "target_name": target_by_item[item].name,
+                "workspace_id": target_by_item[item].workspace_id,
+                "item_id": target_by_item[item].item_id,
                 "weaver_version": __version__,
                 "signature": _item_signature(repository, item),
             },
@@ -259,6 +283,7 @@ def render_catalogue_after_build(
     *,
     catalogue_target,
     current: Catalogue | None = None,
+    selected_models=(),
 ) -> tuple[PlannedStage, ...]:
     """Publish dictionaries and Installation in one batch, Registry last.
 
@@ -269,7 +294,12 @@ def render_catalogue_after_build(
     desired = desired_catalogue(repository, selected_ids, target_by_item)
 
     # Diff against persisted rows so an unchanged table produces no statement.
-    publication = publish(current or Catalogue(rows={}), desired)
+    from .semantic import publication_catalogues, semantic_stage
+
+    current, desired = publication_catalogues(
+        current or Catalogue(rows={}), desired, selected_models
+    )
+    publication = publish(current, desired)
 
     # Registry is its own final action; table plans carry the ordering.
     catalogue_statements: list[str] = [
@@ -297,4 +327,13 @@ def render_catalogue_after_build(
             catalogue_target=catalogue_target,
         ),
     )
-    return tuple(stage for stage in rendered if stage is not None)
+    observed = tuple(
+        semantic_stage(
+            repository,
+            identity.item,
+            target_by_item[identity.item],
+            catalogue_target=catalogue_target,
+        )
+        for identity in sorted(selected_models, key=str)
+    )
+    return observed + tuple(stage for stage in rendered if stage is not None)

@@ -1,0 +1,20 @@
+table Product
+
+	column ProductId
+		dataType: int64
+		isKey
+		sourceColumn: ProductId
+		summarizeBy: none
+
+	column ProductName
+		dataType: string
+		sourceColumn: ProductName
+		summarizeBy: none
+
+	partition Product = m
+		mode: import
+		source =
+				let
+				    Source = #table(type table [ProductId = Int64.Type, ProductName = text], {{10, "Cake"}, {20, "Coffee"}})
+				in
+				    Source

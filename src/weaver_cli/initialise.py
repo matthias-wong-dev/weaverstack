@@ -185,6 +185,7 @@ def _validate(args):
         environment=args.environment or DEFAULT_ENVIRONMENT,
         lakehouse=args.lakehouse,
         warehouse=args.warehouse,
+        semantic_model=getattr(args, "semantic_model", None),
         example=bool(args.example),
     )
 
@@ -252,6 +253,8 @@ def equivalent_command(args):
         value = getattr(args, field)
         if value:
             parts.extend(["--" + field, value])
+    if getattr(args, "semantic_model", None):
+        parts.extend(["--semantic-model", args.semantic_model])
     if args.example:
         parts.append("--example")
     if getattr(args, "publish_environment", False):

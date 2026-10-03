@@ -119,6 +119,28 @@ def test_a_refusal_that_never_clears_is_reported_with_its_status(monkeypatch):
     assert len(sent) == 4
 
 
+@weaver_test()
+def test_a_mutation_can_disable_http_response_replay(monkeypatch):
+    client, sent = _client(monkeypatch, [_response(503)])
+    with pytest.raises(FabricError) as raised:
+        client.request("POST", "refreshes", expected=(202,), retry_transient=False)
+    assert raised.value.status_code == 503
+    assert len(sent) == 1
+
+
+@weaver_test()
+def test_a_request_can_use_the_remaining_operation_timeout(monkeypatch):
+    seen = []
+
+    def send(method, url, **kwargs):
+        seen.append(kwargs["timeout"])
+        return _response(200)
+
+    monkeypatch.setattr("weaver.fabric.client.send", send)
+    FabricClient(token="token", timeout=60).request("GET", "operation", timeout=3)
+    assert seen == [3]
+
+
 # --- the other two transports ------------------------------------------------
 
 

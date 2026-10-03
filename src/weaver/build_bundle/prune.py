@@ -18,6 +18,7 @@ from ..catalogue.tables import (
 from ..declaration.metadata import FOLDER, TABLE, VIEW
 from ..declaration.model import (
     FILE_SHAPE,
+    MODEL_SHAPE,
     PROCEDURE_SHAPE,
     WeaverDocumentId,
     WeaverItemId,
@@ -112,6 +113,8 @@ class TargetInventory:
     #: table name. Its own field because ``_`` is Weaver's rather than the item's,
     #: and so is outside the schemas the rest of this inventory reports.
     runtime_references: tuple[str, ...] = ()
+    workspace_id: str | None = None
+    item_id: str | None = None
 
     def to_mapping(self) -> dict[str, object]:
         return {
@@ -127,6 +130,8 @@ class TargetInventory:
             "files": list(self.files),
             "procedures": list(self.procedures),
             "runtime_references": list(self.runtime_references),
+            "workspace_id": self.workspace_id,
+            "item_id": self.item_id,
         }
 
     @classmethod
@@ -148,6 +153,8 @@ class TargetInventory:
             files=tuple(mapping.get("files", ())),
             procedures=tuple(mapping.get("procedures", ())),
             runtime_references=tuple(mapping.get("runtime_references", ())),
+            workspace_id=mapping.get("workspace_id"),
+            item_id=mapping.get("item_id"),
         )
 
     def update_using(self, plan) -> "TargetInventory":
@@ -175,6 +182,8 @@ class TargetInventory:
         than treated as absent.
         """
 
+        if object_type == "semantic_model":
+            return self.kind == "semanticmodel"
         _area, schema = stored_area(schema)
         if object_type == "file":
             # A file schema is its path beneath Files.
@@ -209,6 +218,8 @@ class TargetInventory:
 
         schema = identity.object_id.schema
         name = identity.object_id.object
+        if identity.shape == MODEL_SHAPE:
+            return "semantic_model" if self.kind == "semanticmodel" else None
         if identity.shape == FILE_SHAPE:
             return "file" if self.has_object(schema, name, "file") else None
         if identity.shape == PROCEDURE_SHAPE:

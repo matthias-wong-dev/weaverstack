@@ -33,6 +33,7 @@ CAPABILITIES = (
     "execute_spark_sql_batch",
     "execute_tsql",
     "query_tsql",
+    "semantic_source",
     "executes_here",
 )
 

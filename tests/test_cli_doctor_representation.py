@@ -18,12 +18,50 @@ from weaver_cli.main import build_parser
         ["--workspace-config", "workspace-config.yml"],
         ["--workspace", "Analytics", "--catalogue", "Warehouse/Catalogue"],
         ["--workspace", "Analytics", "--environment", "Weaver"],
+        [
+            "--workspace",
+            "Analytics",
+            "--semantic-model",
+            "Reporting",
+            "--refresh-semantic-model",
+        ],
     ],
 )
 @weaver_test()
 def test_doctor_requires_workspace_and_rejects_project_options(args):
     with pytest.raises(SystemExit):
         build_parser().parse_args(["doctor", *args])
+
+
+@weaver_test()
+def test_named_semantic_model_cli_forwards_the_target_and_requires_only_rest(
+    monkeypatch, capsys
+):
+    from weaver.sessions.requirements import AUTH, RESOLVER, requirements
+    from weaver_cli.main import command_requirements
+
+    cli = importlib.import_module("weaver_cli.main")
+    monkeypatch.setattr(cli, "_prefer_desktop_credential", lambda *_args: None)
+    calls = []
+    report = DoctorReport(checks=(Check("Workspace Analytics", "ok"),))
+    monkeypatch.setattr(
+        "weaver.operations.doctor.doctor",
+        lambda **kwargs: calls.append(kwargs) or report,
+    )
+    args = build_parser().parse_args(
+        [
+            "doctor",
+            "--workspace",
+            "Analytics",
+            "--semantic-model",
+            "Reporting",
+            "--json",
+        ]
+    )
+    assert command_requirements(args) == requirements(AUTH, RESOLVER)
+    assert cli.handle_doctor(args) == 0
+    assert calls[0]["semantic_model"] == "Reporting"
+    assert json.loads(capsys.readouterr().out)["succeeded"]
 
 
 @weaver_test()

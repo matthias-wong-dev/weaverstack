@@ -56,15 +56,17 @@ def validate_mutation_plan(plan: MutationPlan) -> None:
             require_string(value, what=f"target {name}")
         if target.id in targets:
             raise BuildError(f"duplicate target {target.id!r}")
-        if target.kind not in {"lakehouse", "warehouse"}:
+        if target.kind not in {"lakehouse", "warehouse", "semanticmodel"}:
             raise BuildError(f"unknown target kind {target.kind!r}")
         if (target.logical_item_type is None) != (target.logical_item_name is None):
             raise BuildError(f"incomplete logical item for target {target.id!r}")
         if (
             target.logical_item_type is not None
-            and {"Lakehouse": "lakehouse", "Warehouse": "warehouse"}.get(
-                target.logical_item_type
-            )
+            and {
+                "Lakehouse": "lakehouse",
+                "Warehouse": "warehouse",
+                "SemanticModel": "semanticmodel",
+            }.get(target.logical_item_type)
             != target.kind
         ):
             raise BuildError(f"incompatible logical item for target {target.id!r}")

@@ -12,13 +12,15 @@ from ..signatures import implementation_signature
 from .metadata import ObjectId
 
 if TYPE_CHECKING:
+    from ..semantic_models.source import SemanticContribution
     from .programmable import Programmable
     from .schemas import SchemaSes
     from .source import SourceDocument
 
 LAKEHOUSE = "Lakehouse"
 WAREHOUSE = "Warehouse"
-ITEM_TYPES = frozenset({LAKEHOUSE, WAREHOUSE})
+SEMANTIC_MODEL = "SemanticModel"
+ITEM_TYPES = frozenset({LAKEHOUSE, WAREHOUSE, SEMANTIC_MODEL})
 
 #: The two areas a Lakehouse holds, and the first component of every Lakehouse
 #: data identity. Fabric keeps a Lakehouse's Delta tables under ``Tables`` and
@@ -43,7 +45,8 @@ OBJECT_SHAPE = "object"
 VALIDATION_SHAPE = "validation"
 FILE_SHAPE = "file"
 PROCEDURE_SHAPE = "procedure"
-SHAPES = (OBJECT_SHAPE, VALIDATION_SHAPE, FILE_SHAPE, PROCEDURE_SHAPE)
+MODEL_SHAPE = "model"
+SHAPES = (OBJECT_SHAPE, VALIDATION_SHAPE, FILE_SHAPE, PROCEDURE_SHAPE, MODEL_SHAPE)
 
 #: How a non-object shape marks itself in the one-line spelling. A file's schema
 #: is a path and its object carries an extension, so ``Schema.Object`` cannot
@@ -199,6 +202,16 @@ class WeaverDocumentId:
             raise IdentityError(
                 f"identity shape must be one of {expected}, got {self.shape!r}"
             )
+        if self.shape == MODEL_SHAPE:
+            if (
+                self.item.item_type != SEMANTIC_MODEL
+                or self.object_id != ObjectId("", "")
+                or self.is_files
+            ):
+                raise IdentityError(
+                    "a model root requires a SemanticModel item and no object parts"
+                )
+            return
         if self.shape == FILE_SHAPE:
             schema = _relative_path(self.object_id.schema, what="file path")
             name = _file_name(self.object_id.object, what="file name")
@@ -230,6 +243,8 @@ class WeaverDocumentId:
     @classmethod
     def parse(cls, text: str) -> "WeaverDocumentId":
         parts = _split(text, what="document identity")
+        if len(parts) == 2 and parts[0] == SEMANTIC_MODEL:
+            return cls.model_root(WeaverItemId(*parts))
         if len(parts) >= 4:
             marker = _SHAPE_MARKERS[FILE_SHAPE]
             if parts[2].startswith(marker):
@@ -274,6 +289,10 @@ class WeaverDocumentId:
         )
 
     @classmethod
+    def model_root(cls, item: "WeaverItemId"):
+        return cls(item, ObjectId("", ""), shape=MODEL_SHAPE)
+
+    @classmethod
     def validation(cls, item: "WeaverItemId", object_id: ObjectId):
         shape = VALIDATION_SHAPE if item.item_type == LAKEHOUSE else OBJECT_SHAPE
         return cls(item, object_id, shape=shape)
@@ -311,7 +330,11 @@ class WeaverDocumentId:
         return f"{prefix}{self.object_id.qualified}"
 
     def __str__(self) -> str:
-        return f"{self.item}/{self.relative}"
+        return (
+            str(self.item)
+            if self.shape == MODEL_SHAPE
+            else f"{self.item}/{self.relative}"
+        )
 
 
 def parse_installed_identity(text: str):
@@ -748,6 +771,9 @@ class WeaverRepository:
     item_graph: object | None = None
     item_layers: tuple[tuple[WeaverItemId, ...], ...] = ()
     generated_files: Mapping[str, bytes] = field(default_factory=dict)
+    semantic_models: Mapping[WeaverItemId, "SemanticContribution"] = field(
+        default_factory=dict
+    )
 
     def __post_init__(self) -> None:
         object.__setattr__(

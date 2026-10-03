@@ -86,6 +86,7 @@ def build(
     catalogue: str | None = None,
     environment: str | None = None,
     workspace_config: str | Path | None = None,
+    data_sources=None,
     bundle_only: bool = False,
     bundle_path: str | Path | None = None,
     session=None,
@@ -134,14 +135,19 @@ def build(
     from ..sessions.host import use_or_create_session
 
     with prepare_repository(source_location, source_store=source_store) as prepared:
-        validate_build_request(prepared.repository, bindings, catalogue_binding=control)
+        from ..semantic_models.expressions import configure_sources
+
+        repository = configure_sources(
+            prepared.repository, data_sources, bindings, resolved_workspace
+        )
+        validate_build_request(repository, bindings, catalogue_binding=control)
         _preflight(resolved_workspace, bindings, session=session)
         with use_or_create_session(session, workspace=resolved_workspace) as opened:
             # Fabric requires a Lakehouse attachment before Spark starts, and
             # the bundle freezes the same one.
             opened.require_spark_home(_spark_home(bindings))
             arguments: dict[str, Any] = dict(
-                repository=prepared.repository,
+                repository=repository,
                 source_store=prepared.store,
                 bindings=bindings,
                 requested_bindings=selected,
@@ -199,6 +205,7 @@ def _preflight(workspace: Workspace, bindings, *, session) -> None:
         workspace=workspace.workspace,
         control_item=workspace.catalogue_item,
         environment=workspace.environment,
+        client=session.resolver(workspace).client if session is not None else None,
     )
 
 
@@ -296,6 +303,7 @@ def _run_build(
         session=session,
         workspace=workspace,
         shortcuts=repository.shortcuts,
+        repository=repository,
     )
     requested_bindings = requested_bindings or bindings
     if bundle_only:

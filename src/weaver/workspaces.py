@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Mapping
 
-from .declaration.model import LAKEHOUSE, WeaverItemId
+from .declaration.model import LAKEHOUSE, SEMANTIC_MODEL, WAREHOUSE, WeaverItemId
 from .errors import ConfigError
 from .targets import validate_name
 
@@ -189,10 +189,14 @@ class TargetDeclaration:
         )
 
     def target_for(self, item: WeaverItemId):
-        from .targets import DeltaTarget, ItemRef, WarehouseTarget
+        from .targets import DeltaTarget, ItemRef, SemanticModelTarget, WarehouseTarget
 
         ref = ItemRef(self.physical)
-        return DeltaTarget(ref) if item.item_type == LAKEHOUSE else WarehouseTarget(ref)
+        return {
+            LAKEHOUSE: DeltaTarget,
+            WAREHOUSE: WarehouseTarget,
+            SEMANTIC_MODEL: SemanticModelTarget,
+        }[item.item_type](ref)
 
 
 def _target_declarations(
@@ -221,6 +225,7 @@ class Workspace:
     mirror: "CatalogueRef | str | None" = None
     execution: ExecutionSettings = field(default_factory=ExecutionSettings)
     targets: Mapping[WeaverItemId, TargetDeclaration] = field(default_factory=dict)
+    data_sources: Mapping[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -239,6 +244,15 @@ class Workspace:
         if not isinstance(self.execution, ExecutionSettings):
             raise ConfigError("execution must be ExecutionSettings")
         object.__setattr__(self, "targets", _target_declarations(self.targets))
+        from .semantic_models.expressions import source_mappings
+
+        if not isinstance(self.data_sources, Mapping):
+            raise ConfigError(
+                "data_sources must be a mapping of shared expressions to typed Fabric items"
+            )
+        object.__setattr__(
+            self, "data_sources", MappingProxyType(source_mappings(self.data_sources))
+        )
 
     @property
     def catalogue_item(self) -> "ItemRef":

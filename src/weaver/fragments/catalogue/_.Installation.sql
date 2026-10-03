@@ -30,6 +30,8 @@ Schema:
   Item name: varchar(128)
   Target name: varchar(128)
   Weaver version: varchar(128)
+  Workspace ID: varchar(128)
+  Item ID: varchar(128)
   Signature: varchar(128)
 
 Column notes:
@@ -48,5 +50,7 @@ select cast(null as varchar(128)) as [Item type]
      , cast(null as varchar(128)) as [Item name]
      , cast(null as varchar(128)) as [Target name]
      , cast(null as varchar(128)) as [Weaver version]
+     , cast(null as varchar(128)) as [Workspace ID]
+     , cast(null as varchar(128)) as [Item ID]
      , cast(null as varchar(128)) as [Signature]
  where 1 = 0

@@ -28,6 +28,8 @@ class Builder:
 
     def build(self, *, output: Location | None = None) -> BuildBundle:
         from ..catalogue.state import reconcile_catalogue_state
+        from ..semantic_models.binding import bind_semantic_sources
+        from ..semantic_models.expressions import bind_expression_sources
         from .planner import generate_item_build_bundle
         from .workflow import validate_build_request
 
@@ -39,8 +41,14 @@ class Builder:
         )
         if output is None:
             raise ValueError("Builder.build needs an output location for the bundle")
+        repository = bind_expression_sources(
+            self.repository, self.state.semantic_expressions
+        )
+        repository = bind_semantic_sources(
+            repository, self.state.semantic_sources, self.bindings.by_item
+        )
         return generate_item_build_bundle(
-            self.repository,
+            repository,
             bindings=self.bindings,
             output=output,
             store=self.source_store,

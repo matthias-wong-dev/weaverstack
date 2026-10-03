@@ -10,6 +10,7 @@ from ..sql import (
     AccessTokenAuthentication,
     PooledSqlExecutor,
     SqlConnectionPool,
+    SqlEndpoint,
 )
 from .auth import SQL_SCOPE, get_token
 
@@ -31,7 +32,9 @@ def desktop_sql_pool(
     from ..sql.connection import connect
 
     resolver = resolver or resolver_for(workspace)
-    endpoint = resolver.sql_endpoint(target)
+    endpoint = (
+        target if isinstance(target, SqlEndpoint) else resolver.sql_endpoint(target)
+    )
     authentication = AccessTokenAuthentication(lambda: get_token(SQL_SCOPE, credential))
     return SqlConnectionPool(
         endpoint,
@@ -83,7 +86,9 @@ def fabric_sql_pool(
             "must use desktop_sql_executor explicitly"
         )
 
-    endpoint = resolver.sql_endpoint(target)
+    endpoint = (
+        target if isinstance(target, SqlEndpoint) else resolver.sql_endpoint(target)
+    )
     notebook_credentials = credentials or getattr(resolver, "_credentials", None)
     if notebook_credentials is None:
         try:

@@ -200,6 +200,7 @@ def execute_mutation(
             store=bindings.store,
             target=target,
             sql=bindings.sql_for(target.bound),
+            semantic_model=bindings.semantic_model,
             spark_sql=bindings.spark_sql(),
             spark_sql_batch=bindings.spark_sql_batch(),
             create_delta_table=bindings.delta_table_creator(),

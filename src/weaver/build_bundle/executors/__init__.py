@@ -15,6 +15,7 @@ from .copy_files import CopyFilesExecutor
 from .folder import FolderExecutor
 from .load_file import LoadFileExecutor
 from .runtime_state import RuntimeStateExecutor
+from .semantic import SemanticCatalogueExecutor, SemanticModelExecutor
 from .shortcut import ShortcutExecutor, ShortcutReadinessExecutor
 from .spark_sql import SparkSqlExecutor
 from .spark_sql_batch import SparkSqlBatchExecutor
@@ -25,6 +26,8 @@ from .wipe import LakehouseWipeExecutor
 
 def default_executors() -> dict[str, ActionExecutor]:
     return {
+        SemanticModelExecutor.name: SemanticModelExecutor(),
+        SemanticCatalogueExecutor.name: SemanticCatalogueExecutor(),
         SparkSqlExecutor.name: SparkSqlExecutor(),
         SparkSqlBatchExecutor.name: SparkSqlBatchExecutor(),
         SparkTableExecutor.name: SparkTableExecutor(),
