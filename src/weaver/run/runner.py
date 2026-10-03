@@ -477,7 +477,7 @@ class Runner:
     ) -> RunNodeResult:
         target_type = getattr(node.physical_target, "kind", None)
         if target_type:
-            target_type = str(target_type).title()
+            target_type = str(node.physical_target).partition("/")[0]
         target_name = getattr(node.physical_target, "name", None)
         from ..catalogue.claims import catalogue_columns
 

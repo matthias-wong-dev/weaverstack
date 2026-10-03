@@ -8,6 +8,7 @@ from .resolution import (
     PYTHON_FOLDER,
     PYTHON_TABLE,
     PYTHON_VALIDATION,
+    SEMANTIC_REFRESH,
     WAREHOUSE_PROCEDURE,
 )
 from .result import RunError
@@ -40,6 +41,11 @@ def dispatch_primitive(
         )
 
     kind = node.primitive_kind
+    if kind == SEMANTIC_REFRESH:
+        from ..runtime.semantic_refresh_result import SemanticRefreshResult
+
+        body = session.semantic_model(node.bound_item, workspace=workspace).refresh()
+        return SemanticRefreshResult.from_response(body)
     if getattr(node, "installed", None) is not None:
         return _validation(node, session, workspace, open_runtime, collect)
     if kind == WAREHOUSE_PROCEDURE:

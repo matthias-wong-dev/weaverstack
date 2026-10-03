@@ -8,21 +8,25 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import cached_property
-from typing import Mapping, Sequence
+from typing import TYPE_CHECKING, Mapping, Sequence
 
 from .catalogue.state import Catalogue
-from .declaration.model import WeaverDocumentId, WeaverItemId
+from .declaration.model import SEMANTIC_MODEL, WeaverDocumentId, WeaverItemId
 from .errors import GraphError, LoadError
 from .graph import Graph
 from .installed import (
     PYTHON_FOLDER,
     PYTHON_TABLE,
+    SEMANTIC_REFRESH,
     WAREHOUSE_PROCEDURE,
     InstalledDag,
     InstalledNode,
 )
 from .load_report import DEPENDENCY_EXTERNAL, LoadMessage, info
 from .targets import PhysicalObjectRef, PhysicalTargetRef
+
+if TYPE_CHECKING:
+    from .fabric.resources import Item
 
 #: Barrier kinds written to plan files and task logs.
 ENDPOINT_REFRESH = "endpoint_refresh"
@@ -32,6 +36,7 @@ PRIMITIVE_KINDS = (
     WAREHOUSE_PROCEDURE,
     PYTHON_TABLE,
     PYTHON_FOLDER,
+    SEMANTIC_REFRESH,
     ENDPOINT_REFRESH,
     ONELAKE_PUBLICATION,
 )
@@ -68,6 +73,7 @@ class LoadNode:
     publication_targets: tuple[OneLakeReadiness, ...] = ()
     #: A publication barrier only. The load node that publishes what it waits for.
     produced_by: str | None = None
+    bound_item: Item | None = None
 
     @property
     def sort_key(self) -> tuple[str, str, str, str]:
@@ -232,6 +238,13 @@ class _Planner:
         names: tuple[str, ...],
     ) -> tuple[InstalledNode, ...]:
         available = self.dag.loadables(items=requested)
+        for item in requested:
+            if item.item_type == SEMANTIC_MODEL and not any(
+                node.item == item for node in available
+            ):
+                raise LoadError(
+                    f"{item} is not certified for Load. Build {item} before loading it."
+                )
         if not names:
             return self._chosen(available)
 
@@ -355,7 +368,21 @@ class _Planner:
             )
 
     def _load_node(self, installed: InstalledNode) -> LoadNode:
-        node_id = f"load:{installed.target}/{installed.load_key}"
+        if installed.artefact_kind == SEMANTIC_REFRESH:
+            from .errors import ConfigError
+            from .fabric.semantic_model import validate_bound_model
+
+            try:
+                validate_bound_model(installed.bound_item)
+            except ConfigError as exc:
+                raise LoadError(
+                    f"{exc}. Build {installed.item} before loading it."
+                ) from exc
+        node_id = (
+            f"load:{installed.target}"
+            if installed.artefact_kind == SEMANTIC_REFRESH
+            else f"load:{installed.target}/{installed.load_key}"
+        )
         node = self.nodes.get(node_id)
         if node is None:
             node = LoadNode(
@@ -365,7 +392,12 @@ class _Planner:
                 primitive_kind=installed.artefact_kind,
                 physical_object=installed.physical,
                 primitive_id=installed.artefact,
-                primitive_object=installed.artefact_physical(installed.artefact_type),
+                primitive_object=(
+                    installed.artefact_physical(installed.artefact_type)
+                    if installed.artefact is not None
+                    else None
+                ),
+                bound_item=installed.bound_item,
             )
             self.nodes[node_id] = node
         return node

@@ -101,10 +101,16 @@ class TestSession(Session):
         self._semantic_answers[(workspace, item)] = client
 
     def semantic_model(self, item, *, workspace=None):
+        from ..fabric.resources import Item
+
         name = getattr(item, "name", item)
         configured = self.workspace_or_default(workspace)
-        self._record("semantic_model", name, configured)
-        key = (str(configured.workspace), name)
+        self._record("semantic_model", item, configured)
+        key = (
+            (item.workspace_id, item.id)
+            if isinstance(item, Item)
+            else (str(configured.workspace), name)
+        )
         if key not in self._semantic_answers:
             raise CommandError(
                 "No semantic model client is configured. Call answer_semantic_model() first."

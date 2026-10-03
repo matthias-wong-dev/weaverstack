@@ -13,7 +13,7 @@ from abc import ABC, abstractmethod
 from concurrent.futures import Executor, ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Any, Iterator, Sequence
+from typing import TYPE_CHECKING, Any, Iterator, Sequence
 
 from ..delta_protocol import (
     DirectDeltaAction,
@@ -26,6 +26,9 @@ from ..targets import ItemRef
 from ..workspaces import Workspace
 from .resources import Resource
 from .telemetry import SessionTelemetry
+
+if TYPE_CHECKING:
+    from ..fabric.resources import Item
 
 
 def workspace_context(workspace: Workspace) -> tuple:
@@ -268,9 +271,15 @@ class Session(ABC):
         return self.scope(workspace).resolve_item(reference, item_type=item_type)
 
     def semantic_model(
-        self, item: ItemRef | str, *, workspace: Workspace | None = None
+        self, item: ItemRef | str | Item, *, workspace: Workspace | None = None
     ):
-        reference = item if isinstance(item, ItemRef) else ItemRef(item)
+        from ..fabric.resources import Item
+
+        if isinstance(item, Item):
+            from ..fabric.semantic_model import validate_bound_model
+
+            validate_bound_model(item)
+        reference = item if isinstance(item, (ItemRef, Item)) else ItemRef(item)
         return self.scope(workspace).semantic_model(reference)
 
     # --- execution capabilities ---------------------------------------------
@@ -762,7 +771,7 @@ class WorkspaceScope:
         self._resolver = resolver
         self._store = store
         self._resources: list[Resource] = []
-        self._semantic_models: dict[str, Any] = {}
+        self._semantic_models: dict[str | tuple[str, str], Any] = {}
         #: Candidate Lakehouses for Livy attachment, not execution destinations.
         self._offered_spark_homes: set[str] = set()
         #: An exact attachment a frozen bundle requires. It outranks every offer.
@@ -876,20 +885,26 @@ class WorkspaceScope:
             self.telemetry.count("resolve.item.cache_hits")
         return resolved
 
-    def semantic_model(self, item: ItemRef):
+    def semantic_model(self, item: ItemRef | Item):
+        from ..fabric.resources import Item
         from ..fabric.semantic_model import SemanticModelClient
 
+        key = (item.workspace_id, item.id) if isinstance(item, Item) else item.name
         with self._lock:
-            if item.name not in self._semantic_models:
+            if key not in self._semantic_models:
                 power_bi = self._power_bi_client()
-                resolved = self.resolve_item(item, item_type="SemanticModel")
-                self._semantic_models[item.name] = SemanticModelClient(
+                resolved = (
+                    item
+                    if isinstance(item, Item)
+                    else self.resolve_item(item, item_type="SemanticModel")
+                )
+                self._semantic_models[key] = SemanticModelClient(
                     resolved.workspace_id,
                     resolved.id,
                     fabric=self.resolver.client,
                     power_bi=power_bi,
                 )
-            return self._semantic_models[item.name]
+            return self._semantic_models[key]
 
     def _power_bi_client(self):
         from ..fabric.auth import POWER_BI_SCOPE, TokenProvider

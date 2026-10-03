@@ -11,7 +11,12 @@ from ..catalogue.tables import LOAD_STATUS
 from ..declaration.model import WeaverItemId
 from ..errors import CommandError, LoadError
 from ..health import assess_load, resolve_as_of
-from ..installed import PYTHON_FOLDER, PYTHON_TABLE, WAREHOUSE_PROCEDURE
+from ..installed import (
+    PYTHON_FOLDER,
+    PYTHON_TABLE,
+    SEMANTIC_REFRESH,
+    WAREHOUSE_PROCEDURE,
+)
 from ..load_plan import ENDPOINT_REFRESH, ONELAKE_PUBLICATION
 from ..load_report import (
     BLOCKED,
@@ -405,6 +410,10 @@ def _completion_document(report: LoadRunReport, timings=()) -> dict:
         "rows_deleted": 0,
         "rows_rejected": 0,
     }
+    if report.nodes and all(
+        node.primitive_kind == SEMANTIC_REFRESH for node in report.nodes
+    ):
+        rows = {}
     for node in report.nodes:
         counted["executed"] += 1 if node.executed else 0
         counted["succeeded"] += (

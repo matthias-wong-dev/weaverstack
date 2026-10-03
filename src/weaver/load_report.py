@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from typing import Any, Mapping
 
 from .runtime.load_result import LoadResult
+from .runtime.semantic_refresh_result import SemanticRefreshResult
 
 PENDING = "pending"
 RUNNING = "running"
@@ -88,7 +89,7 @@ class LoadNodeReport:
     status: str
     executed: bool = False
     messages: tuple[LoadMessage, ...] = ()
-    result: LoadResult | None = None
+    result: LoadResult | SemanticRefreshResult | None = None
     started_at: str | None = None
     finished_at: str | None = None
 
@@ -113,7 +114,14 @@ class LoadNodeReport:
 
     @classmethod
     def from_mapping(cls, payload: Mapping[str, Any]) -> "LoadNodeReport":
+        from .installed import SEMANTIC_REFRESH
+
         rows = payload.get("rows")
+        result_type = (
+            SemanticRefreshResult
+            if payload["primitive_kind"] == SEMANTIC_REFRESH
+            else LoadResult
+        )
         return cls(
             node_id=payload["node_id"],
             logical_id=payload.get("logical_id"),
@@ -125,7 +133,7 @@ class LoadNodeReport:
             messages=tuple(
                 LoadMessage.from_mapping(one) for one in payload.get("messages") or ()
             ),
-            result=None if rows is None else LoadResult.from_row(rows),
+            result=None if rows is None else result_type.from_row(rows),
             started_at=payload.get("started_at"),
             finished_at=payload.get("finished_at"),
         )

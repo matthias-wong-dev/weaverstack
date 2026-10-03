@@ -183,8 +183,16 @@ requested properties and inferred calculated columns, then publishes the two
 semantic dictionaries. Registry publication remains the final Build barrier.
 A failed update or readback leaves the model uncertified. Planning resolves the
 item without fetching its existing definition. There is no live partition
-comparison or retention step. The installed semantic Load/Test/Health path and
-`.source` remain later feature work.
+comparison or retention step. `.source`, semantic DAX Tests and full semantic
+Health remain later feature work.
+
+Load reads the certified model root and its typed workspace/item IDs from the
+catalogue. The installed graph, load planner and Runner dispatch a built-in
+semantic refresh through `Session.semantic_model().refresh()`. Request ID,
+service timing and outcome belong to the normal Log and LoadStatus record.
+Semantic refresh has no row counts or bookmarks. A changed Build invalidates
+LoadStatus; an unchanged Build preserves it. Semantic-only Load uses REST/TDS
+and needs neither source files nor a deployed runtime module.
 
 `doctor --semantic-model NAME` checks Power BI authentication, the model's
 TMSL definition and DAX access through REST. This mode starts no Spark session.
@@ -224,7 +232,8 @@ way: the catalogue over TDS, a Lakehouse's views over Spark SQL, a Lakehouse's
 objects from storage, a Warehouse over TDS. A desktop `weaver build` therefore
 needs no published wheel, because its Spark SQL and TableBuilder submissions
 import no Weaver, and no Fabric Environment either, because they run on the
-workspace default. `load` and `test` ask for `--environment`. `install` asks
+workspace default. Loads and tests of deployed Python modules use an Environment.
+`install` asks
 for nothing: a bundle carries the workspace, the catalogue, the Environment and
 the Lakehouse a Spark session attaches to, frozen when it was generated, and the
 Session that installs it supplies credentials and transport and no decision.
@@ -234,8 +243,8 @@ Livy submissions. Catalogue reads, publication, `_.Log` writes and `_.Bookmark`
 reads and writes must never be the reason a Spark session starts.
 
 What crosses as a program is a run's Python primitives, which are deployed
-modules imported where Spark is. `weaver load` therefore requires the published
-wheel.
+modules imported where Spark is. Loading those modules requires the published
+wheel. Warehouse and semantic-only Loads use TDS and REST without Spark.
 
 A Fabric test that runs Weaver on the laptop tests the desktop position, not the
 in-Fabric one. That is what the `remote` and `hosted` markers are for, and why a

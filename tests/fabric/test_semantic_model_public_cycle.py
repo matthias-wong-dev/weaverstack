@@ -1,0 +1,234 @@
+"""Public semantic Build and Load on fixed items; restoration owns the cleanup."""
+
+import json
+import os
+import shutil
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+from support.weaver_test import register_session, weaver_test
+from test_semantic_model_boundary import _settle_refreshes
+
+import weaver
+from weaver.catalogue.connection import catalogue_connection
+from weaver.catalogue.reader import read_table
+from weaver.catalogue.reconcile import prune_installation
+from weaver.catalogue.render import InstallationScope, render_delete_scope
+from weaver.catalogue.tables import (
+    BOOKMARK,
+    CATALOGUE_TABLES,
+    CURRENT_STATE_TABLES,
+    INSTALLATION,
+    LOAD_STATISTIC,
+    LOAD_STATUS,
+    LOG,
+    PROJECTED_TABLES,
+    REGISTRY,
+    SEMANTIC_MODEL_DICTIONARY,
+)
+from weaver.catalogue.tsql import literal
+from weaver.declaration.model import WeaverDocumentId, WeaverItemId
+from weaver.fabric.resolution import FabricResolver
+from weaver.fabric.resources import WAREHOUSE, find_item
+from weaver.semantic_models.definition import decode_model
+from weaver.sessions import ConsoleSession
+from weaver.workspaces import Workspace
+
+ITEM = WeaverItemId.parse("SemanticModel/RefreshAcceptance")
+ROOT = WeaverDocumentId.model_root(ITEM)
+SCOPE = InstallationScope(ITEM.item_type, ITEM.item_name)
+PBIP = Path(__file__).parents[1] / "fixtures/semantic_model/Probe"
+OWNED_TABLES = (*PROJECTED_TABLES, *CURRENT_STATE_TABLES, LOAD_STATISTIC)
+
+
+def _owned_counts(connection):
+    return connection.rows(
+        " UNION ALL ".join(
+            f"SELECT {literal(table.name)} AS [table_name], COUNT(*) AS [rows] "
+            f"FROM [_].[{table.name}] WHERE {SCOPE.predicate}"
+            for table in OWNED_TABLES
+        )
+    )
+
+
+@pytest.fixture
+def semantic_build_context(
+    fabric_workspace_item, fabric_client, fixed_semantic_model_name, tmp_path
+):
+    # Unlike self-provisioning fixtures, this path only finds the permanent estate.
+    catalogue_name = os.environ.get("WEAVER_PYTEST_WEAVER", "PYTEST_WEAVER")
+    find_item(
+        fabric_workspace_item, catalogue_name, item_type=WAREHOUSE, client=fabric_client
+    )
+    workspace = Workspace(
+        workspace=fabric_workspace_item.name, catalogue=f"Warehouse/{catalogue_name}"
+    )
+    resolver = FabricResolver(workspace, client=fabric_client)
+    with ConsoleSession(
+        workspace=workspace, resolver=resolver, progress=False
+    ) as session:
+        register_session(session)
+        connection = catalogue_connection(session)
+        missing = [
+            f"{table.name}.{column.public_name}"
+            for table in CATALOGUE_TABLES
+            for column in table.columns
+            if column.public_name.casefold() not in (connection.columns_of(table) or {})
+        ]
+        assert not missing, (
+            f"Initialise the fixed catalogue outside pytest before this test: {missing}"
+        )
+        model = session.semantic_model(fixed_semantic_model_name)
+        claims = read_table(connection, INSTALLATION)
+        assert not any(
+            row["item_type"] == ITEM.item_type
+            and (
+                row["target_name"] == fixed_semantic_model_name
+                or row["item_id"] == model.model_id
+            )
+            for row in claims
+        ), "The fixed semantic item must have no existing catalogue owner"
+        assert all(row["rows"] == 0 for row in _owned_counts(connection)), (
+            "RefreshAcceptance has existing catalogue state; clean it outside pytest"
+        )
+        history_predicate = (
+            f"[Target type] = {literal(ITEM.item_type)} AND "
+            f"[Target name] = {literal(fixed_semantic_model_name)}"
+        )
+        history = read_table(connection, LOG, predicate=history_predicate)
+        retained_log_ids = {row["log_sk"] for row in history}
+        _settle_refreshes(model)
+        original = model.get_definition()
+        backup = tmp_path / "original-definition.json"
+        backup.write_text(json.dumps(original), encoding="utf-8")
+        print(f"Original semantic definition: {backup}")
+        try:
+            yield SimpleNamespace(
+                session=session,
+                connection=connection,
+                model=model,
+                target=fixed_semantic_model_name,
+            )
+        finally:
+            try:
+                _settle_refreshes(model)
+                model.update_definition(original, allow_purge_data=True, timeout=300)
+                model.refresh(timeout=300)
+                assert decode_model(model.get_definition()) == decode_model(original)
+                print(f"Restored semantic model {model.workspace_id}/{model.model_id}")
+            finally:
+                session.flush()
+                statements = list(prune_installation(SCOPE))
+                statements.extend(
+                    render_delete_scope(table, scope=SCOPE)
+                    for table in (*CURRENT_STATE_TABLES, LOAD_STATISTIC)
+                )
+                added_log_ids = {
+                    row["log_sk"]
+                    for row in read_table(connection, LOG, predicate=history_predicate)
+                } - retained_log_ids
+                statements.extend(
+                    f"DELETE FROM [_].[Log] WHERE [Log SK] = {literal(log_id)};"
+                    for log_id in sorted(added_log_ids)
+                )
+                connection.execute("\n".join(statements))
+                remaining = _owned_counts(connection)
+                assert all(row["rows"] == 0 for row in remaining), remaining
+                assert {
+                    row["log_sk"]
+                    for row in read_table(connection, LOG, predicate=history_predicate)
+                } == retained_log_ids
+                assert {
+                    json.dumps(row, default=str, sort_keys=True)
+                    for row in read_table(connection, INSTALLATION)
+                } == {json.dumps(row, default=str, sort_keys=True) for row in claims}
+                print(
+                    "Removed only RefreshAcceptance catalogue rows and its new model logs"
+                )
+
+
+@weaver_test(remote=True, resources={"rest", "tds"})
+@pytest.mark.parametrize("pbip", [False, True], ids=["addon-only", "pbip"])
+def test_public_build_catalogue_load_dax_and_unchanged_build(
+    semantic_build_context, tmp_path, pbip
+):
+    context = semantic_build_context
+    folder = tmp_path / "project" / str(ITEM)
+    folder.mkdir(parents=True)
+    if pbip:
+        shutil.copytree(PBIP, folder, dirs_exist_ok=True)
+    (folder / "addon.yml").write_text(
+        'tables:\n  Calendar:\n    .dax: ROW("Year", 2026)\n', encoding="utf-8"
+    )
+    root = folder.parent.parent
+    selector = f"{ITEM}=SemanticModel/{context.target}"
+    built = weaver.build(root, items=selector, session=context.session)
+    print(json.dumps(built.to_mapping(), default=str))
+    assert built.succeeded, built.errors
+    assert ROOT in built.selection.selected_for_build
+    (binding,) = read_table(context.connection, INSTALLATION, scope=SCOPE)
+    assert (binding["workspace_id"], binding["item_id"]) == (
+        context.model.workspace_id,
+        context.model.model_id,
+    )
+    (definition,) = read_table(
+        context.connection, SEMANTIC_MODEL_DICTIONARY, scope=SCOPE
+    )
+    (registered,) = read_table(context.connection, REGISTRY, scope=SCOPE)
+    assert registered["signature"] == definition["signature"]
+    tables = {
+        table["name"]: table
+        for table in json.loads(definition["definition"])["model"]["tables"]
+    }
+    assert set(tables) == ({"Calendar", "Sales", "Product"} if pbip else {"Calendar"})
+    assert {column["name"] for column in tables["Calendar"]["columns"]} == {"Year"}
+    if pbip:
+        assert tables["Sales"]["partitions"][0]["mode"] == "import"
+    (pending,) = read_table(context.connection, LOAD_STATUS, scope=SCOPE)
+    assert pending["result"] == "pending"
+
+    away = root.with_name("source-not-present")
+    root.rename(away)
+    try:
+        report = weaver.load(str(ITEM), session=context.session)
+    finally:
+        away.rename(root)
+    print(json.dumps(report.to_mapping(), default=str))
+    assert report.succeeded and len(report.nodes) == 1
+    (node,) = report.nodes
+    assert node.result.status == "Completed" and node.result.request_id
+    assert node.result.start_time and node.result.end_time
+    assert not hasattr(node.result, "rows_inserted")
+    (loaded,) = read_table(context.connection, LOAD_STATUS, scope=SCOPE)
+    assert loaded["result"] == "succeeded"
+    assert loaded["workflow_id"] == report.workflow_id
+    assert loaded["started_datetime"] and loaded["completed_datetime"]
+    assert loaded["duration_milliseconds"] >= 0
+    logs = read_table(
+        context.connection,
+        LOG,
+        predicate=f"[Workflow ID] = {literal(report.workflow_id)}",
+    )
+    assert any(node.result.request_id in row["details"] for row in logs)
+    assert not read_table(context.connection, BOOKMARK, scope=SCOPE)
+    assert not read_table(context.connection, LOAD_STATISTIC, scope=SCOPE)
+    assert context.model.query_dax('EVALUATE ROW("Year", MAX(Calendar[Year]))') == [
+        {"[Year]": 2026}
+    ]
+    if pbip:
+        assert context.model.query_dax('EVALUATE ROW("Revenue", [Revenue])') == [
+            {"[Revenue]": 20}
+        ]
+    unchanged = weaver.build(root, items=selector, session=context.session)
+    print(json.dumps(unchanged.to_mapping(), default=str))
+    assert unchanged.succeeded, unchanged.errors
+    assert not unchanged.selection.selected_for_build
+    assert unchanged.installation_report.action_counts()["total"] == 0
+    assert read_table(context.connection, LOAD_STATUS, scope=SCOPE) == (loaded,)
+    assert read_table(context.connection, SEMANTIC_MODEL_DICTIONARY, scope=SCOPE) == (
+        definition,
+    )
+    assert not {"livy", "onelake"} & {
+        event.resource for event in context.session.telemetry.events()
+    }

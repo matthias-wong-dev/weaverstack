@@ -1395,7 +1395,13 @@ def _print_load_summary(report) -> None:
     if counts[SKIPPED]:
         print(f"  {counts[SKIPPED]:>3} skipped")
 
-    executed_loaders = [node for node in loaders if node.executed]
+    from weaver.installed import SEMANTIC_REFRESH
+
+    executed_loaders = [
+        node
+        for node in loaders
+        if node.executed and node.primitive_kind != SEMANTIC_REFRESH
+    ]
     if not executed_loaders:
         return
     print("  Rows")

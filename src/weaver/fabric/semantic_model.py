@@ -12,6 +12,30 @@ from .client import FabricError
 POWER_BI_API = "https://api.powerbi.com/v1.0/myorg"
 
 
+def validate_bound_model(item) -> None:
+    from .resources import SEMANTIC_MODEL, Item
+
+    if not isinstance(item, Item) or item.type != SEMANTIC_MODEL:
+        raise ConfigError("A bound semantic model must name a typed SemanticModel item")
+    for label, value in (("workspace ID", item.workspace_id), ("item ID", item.id)):
+        if not isinstance(value, str) or not re.fullmatch(
+            r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}", value
+        ):
+            raise ConfigError(
+                f"SemanticModel/{item.name} has invalid {label} {value!r}"
+            )
+
+
+class SemanticRefreshError(FabricError):
+    def __init__(self, message, *, request_id, body, status_code=None):
+        from ..runtime.semantic_refresh_result import SemanticRefreshResult
+
+        super().__init__(message, status_code=status_code)
+        self.result = SemanticRefreshResult.from_response(
+            {**body, "request_id": request_id}, error_message=message
+        )
+
+
 class SemanticModelClient:
     def __init__(self, workspace_id: str, model_id: str, *, fabric, power_bi):
         self.workspace_id = workspace_id
@@ -84,15 +108,24 @@ class SemanticModelClient:
                 "Semantic model refresh was accepted without a valid request ID; completion is unknown"
             )
         path = f"{self.dataset_path}/refreshes/{request_id}"
+        body = {}
         while time.monotonic() < deadline:
-            response = self.power_bi.request(
-                "GET",
-                path,
-                expected=(200, 202),
-                timeout=min(deadline - time.monotonic(), self.power_bi.timeout),
-                deadline=deadline,
-            )
-            body = response.json()
+            try:
+                response = self.power_bi.request(
+                    "GET",
+                    path,
+                    expected=(200, 202),
+                    timeout=min(deadline - time.monotonic(), self.power_bi.timeout),
+                    deadline=deadline,
+                )
+                body = response.json()
+            except FabricError as exc:
+                raise SemanticRefreshError(
+                    str(exc),
+                    request_id=request_id,
+                    body=body,
+                    status_code=exc.status_code,
+                ) from exc
             status = body.get("status")
             if status == "Completed":
                 if time.monotonic() >= deadline:
@@ -104,13 +137,17 @@ class SemanticModelClient:
                     for message in body.get("messages", [])
                     if isinstance(message, dict) and message.get("type") == "Error"
                 )
-                raise FabricError(
+                raise SemanticRefreshError(
                     f"Semantic model refresh {request_id} ended with status {status!r}"
-                    + (f": {messages}" if messages else "")
+                    + (f": {messages}" if messages else ""),
+                    request_id=request_id,
+                    body=body,
                 )
             time.sleep(min(poll_interval, max(0, deadline - time.monotonic())))
-        raise FabricError(
-            f"Semantic model refresh {request_id} did not complete within {timeout}s"
+        raise SemanticRefreshError(
+            f"Semantic model refresh {request_id} did not complete within {timeout}s",
+            request_id=request_id,
+            body=body,
         )
 
     def query_dax(self, query: str) -> list[dict]:

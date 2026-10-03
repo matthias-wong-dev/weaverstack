@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from functools import cached_property
 from types import MappingProxyType
-from typing import Iterable, Mapping, Sequence
+from typing import TYPE_CHECKING, Iterable, Mapping, Sequence
 
 from .catalogue.claims import catalogue_columns, stored_area
 from .catalogue.state import Catalogue, InstalledMirror
@@ -21,6 +21,7 @@ from .catalogue.tables import (
     ROLE_ASSUMPTION,
     ROLE_DATA,
     ROLE_TEST,
+    SEMANTIC_MODEL_DICTIONARY,
     SHORTCUT,
     TABLE_DICTIONARY,
     TEST_DICTIONARY,
@@ -59,6 +60,10 @@ from .targets import (
 WAREHOUSE_PROCEDURE = "warehouse_procedure"
 PYTHON_TABLE = "python_table"
 PYTHON_FOLDER = "python_folder"
+SEMANTIC_REFRESH = "semantic_refresh"
+
+if TYPE_CHECKING:
+    from .fabric.resources import Item
 
 #: Item type determines the kind of its named physical target.
 _TARGET_KIND_FOR_ITEM = {
@@ -109,6 +114,8 @@ class InstalledNode:
     is_static: bool = False
     #: Source ownership when another target supplies this object's data.
     mirror: InstalledMirror | None = None
+    #: The typed semantic item frozen by Build, independent of display-name reuse.
+    bound_item: Item | None = None
 
     @property
     def node_id(self) -> str:
@@ -128,7 +135,7 @@ class InstalledNode:
 
     @property
     def is_installed(self) -> bool:
-        return self.artefact_type is not None
+        return self.artefact_type is not None or self.artefact_kind == SEMANTIC_REFRESH
 
     @property
     def is_mirrored(self) -> bool:
@@ -152,6 +159,8 @@ class InstalledNode:
     def load_name(self) -> str | None:
         """The request spelling, which may identify both a Folder and a table."""
 
+        if self.item.item_type == SEMANTIC_MODEL:
+            return self.item.item_name
         object_id = getattr(self.identity, "object_id", None)
         return None if object_id is None else object_id.qualified
 
@@ -159,6 +168,8 @@ class InstalledNode:
     def load_key(self) -> str:
         """The target-local identity, including a Lakehouse object's area."""
 
+        if self.item.item_type == SEMANTIC_MODEL:
+            return str(self.identity)
         schema, name = catalogue_columns(self.identity)
         return f"{schema}.{name}"
 
@@ -581,6 +592,33 @@ def _registered(catalogue: Catalogue, installations):
             continue
         node = replace(node, is_static=identity in static)
         data[identity] = node
+        if node.object_type == "semantic_model":
+            from .fabric.resources import Item
+
+            definitions = catalogue.rows[identity.item].get(
+                SEMANTIC_MODEL_DICTIONARY.name, ()
+            )
+            if not any(
+                row.get("schema_name") == ""
+                and row.get("object_name") == ""
+                and row.get("definition")
+                and row.get("signature") == catalogue.registered[identity].signature
+                for row in definitions
+            ):
+                continue
+            rows = catalogue.rows[identity.item].get(INSTALLATION.name, ())
+            binding = rows[0]
+            data[identity] = replace(
+                node,
+                artefact_kind=SEMANTIC_REFRESH,
+                bound_item=Item(
+                    id=binding.get("item_id"),
+                    workspace_id=binding.get("workspace_id"),
+                    name=node.target.name,
+                    type=SEMANTIC_MODEL,
+                ),
+            )
+            continue
         for kind, candidate in primitive_candidates(identity, node.object_type):
             data[identity] = replace(
                 node,
@@ -722,6 +760,8 @@ def stored_identity(item: WeaverItemId, schema: str, name: str) -> WeaverDocumen
     Validation identities use a separate projection.
     """
 
+    if item.item_type == SEMANTIC_MODEL and schema == "" and name == "":
+        return WeaverDocumentId.model_root(item)
     area, relational = stored_area(schema)
     return WeaverDocumentId(item, ObjectId(relational, name), is_files=area == FILES)
 

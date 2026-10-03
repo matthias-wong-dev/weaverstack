@@ -4,11 +4,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import cached_property
-from typing import Mapping
+from typing import TYPE_CHECKING, Mapping
 
 from ..errors import GraphError
 from ..graph import Graph
 from .result import RunError
+
+if TYPE_CHECKING:
+    from ..fabric.resources import Item
 
 
 @dataclass(frozen=True)
@@ -30,6 +33,7 @@ class RunNode:
     publication_of: object | None = None
     publication_targets: tuple[object, ...] = ()
     produced_by: str | None = None
+    bound_item: Item | None = None
 
     @property
     def sort_key(self) -> tuple[str, str, str, str, str]:
@@ -120,6 +124,7 @@ def _load_graph(request, state) -> RunGraph:
                 publication_of=node.publication_of,
                 publication_targets=node.publication_targets,
                 produced_by=node.produced_by,
+                bound_item=node.bound_item,
                 role="load",
             )
             for node in dag.nodes
