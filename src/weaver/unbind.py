@@ -6,9 +6,9 @@ from dataclasses import dataclass
 
 from .catalogue.reader import read_table
 from .catalogue.reconcile import prune_installation
-from .catalogue.render import InstallationScope, InstallationScopes
-from .catalogue.tables import INSTALLATION
-from .declaration.model import LAKEHOUSE, WAREHOUSE
+from .catalogue.render import InstallationScope, InstallationScopes, render_delete_scope
+from .catalogue.tables import CURRENT_STATE_TABLES, INSTALLATION, REGISTRY
+from .declaration.model import LAKEHOUSE, SEMANTIC_MODEL, WAREHOUSE
 from .targets import ItemRef
 
 
@@ -17,6 +17,7 @@ class UnbindResult:
     targets: tuple[str, ...]
     logical_items: tuple[str, ...]
     statements: tuple[str, ...]
+    before_reset: tuple[str, ...] = ()
 
     def to_mapping(self) -> dict[str, object]:
         return {
@@ -31,12 +32,15 @@ def plan_unbind(
     *,
     lakehouses=(),
     warehouses=(),
+    semantic_models=(),
 ) -> UnbindResult:
     """Render complete catalogue deletion without inspecting physical targets."""
 
-    selected = {(LAKEHOUSE, ItemRef.parse(value).name) for value in lakehouses} | {
-        (WAREHOUSE, ItemRef.parse(value).name) for value in warehouses
-    }
+    selected = (
+        {(LAKEHOUSE, ItemRef.parse(value).name) for value in lakehouses}
+        | {(WAREHOUSE, ItemRef.parse(value).name) for value in warehouses}
+        | {(SEMANTIC_MODEL, ItemRef.parse(value).name) for value in semantic_models}
+    )
     rows = read_table(catalogue, INSTALLATION)
     scopes = sorted(
         {
@@ -50,18 +54,43 @@ def plan_unbind(
     # pass per installation: a DELETE costs a transaction whether it removes one
     # row or all of them, so the statement count is the cost.
     statements = prune_installation(InstallationScopes(tuple(scopes))) if scopes else ()
+    semantic_scopes = tuple(
+        scope for scope in scopes if scope.item_type == SEMANTIC_MODEL
+    )
+    current = (
+        tuple(
+            render_delete_scope(table, scope=InstallationScopes(semantic_scopes))
+            for table in CURRENT_STATE_TABLES
+        )
+        if semantic_scopes
+        else ()
+    )
+    statements = (*statements[:1], *current, *statements[1:])
     targets = tuple(f"{item_type}/{name}" for item_type, name in sorted(selected))
     return UnbindResult(
         targets=targets,
         logical_items=tuple(map(str, scopes)),
         statements=statements,
+        before_reset=(
+            render_delete_scope(REGISTRY, scope=InstallationScopes(semantic_scopes)),
+            *current,
+        )
+        if semantic_scopes
+        else (),
     )
 
 
-def unbind_targets(catalogue, *, lakehouses=(), warehouses=()) -> UnbindResult:
+def unbind_targets(
+    catalogue, *, lakehouses=(), warehouses=(), semantic_models=()
+) -> UnbindResult:
     """Execute target-directed catalogue deletion and touch no physical target."""
 
-    result = plan_unbind(catalogue, lakehouses=lakehouses, warehouses=warehouses)
+    result = plan_unbind(
+        catalogue,
+        lakehouses=lakehouses,
+        warehouses=warehouses,
+        semantic_models=semantic_models,
+    )
     for statement in result.statements:
         catalogue.execute(statement)
     return result

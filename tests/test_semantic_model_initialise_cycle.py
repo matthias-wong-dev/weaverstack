@@ -117,12 +117,25 @@ def test_semantic_build_cli_requests_tds_and_no_lakehouse_resources():
 
 
 @weaver_test()
-def test_semantic_target_is_not_dispatched_to_physical_wipe():
-    from weaver.errors import CommandError
-    from weaver.operations.wipe import WipeTarget
+def test_semantic_target_is_not_dispatched_to_warehouse_or_lakehouse_wipe():
+    from test_semantic_wipe_cycle import setup
 
-    with pytest.raises(CommandError, match="SemanticModel.*not supported"):
-        WipeTarget.parse("SemanticModel/Reporting")
+    from weaver.semantic_models.wipe import prepare_reset
+    from weaver.wipe_plan import wipe_mutation_plan
+
+    session, client = setup()
+    plan = weaver.plan_wipe("SemanticModel/Reporting", session=session)
+    spec = prepare_reset(client, "Reporting", preserve_data_source=False)
+    mutation, payloads = wipe_mutation_plan(
+        plan, semantic_wipes={"SemanticModel/Reporting": spec}
+    )
+    actions = [action for _, _, action in mutation.actions()]
+    assert len(actions) == 1 and actions[0].executor == "semantic_wipe"
+    assert actions[0].kind == "wipe_semantic_model"
+    assert mutation.targets[0].kind == "semanticmodel"
+    assert mutation.targets[0].item_id == client.model_id
+    assert mutation.execution.spark_home_target_id is None
+    assert set(payloads) == {actions[0].payload}
 
 
 @weaver_test()

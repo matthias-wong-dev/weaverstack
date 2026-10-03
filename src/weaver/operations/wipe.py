@@ -52,6 +52,7 @@ CATALOGUE_ACTIONS = (REMOVE, UNBIND, LEAVE, PHYSICAL_ONLY)
 #: Physical item types as spelled by the catalogue and target grammar.
 LAKEHOUSE = "Lakehouse"
 WAREHOUSE = "Warehouse"
+SEMANTIC_MODEL = "SemanticModel"
 
 EMPTIED = "emptied"
 PRESERVED = "preserved"
@@ -71,10 +72,6 @@ class WipeTarget:
     @classmethod
     def parse(cls, text: str) -> "WipeTarget":
         target = parse_physical_target(text, what="wipe target", error=CommandError)
-        if physical_kind(target) not in {LAKEHOUSE, WAREHOUSE}:
-            raise CommandError(
-                "SemanticModel wipe is not supported; name a Lakehouse or Warehouse"
-            )
         return cls(item_type=physical_kind(target), item=physical_item(target))
 
     @property
@@ -98,6 +95,7 @@ class WipePlan:
     catalogue: str | None
     catalogue_action: str
     unbound: tuple[str, ...] = ()
+    preserve_data_source: bool = False
 
     def is_catalogue(self, target: WipeTarget) -> bool:
         return (
@@ -115,6 +113,8 @@ class WipePlan:
         lines = [f"Wipe on {self.workspace.workspace}", "", "Empty"]
         for target in self.targets:
             note = "  catalogue" if self.is_catalogue(target) else ""
+            if target.item_type == SEMANTIC_MODEL and self.preserve_data_source:
+                note += "  preserve data source in a hidden columnless source table"
             lines.append(f"  {str(target).ljust(width)}{note}".rstrip())
         lines.append("")
         lines.append("Catalogue")
@@ -145,6 +145,7 @@ class WipePlan:
             "catalogue": self.catalogue,
             "catalogue_action": self.catalogue_action,
             "unbound": list(self.unbound),
+            "preserve_data_source": self.preserve_data_source,
         }
 
 
@@ -242,6 +243,7 @@ def plan_wipe(
     workspace_config: str | Path | None = None,
     unbind: bool = False,
     catalogue_action: str | None = None,
+    preserve_data_source: bool = False,
     session=None,
 ) -> WipePlan:
     """Settle the estate and catalogue disposition before removing anything.
@@ -289,6 +291,10 @@ def plan_wipe(
             with opened.task("Read the installed estate", resolved_catalogue):
                 discovered = _installed_estate(resolved, session=opened)
 
+    if preserve_data_source and not any(
+        target.item_type == SEMANTIC_MODEL for target in discovered
+    ):
+        raise CommandError("--preserve-data-source requires a SemanticModel target")
     ordered = _execution_order(discovered, catalogue=resolved_catalogue, action=action)
     unbound = ()
     if action == UNBIND:
@@ -304,6 +310,7 @@ def plan_wipe(
         catalogue=resolved_catalogue,
         catalogue_action=action,
         unbound=unbound,
+        preserve_data_source=preserve_data_source,
     )
 
 
@@ -311,6 +318,17 @@ def _catalogue_action(
     named: str | None, *, unbind: bool, catalogue: str | None, selected
 ) -> str:
     action = _requested_action(named, unbind=unbind, catalogue=catalogue)
+    if (
+        selected
+        and all(target.item_type == SEMANTIC_MODEL for target in selected)
+        and catalogue
+    ):
+        if named == REMOVE:
+            raise CommandError(
+                "A SemanticModel-only wipe preserves the catalogue; omit catalogue_action=remove"
+            )
+        if named is None and not unbind:
+            action = UNBIND
     if action == UNBIND:
         _refuse_unusable_unbind(catalogue=catalogue, selected=selected)
     if action == LEAVE and catalogue is not None:
@@ -407,11 +425,17 @@ PLANNING_ARGUMENTS = (
     "workspace_config",
     "unbind",
     "catalogue_action",
+    "preserve_data_source",
 )
 
 
 def _refuse_planning_arguments(**given) -> None:
     supplied = sorted(name for name in PLANNING_ARGUMENTS if given.get(name))
+    if (
+        given.get("preserve_data_source") is not None
+        and "preserve_data_source" not in supplied
+    ):
+        supplied.append("preserve_data_source")
     if not supplied:
         return
     raise CommandError(
@@ -430,6 +454,7 @@ def wipe(
     workspace_config: str | Path | None = None,
     unbind: bool = False,
     catalogue_action: str | None = None,
+    preserve_data_source: bool | None = None,
     dry_run: bool = False,
     session=None,
 ) -> WipeResult:
@@ -448,6 +473,7 @@ def wipe(
             workspace_config=workspace_config,
             unbind=unbind,
             catalogue_action=catalogue_action,
+            preserve_data_source=bool(preserve_data_source),
             session=session,
         )
     else:
@@ -459,6 +485,7 @@ def wipe(
             workspace_config=workspace_config,
             unbind=unbind,
             catalogue_action=catalogue_action,
+            preserve_data_source=preserve_data_source,
         )
 
     resolved = plan.workspace
@@ -504,12 +531,20 @@ def _execute(plan: WipePlan, workspace, *, session):
 
     from ..wipe_plan import wipe_mutation_plan
 
+    semantic_wipes = _semantic_wipes(plan, session=session)
     unbound = None
     statements = ()
+    before_reset = ()
     if plan.catalogue_action == UNBIND and plan.unbound:
         unbinding = _plan_unbind(plan, workspace, session=session)
         unbound, statements = unbinding.to_mapping(), unbinding.statements
-    mutation, payloads = wipe_mutation_plan(plan, unbind_statements=statements)
+        before_reset = unbinding.before_reset
+    mutation, payloads = wipe_mutation_plan(
+        plan,
+        unbind_statements=statements,
+        before_reset_statements=before_reset,
+        semantic_wipes=semantic_wipes,
+    )
     with session.step("Emptying " + ", ".join(str(t) for t in plan.targets)):
         report = session.execute_mutation(mutation, payloads)
     outcomes = report.by_id
@@ -547,6 +582,20 @@ def _reports(target, mutation, outcomes) -> tuple[WipeReport, ...]:
         DETACH_TABLE_SHORTCUTS,
     )
 
+    if target.item_type == SEMANTIC_MODEL:
+        action = next(
+            action
+            for _, _, action in mutation.actions()
+            if action.target_id == f"semanticmodel-{target.physical_name}"
+        )
+        value = outcomes[action.id].value
+        return (
+            WipeReport(
+                str(target),
+                Location(f"semanticmodel://{target.item.name}"),
+                tuple(value["removed"]),
+            ),
+        )
     if target.item_type != LAKEHOUSE:
         return (
             WipeReport(
@@ -579,12 +628,22 @@ def _enumerate(plan: WipePlan, workspace, *, session):
 
     from ..physical_wipe import wipe_lakehouse
 
+    semantic_wipes = _semantic_wipes(plan, session=session)
     items: list[WipeItemResult] = []
     reports: list[WipeReport] = []
     storage = any(target.item_type == LAKEHOUSE for target in plan.targets)
     store = session.store(workspace) if storage else None
     for target in plan.targets:
-        if target.item_type == LAKEHOUSE:
+        if target.item_type == SEMANTIC_MODEL:
+            produced = (
+                WipeReport(
+                    str(target),
+                    Location(f"semanticmodel://{target.item.name}"),
+                    tuple(semantic_wipes[str(target)]["removed"]),
+                    dry_run=True,
+                ),
+            )
+        elif target.item_type == LAKEHOUSE:
             produced = tuple(
                 WipeReport(
                     target=report.target,
@@ -618,6 +677,20 @@ def _enumerate(plan: WipePlan, workspace, *, session):
     return items, reports
 
 
+def _semantic_wipes(plan, *, session):
+    from ..semantic_models.wipe import prepare_reset
+
+    return {
+        str(target): prepare_reset(
+            session.semantic_model(target.physical_name, workspace=plan.workspace),
+            target.physical_name,
+            preserve_data_source=plan.preserve_data_source,
+        )
+        for target in plan.targets
+        if target.item_type == SEMANTIC_MODEL
+    }
+
+
 def _counts(reports: Sequence[WipeReport]) -> dict[str, int]:
     """Count named shortcuts and other entries reported for one item.
 
@@ -643,11 +716,12 @@ def _plan_unbind(plan: WipePlan, workspace, *, session):
     from ..catalogue.connection import catalogue_connection
     from ..unbind import plan_unbind
 
-    lakehouses, warehouses = _unbound_names(plan)
+    lakehouses, warehouses, semantic_models = _unbound_names(plan)
     return plan_unbind(
         catalogue_connection(session, workspace),
         lakehouses=lakehouses,
         warehouses=warehouses,
+        semantic_models=semantic_models,
     )
 
 
@@ -656,6 +730,7 @@ def _unbound_names(plan: WipePlan):
     return (
         sorted({t.physical_name for t in targets if t.item_type == LAKEHOUSE}),
         sorted({t.physical_name for t in targets if t.item_type == WAREHOUSE}),
+        sorted({t.physical_name for t in targets if t.item_type == SEMANTIC_MODEL}),
     )
 
 
