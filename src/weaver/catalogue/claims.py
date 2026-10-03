@@ -19,8 +19,7 @@ from .tables import (
     KEY_DICTIONARY,
     OBJECT_TYPES,
     REGISTRY,
-    SEMANTIC_MODEL_DICTIONARY,
-    SEMANTIC_OBJECT_DICTIONARY,
+    SEMANTIC_TABLES,
     TABLE_DICTIONARY,
     CatalogueTable,
 )
@@ -139,8 +138,7 @@ CATALOGUE_CLAIMS_BY_OBJECT_TYPE: Mapping[str, tuple[CatalogueClaimRule, ...]] = 
     "schema": (CatalogueClaimRule(REGISTRY),),
     "semantic_model": (
         CatalogueClaimRule(REGISTRY),
-        CatalogueClaimRule(SEMANTIC_MODEL_DICTIONARY),
-        CatalogueClaimRule(SEMANTIC_OBJECT_DICTIONARY),
+        *(CatalogueClaimRule(table) for table in SEMANTIC_TABLES),
         CatalogueClaimRule(DEPENDENCY, predicate_columns=("referencing_schema_name",)),
     ),
 }

@@ -39,10 +39,7 @@ def test_role_members_must_be_empty_before_build_can_certify_removal(tmp_path):
     )
     assert not any(
         "MERGE" in statement
-        and (
-            "[_].[Registry]" in statement
-            or "[_].[SemanticModelDictionary]" in statement
-        )
+        and ("[_].[Registry]" in statement or "[_].[SemanticModel]" in statement)
         for statement in session.tsql
     )
 
@@ -76,10 +73,7 @@ def test_removed_writable_property_prevents_certification(
     )
     assert not any(
         "MERGE" in statement
-        and (
-            "[_].[Registry]" in statement
-            or "[_].[SemanticModelDictionary]" in statement
-        )
+        and ("[_].[Registry]" in statement or "[_].[SemanticModel]" in statement)
         for statement in session.tsql
     )
 
@@ -116,6 +110,6 @@ def test_multiline_text_equivalence_allows_build_certification(tmp_path, field):
     report = execute_bundle(bundle, session)
     assert report.succeeded, report.to_mapping()
     assert any(
-        "MERGE" in statement and "[_].[SemanticModelDictionary]" in statement
+        "MERGE" in statement and "[_].[SemanticModel]" in statement
         for statement in session.tsql
     )

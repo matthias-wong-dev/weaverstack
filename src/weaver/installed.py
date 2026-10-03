@@ -21,12 +21,14 @@ from .catalogue.tables import (
     ROLE_ASSUMPTION,
     ROLE_DATA,
     ROLE_TEST,
-    SEMANTIC_MODEL_DICTIONARY,
-    SEMANTIC_OBJECT_DICTIONARY,
+    SEMANTIC_MODEL_TABLE,
     SHORTCUT,
     TABLE_DICTIONARY,
     TEST_DICTIONARY,
     VALIDATION_ROLES,
+)
+from .catalogue.tables import (
+    SEMANTIC_MODEL as SEMANTIC_MODEL_DEFINITION,
 )
 from .declaration.metadata import ASSUMPTION, TEST, ObjectId
 from .declaration.model import (
@@ -600,7 +602,7 @@ def _registered(catalogue: Catalogue, installations):
             from .fabric.resources import Item
 
             definitions = catalogue.rows[identity.item].get(
-                SEMANTIC_MODEL_DICTIONARY.name, ()
+                SEMANTIC_MODEL_DEFINITION.name, ()
             )
             if not any(
                 row.get("schema_name") == ""
@@ -808,16 +810,14 @@ def _dependency_rows(catalogue: Catalogue, nodes) -> tuple[_DependencyRow, ...]:
             schema = str(row.get("referencing_schema_name") or "")
             name = str(row.get("referencing_object_name") or "")
             if item.item_type == SEMANTIC_MODEL:
-                from .semantic_models.compiler import escape
-
                 consumer = WeaverDocumentId.model_root(item)
                 if str(consumer) not in nodes:
                     continue
                 binding = next(
                     (
                         r.get("source_binding")
-                        for r in tables.get(SEMANTIC_OBJECT_DICTIONARY.name, ())
-                        if r.get("semantic_path") == f"/model/tables/{escape(name)}"
+                        for r in tables.get(SEMANTIC_MODEL_TABLE.name, ())
+                        if r.get("table_name") == name
                     ),
                     None,
                 )

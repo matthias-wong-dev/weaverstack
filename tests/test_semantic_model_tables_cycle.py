@@ -1,0 +1,91 @@
+"""Typed semantic catalogue rows follow the model's Build lifecycle."""
+
+import json
+from dataclasses import replace
+
+from support.weaver_test import weaver_test
+from test_semantic_model_build_cycle import ITEM, ROOT, prepared
+
+from weaver.build_bundle.catalogue_actions import desired_catalogue
+from weaver.catalogue.claims import (
+    CatalogueClaim,
+    claim_rules_for_object_type,
+    without_claims,
+)
+from weaver.catalogue.state import Catalogue
+from weaver.catalogue.tables import CATALOGUE_TABLES
+from weaver.declaration.repository import parse_item_repository
+from weaver.locations import Location
+
+
+@weaver_test()
+def test_typed_semantic_rows_keep_descriptions_native_metadata_and_claim_ownership(
+    tmp_path,
+):
+    root, _, bindings, _, _ = prepared(tmp_path, True)
+    (root / str(ITEM) / "addon.yml").write_text(
+        "model:\n  description: Sales model\n"
+        "tables:\n  Sales:\n    description: Sales transactions\n"
+        "    columns:\n      ProductId:\n        description: Product identity\n"
+        "    measures:\n      Revenue:\n        description: Total revenue\n",
+        encoding="utf-8",
+    )
+    repository = parse_item_repository(Location(root.as_posix()))
+    target = replace(
+        bindings.by_item[ITEM].to_bound_target(),
+        workspace_id="workspace-id",
+        item_id="model-id",
+    )
+    projected = desired_catalogue(repository, {ROOT}, {ITEM: target})
+    catalogue = Catalogue.from_mapping(projected.to_mapping())
+    rows = catalogue.rows[ITEM]
+    semantic_tables = {
+        "SemanticModel",
+        "SemanticModelTable",
+        "SemanticModelMeasure",
+        "SemanticModelRelationship",
+        "SemanticModelColumn",
+    }
+    assert {
+        t.name for t in CATALOGUE_TABLES if t.name.startswith("Semantic")
+    } == semantic_tables
+    assert rows["SemanticModel"][0]["description"] == "Sales model"
+    assert (
+        json.loads(rows["SemanticModel"][0]["definition"])
+        == repository.semantic_models[ITEM].model
+    )
+    sales = next(r for r in rows["SemanticModelTable"] if r["table_name"] == "Sales")
+    assert sales["description"] == "Sales transactions"
+    measure = next(
+        r for r in rows["SemanticModelMeasure"] if r["measure_name"] == "Revenue"
+    )
+    assert measure["table_name"] == "Sales"
+    assert measure["description"] == "Total revenue"
+    assert measure["expression"]
+    column = next(
+        r
+        for r in rows["SemanticModelColumn"]
+        if r["table_name"] == "Sales" and r["column_name"] == "ProductId"
+    )
+    assert column["description"] == "Product identity"
+    assert column["data_type"] == "int64"
+    relationship = rows["SemanticModelRelationship"][0]
+    assert relationship["from_table"] == "Sales"
+    assert relationship["to_table"] == "Product"
+    assert relationship["from_column"] == relationship["to_column"] == "ProductId"
+    assert relationship["from_cardinality"] == "many"
+    assert relationship["to_cardinality"] == "one"
+    assert relationship["cross_filtering_behavior"] == "oneDirection"
+    for name in semantic_tables:
+        for row in rows[name]:
+            assert row["signature"] == repository.semantic_models[ITEM].signature
+            assert json.loads(row["provenance"])
+    pruned = without_claims(
+        catalogue,
+        [
+            CatalogueClaim(ROOT, rule)
+            for rule in claim_rules_for_object_type("semantic_model")
+        ],
+    )
+    assert not pruned.registered
+    assert all(not pruned.rows[ITEM][name] for name in semantic_tables)

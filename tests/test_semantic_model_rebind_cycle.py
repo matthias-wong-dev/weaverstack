@@ -91,9 +91,7 @@ def test_rebinding_unchanged_source_deploys_before_recertifying(tmp_path, change
         sql = session.tsql
         revoke = next(i for i, s in enumerate(sql) if "DELETE FROM [_].[Registry]" in s)
         publish = next(
-            i
-            for i, s in enumerate(sql)
-            if "MERGE" in s and "[_].[SemanticModelDictionary]" in s
+            i for i, s in enumerate(sql) if "MERGE" in s and "[_].[SemanticModel]" in s
         )
         certify = next(
             i for i, s in enumerate(sql) if "MERGE" in s and "[_].[Registry]" in s

@@ -22,8 +22,9 @@ def test_semantic_catalogue_roundtrips_model_root_and_projects_native_children(
         without_claims,
     )
     from weaver.catalogue.tables import (
-        SEMANTIC_MODEL_DICTIONARY,
-        SEMANTIC_OBJECT_DICTIONARY,
+        SEMANTIC_MODEL,
+        SEMANTIC_MODEL_MEASURE,
+        SEMANTIC_TABLES,
     )
 
     folder = tmp_path / "SemanticModel" / "Reporting"
@@ -53,12 +54,12 @@ def test_semantic_catalogue_roundtrips_model_root_and_projects_native_children(
     assert rows["Installation"][0]["workspace_id"] == "workspace-id"
     assert rows["Installation"][0]["item_id"] == "model-id"
     assert (
-        json.loads(rows[SEMANTIC_MODEL_DICTIONARY.name][0]["definition"])
+        json.loads(rows[SEMANTIC_MODEL.name][0]["definition"])
         == repository.semantic_models[item].model
     )
-    children = {r["semantic_path"]: r for r in rows[SEMANTIC_OBJECT_DICTIONARY.name]}
-    measure = children["/model/tables/Calendar/measures/Answer"]
-    assert measure["semantic_kind"] == "measure"
+    (measure,) = rows[SEMANTIC_MODEL_MEASURE.name]
+    assert measure["table_name"] == "Calendar"
+    assert measure["measure_name"] == "Answer"
     assert json.loads(measure["properties"])["expression"] == "1"
     assert (
         json.loads(measure["provenance"])["expression"]["source"]
@@ -72,5 +73,5 @@ def test_semantic_catalogue_roundtrips_model_root_and_projects_native_children(
         ],
     )
     assert not pruned.registered
-    assert not pruned.rows[item][SEMANTIC_MODEL_DICTIONARY.name]
-    assert not pruned.rows[item][SEMANTIC_OBJECT_DICTIONARY.name]
+    assert not pruned.rows[item][SEMANTIC_MODEL.name]
+    assert all(not pruned.rows[item][table.name] for table in SEMANTIC_TABLES)

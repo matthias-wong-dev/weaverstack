@@ -182,7 +182,7 @@ Unsupported directives and TMDL statements must fail at their source location.
 `initialise` alone creates semantic items. Build binds the existing typed item
 and freezes its workspace/item IDs in the bundle. The update action disables
 purging. Declared success edges require deployment before effective-definition
-readback and both semantic dictionaries before Registry publication. The readback
+readback and all five semantic catalogue projections before Registry publication. The readback
 checks requested properties and inferred calculated columns. Publication also
 requires the shared physical completion gate. Failed or uncertain deployment
 and failed readback cannot certify a model; independent physical branches continue.
@@ -205,7 +205,12 @@ Microsoft's [Direct Lake limits](https://learn.microsoft.com/en-us/fabric/fundam
 apply, including single-source and composite-model constraints for Direct Lake
 on SQL. Views use the native DirectQuery fallback; Weaver retains `directLake`.
 
-`SemanticObjectDictionary.Source binding` retains source metadata. Each semantic
+`_.SemanticModel` retains the native definition, model description and provenance.
+`_.SemanticModelTable`, `_.SemanticModelMeasure`, `_.SemanticModelRelationship`
+and `_.SemanticModelColumn` expose typed child metadata. Models, tables, measures
+and columns include native descriptions. `SemanticModelTable.Source binding`
+retains source metadata. Join its item identity and Table name to Dependency
+item identity and Referencing object name. Each semantic
 table publishes its exact producer in `_.Dependency`; two consuming tables keep
 separate rows even when they share a producer. The installed DAG reads those rows
 and derives the single model-refresh node's upstream edges. Lakehouse SQL endpoint

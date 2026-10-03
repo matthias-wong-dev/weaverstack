@@ -45,8 +45,7 @@ from .tables import (
     RUNTIME_ROLES,
     SCOPE_ITEM_NAME,
     SCOPE_ITEM_TYPE,
-    SEMANTIC_MODEL_DICTIONARY,
-    SEMANTIC_OBJECT_DICTIONARY,
+    SEMANTIC_TABLES,
     TEST_DICTIONARY,
     TEST_STATUS,
     VALIDATION_ROLES,
@@ -617,8 +616,7 @@ INTRODUCED_TABLES = frozenset(
         BOOKMARK.name,
         LOAD_STATUS.name,
         TEST_STATUS.name,
-        SEMANTIC_MODEL_DICTIONARY.name,
-        SEMANTIC_OBJECT_DICTIONARY.name,
+        *(table.name for table in SEMANTIC_TABLES),
     }
 )
 

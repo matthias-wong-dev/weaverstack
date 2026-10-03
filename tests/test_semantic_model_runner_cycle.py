@@ -132,7 +132,7 @@ def test_changed_dictionary_signature_requires_build_before_load(monkeypatch):
     from weaver.errors import LoadError
 
     rows = installed_rows()
-    rows[ITEM]["SemanticModelDictionary"][0]["signature"] = "uncertified-definition"
+    rows[ITEM]["SemanticModel"][0]["signature"] = "uncertified-definition"
     session, client, _ = refresh_session(monkeypatch, COMPLETED)
     with session:
         answer_installed(session, rows)
