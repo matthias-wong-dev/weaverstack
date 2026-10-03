@@ -134,6 +134,32 @@ def test_an_installed_read_does_not_read_the_history():
     assert BOOKMARK.name in connection.read
 
 
+class _Batched(_Connection):
+    """A connection that reads several statements in one round trip."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.round_trips = 0
+
+    def row_sets(self, statements):
+        self.round_trips += 1
+        return [self.rows(statement) for statement in statements]
+
+
+@weaver_test()
+def test_an_installed_read_reads_every_table_in_one_round_trip():
+    """Each table read is a statement in one batch, not a round trip of its own."""
+
+    from weaver.catalogue.state import read_installed_catalogue
+
+    connection = _Batched()
+
+    read_installed_catalogue(connection)
+
+    assert connection.round_trips == 1
+    assert sorted(connection.read) == sorted(table.name for table in READABLE_TABLES)
+
+
 @weaver_test()
 def test_materialised_says_what_was_loaded_and_not_what_exists():
     """Two different questions, and the catalogue answers only one of them.

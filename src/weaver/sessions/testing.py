@@ -264,6 +264,21 @@ class TestSession(Session):
         )
         return self._answer(self._tsql_answers, [statement])
 
+    def query_tsql_sets(
+        self,
+        statements,
+        *,
+        target: Any,
+        workspace: Workspace | None = None,
+    ) -> tuple:
+        """Record one round trip, and answer each statement as it would alone."""
+
+        self._record("tsql", list(statements), workspace, target=target)
+        return tuple(
+            tuple(self._answer(self._tsql_answers, [statement]))
+            for statement in statements
+        )
+
     # --- recording -----------------------------------------------------------
 
     def _record(self, kind: str, body, workspace, **detail) -> None:

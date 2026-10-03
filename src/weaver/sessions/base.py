@@ -504,6 +504,22 @@ class Session(ABC):
     ) -> Any:
         """Run a T-SQL query against a Warehouse and return its rows."""
 
+    def query_tsql_sets(
+        self,
+        statements: Sequence[str],
+        *,
+        target: Any,
+        workspace: Workspace | None = None,
+    ) -> tuple[tuple[Any, ...], ...]:
+        """Run several T-SQL queries in one round trip and return each one's rows."""
+
+        if not statements:
+            return ()
+        executor = self.sql_executor(target, workspace=workspace)
+        return executor.query_result_sets(
+            "\n".join(statement.rstrip().rstrip(";") + ";" for statement in statements)
+        )
+
     # --- asynchronous appends -------------------------------------------------
 
     def flusher(self, table, *, warehouse, workspace: Workspace | None = None):
