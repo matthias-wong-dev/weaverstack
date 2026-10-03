@@ -56,7 +56,7 @@ Session         ConsoleSession   desktop → Fabric
 initialise      resolve request → read the workspace's items → create the
                 missing ones → write the project → optionally publish the Environment
 
-build           resolve request → read BuildState → Builder → Installer
+build           resolve request → read BuildState → Builder → MutationExecutor
 load / test     resolve request → read RunState   → Runner
 health          resolve request → read Catalogue  → HealthReport
 doctor          authenticate → list workspaces → discover items → probe OneLake, TDS and Spark
@@ -169,8 +169,11 @@ Definition updates and refresh submissions disable HTTP-response retries.
 Refresh waits for its request ID to reach terminal completion through the
 canonical Power BI endpoint.
 
-Semantic models share the ordinary repository, graph, Build bundle, Installer
-and catalogue owners. `SemanticModel/Name` is the model-root document identity;
+Semantic models share the ordinary repository, graph, format-5 MutationPlan,
+MutationExecutor and catalogue owners. The shared codec validates their targets
+and payloads. `Session.execute_mutation` binds `Session.semantic_model` through
+MutationBindings and the physical drivers. A semantic-only Build starts no Spark.
+`SemanticModel/Name` is the model-root document identity;
 its native TMSL dictionary remains authoritative. Store source bytes and
 property provenance beside it. Compile the PBIP base, `SemanticModel/addon.yml`, item addon
 and `.dax` through `semantic_models.compiler`; preserve authored partitions.
@@ -178,10 +181,13 @@ Unsupported directives and TMDL statements must fail at their source location.
 
 `initialise` alone creates semantic items. Build binds the existing typed item
 and freezes its workspace/item IDs in the bundle. The update action disables
-purging. A catalogue-stage executor reads the effective definition, checks the
-requested properties and inferred calculated columns, then publishes the two
-semantic dictionaries. Registry publication remains the final Build barrier.
-A failed update or readback leaves the model uncertified. Planning resolves the
+purging. Declared success edges require deployment before effective-definition
+readback and both semantic dictionaries before Registry publication. The readback
+checks requested properties and inferred calculated columns. Publication also
+requires the shared physical completion gate. Failed or uncertain deployment
+and failed readback cannot certify a model; independent physical branches continue.
+Catalogue identity upgrades precede preparation and publication through the same
+dependency planner. Planning resolves the
 item without fetching its existing definition. There is no live partition
 comparison or retention step. Semantic DAX Tests and full semantic Health remain
 later feature work.
@@ -190,7 +196,9 @@ Table `.source` names an existing logical Warehouse or Lakehouse Table/View.
 Session reads its typed physical identity, SQL endpoint and any missing column
 shape before Build planning. Selected sources can supply a declared schema;
 missing inferred shape requires explicit semantic columns or a prior source
-Build. New tables use Direct Lake on SQL. Authored SQL-navigation M partitions
+Build. Semantic deployment requires successful selected source Table/View actions
+and, for Lakehouse sources, the existing SQL endpoint refresh completion. New
+tables use Direct Lake on SQL. Authored SQL-navigation M partitions
 and Direct Lake entity partitions retain their storage mode and other properties
 when rebound. Unsupported M transformations fail with a source diagnostic.
 Microsoft's [Direct Lake limits](https://learn.microsoft.com/en-us/fabric/fundamentals/direct-lake-overview#considerations-and-limitations)
@@ -246,7 +254,7 @@ It is one product in two positions, because the doers do not know which one they
 are in.
 
 There is one `build`, one `load` and one `test`. Every build action runs in the
-`Installer` wherever that is, and the state a build plans against is read the same
+mutation executor wherever that is, and the state a build plans against is read the same
 way: the catalogue over TDS, a Lakehouse's views over Spark SQL, a Lakehouse's
 objects from storage, a Warehouse over TDS. A desktop `weaver build` therefore
 needs no published wheel, because its Spark SQL and TableBuilder submissions
@@ -302,50 +310,172 @@ suite deleted files through the store directly and looked like it was testing
 
 ## Archived Lakehouse installation
 
-`Installer` offers a revalidated frozen bundle to `Session.install_bundle`.
-The concrete default returns `None` before installation and retains the local
-Installer loop. Custom executor registries retain that loop.
+Build emits a format-5 `MutationPlan` and optional payload bytes. Build selection,
+omissions, repository identity, runtime state and target changes are metadata in
+the plan's frozen Build envelope. The directory codec rejects older bundles with
+regeneration guidance. `BuildBundle` stores an artifact; execution consumes its
+plan and payload bytes through `Session.execute_mutation`.
 
-`ConsoleSession` carries eligible Lakehouse bundles into its existing Livy
-session. Eligibility requires the bundle's frozen Spark attachment, built-in
-executors, and Lakehouse destinations with the central catalogue Warehouse.
-Mixed installations offer contiguous Lakehouse batches from each sequence to
-`Session.install_batches`. Warehouse batches retain their existing execution
-path. Batch order and sequence barriers remain fixed, and every segment shares
-the installation's Registry timestamp. A borrowed `LivySession` uses the same
-archive path; custom sessions, stores, resolvers and Livy implementations retain
-their supplied capabilities.
+The Session owns execution routing. `ConsoleSession` executes a plan with no
+frozen Spark attachment through the shared native executor, reaching TDS,
+OneLake and REST from the desktop, so it starts no Spark session. A plan that
+attaches Spark uses `execute_mutation_remote(plan, payloads=None)`, which submits
+the whole plan once to Fabric. Native and remote execution both use
+`MutationExecutor` and the existing physical executors.
 
-The carrier checks the stored manifest against the validated in-memory plan
-before acquiring the installation scope. It carries those checked bytes,
-referenced payload bytes and the
-caller's Python runtime sources and static SQL, YAML and JSON resources. The
-batch-selection request is a hashed carrier member; the frozen manifest and
-payloads remain unchanged. The remote installer validates the full bundle before
-executing the selected contiguous Lakehouse batches.
-The carrier and every member have a SHA-256 identity. Extraction validates the full
-inventory, paths, file kinds and content before creating the private tree. The
-expanded-size bound is 128 MiB; larger bundles retain the local Installer loop.
-The remote program imports the extracted runtime in an isolated namespace and
-restores previously loaded Weaver modules and import paths after installation.
+The internal carrier contains the canonical plan, optional payloads and matching
+Weaver runtime sources and static resources. It validates all payload hashes
+before staging. The carrier and every member have SHA-256 identities. Extraction
+validates inventory, paths, file kinds and content before creating the private
+tree. The expanded-size bound is 128 MiB; an oversized carrier is refused before
+submission. The generated bootstrap imports the extracted runtime under a
+process-shared namespace lock, drains execution, and restores borrowed modules
+and import paths.
 
-Runtime dependencies are checked before installation. Missing dependencies or a
-Delta writer version mismatch produce an explicit pre-mutation decline. The
-archive path retains the versioned direct-Delta writer and the caller's worker
-bound, supported Spark Views, dependency barriers, catalogue settlement and
-load-artefact installation. Build does not execute loads or validations.
+The carrier is staged in the plan's Spark-home Lakehouse, under
+`Files/_weaver_carriers/<invocation-id>/`, so a Lakehouse plan needs no other
+item. That area is transport, not a plan target: it is outside plan identity and
+physical scopes, and prune does not inventory it. The bootstrap copies the
+carrier into private storage before any action runs. Every invocation removes its
+directory when it returns, whatever the outcome, and removes the area once no
+other carrier is in it.
 
-One mutation submission has retries disabled and an allowance equal to the
-planned action count times the per-action statement timeout. Complete sequence
-prefixes are journalled to the private OneLake result file. The final Livy result
-is a byte count and hash for that file. The desktop validates ordered action
-identities, outcomes and clocks and persists the normal installation report.
-An unavailable outcome retains validated prefixes and fails every unacknowledged
-action with an uncertainty marker. Completed and declined carriers are removed.
-Cleanup failures preserve the verified installation outcome, retain the carrier
-and result location, and are recorded separately in `archive_cleanup_failures`
-and surfaced as Session warnings. Uncertain carriers and journals remain at
-their report's recorded location.
+Runtime dependencies and the pinned Delta writer are checked before mutation.
+The archive retains direct-Delta creation, supported Views, catalogue settlement
+and load-artifact installation. Build does not run loads or validations.
+One Livy mutation submission has retries disabled and an allowance equal to the
+action count times the statement timeout. Its final result is a byte count and
+hash for the complete invocation report stored in OneLake. The desktop validates
+the result identity and full action inventory before producing the Build report.
+
+An ambiguous submission or lost result marks the invocation uncertain, and it is
+never replayed. The next ordinary Build reads the actual catalogue and physical
+inventory and converges. A carrier cleanup failure is recorded on the invocation
+and does not change its report.
+
+## Physical mutation contract
+
+Every format-5 action supplies `depends_on` and `settle_after`, including empty
+lists for roots. Sequence and batch nesting collect the actions; sequences also
+provide presentation grouping. The planner freezes both edge sets, and execution
+uses those links.
+
+`depends_on` requires successful predecessors. `settle_after` imposes order after
+a known terminal outcome, including failure or dependency blocking. Pending and
+uncertain outcomes do not settle an ordering edge, and unsuccessful actions
+provide no success evidence. Typed results, certification and required completion
+follow success paths. The union of both edge sets must be acyclic.
+
+Build stages and item layers order presentation only. Each planner declares,
+per action, the keys it provides and the keys it `requires` or `follows`
+(`weaver.build_bundle.dependencies`), and `enumerate_stages` compiles them into
+`depends_on` and `settle_after`. A key nothing in the plan provides is already
+satisfied by the target and adds no edge. The edges are the real physical
+dependencies:
+
+```text
+decertify → reset runtime state → every physical root
+schema ─→ table ─→ dependent view          drop consumer ─→ drop producer ─→ rebuild
+shortcut create ─→ readiness ─→ consumer   source object ─→ shortcut create
+Lakehouse mutations ··→ refresh start ─→ refresh await ─→ endpoint readers
+folder ─→ runtime file                     object ─→ Warehouse procedure
+every physical success sink ─→ physical gate ─→ catalogue publication ─→ Registry
+```
+
+`··→` is `settle_after`: a refresh reflects whatever the mutations left.
+Publication certifies objects, not endpoint metadata, so the physical gate
+excludes refreshes and publication runs beside them. The Build completes only
+once every refresh it started is current, so the next operation reads a current
+endpoint. A known
+failure blocks only its dependents; independent branches continue, and
+publication, which needs every physical success, does not run. The final gate
+over every success sink is the required completion.
+
+Platform limits are resources, not edges. An action names the capability it
+occupies: `warehouse:<item>` for TDS, `spark` for Spark SQL and table creation,
+`onelake:<item>` for storage, `shortcuts:<item>` for the shortcut API. The
+Workspace's `execution.build` sets each capability's limit
+(`warehouse_concurrency` per Warehouse, `spark_concurrency`,
+`onelake_concurrency`, `shortcut_concurrency`) for Build, Wipe and Mirror, and
+`weaver.sessions.archive_runtime.execution_capacity` applies it. The defaults
+suit a mid-sized capacity; an F64 sustains twice as much. The limits travel
+with an invocation, outside plan identity. They throttle execution only; an
+ordering the plan needs is an edge, never a low limit. Each Warehouse lane
+leases its own pooled connection, and four concurrent DDL lanes ran without
+conflict in Fabric. Ready T-SQL actions on one Warehouse share a round trip,
+each in its own `TRY`/`CATCH` with its own outcome; Fabric refuses
+`SET XACT_ABORT`. Waiting work holds no resource.
+`spark_table` actions with authored setup share an exclusion, because their
+temporary views are session-scoped. The identifier-case scope is shared by
+concurrent statements in one mode and exclusive between modes.
+
+Slow Fabric convergence yields. Shortcut creation submits once and returns
+`Waiting` while a source is still reaching OneLake; readiness and name release
+are polled the same way, and the SQL endpoint refresh is a typed start/await
+operation. A waiting state is plain data, because the invocation ledger records
+it. `execute_install_action`, which runs one action alone, resumes it in place.
+
+A `MutationPlan` owns tuples and recursively frozen envelope mappings. Construction
+and decoding use the same structural validation and `weaver.graph.Graph`.
+Both edge sets, typed result references, required completion, resource exclusions,
+write scopes and protected scopes participate in canonical identity. Edge order
+is canonical. A nonempty `bundle_id` must match the plan's computed identity at
+shared validation. Empty identity is allowed for drafting; bundle validation
+requires a sealed identity, and the writer seals drafts before writing. The codec
+retains `plan.yml`, `payload/`, binary bytes, SHA-256 checks and manifest-last writes.
+
+`DriverContract` declares an extension's payload and result types and whether it
+starts or settles an asynchronous operation. Validation requires causal typed
+references and successful settlement before declared certification and required
+completion. `PhysicalScope.path` is canonical target-relative intent. Shared
+validation rejects whitespace padding in any path component, unsafe relative paths
+and padded physical item/workspace IDs before scope comparisons; execution does
+not repair them.
+The empty scope path covers the whole target. `PhysicalScope` comparisons use item
+kind, item ID and effective workspace ID across manifest aliases. A target's
+explicit workspace ID takes
+precedence; a target with no workspace descriptor uses the execution workspace ID.
+Workspace display names provide no physical identity. When either workspace is
+unresolved, equal kind/item IDs are potentially overlapping. Destructive writes
+must respect protected scopes, and overlapping writers need enforced ordering or
+a common exclusion. Different known workspace IDs, item IDs, kinds or disjoint
+paths retain distinct scopes.
+
+The internal `MutationExecutor` validates sealed plans and all payload bytes before
+physical driver preflight and admission. `execute` accepts a `MutationPlan` and
+explicit payload bytes. Build
+callers load the plan and payloads from their bundle before execution. Wipe and
+Mirror callers supply their planner's plan. Persistence and transport stay with
+the caller. The transitional `physical_driver` binds the existing Build executors.
+The scheduler uses the frozen edge sets through stable ready counts and
+bounded runtime lanes. Pending continuations release workers and execution
+permits. Each action owns its declared exclusions through Pending and releases
+them on known completion. Operation leases remain attached to acknowledged
+starters until settlement. Settlers can access their operation's leases while
+their own exclusions serialize shared writers. Uncertainty retains the affected
+leases. Typed runtime drivers match the frozen
+contracts. Bound physical adapters call the existing executors through supplied
+contexts and capability requirements; a shared connection, Session or inner pool
+that no per-action resource owns takes one driver lane.
+
+Reports retain action-keyed success, known failure, dependency blocking,
+not-dispatched and uncertain outcomes in frozen action order. A refused request
+is a known failure. A lost response after a request may have been sent raises
+`weaver.errors.OutcomeUnknown`, and its action is uncertain: the mutation may
+have been applied, so it settles nothing, and the next Build reconciles it. Independent work
+continues by default; fail-fast and cancellation stop new admissions and drain
+running work. Idle waits observe cancellation through event interruption on the
+default clock or bounded sleeps on supplied clocks. Blocking driver calls must
+drain through their own contracts. Supported cancellation requires a
+driver-confirmed outcome. A valid known failure retains its error and settlement
+evidence after deadline expiry; late success cannot certify completion.
+The report's ledger is in-memory evidence for one invocation. Runtime clocks, handles and invocation IDs remain outside
+plan identity. Catalogue-free physical plans bind a Workspace without a catalogue.
+
+Real Fabric qualification covers desktop plan execution, binary payload delivery,
+physical actions and failures, lost-response uncertainty without replay, and
+ordinary Build convergence. Local executor and bootstrap tests establish their
+own boundaries, not Fabric readiness. Load and Test scheduling is unchanged.
 
 ## Architecture invariants
 
@@ -448,7 +578,12 @@ Weaver's own dependency resolver   EnvironmentPackageConflict
 SUPPORTED_FABRIC_RUNTIMES          per-runtime wheel ABI selection
 initialise --no-input              a wipe dry run as its own preflight
 a per-command interaction check    workspace-config as the wiped estate
-weaver.test(strict=True)
+weaver.test(strict=True)           format-4 bundles / compile_legacy_build
+the public Installer               partial-batch archive routing
+DurableJournal / MutationJournal   checkpoint recovery and receipts
+ArchiveStaging / select_staging    a separate carrier Lakehouse
+procedural Wipe and Mirror runs    create_onelake_shortcuts / await_addressable
+per-batch settlement chains        the native-session lane
 ```
 
 The `provision` scope went when the suite moved to fixed items. Standing the
@@ -460,9 +595,22 @@ Interaction is one CLI-wide policy. `--non-interactive` is the only spelling,
 confirmation is read, and `--yes` grants authorisation and nothing else.
 
 A wipe plans before it acts. `plan_wipe` settles the estate and the catalogue
-disposition, `wipe` empties the plan it is given, and the physical mechanics in
-`physical_wipe` know nothing about authorisation or estate discovery. The estate
-an unscoped wipe empties is what `_.Installation` records.
+disposition, `wipe_mutation_plan` freezes each target's destructive scope into a
+MutationPlan, and `wipe` executes it through the Session. The physical mechanics
+in `physical_wipe` know nothing about authorisation or estate discovery; they
+enumerate inside the frozen scope when an action runs. A Warehouse is one
+dynamic-SQL action. A Lakehouse area detaches its shortcuts, waits for OneLake to
+release their paths, and is swept only after a successful detach. Targets are
+independent; a removed catalogue or an unbind follows them all. The estate an
+unscoped wipe empties is what `_.Installation` records.
+
+A mirror plans before it acts too. `check_mirror` proves the source and refuses
+unsafe destinations, then `mirror_mutation_plan` reads what the mirror needs,
+source code definitions, case-exact source paths and the deployed load tree,
+and compiles one plan: the destination catalogue is emptied, built against its
+known-empty state and forked, while each item's destination is emptied and
+reconstructed. An item is recorded and bound to its mirror last, only after its
+own reconstruction and the fork succeed.
 
 One disposition, one meaning. `REMOVE` takes the catalogue last, `UNBIND` keeps
 it and deletes its claims for the targets emptied and is never handed it as a

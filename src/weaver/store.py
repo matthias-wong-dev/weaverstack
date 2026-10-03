@@ -13,12 +13,16 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
-from .errors import CommandError, WeaverError
+from .errors import CommandError, OutcomeUnknown, WeaverError
 from .locations import Location
 
 
 class StoreError(WeaverError):
     pass
+
+
+class StoreOutcomeUnknown(StoreError, OutcomeUnknown):
+    """A storage request may have been acted on, and its response was lost."""
 
 
 class StoreNotFoundError(StoreError):
@@ -130,11 +134,15 @@ class FilesystemStore:
         if not path.exists():
             return
         if path.is_dir():
-            if not recursive:
+            if recursive:
+                shutil.rmtree(path)
+                return
+            try:
+                path.rmdir()
+            except OSError:
                 raise StoreError(
-                    f"{location.value} is a directory. Pass recursive=True to delete it."
-                )
-            shutil.rmtree(path)
+                    f"{location.value} is not empty. Pass recursive=True to delete it."
+                ) from None
         else:
             path.unlink()
 

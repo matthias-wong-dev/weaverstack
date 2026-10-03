@@ -20,6 +20,7 @@ from factories import (
     target_inventory,
     warehouse_table,
 )
+from support.bundles import build_metadata
 from support.weaver_test import weaver_test
 from support.workspaces import WORKSPACE
 
@@ -250,4 +251,4 @@ def test_shared_names_change_all_three_physical_forms_and_reach_a_fixed_point(
     )
 
     assert _actions(third) == []
-    assert third.plan.target_changes == {}
+    assert build_metadata(third.plan).target_changes == {}

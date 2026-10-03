@@ -12,45 +12,20 @@ The descriptor references them by manifest id rather than repeating them.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import Any, Mapping
 
 from ..errors import BuildError
+from ..mutation.execution import BundleEnvironment
+from ..mutation.execution import MutationExecution as BundleExecution
 from .targets import LAKEHOUSE_TARGET, WAREHOUSE_TARGET
 
 #: Executors whose actions cannot run without a Spark session.
 SPARK_EXECUTORS = frozenset({"spark_sql", "spark_sql_batch", "spark_table"})
+#: Table shortcut readiness asks Spark whether a relation reads.
+SPARK_KINDS = frozenset({"await_table_shortcuts"})
 
 
-@dataclass(frozen=True)
-class BundleEnvironment:
-    """The Fabric Environment a bundle's remote programs are published to.
-
-    ``workspace`` preserves a qualified ``Workspace/Environment`` reference;
-    ``None`` means the workload workspace owns it.
-    """
-
-    name: str
-    workspace: str | None = None
-    item_id: str | None = None
-
-    @property
-    def reference(self) -> str:
-        return f"{self.workspace}/{self.name}" if self.workspace else self.name
-
-    def to_mapping(self) -> dict[str, Any]:
-        return {
-            "name": self.name,
-            "workspace": self.workspace,
-            "item_id": self.item_id,
-        }
-
-    @classmethod
-    def from_mapping(cls, mapping: Mapping[str, Any]) -> "BundleEnvironment":
-        return cls(
-            name=mapping["name"],
-            workspace=mapping.get("workspace"),
-            item_id=mapping.get("item_id"),
-        )
+def needs_spark(action) -> bool:
+    return action.executor in SPARK_EXECUTORS or action.kind in SPARK_KINDS
 
 
 @dataclass(frozen=True)
@@ -65,65 +40,6 @@ class ExecutionIdentity:
     workspace_name: str
     workspace_id: str | None = None
     environment: BundleEnvironment | None = None
-
-
-@dataclass(frozen=True)
-class BundleExecution:
-    """Where a frozen bundle installs, and what it needs to get there.
-
-    ``catalogue_target_id`` and ``spark_home_target_id`` name targets in the same
-    manifest, so the catalogue and the Spark attachment cannot drift from the
-    destinations the plan was generated against. ``spark_home_target_id`` is
-    ``None`` when no planned action needs Spark.
-    """
-
-    workspace_name: str
-    catalogue_target_id: str
-    workspace_id: str | None = None
-    environment: BundleEnvironment | None = None
-    spark_home_target_id: str | None = None
-
-    def to_mapping(self) -> dict[str, Any]:
-        return {
-            "workspace_name": self.workspace_name,
-            "workspace_id": self.workspace_id,
-            "catalogue_target_id": self.catalogue_target_id,
-            "environment": (
-                None if self.environment is None else self.environment.to_mapping()
-            ),
-            "spark_home_target_id": self.spark_home_target_id,
-        }
-
-    @classmethod
-    def of(
-        cls,
-        identity: ExecutionIdentity,
-        *,
-        catalogue_target_id: str,
-        spark_home_target_id: str | None,
-    ) -> "BundleExecution":
-        return cls(
-            workspace_name=identity.workspace_name,
-            catalogue_target_id=catalogue_target_id,
-            workspace_id=identity.workspace_id,
-            environment=identity.environment,
-            spark_home_target_id=spark_home_target_id,
-        )
-
-    @classmethod
-    def from_mapping(cls, mapping: Mapping[str, Any]) -> "BundleExecution":
-        environment = mapping.get("environment")
-        return cls(
-            workspace_name=mapping["workspace_name"],
-            catalogue_target_id=mapping["catalogue_target_id"],
-            workspace_id=mapping.get("workspace_id"),
-            environment=(
-                None
-                if environment is None
-                else BundleEnvironment.from_mapping(environment)
-            ),
-            spark_home_target_id=mapping.get("spark_home_target_id"),
-        )
 
 
 def resolve_execution_identity(workspace, *, session) -> ExecutionIdentity:
@@ -180,10 +96,7 @@ def _environment_id(reference, workspace, *, session) -> str | None:
 def plan_needs_spark(plan) -> bool:
     """Whether any planned action has to run through a Spark session."""
 
-    return any(
-        action.executor in SPARK_EXECUTORS
-        for _sequence, _batch, action in plan.actions()
-    )
+    return any(needs_spark(action) for _sequence, _batch, action in plan.actions())
 
 
 def spark_home_of(targets):
@@ -288,13 +201,19 @@ def execution_workspace(execution: BundleExecution, plan):
 
     from ..workspaces import Workspace
 
-    catalogue = next(
-        target for target in plan.targets if target.id == execution.catalogue_target_id
+    catalogue = (
+        None
+        if execution.catalogue_target_id is None
+        else next(
+            target
+            for target in plan.targets
+            if target.id == execution.catalogue_target_id
+        )
     )
     environment = execution.environment
     return Workspace(
         workspace=execution.workspace_name,
-        catalogue=f"Warehouse/{catalogue.name}",
+        catalogue=None if catalogue is None else f"Warehouse/{catalogue.name}",
         environment=None if environment is None else environment.reference,
     )
 
@@ -319,6 +238,7 @@ __all__ = [
     "resolve_execution_identity",
     "execution_spark_home",
     "execution_workspace",
+    "needs_spark",
     "plan_needs_spark",
     "select_spark_home",
     "spark_home_of",

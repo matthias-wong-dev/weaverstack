@@ -92,6 +92,36 @@ class SparkCatalogue:
 
         return self._named(f"SHOW VIEWS IN {self.qualified_schema(schema)}", "viewName")
 
+    def views_among(self, schema: str, names) -> tuple[str, ...]:
+        """Which of ``names`` are persistent views, resolving only those names."""
+
+        names = sorted(set(names), key=str.casefold)
+        if any(set(name) & set("*|'`") for name in names):
+            # A name the pattern cannot spell is answered by the full listing.
+            wanted = {name.casefold() for name in names}
+            return tuple(v for v in self.views(schema) if v.casefold() in wanted)
+        found = []
+        for start in range(0, len(names), VIEWS_PER_PATTERN):
+            pattern = "|".join(names[start : start + VIEWS_PER_PATTERN])
+            found.extend(
+                self._named(
+                    f"SHOW VIEWS IN {self.qualified_schema(schema)} LIKE '{pattern}'",
+                    "viewName",
+                )
+            )
+        return tuple(found)
+
+    def relations(self, schema: str) -> tuple[str, ...]:
+        """Every persistent table and view name in one schema, in one listing.
+
+        ``SHOW VIEWS`` resolves each view and took 30s over 234 of them, where
+        ``SHOW TABLES`` names all 781 relations in 4s.
+        """
+
+        return self._named(
+            f"SHOW TABLES IN {self.qualified_schema(schema)}", "tableName"
+        )
+
     def tables(self, schema: str) -> tuple[str, ...]:
         """Table names in one schema of this destination.
 
@@ -144,6 +174,9 @@ def _session_runner(spark: Any):
 
     return run
 
+
+#: Names resolved by one ``SHOW VIEWS ... LIKE`` pattern.
+VIEWS_PER_PATTERN = 100
 
 #: Spark reports a missing Lakehouse as a missing schema.
 _ABSENT = frozenset({"SCHEMA_NOT_FOUND", "TABLE_OR_VIEW_NOT_FOUND"})

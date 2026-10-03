@@ -109,60 +109,195 @@ class ArchiveSession(NotebookSession):
         )
 
 
-def run_bundle(root, spark, output, archive_sha256, *, workers):
-    import json
-    import time
+#: The executor's worker pool. Resource limits, not workers, bound each
+#: capability, so the pool is generous.
+WORKERS = 32
+#: Ready T-SQL actions on one Warehouse sent in one round trip.
+TSQL_ROUND_TRIP = 25
+
+
+def execution_capacity(plan, workspace=None) -> tuple[int, dict[str, int]]:
+    """The executor's workers and each resource's limit for this deployment.
+
+    The Workspace's ``execution.build`` sets how many actions may occupy each
+    capability at once. Capacity changes how much runs at once, never what the
+    plan orders.
+    """
+
+    from ..build_bundle.stages import SPARK
+    from ..workspaces import BuildConcurrency
+
+    build = BuildConcurrency() if workspace is None else workspace.execution.build
+    lanes = {
+        "warehouse": build.warehouse_concurrency,
+        SPARK: build.spark_concurrency,
+        "onelake": build.onelake_concurrency,
+        "shortcuts": build.shortcut_concurrency,
+    }
+    limits = {
+        key: lanes.get(key.partition(":")[0], 1)
+        for _, _, action in plan.actions()
+        for key in action.resources
+    }
+    return WORKERS, limits
+
+
+def execute_mutation(
+    plan,
+    payloads,
+    session,
+    *,
+    workers=None,
+    limits=None,
+    invocation_id=None,
+    timeout=600,
+    build_datetime=None,
+    executors=None,
+):
+    """Bind physical capabilities and execute one complete MutationPlan.
+
+    Resource limits, not ``workers``, bound concurrency on each capability.
+    Unless given, both come from the Session's Workspace.
+    """
     from dataclasses import replace
-    from importlib import import_module
 
-    from ..build_bundle import Installer, load_bundle
-    from ..build_bundle.bundle import validate_bundle
-    from ..build_bundle.execution import execution_workspace
-    from ..build_bundle.installer import select_install_batches
-    from ..locations import Location
-    from ..store import FilesystemStore
+    from ..build_bundle.executors import default_executors
+    from ..build_bundle.executors.base import InstallationContext
+    from ..build_bundle.executors.sql_endpoint_refresh import endpoint_refresh_drivers
+    from ..build_bundle.executors.tsql import TSqlBatchExecutor, TSqlExecutor
+    from ..build_bundle.executors.tsql_round_trip import round_trip_driver
+    from ..build_bundle.installer import MutationBindings
+    from ..errors import BuildError, WeaverError
+    from ..mutation.executor import (
+        MutationExecutor,
+        physical_driver,
+        validate_inputs,
+    )
 
-    bundle = load_bundle(Location(str(root / "bundle")), store=FilesystemStore())
-    request_path = root / "request.json"
-    request = json.loads(request_path.read_text()) if request_path.exists() else None
-    build_datetime = None
-    if request is not None:
-        validate_bundle(bundle.location, bundle.plan, store=bundle.store)
-        selected = select_install_batches(
-            bundle.plan,
-            sequence_number=request["sequence_number"],
-            batch_ids=request["batch_ids"],
+    payloads = validate_inputs(plan, payloads)
+    capacity, configured = execution_capacity(plan, session.workspace)
+    workers = capacity if workers is None else workers
+    limits = configured if limits is None else limits
+    if build_datetime is None:
+        from datetime import datetime, timezone
+
+        build_datetime = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")
+    executors = default_executors() if executors is None else executors
+    contracts = {contract.executor for contract in plan.driver_contracts}
+    if any(
+        a.executor not in executors
+        and a.executor not in contracts
+        and a.executor != "completion_gate"
+        for _, _, a in plan.actions()
+    ):
+        raise BuildError("mutation execution requires supported physical drivers")
+    bindings = MutationBindings(session)
+    bindings._bind(plan)
+    resolved = {t.id: bindings.resolve_target(t) for t in plan.targets}
+    contexts = {
+        key: InstallationContext(
+            resolver=bindings.resolver,
+            store=bindings.store,
+            target=target,
+            sql=bindings.sql_for(target.bound),
+            semantic_model=bindings.semantic_model,
+            spark_sql=bindings.spark_sql(),
+            spark_sql_batch=bindings.spark_sql_batch(),
+            create_delta_table=bindings.delta_table_creator(),
+            create_direct_delta_table=bindings.direct_delta_table_creator(),
+            targets=resolved,
+            build_datetime=build_datetime,
         )
-        build_datetime = request["build_datetime"]
-        bundle = replace(bundle, plan=selected)
-    workspace = execution_workspace(bundle.plan.execution, bundle.plan)
-    fs = import_module("notebookutils").fs
+        for key, target in resolved.items()
+    }
 
-    def journal(report):
-        result = {
-            "status": "running",
-            "archive_sha256": archive_sha256,
-            "request": request,
-            "report": report.to_mapping(),
+    drivers = {}
+    for name, executor in executors.items():
+        driver = physical_driver(
+            executor, contexts, required_capabilities=("resolver", "store")
+        )
+
+        def run(request, physical=driver.run):
+            try:
+                return physical(request)
+            except (WeaverError, ValueError) as error:
+                return error_outcome(error)
+
+        drivers[name] = replace(driver, run=run)
+        if type(executor) in (TSqlExecutor, TSqlBatchExecutor) and TSQL_ROUND_TRIP > 1:
+            drivers[name] = replace(
+                drivers[name],
+                batch=round_trip_driver(contexts, details=_tsql_details),
+                batch_size=TSQL_ROUND_TRIP,
+            )
+    drivers.update(endpoint_refresh_drivers(contexts, outcome=error_outcome))
+    return MutationExecutor(
+        drivers, workers=workers, limits=limits, timeout=timeout
+    ).execute(plan, payloads, invocation_id=invocation_id)
+
+
+def error_outcome(error):
+    """A refused request is a known failure; a lost response leaves it uncertain.
+
+    An uncertain mutation may have been applied, so it settles no ordering edge.
+    """
+
+    from ..errors import OutcomeUnknown
+    from ..mutation.executor import Failed, Uncertain
+
+    reported = f"{type(error).__name__}: {error}"
+    return (
+        Uncertain(reported) if isinstance(error, OutcomeUnknown) else Failed(reported)
+    )
+
+
+def _tsql_details(action, payload):
+    if action.executor == "tsql":
+        script = payload.decode("utf-8")
+        return {
+            "statement_first_line": script.splitlines()[0] if script.strip() else ""
         }
-        fs.put(output, json.dumps(result, separators=(",", ":"), allow_nan=False), True)
+    import json
 
-    started = time.monotonic()
+    return {"statements": len(json.loads(payload.decode("utf-8")))}
+
+
+def run_mutation(root, spark, output, archive_sha256, *, workers):
+    from ..build_bundle.execution import execution_workspace
+    from ..locations import Location
+    from ..mutation.bundle import load_bundle
+    from ..store import FilesystemStore
+    from .mutation_report import encode_report, loads
+
+    request = loads((root / "request.json").read_bytes())
+    bundle = load_bundle(Location(str(root / "bundle")), store=FilesystemStore())
+    plan = bundle.plan
+    if request["plan_id"] != plan.bundle_id:
+        raise ValueError("mutation request plan differs")
+    payloads = {
+        a.payload: bundle.store.read(bundle.location.join(*a.payload.split("/")))
+        for _, _, a in plan.actions()
+        if a.payload is not None
+    }
+    workspace = execution_workspace(plan.execution, plan)
     with ArchiveSession(
         workspace=workspace, spark=spark, direct_delta_workers=workers
     ) as session:
-        with session.task("Install", bundle.bundle_id):
-            report = Installer(session).install(
-                bundle, on_sequence=journal, build_datetime=build_datetime
-            )
-        profiles = list(getattr(session, "created_profiles", ()))
-        events = [event.to_mapping() for event in session.telemetry.events()]
+        report = execute_mutation(
+            plan,
+            payloads,
+            session,
+            invocation_id=request["invocation_id"],
+            timeout=request["timeout"],
+            workers=request["workers"],
+            limits=request["limits"],
+            build_datetime=request["build_datetime"],
+        )
     return {
         "status": "completed",
-        "request": request,
         "archive_sha256": archive_sha256,
-        "report": report.to_mapping(),
-        "install_seconds": time.monotonic() - started,
-        "direct_delta_tables": profiles,
-        "events": events,
+        "request": request,
+        "plan_id": plan.bundle_id,
+        "invocation_id": request["invocation_id"],
+        "report": encode_report(report),
     }

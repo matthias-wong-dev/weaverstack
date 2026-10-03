@@ -361,19 +361,25 @@ def test_an_unknown_disposition_names_the_ones_there_are():
 
 
 @weaver_test()
-def test_mirror_asks_for_the_physical_only_disposition():
-    """Read off the wiring, so the estate semantics cannot reach mirror."""
+def test_mirror_empties_physical_targets_without_estate_semantics():
+    """Read off the wiring, so estate discovery and claims cannot reach mirror."""
 
     import inspect
     import sys
 
+    import weaver.mirror_plan  # noqa: F401 - imported for sys.modules
     import weaver.operations.mirror  # noqa: F401 - imported for sys.modules
 
-    source = inspect.getsource(sys.modules["weaver.operations.mirror"])
-
-    assert source.count("catalogue_action=PHYSICAL_ONLY") == 2
-    assert "catalogue_action=UNBIND" not in source
-    assert "plan_wipe" not in source
+    for module in ("weaver.mirror_plan", "weaver.operations.mirror"):
+        source = inspect.getsource(sys.modules[module])
+        assert "plan_wipe" not in source
+        assert "UNBIND" not in source
+    assert (
+        inspect.getsource(sys.modules["weaver.mirror_plan"]).count(
+            "target_wipe_actions("
+        )
+        == 2
+    )
 
 
 # --- estate discovery ---------------------------------------------------------
@@ -458,24 +464,65 @@ def test_a_wipe_with_no_targets_and_no_catalogue_says_what_it_needs():
 
 
 def _emptied(monkeypatch, removed=("Sales",), area="delta"):
-    """Record which targets a wipe reached, touching no physical item."""
+    """Record which targets a wipe's plan reached, touching no physical item.
 
-    operations = _operations()
+    ``removed`` is what each Lakehouse area sweep reports, split into the
+    shortcuts its detach removed and the entries its sweep deleted.
+    """
+
+    from weaver.mutation.executor import MutationReport, MutationResult
+
     reached = []
+    shortcuts = [name for name in removed if name.startswith("shortcut:")]
+    entries = [name for name in removed if not name.startswith("shortcut:")]
 
-    def one(target, *_args, **kwargs):
-        reached.append(str(target))
+    def execute(session, plan, payloads=None, **options):
+        names = {
+            target.id: f"{target.kind.title()}/{target.item_name}"
+            for target in plan.targets
+        }
+        results = []
+        for _s, batch, action in plan.actions():
+            name = names[batch.target_id]
+            if name not in reached and action.kind != "unbind_catalogue_claims":
+                reached.append(name)
+            files = action.kind.endswith("files") or "file_shortcuts" in action.kind
+            mine = (area == "folder") == files
+            value = {}
+            if action.kind.startswith("detach"):
+                value = {"removed": shortcuts if mine else []}
+            elif action.kind.startswith("clear"):
+                value = {
+                    "location": f"/tmp/local/{name}",
+                    "removed": entries if mine else [],
+                }
+            results.append(MutationResult(action.id, "succeeded", value))
+        return MutationReport(plan.bundle_id, tuple(results))
+
+    def enumerate_lakehouse(item, workspace, *, dry_run, **_options):
+        assert dry_run, "a wipe enumerated rather than executed its plan"
+        reached.append(f"Lakehouse/{item.name}")
         return (
-            WipeReport(
-                f"{area}:{target}",
-                Location(f"/tmp/local/{target.physical_name}"),
-                removed,
-                kwargs["dry_run"],
-            ),
+            WipeReport(f"{area}:{item}", Location(f"/tmp/local/{item}"), removed, True),
         )
 
-    monkeypatch.setattr(operations, "_wipe_one", one)
-    return operations, reached
+    import weaver.physical_wipe as mechanics
+
+    monkeypatch.setattr(TestSession, "execute_mutation", execute)
+    monkeypatch.setattr(mechanics, "wipe_lakehouse", enumerate_lakehouse)
+    return _operations(), reached
+
+
+def _unbinding(monkeypatch, asked):
+    from weaver.unbind import UnbindResult
+
+    def plan_unbind(plan, _workspace, **_options):
+        asked.append(plan.unbound)
+        return UnbindResult(
+            targets=plan.unbound, logical_items=(), statements=("delete claims",)
+        )
+
+    monkeypatch.setattr(_operations(), "_plan_unbind", plan_unbind)
 
 
 @weaver_test()
@@ -534,7 +581,7 @@ def test_a_removed_catalogue_unbinds_nothing(monkeypatch):
     operations, _reached = _emptied(monkeypatch)
     monkeypatch.setattr(
         operations,
-        "_unbind_physical_targets",
+        "_plan_unbind",
         lambda *_a, **_k: pytest.fail("claims were deleted from an emptied catalogue"),
     )
 
@@ -545,15 +592,9 @@ def test_a_removed_catalogue_unbinds_nothing(monkeypatch):
 
 @weaver_test()
 def test_unbind_removes_the_claims_for_the_targets_it_emptied(monkeypatch):
-    operations, reached = _emptied(monkeypatch)
+    _operations_module, reached = _emptied(monkeypatch)
     asked = []
-    monkeypatch.setattr(
-        operations,
-        "_unbind_physical_targets",
-        lambda _workspace, targets, **_k: (
-            asked.append(tuple(map(str, targets))) or {"targets": []}
-        ),
-    )
+    _unbinding(monkeypatch, asked)
 
     result = public_wipe(
         plan=_plan("Lakehouse/Landing", unbind=True), session=_session()
@@ -561,7 +602,11 @@ def test_unbind_removes_the_claims_for_the_targets_it_emptied(monkeypatch):
 
     assert reached == ["Lakehouse/Landing"]
     assert asked == [("Lakehouse/Landing",)]
-    assert result.unbound == {"targets": []}
+    assert result.unbound == {
+        "targets": ["Lakehouse/Landing"],
+        "logical_items": [],
+        "statements": 1,
+    }
 
 
 @weaver_test()
@@ -569,8 +614,13 @@ def test_a_dry_run_removes_nothing_and_deletes_no_claim(monkeypatch):
     operations, _reached = _emptied(monkeypatch)
     monkeypatch.setattr(
         operations,
-        "_unbind_physical_targets",
+        "_plan_unbind",
         lambda *_a, **_k: pytest.fail("a dry run deleted claims"),
+    )
+    monkeypatch.setattr(
+        TestSession,
+        "execute_mutation",
+        lambda *_a, **_k: pytest.fail("a dry run executed a wipe"),
     )
 
     result = public_wipe(
@@ -621,19 +671,7 @@ def test_a_file_is_not_counted_as_a_folder(monkeypatch):
 def test_a_warehouse_counts_nothing_rather_than_one_placeholder(monkeypatch):
     """A placeholder name became a count of one for a Warehouse holding many."""
 
-    operations = _operations()
-    monkeypatch.setattr(
-        operations,
-        "_wipe_one",
-        lambda target, *_a, **k: (
-            WipeReport(
-                str(target),
-                Location(f"warehouse://{target.physical_name}"),
-                (),
-                k["dry_run"],
-            ),
-        ),
-    )
+    _emptied(monkeypatch)
 
     result = public_wipe(plan=_plan("Warehouse/Curated"), session=_session())
 
@@ -643,10 +681,8 @@ def test_a_warehouse_counts_nothing_rather_than_one_placeholder(monkeypatch):
 
 @weaver_test()
 def test_a_preserved_catalogue_reports_itself_as_preserved(monkeypatch):
-    operations, _reached = _emptied(monkeypatch)
-    monkeypatch.setattr(
-        operations, "_unbind_physical_targets", lambda *_a, **_k: {"targets": []}
-    )
+    _emptied(monkeypatch)
+    _unbinding(monkeypatch, [])
 
     result = public_wipe(
         plan=_plan("Lakehouse/Landing", unbind=True), session=_session()
@@ -788,9 +824,7 @@ def test_the_items_executed_are_the_items_described(case, monkeypatch):
     """Every target the description lists is emptied, and nothing else is."""
 
     _operations_module, reached = _emptied(monkeypatch)
-    monkeypatch.setattr(
-        _operations(), "_unbind_physical_targets", lambda *_a, **_k: {"targets": []}
-    )
+    _unbinding(monkeypatch, [])
     plan = _for(case)
 
     result = public_wipe(plan=plan, session=_session())

@@ -98,7 +98,6 @@ class ConsoleSession(Session):
             raise ValueError("direct Delta workers must be an integer from 1 to 16")
         self.direct_delta_workers = direct_delta_workers
         self._delta_resolution_lock = threading.Lock()
-        self.archive_cleanup_failures: list[dict[str, Any]] = []
         from ..fabric.auth import checked_credential
 
         # Validate the supplied credential now; acquire its token lazily.
@@ -117,47 +116,17 @@ class ConsoleSession(Session):
 
     # --- progress -----------------------------------------------------------
 
-    def install_bundle(self, bundle, *, workspace=None, timeout=None):
-        return self._install_archive(bundle, workspace=workspace, timeout=timeout)
+    def execute_mutation_remote(self, plan, payloads=None, **options):
+        from .install_archive import execute_mutation_remote
 
-    def install_batches(
-        self,
-        bundle,
-        *,
-        sequence_number,
-        batch_ids,
-        build_datetime,
-        workspace=None,
-        timeout=None,
-    ):
-        request = {
-            "sequence_number": sequence_number,
-            "batch_ids": list(batch_ids),
-            "build_datetime": build_datetime,
-        }
-        return self._install_archive(
-            bundle, workspace=workspace, timeout=timeout, request=request
-        )
+        return execute_mutation_remote(self, plan, payloads, **options)
 
-    def _install_archive(self, bundle, *, workspace=None, timeout=None, request=None):
-        from ..fabric.livy import LivySession
-
-        if (
-            type(self) is not ConsoleSession
-            or any(
-                value is not None for value in (self._given_store, self._given_resolver)
-            )
-            or (
-                self._given_livy is not None
-                and type(self._given_livy) is not LivySession
-            )
-        ):
-            return None
-        from .install_archive import install_in_scope
-
-        return install_in_scope(
-            self, bundle, workspace=workspace, timeout=timeout, request=request
-        )
+    def execute_mutation(self, plan, payloads=None, **options):
+        # Only Spark work needs the plan carried into Fabric. TDS, OneLake and
+        # REST are reached from here, so a plan without Spark starts no session.
+        if plan.execution.spark_home_target_id is None:
+            return super().execute_mutation(plan, payloads, **options)
+        return self.execute_mutation_remote(plan, payloads, **options)
 
     # --- progress -----------------------------------------------------------
 

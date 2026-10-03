@@ -1,0 +1,116 @@
+"""Execute a persisted Build plan and present its physical action results."""
+
+from collections.abc import Mapping
+from datetime import datetime, timedelta, timezone
+
+from ..mutation.executor import TypedValue, validate_inputs
+from ..mutation.serialization import thaw_value
+from .report import ActionResult, InstallationReport, SequenceResult
+
+
+def execute_bundle(bundle, session, *, executors=None, build_datetime=None):
+    payloads = {
+        a.payload: bundle.store.read(bundle.location.join(*a.payload.split("/")))
+        for _, _, a in bundle.plan.actions()
+        if a.payload is not None
+    }
+    validate_inputs(bundle.plan, payloads)
+    started = datetime.now(timezone.utc)
+    options = {"build_datetime": build_datetime}
+    if executors is not None:
+        options["executors"] = executors
+    report = session.execute_mutation(bundle.plan, payloads, **options)
+    finished = datetime.now(timezone.utc)
+    started_at, finished_at = _action_times(report, finished)
+    sequences = []
+    for sequence in bundle.plan.sequences:
+        actions = []
+        for batch in sequence.batches:
+            for action in batch.actions:
+                if action.executor == "completion_gate":
+                    continue
+                result = report.by_id[action.id]
+                value = result.value
+                if isinstance(value, TypedValue):
+                    value = value.value
+                status = (
+                    "skipped"
+                    if isinstance(value, Mapping) and value.get("skipped") is True
+                    else result.status
+                    if result.status in {"succeeded", "failed"}
+                    else ("failed" if result.status == "uncertain" else "skipped")
+                )
+                duration = result.active_seconds + result.wait_seconds
+                actions.append(
+                    ActionResult(
+                        action_id=action.id,
+                        resource_node_id=action.resource_node_id,
+                        source_path=action.source_path,
+                        target_id=action.target_id,
+                        executor=action.executor,
+                        status=status,
+                        started_at=started_at.get(action.id),
+                        finished_at=finished_at.get(action.id),
+                        duration_seconds=duration,
+                        error_type=(
+                            "UncertainMutation"
+                            if result.status == "uncertain"
+                            else "MutationFailure"
+                        )
+                        if result.error
+                        else None,
+                        error_message=result.error,
+                        # A remote report's values arrive frozen.
+                        details=thaw_value(value)
+                        if isinstance(value, Mapping)
+                        else None,
+                    )
+                )
+        if actions:
+            status = (
+                "failed"
+                if any(a.status == "failed" for a in actions)
+                else (
+                    "skipped"
+                    if all(a.status == "skipped" for a in actions)
+                    else "succeeded"
+                )
+            )
+            sequences.append(
+                SequenceResult(
+                    sequence.number, sequence.description, status, tuple(actions)
+                )
+            )
+    presented = InstallationReport(
+        bundle.bundle_id,
+        "succeeded" if report.succeeded else "failed",
+        started,
+        finished,
+        tuple(sequences),
+    )
+    bundle.store.write(
+        bundle.location / "install-report.yml", presented.to_yaml().encode("utf-8")
+    )
+    return presented
+
+
+def _action_times(report, finished):
+    """Each action's first dispatch and terminal outcome, as wall-clock times.
+
+    Ledger instants come from the executing host's monotonic clock, so they are
+    placed relative to the invocation's last event, taken as ``finished``.
+    """
+
+    events = report.ledger
+    if not events:
+        return {}, {}
+    end = max(event.at for event in events)
+    started: dict[str, datetime] = {}
+    ended: dict[str, datetime] = {}
+    for event in events:
+        at = finished - timedelta(seconds=end - event.at)
+        if event.kind == "dispatched":
+            started.setdefault(event.action_id, at)
+        elif event.kind == "terminal":
+            ended[event.action_id] = at
+    return started, ended

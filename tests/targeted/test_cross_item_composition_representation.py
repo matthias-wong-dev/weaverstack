@@ -21,6 +21,7 @@ from __future__ import annotations
 import pytest
 from factories import FixtureCatalogue, item_bindings, target_inventory
 from support.build_envs import CROSS_ITEM_JOURNEY_FIXTURE
+from support.bundles import build_metadata, runs_before
 from support.weaver_test import weaver_test
 from support.workspaces import WORKSPACE
 
@@ -72,17 +73,13 @@ def plan(repository, tmp_path_factory):
     return bundle.plan
 
 
-def _at(plan) -> dict:
-    """Each action's sequence number, by the action id the manifest gave it."""
-
-    return {action.id: sequence.number for sequence, _batch, action in plan.actions()}
-
-
-def _when(plan, ending: str) -> int:
-    at = _at(plan)
-    matches = [number for action_id, number in at.items() if action_id.endswith(ending)]
-    assert matches, f"no action ends with {ending!r}; the plan has {sorted(at)}"
-    assert len(matches) == 1, f"{ending!r} matches several actions: {matches}"
+def _action(plan, ending: str) -> str:
+    matches = [
+        action.id
+        for _s, _b, action in plan.actions()
+        if action.id.endswith(ending) and not action.id.startswith("managed-drop")
+    ]
+    assert len(matches) == 1, f"{ending!r} matches {matches}"
     return matches[0]
 
 
@@ -121,12 +118,12 @@ def test_one_bundle_carries_both_targets(plan):
         "Reporting",
         "_weaver",
     }
-    assert plan.omitted_nodes == ()
+    assert build_metadata(plan).omitted_nodes == ()
 
 
 @weaver_test()
 def test_the_warehouse_waits_for_the_lakehouse_it_reads(plan):
-    """The composition claim: source, then barrier, then consumer.
+    """The composition claim: source, then endpoint refresh, then consumer.
 
     A Warehouse object reading an shortcut Delta table reaches it over the SQL
     analytics endpoint, and the endpoint is eventually consistent with the
@@ -135,13 +132,21 @@ def test_the_warehouse_waits_for_the_lakehouse_it_reads(plan):
     while the crossing between them was stale.
     """
 
-    produced = _when(plan, "Lakehouse--Sales--Tables--DWG.Customer")
-    refreshed = _when(plan, "refresh-sql-endpoint-Lakehouse--Sales")
-    shortcut = _when(plan, "shortcuts-Warehouse--Reporting")
-    reported = _when(plan, "Warehouse--Reporting--Rpt.CustomerReport")
-    viewed = _when(plan, "Warehouse--Reporting--Rpt.ActiveCustomerReport")
+    chain = [
+        _action(plan, ending)
+        for ending in (
+            "Lakehouse--Sales--Tables--DWG.Customer",
+            "start-sql-endpoint-refresh-Lakehouse--Sales",
+            "await-sql-endpoint-refresh-Lakehouse--Sales",
+            "shortcuts-Warehouse--Reporting",
+            "Warehouse--Reporting--Rpt.CustomerReport",
+            "Warehouse--Reporting--Rpt.ActiveCustomerReport",
+        )
+    ]
 
-    assert produced < refreshed < shortcut < reported < viewed
+    assert all(
+        runs_before(plan, first, second) for first, second in zip(chain, chain[1:])
+    )
 
 
 @weaver_test()
@@ -155,6 +160,7 @@ def test_the_warehouse_side_is_reached_over_tds(plan):
     by_target = {
         batch.target_id.split("--")[0]: action.executor
         for _sequence, batch, action in plan.actions()
+        if action.executor != "completion_gate"
         if action.id.endswith("shortcuts-Warehouse--Reporting")
     }
 
@@ -172,6 +178,7 @@ def test_the_warehouse_report_carries_a_load_procedure_and_a_test(plan):
     procedures = {
         action.id
         for _sequence, _batch, action in plan.actions()
+        if action.executor != "completion_gate"
         if action.id.startswith("runtime-Warehouse--Reporting--procedure")
     }
 
@@ -189,6 +196,9 @@ def test_the_warehouse_report_carries_a_load_procedure_and_a_test(plan):
 def test_the_catalogue_is_published_after_both_sides_are_built(plan):
     """One estate, one certification, and it comes last."""
 
-    assert _when(plan, "publish-registry") > _when(
-        plan, "Warehouse--Reporting--Rpt.ActiveCustomerReport"
+    published = _action(plan, "publish-registry")
+    assert all(
+        runs_before(plan, action.id, published)
+        for _s, _b, action in plan.actions()
+        if action.id not in {published, "complete-build"}
     )

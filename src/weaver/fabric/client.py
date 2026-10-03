@@ -5,9 +5,10 @@ from __future__ import annotations
 import json
 import time
 from contextlib import nullcontext
+from dataclasses import dataclass
 from typing import Any
 
-from ..errors import WeaverError, reported_message
+from ..errors import OutcomeUnknown, WeaverError, reported_message
 from .auth import FABRIC_SCOPE, token_source
 
 FABRIC_API = "https://api.fabric.microsoft.com/v1"
@@ -39,6 +40,16 @@ class FabricError(WeaverError):
     def __init__(self, message: str, *, status_code: int | None = None) -> None:
         super().__init__(message)
         self.status_code = status_code
+
+
+class FabricOutcomeUnknown(FabricError, OutcomeUnknown):
+    """The request may have been acted on, and its response was lost."""
+
+
+def outcome_unknown(method: str, status_code: int) -> bool:
+    """Whether a mutation's failed reply leaves open that Fabric acted on it."""
+
+    return method not in READ_METHODS and status_code == 500
 
 
 def _response_message(response) -> str:
@@ -229,12 +240,16 @@ class FabricClient:
                     timeout=self.timeout if timeout is None else timeout,
                 )
             except requests.exceptions.RequestException as exc:
-                raise FabricError(
-                    f"{method} {url} could not be reached: {exc}"
-                ) from exc
+                error = FabricError if never_sent(exc) else FabricOutcomeUnknown
+                raise error(f"{method} {url} could not be reached: {exc}") from exc
             if response.status_code in expected:
                 return response
-            raise FabricError(
+            error = (
+                FabricOutcomeUnknown
+                if outcome_unknown(method, response.status_code)
+                else FabricError
+            )
+            raise error(
                 f"{method} {url} returned {response.status_code}: "
                 f"{_response_message(response)}",
                 status_code=response.status_code,
@@ -278,39 +293,81 @@ class FabricClient:
         if response.status_code != 202:
             return response.json() if response.content else {}
 
-        location = response.headers.get("Location")
-        operation_id = response.headers.get("x-ms-operation-id")
-        if not location and operation_id:
-            location = f"operations/{operation_id}"
-        if not location:
-            raise FabricError(
-                "Fabric accepted a long-running operation without a polling location"
-            )
-
+        operation = accepted_operation(response, poll_interval=poll_interval)
         deadline = time.monotonic() + timeout
-        current = response
         while time.monotonic() < deadline:
-            retry_after = current.headers.get("Retry-After")
-            try:
-                delay = float(retry_after) if retry_after is not None else poll_interval
-            except (TypeError, ValueError):
-                delay = poll_interval
-            time.sleep(max(0.0, delay))
-            current = self.request("GET", location, expected=(200,))
-            body = current.json() if current.content else {}
-            status = str(body.get("status") or "").casefold()
-            if status == "succeeded":
-                return body
-            if status in {"failed", "cancelled", "canceled"}:
-                error = body.get("error") or {}
-                message = error.get("message") if isinstance(error, dict) else None
-                raise FabricError(
-                    f"Fabric operation {operation_id or location} {status}"
-                    + (f": {message}" if message else "")
-                )
-            location = current.headers.get("Location") or location
-
+            time.sleep(operation.retry_after)
+            operation = self.poll_operation(operation, poll_interval=poll_interval)
+            if operation.done:
+                return operation.body
         raise FabricError(
-            f"Fabric operation {operation_id or location} did not finish within "
-            f"{int(timeout)}s"
+            f"Fabric operation {operation.name} did not finish within {int(timeout)}s"
         )
+
+    def poll_operation(
+        self,
+        operation: "Operation",
+        *,
+        poll_interval: float = DEFAULT_OPERATION_POLL_INTERVAL,
+    ) -> "Operation":
+        """Observe a long-running operation once; raise if it failed."""
+
+        current = self.request("GET", operation.location, expected=(200,))
+        body = current.json() if current.content else {}
+        status = str(body.get("status") or "").casefold()
+        if status in {"failed", "cancelled", "canceled"}:
+            error = body.get("error") or {}
+            message = error.get("message") if isinstance(error, dict) else None
+            raise FabricError(
+                f"Fabric operation {operation.name} {status}"
+                + (f": {message}" if message else "")
+            )
+        return Operation(
+            location=current.headers.get("Location") or operation.location,
+            operation_id=operation.operation_id,
+            retry_after=_retry_after(current, poll_interval),
+            done=status == "succeeded",
+            body=body,
+        )
+
+
+@dataclass(frozen=True)
+class Operation:
+    """A Fabric long-running operation and its latest observation."""
+
+    location: str
+    operation_id: str | None = None
+    retry_after: float = DEFAULT_OPERATION_POLL_INTERVAL
+    done: bool = False
+    body: Any = None
+
+    @property
+    def name(self) -> str:
+        return self.operation_id or self.location
+
+
+def accepted_operation(
+    response, *, poll_interval: float = DEFAULT_OPERATION_POLL_INTERVAL
+) -> Operation:
+    """The operation behind a ``202 Accepted`` response."""
+
+    location = response.headers.get("Location")
+    operation_id = response.headers.get("x-ms-operation-id")
+    if not location and operation_id:
+        location = f"operations/{operation_id}"
+    if not location:
+        raise FabricError(
+            "Fabric accepted a long-running operation without a polling location"
+        )
+    return Operation(
+        location=location,
+        operation_id=operation_id,
+        retry_after=_retry_after(response, poll_interval),
+    )
+
+
+def _retry_after(response, default: float) -> float:
+    try:
+        return max(0.0, float(response.headers.get("Retry-After")))
+    except (TypeError, ValueError):
+        return default

@@ -4,6 +4,8 @@ from ..catalogue.semantic import json_text
 from ..catalogue.state import Catalogue
 from ..catalogue.tables import SEMANTIC_MODEL_DICTIONARY, SEMANTIC_OBJECT_DICTIONARY
 from ..declaration.model import WeaverDocumentId
+from ..semantic_models.references import source_identity
+from .dependencies import endpoint_object_key, object_key
 from .models import BuildBatch, InstallAction
 from .payloads import sha256_hex
 from .stages import BUILD, CATALOGUE, PlannedStage
@@ -54,6 +56,20 @@ def semantic_stage(repository, item, target, *, catalogue_target=None):
         payload=filename,
         payload_sha256=sha256_hex(content),
     )
+    sources = tuple(
+        source_identity(reference)
+        for reference in contribution.source_references.values()
+    )
+    requirements = (
+        (object_key(item),)
+        if publishing
+        else tuple(object_key(source) for source in sources)
+        + tuple(
+            endpoint_object_key(source)
+            for source in sources
+            if source.item.item_type == "Lakehouse"
+        )
+    )
     return PlannedStage(
         phase=CATALOGUE if publishing else BUILD,
         slug="semantic-catalogue" if publishing else "build-objects",
@@ -62,6 +78,8 @@ def semantic_stage(repository, item, target, *, catalogue_target=None):
         if publishing
         else "Build item documents",
         payloads={filename: content},
+        provides={} if publishing else {action.id: (object_key(item),)},
+        requires={action.id: requirements},
         batches=(
             BuildBatch(
                 id=action.id,

@@ -1,4 +1,4 @@
-"""Collect catalogue claims and render the three ordered catalogue barriers."""
+"""Collect catalogue claims and render the ordered catalogue actions."""
 
 from __future__ import annotations
 
@@ -301,7 +301,7 @@ def render_catalogue_after_build(
     )
     publication = publish(current, desired)
 
-    # Registry stays in its own final barrier; table plans carry the ordering.
+    # Registry is its own final action; table plans carry the ordering.
     catalogue_statements: list[str] = [
         statement
         for table_plan in (*publication.dictionaries, publication.installation)

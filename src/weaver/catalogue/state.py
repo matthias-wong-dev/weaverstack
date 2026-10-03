@@ -426,10 +426,22 @@ class Catalogue:
         Historical tables are unchanged because rebuilds do not invalidate them.
         """
 
-        from .runtime_state import with_established, without_invalidated
+        from .runtime_state import (
+            RuntimeStateEstablishment,
+            RuntimeStateInvalidation,
+            with_established,
+            without_invalidated,
+        )
 
-        invalidation = tuple(getattr(plan, "runtime_state", ()))
-        establishment = tuple(getattr(plan, "runtime_state_established", ()))
+        envelope = plan.build_envelope or {}
+        invalidation = tuple(
+            RuntimeStateInvalidation.from_mapping(row)
+            for row in envelope.get("runtime_state", ())
+        )
+        establishment = tuple(
+            RuntimeStateEstablishment.from_mapping(row)
+            for row in envelope.get("runtime_state_established", ())
+        )
         if not invalidation and not establishment:
             return self
         return Catalogue(

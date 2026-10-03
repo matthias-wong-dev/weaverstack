@@ -278,3 +278,30 @@ def test_fabric_store_copies_between_onelake_and_the_driver_without_byte_decodin
         ),
         (f"file:{local_archive.as_posix()}", remote_archive.value, False),
     ]
+
+
+@weaver_test()
+def test_a_sql_endpoint_is_resolved_once_through_the_workspace_api():
+    """An endpoint refresh inside Fabric needs the endpoint paired with a Lakehouse."""
+
+    asked = []
+
+    class Client:
+        def paged(self, path):
+            asked.append(path)
+            return [
+                {"id": "endpoint-id", "displayName": "Sales", "type": "SQLEndpoint"}
+            ]
+
+    resolver = FabricSessionResolver(
+        Workspace(workspace="Analytics"),
+        runtime=_runtime(),
+        lakehouse=_LakehouseUtils(),
+        client=Client(),
+    )
+
+    first = resolver.resolve(ItemRef("Sales"), item_type="SQLEndpoint")
+    again = resolver.resolve(ItemRef("Sales"), item_type="SQLEndpoint")
+
+    assert first.id == "endpoint-id" and again is first
+    assert asked == ["workspaces/workspace-id/items?type=SQLEndpoint"]

@@ -47,3 +47,16 @@ def test_old_catalogue_identity_columns_are_added_before_publication(tmp_path):
     assert b"[Workspace ID] varchar(128)" in upgrades[0]
     assert b"[Item ID] varchar(128)" in upgrades[0]
     assert not any(b"DROP TABLE [_].[Installation]" in payload for payload in payloads)
+    from weaver.graph import Graph
+
+    actions = [a for _, _, a in bundle.plan.actions()]
+    success = Graph(
+        (a.id for a in actions),
+        ((dep, a.id) for a in actions for dep in a.depends_on),
+    )
+    for action in actions:
+        if (
+            action.executor in {"semantic_model", "semantic_catalogue"}
+            or action.kind == "publish_registry"
+        ):
+            assert "upgrade-catalogue" in success.ancestors(action.id)

@@ -84,12 +84,18 @@ def plan_shortcuts(repository, *, selected=(SHORTCUT,)):
 
 
 @weaver_test()
-def test_a_selected_shortcut_is_planned_as_one_action(estate):
+def test_a_selected_shortcut_is_one_creation_and_one_readiness_wait(estate):
     planned = plan_shortcuts(estate)
 
     assert planned.stage is not None
-    kinds = [action.kind for batch in planned.stage.batches for action in batch.actions]
-    assert kinds == ["create_shortcut"]
+    actions = [action for batch in planned.stage.batches for action in batch.actions]
+    assert [action.kind for action in actions] == [
+        "create_shortcut",
+        "await_table_shortcuts",
+    ]
+    create, ready = actions
+    assert planned.stage.requires[ready.id] == (f"action:{create.id}",)
+    assert planned.stage.provides[ready.id] == (f"object:{SHORTCUT}",)
 
 
 @weaver_test()
@@ -836,3 +842,44 @@ class _Registered:
 
     def __init__(self, signature: str) -> None:
         self.signature = signature
+
+
+@weaver_test()
+def test_a_large_creation_is_awaited_in_chunks_that_overlap():
+    """Each readiness action checks a bounded share, so a wide wait spreads out."""
+
+    import json
+
+    from weaver.build_bundle.shortcuts import READINESS_CHUNK, readiness_actions
+
+    frozen = [
+        {
+            "shortcut": f"Lakehouse/Curated/Tables/DWG.T{i:03d}",
+            "type": "table",
+            "path": "Tables/DWG",
+            "name": f"T{i:03d}",
+        }
+        for i in range(2 * READINESS_CHUNK + 1)
+    ] + [
+        {
+            "shortcut": "Lakehouse/Curated/Files/Raw.Feed",
+            "type": "folder",
+            "path": "Files/Raw",
+            "name": "Feed",
+        }
+    ]
+    payloads = {}
+
+    awaited = readiness_actions(
+        frozen, payloads, name="shortcuts-Curated", file="Curated"
+    )
+
+    tables = [(a, names) for a, names in awaited if a.kind == "await_table_shortcuts"]
+    files = [(a, names) for a, names in awaited if a.kind == "await_file_shortcuts"]
+    assert [len(names) for _a, names in tables] == [READINESS_CHUNK, READINESS_CHUNK, 1]
+    assert [a.id for a, _n in files] == ["await-files-shortcuts-Curated"]
+    assert sorted(n for _a, names in tables for n in names) == sorted(
+        each["shortcut"] for each in frozen if each["type"] == "table"
+    )
+    first = json.loads(payloads[tables[0][0].payload])
+    assert first["surface"] == "tables" and len(first["shortcuts"]) == READINESS_CHUNK

@@ -38,6 +38,7 @@ from factories import (
     load_estate_bindings,
     target_inventory,
 )
+from support.bundles import build_metadata
 from support.weaver_test import weaver_test
 from support.workspaces import WORKSPACE
 
@@ -117,7 +118,7 @@ def test_a_consumer_only_build_restores_a_shortcut_over_an_installed_producer(
     assert catalogue.registered[shortcut].object_role == "shortcut"
 
     bundle = _consumer_only_bundle(tmp_path, repository, catalogue)
-    selection = bundle.plan.selection
+    selection = build_metadata(bundle.plan).selection
 
     assert shortcut in selection.impact.new
     assert shortcut in selection.selected_for_build
@@ -153,7 +154,7 @@ def test_the_installed_producer_is_declared_and_never_written_to(tmp_path, settl
     # And the consumer's shortcut is not set aside for want of a binding.
     assert not [
         node
-        for node in bundle.plan.omitted_nodes
+        for node in build_metadata(bundle.plan).omitted_nodes
         if node.reason == OMIT_TARGET_UNBOUND and LOAD_CONSUMER in node.node_id
     ]
 

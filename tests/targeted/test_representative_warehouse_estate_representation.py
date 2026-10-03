@@ -6,6 +6,7 @@ import re
 
 import pytest
 from factories import FixtureCatalogue, item_bindings, target_inventory
+from support.bundles import build_metadata
 from support.representative_warehouse_estate import (
     RepresentativeWarehouseSpec,
     make_representative_oracle,
@@ -184,7 +185,7 @@ def test_fifty_declarations_produce_a_complete_ordered_cold_build_bundle(tmp_pat
         and programmable.role in {ROLE_TEST, ROLE_ASSUMPTION}
     }
 
-    assert bundle.plan.omitted_nodes == ()
+    assert build_metadata(bundle.plan).omitted_nodes == ()
     assert loaded.plan.to_mapping() == bundle.plan.to_mapping()
     assert expected_tables <= action_resources["build_table"]
     assert expected_views <= action_resources["build_view"]
@@ -192,7 +193,8 @@ def test_fifty_declarations_produce_a_complete_ordered_cold_build_bundle(tmp_pat
     assert len(expected_validations) == 10
     assert expected_validations <= action_resources["build_procedure"]
     assert {shortcut.destination for shortcut in oracle.shortcuts} <= {
-        str(identity) for identity in bundle.plan.selection.selected_for_build
+        str(identity)
+        for identity in build_metadata(bundle.plan).selection.selected_for_build
     }
 
     sequence_by_resource = {

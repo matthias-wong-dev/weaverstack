@@ -5,13 +5,14 @@ import shutil
 from pathlib import Path
 
 import pytest
+from support.bundles import build_metadata
 from support.weaver_test import weaver_test
 from support.workspaces import InventoryClient
 
-from weaver.build_bundle import Installer
 from weaver.build_bundle.bundle import load_bundle
 from weaver.build_bundle.catalogue_actions import desired_catalogue
 from weaver.build_bundle.execution import ExecutionIdentity
+from weaver.build_bundle.execution_plan import execute_bundle
 from weaver.build_bundle.planner import certifiable_identities
 from weaver.build_bundle.targets import ItemBindings, WarehouseBinding, parse_build_item
 from weaver.build_bundle.workflow import (
@@ -153,16 +154,16 @@ def test_build_deploys_and_certifies_readback_without_touching_source(tmp_path, 
         p.relative_to(root): p.read_bytes() for p in root.rglob("*") if p.is_file()
     }
     bundle = bundle_for(tmp_path, repository, bindings, state, "first")
-    assert bundle.plan.selection.selected_for_build == (ROOT,)
-    assert not bundle.plan.selection.selected_for_drop
+    assert build_metadata(bundle.plan).selection.selected_for_build == (ROOT,)
+    assert not build_metadata(bundle.plan).selection.selected_for_drop
     assert not bundle.plan.execution.spark_home_target_id
     deployed = engine_model(repository)
     semantic = session.semantic_model("Reporting_Dev")
     semantic.definition = encode_definition(deployed)
     semantic.calls.clear()
     session.calls.clear()
-    report = Installer(session).install(
-        load_bundle(bundle.location, store=FilesystemStore())
+    report = execute_bundle(
+        load_bundle(bundle.location, store=FilesystemStore()), session
     )
     assert report.succeeded, report.to_mapping()
     assert [c[0] for c in semantic.calls] == ["update_definition", "get_definition"]
@@ -199,7 +200,7 @@ def test_build_deploys_and_certifies_readback_without_touching_source(tmp_path, 
         repository, bindings, deployed, state2.target_inventories
     )
     second = bundle_for(tmp_path, repository, bindings, installed, "second")
-    assert not second.plan.selection.selected_for_build
+    assert not build_metadata(second.plan).selection.selected_for_build
     assert list(second.plan.actions()) == []
 
 
@@ -223,8 +224,8 @@ def test_failed_deployment_or_readback_cannot_certify_changed_model(tmp_path, fa
     path.write_text(path.read_text().replace("2026", "2027"), encoding="utf-8")
     changed = parse_item_repository(Location(root.as_posix()))
     bundle = bundle_for(tmp_path, changed, bindings, installed, "changed")
-    assert bundle.plan.selection.impact.changed == (ROOT,)
-    assert not bundle.plan.selection.selected_for_drop
+    assert build_metadata(bundle.plan).selection.impact.changed == (ROOT,)
+    assert not build_metadata(bundle.plan).selection.selected_for_drop
     if failure == "update":
         semantic.failure = RuntimeError("update failed")
     elif failure == "missing_columns":
@@ -240,7 +241,7 @@ def test_failed_deployment_or_readback_cannot_certify_changed_model(tmp_path, fa
         semantic.definition = encode_definition(stale)
     # wrong_expression retains the previous model after a successful update.
     session.calls.clear()
-    report = Installer(session).install(bundle)
+    report = execute_bundle(bundle, session)
     assert not report.succeeded
     assert any("DELETE FROM [_].[Registry]" in statement for statement in session.tsql)
     assert not any(
@@ -310,10 +311,15 @@ def test_policy_change_selects_only_effectively_changed_models(tmp_path, policy)
     result = bundle_for(
         tmp_path, changed, bindings, BuildState(installed, inventories), "policy"
     )
-    assert set(result.plan.selection.selected_for_build) == (
+    assert set(build_metadata(result.plan).selection.selected_for_build) == (
         {ROOT} if policy == "item" else {ROOT, other_root}
     )
-    assert not result.plan.selection.selected_for_drop
+    assert not build_metadata(result.plan).selection.selected_for_drop
+    assert {
+        a.resource_node_id
+        for _, _, a in result.plan.actions()
+        if a.executor == "semantic_catalogue"
+    } == {str(i) for i in build_metadata(result.plan).selection.selected_for_build}
 
 
 @weaver_test()
@@ -328,7 +334,7 @@ def test_build_freezes_typed_ids_without_reading_existing_definition(tmp_path):
         bindings, required_catalogue_items=(ITEM,), session=session
     )
     bundle = bundle_for(tmp_path, repository, bindings, observed, "resolved")
-    assert bundle.plan.selection.selected_for_build == (ROOT,)
+    assert build_metadata(bundle.plan).selection.selected_for_build == (ROOT,)
     assert semantic.calls == []
     bound = next(
         t for t in bundle.plan.targets if t.logical_item_type == "SemanticModel"

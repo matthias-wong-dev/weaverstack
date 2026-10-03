@@ -100,6 +100,17 @@ class InventoryClient:
     def wait_for_operation(self, response, **_):
         return {"status": "Succeeded"}
 
+    def poll_operation(self, operation, **_):
+        from weaver.fabric.client import Operation
+
+        self.requested.append(f"GET {operation.location}")
+        return Operation(
+            location=operation.location,
+            operation_id=operation.operation_id,
+            done=True,
+            body={"status": "Succeeded"},
+        )
+
 
 class _Response:
     """The little of a REST response the resolver reads."""

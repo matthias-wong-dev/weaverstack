@@ -11,16 +11,17 @@ create-or-alter scripts.
 from __future__ import annotations
 
 from .base import ActionExecutor, InstallationContext, ResolvedTarget, SkippedExecution
+from .copy_files import CopyFilesExecutor
 from .folder import FolderExecutor
 from .load_file import LoadFileExecutor
 from .runtime_state import RuntimeStateExecutor
 from .semantic import SemanticCatalogueExecutor, SemanticModelExecutor
-from .shortcut import ShortcutExecutor
+from .shortcut import ShortcutExecutor, ShortcutReadinessExecutor
 from .spark_sql import SparkSqlExecutor
 from .spark_sql_batch import SparkSqlBatchExecutor
 from .spark_table import SparkTableExecutor
-from .sql_endpoint_refresh import SqlEndpointRefreshExecutor
 from .tsql import TSqlBatchExecutor, TSqlExecutor
+from .wipe import LakehouseWipeExecutor
 
 
 def default_executors() -> dict[str, ActionExecutor]:
@@ -31,17 +32,20 @@ def default_executors() -> dict[str, ActionExecutor]:
         SparkSqlBatchExecutor.name: SparkSqlBatchExecutor(),
         SparkTableExecutor.name: SparkTableExecutor(),
         FolderExecutor.name: FolderExecutor(),
+        CopyFilesExecutor.name: CopyFilesExecutor(),
         LoadFileExecutor.name: LoadFileExecutor(),
         TSqlExecutor.name: TSqlExecutor(),
         TSqlBatchExecutor.name: TSqlBatchExecutor(),
         ShortcutExecutor.name: ShortcutExecutor(),
-        SqlEndpointRefreshExecutor.name: SqlEndpointRefreshExecutor(),
+        ShortcutReadinessExecutor.name: ShortcutReadinessExecutor(),
         RuntimeStateExecutor.name: RuntimeStateExecutor(),
+        LakehouseWipeExecutor.name: LakehouseWipeExecutor(),
     }
 
 
 __all__ = [
     "ActionExecutor",
+    "CopyFilesExecutor",
     "InstallationContext",
     "ResolvedTarget",
     "RuntimeStateExecutor",
@@ -50,8 +54,9 @@ __all__ = [
     "SparkSqlExecutor",
     "SparkSqlBatchExecutor",
     "SparkTableExecutor",
-    "SqlEndpointRefreshExecutor",
+    "ShortcutReadinessExecutor",
     "FolderExecutor",
+    "LakehouseWipeExecutor",
     "LoadFileExecutor",
     "TSqlExecutor",
     "TSqlBatchExecutor",

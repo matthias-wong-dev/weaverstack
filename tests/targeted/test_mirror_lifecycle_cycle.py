@@ -19,6 +19,7 @@ from factories import (
     schema_document,
     warehouse_table,
 )
+from support.bundles import build_metadata
 from support.weaver_test import weaver_test
 from support.workspaces import WORKSPACE
 from warehouse_mirror import (
@@ -188,7 +189,10 @@ def _selective(tmp_path: Path):
 def test_only_the_changed_object_is_selected(tmp_path):
     _reconciled, bundle = _selective(tmp_path)
 
-    selected = {str(identity) for identity in bundle.plan.selection.selected_for_build}
+    selected = {
+        str(identity)
+        for identity in build_metadata(bundle.plan).selection.selected_for_build
+    }
 
     assert str(mirror_object("Customer")) in selected
     assert str(mirror_object("Region")) not in selected
@@ -230,7 +234,11 @@ def test_the_row_goes_after_the_physical_work_and_before_publication(tmp_path):
     """The transition completes only once the build that owns the rows has run."""
 
     _reconciled, bundle = _selective(tmp_path)
-    ordered = [action.id for action in plan_actions(bundle)]
+    ordered = [
+        action.id
+        for action in plan_actions(bundle)
+        if action.executor != "completion_gate"
+    ]
     kinds = {action.id: action.kind for action in plan_actions(bundle)}
 
     at = ordered.index(DEREGISTER_MIRROR_SLUG)

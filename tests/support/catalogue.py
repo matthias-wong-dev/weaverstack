@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from weaver.build_bundle.models import BuildPlan
+from support.bundles import given_build_plan as BuildPlan
 from weaver.build_bundle.report import InstallationReport
 from weaver.build_bundle.targets import ItemBinding, ItemBindings, WarehouseBinding
 from weaver.build_bundle.workflow import build_item_repository_source

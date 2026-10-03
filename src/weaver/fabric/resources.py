@@ -5,6 +5,7 @@ Fabric item identity is workspace, type and name. A bare name can be ambiguous.
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 
 from ..errors import CommandError
@@ -215,10 +216,25 @@ def refresh_sql_endpoint_metadata(
 ) -> dict:
     """Refresh every table in one SQL analytics endpoint and await completion."""
 
+    client = client or FabricClient()
+    refresh = start_sql_endpoint_refresh(endpoint, client=client)
+    while not refresh["done"]:
+        time.sleep(refresh["retry_after"])
+        refresh = observe_sql_endpoint_refresh(refresh, client=client)
+    return refresh_details(refresh)
+
+
+def start_sql_endpoint_refresh(
+    endpoint: Item, *, client: FabricClient | None = None
+) -> dict:
+    """Ask Fabric to refresh an endpoint and return the plain-data handle."""
+
     if endpoint.type != SQL_ENDPOINT:
         raise CommandError(
             f"SQL endpoint refresh requires a {SQL_ENDPOINT} item. Received {endpoint.type!r}."
         )
+    from .client import accepted_operation
+
     client = client or FabricClient()
     response = client.request(
         "POST",
@@ -226,13 +242,59 @@ def refresh_sql_endpoint_metadata(
         payload={"recreateTables": False},
         expected=(200, 202),
     )
-    result = client.wait_for_operation(response)
-    return {
+    handle = {
         "lakehouse": endpoint.name,
         "sql_endpoint_id": endpoint.id,
         "operation_id": response.headers.get("x-ms-operation-id"),
-        "status": result.get("status", "Succeeded"),
+        "location": None,
+        "retry_after": 0.0,
+        "done": response.status_code != 202,
+        "status": "Running",
     }
+    if handle["done"]:
+        return {**handle, "status": _refresh_status(response)}
+    operation = accepted_operation(response)
+    return {
+        **handle,
+        "location": operation.location,
+        "retry_after": operation.retry_after,
+    }
+
+
+def observe_sql_endpoint_refresh(
+    refresh: dict, *, client: FabricClient | None = None
+) -> dict:
+    """Poll a started refresh once; a failed refresh raises."""
+
+    if refresh["done"]:
+        return refresh
+    from .client import Operation
+
+    client = client or FabricClient()
+    operation = client.poll_operation(
+        Operation(location=refresh["location"], operation_id=refresh["operation_id"])
+    )
+    return {
+        **refresh,
+        "location": operation.location,
+        "retry_after": operation.retry_after,
+        "done": operation.done,
+        "status": operation.body.get("status", "Succeeded")
+        if operation.done and isinstance(operation.body, dict)
+        else "Running",
+    }
+
+
+def refresh_details(refresh: dict) -> dict:
+    return {
+        key: refresh[key]
+        for key in ("lakehouse", "sql_endpoint_id", "operation_id", "status")
+    }
+
+
+def _refresh_status(response) -> str:
+    body = response.json() if response.content else {}
+    return body.get("status", "Succeeded") if isinstance(body, dict) else "Succeeded"
 
 
 def _await_item(
@@ -244,8 +306,6 @@ def _await_item(
     attempts: int = 30,
     pause: float = 2.0,
 ) -> Item:
-    import time
-
     for _ in range(attempts):
         try:
             return find_item(workspace, name, item_type=item_type, client=client)

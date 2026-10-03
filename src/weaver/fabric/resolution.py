@@ -96,14 +96,21 @@ class FabricResolver:
     def refresh_sql_endpoint(self, item: ItemRef) -> dict:
         """Refresh the SQL analytics endpoint paired with a named Lakehouse."""
 
-        client = self.client
-        endpoint = find_item(
-            self.workspace,
-            item.name,
-            item_type=SQL_ENDPOINT,
-            client=client,
+        return refresh_sql_endpoint_metadata(
+            self.resolve(item, item_type=SQL_ENDPOINT), client=self.client
         )
-        return refresh_sql_endpoint_metadata(endpoint, client=client)
+
+    def start_sql_endpoint_refresh(self, item: ItemRef):
+        from .resources import start_sql_endpoint_refresh
+
+        return start_sql_endpoint_refresh(
+            self.resolve(item, item_type=SQL_ENDPOINT), client=self.client
+        )
+
+    def observe_sql_endpoint_refresh(self, refresh):
+        from .resources import observe_sql_endpoint_refresh
+
+        return observe_sql_endpoint_refresh(refresh, client=self.client)
 
     def lakehouse(self, item: ItemRef) -> Location:
         return self.root / lakehouse_artifact_segment(
@@ -151,21 +158,25 @@ class FabricResolver:
     # These REST operations belong to the desktop workspace adapter. An
     # in-Fabric resolver records them as skipped.
 
-    def create_onelake_shortcuts(self, item: ItemRef, shortcuts) -> tuple[dict, ...]:
-        """Point each shortcut's ``path/name`` at its source, in one request.
+    def submit_onelake_shortcuts(self, item: ItemRef, shortcuts):
+        """Point each shortcut's ``path/name`` at its source, in one bulk call.
 
-        Each shortcut names a source that is either a name in this workspace or
-        an item already resolved elsewhere. A direct shortcut may point outside
-        the workspace the build is bound to, and that address is settled when the
-        bundle is generated, so there is nothing left to look up here.
-
-        Sources are resolved before anything is sent, so the whole batch goes in
-        one bulk create submission.
+        Each source is a name in this workspace or an item already resolved
+        elsewhere; see :class:`.shortcuts.BulkSubmission` for the outcome.
         """
 
-        from .shortcuts import ShortcutRequest, create_shortcuts
+        from .shortcuts import submit_shortcuts
 
-        requests = tuple(
+        return submit_shortcuts(
+            self.resolve(item, item_type=LAKEHOUSE),
+            self._shortcut_requests(shortcuts),
+            client=self.client,
+        )
+
+    def _shortcut_requests(self, shortcuts):
+        from .shortcuts import ShortcutRequest
+
+        return tuple(
             ShortcutRequest(
                 path=shortcut["path"],
                 name=shortcut["name"],
@@ -176,11 +187,6 @@ class FabricResolver:
             )
             for shortcut in shortcuts
         )
-        return create_shortcuts(
-            self.resolve(item, item_type=LAKEHOUSE),
-            requests,
-            client=self.client,
-        ).created
 
     def _shortcut_source(self, source: "ItemRef | Item", source_kind: str | None):
         if getattr(source, "id", None) and getattr(source, "workspace_id", None):

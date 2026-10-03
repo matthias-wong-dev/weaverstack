@@ -1,8 +1,8 @@
-"""Plan an item-oriented repository as an ordered build bundle.
+"""Plan an item-oriented repository as a build bundle.
 
-Item dependency layers are the outer barriers; document dependencies order work
-within each item. Items in one layer share stage barriers, while a consumer waits
-for every producer item, including endpoint refreshes, to finish.
+Item dependency layers and stages order the presentation. Execution order is the
+physical DAG compiled from each action's dependency keys, so independent items
+and branches overlap.
 """
 
 from __future__ import annotations
@@ -26,7 +26,6 @@ from ..etl import item_runtime_artefacts, load_schemas, runtime_artefacts
 from ..locations import Location
 from ..store import Store
 from .bundle import (
-    SUPPORTED_FORMAT_VERSION,
     BuildBundle,
     compute_bundle_id,
     write_bundle,
@@ -37,12 +36,21 @@ from .catalogue_actions import (
     render_catalogue_before_build,
     render_mirror_deregistration,
 )
+from .dependencies import (
+    DECERTIFIED,
+    PHYSICAL_COMPLETE,
+    PREPARED,
+    UPGRADED,
+    catalogue_step_key,
+)
 from .documents import lakehouse_build_stages, warehouse_build_stages
 from .drops import lakehouse_drop_stages, warehouse_drop_stages
 from .endpoints import lakehouse_endpoint_refresh_stage
 from .execution import BundleExecution, ExecutionIdentity, select_spark_home
+from .executors.sql_endpoint_refresh import AWAIT_EXECUTOR, START_EXECUTOR
+from .executors.sql_endpoint_refresh import CONTRACTS as ENDPOINT_REFRESH_CONTRACTS
 from .incremental import installed_as_pointer, select_build, stale_through_shortcuts
-from .models import OMIT_TARGET_UNBOUND, BuildPlan, OmittedNode
+from .models import OMIT_TARGET_UNBOUND, OmittedNode
 from .prune import TargetInventory, lakehouse_prune_stage, warehouse_prune_stage
 from .runtime import item_runtime_removals, item_runtime_stages
 from .runtime_tables import (
@@ -168,7 +176,11 @@ def generate_item_build_bundle(
     from .catalogue_actions import render_catalogue_upgrade
 
     upgrade = render_catalogue_upgrade(catalogue, catalogue_target=catalogue_target)
-    stages: list[PlannedStage] = [upgrade] if upgrade is not None else []
+    stages: list[PlannedStage] = (
+        [upgrade.declaring(provides=(UPGRADED, PREPARED))]
+        if upgrade is not None
+        else []
+    )
     omitted: list[OmittedNode] = []
 
     # Decertify everything rebuilt, including pointers refreshed in place.
@@ -186,7 +198,11 @@ def generate_item_build_bundle(
         stale_claims=stale_claims,
     )
     if catalogue_before is not None:
-        stages.append(catalogue_before)
+        stages.append(
+            catalogue_before.declaring(
+                requires=(UPGRADED,), provides=(DECERTIFIED, PREPARED)
+            )
+        )
 
     # Runtime state is reset here, between decertification and the first
     # physical action, and never after it. See
@@ -209,7 +225,11 @@ def generate_item_build_bundle(
         establishment=established_state,
     )
     if reconciliation is not None:
-        stages.append(reconciliation)
+        stages.append(
+            reconciliation.declaring(
+                requires=(UPGRADED, DECERTIFIED), provides=(PREPARED,)
+            )
+        )
 
     view_state = view_state_establishment(
         repository,
@@ -247,28 +267,23 @@ def generate_item_build_bundle(
 
     _refuse_selected_omissions(omitted)
 
-    recorded_views = render_runtime_state_reconciliation(
-        (),
-        catalogue_target=catalogue_target,
-        establishment=view_state,
-        slug=VIEW_STATE_SLUG,
-        description="record the Views this build created",
-        index=1,
-    )
-    if recorded_views is not None:
-        stages.append(recorded_views)
-
-    # Deregister a mirror only after physical work gives the object its own rows.
-    deregistered = render_mirror_deregistration(
-        catalogue,
-        selected_for_build,
-        catalogue_target=catalogue_target,
-    )
-    if deregistered is not None:
-        stages.append(deregistered)
-
-    stages.extend(
-        render_catalogue_after_build(
+    published = [
+        render_runtime_state_reconciliation(
+            (),
+            catalogue_target=catalogue_target,
+            establishment=view_state,
+            slug=VIEW_STATE_SLUG,
+            description="record the Views this build created",
+            index=1,
+        ),
+        # Deregister a mirror only after physical work gives the object its own
+        # rows.
+        render_mirror_deregistration(
+            catalogue,
+            selected_for_build,
+            catalogue_target=catalogue_target,
+        ),
+        *render_catalogue_after_build(
             repository,
             certifiable_ids,
             target_by_item,
@@ -280,10 +295,20 @@ def generate_item_build_bundle(
                 for identity in selected_for_build
                 if identity.item in repository.semantic_models
             },
+        ),
+    ]
+    # Publication certifies only physical work that succeeded, and the Registry
+    # is published last.
+    previous = PHYSICAL_COMPLETE
+    for index, stage in enumerate(stage for stage in published if stage is not None):
+        stages.append(
+            stage.declaring(requires=(previous,), provides=(catalogue_step_key(index),))
         )
-    )
+        previous = catalogue_step_key(index)
 
-    sequences, payloads, target_changes = enumerate_stages(stages)
+    sequences, payloads, target_changes, required = enumerate_stages(
+        stages, targets=targets, completion_target_id=catalogue_target.id
+    )
 
     omitted.extend(
         OmittedNode(
@@ -294,17 +319,11 @@ def generate_item_build_bundle(
         for identity in sorted(repository.source_documents, key=str)
         if identity not in certifiable_ids
     )
-    plan = BuildPlan(
-        format_version=SUPPORTED_FORMAT_VERSION,
-        bundle_id="",
-        repository_name=repository.name,
-        repository_signature=repository.signature,
+    from ..mutation.models import MutationPlan, PhysicalScope
+
+    plan = MutationPlan(
         targets=targets,
         sequences=sequences,
-        selection=selection,
-        # Warehouse-only work freezes no Lakehouse and therefore acquires no
-        # Spark session. The bound targets are read in the order ``build``
-        # reads its bindings, so the two cannot choose different attachments.
         execution=BundleExecution.of(
             execution,
             catalogue_target_id=catalogue_target.id,
@@ -312,12 +331,39 @@ def generate_item_build_bundle(
                 target_by_item.values(), needed=_needs_spark(sequences)
             ),
         ),
-        omitted_nodes=tuple(
-            sorted(omitted, key=lambda node: (node.node_id, node.reason))
+        build_envelope={
+            "repository_name": repository.name,
+            "repository_signature": repository.signature,
+            "selection": selection.to_mapping(),
+            "omitted_nodes": [
+                node.to_mapping()
+                for node in sorted(omitted, key=lambda n: (n.node_id, n.reason))
+            ],
+            "target_changes": {
+                key: [change.to_mapping() for change in value]
+                for key, value in sorted(target_changes.items())
+            },
+            "runtime_state": [one.to_mapping() for one in runtime_state],
+            "runtime_state_established": [
+                one.to_mapping() for one in (*established_state, *view_state)
+            ],
+        },
+        protected_scopes=tuple(
+            PhysicalScope(source.id, "")
+            for source in installed_sources.values()
+            if source.id not in {target.id for target in target_by_item.values()}
         ),
-        target_changes=target_changes,
-        runtime_state=runtime_state,
-        runtime_state_established=(*established_state, *view_state),
+        required_completion=required,
+        driver_contracts=(
+            ENDPOINT_REFRESH_CONTRACTS
+            if any(
+                a.executor in REFRESH_EXECUTORS
+                for sequence in sequences
+                for batch in sequence.batches
+                for a in batch.actions
+            )
+            else ()
+        ),
     )
     plan = replace(plan, bundle_id=compute_bundle_id(plan))
     return write_bundle(
@@ -328,13 +374,16 @@ def generate_item_build_bundle(
     )
 
 
+REFRESH_EXECUTORS = frozenset({START_EXECUTOR, AWAIT_EXECUTOR})
+
+
 def _needs_spark(sequences) -> bool:
     """Whether any planned action has to run through a Spark session."""
 
-    from .execution import SPARK_EXECUTORS
+    from .execution import needs_spark
 
     return any(
-        action.executor in SPARK_EXECUTORS
+        needs_spark(action)
         for sequence in sequences
         for batch in sequence.batches
         for action in batch.actions
@@ -634,7 +683,13 @@ def _plan_item(
     # Runtime installation follows structure and endpoint refresh.
     # Removals come from prior Registry rows, not the target diff.
     stages.extend(
-        item_runtime_stages(artefacts, selected_loads, item=item, target=target)
+        item_runtime_stages(
+            artefacts,
+            selected_loads,
+            item=item,
+            target=target,
+            repository=repository,
+        )
     )
     stages.extend(
         item_runtime_removals(removed, item=item, target=target, registered=registered)

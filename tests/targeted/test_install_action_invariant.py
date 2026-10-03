@@ -45,6 +45,10 @@ UNCOVERED = {
         "no Fabric test changes an owned folder; the executor is in "
         "test_folder_executor_boundary.py"
     ),
+    "await_file_shortcuts": (
+        "no Fabric test reads a Files shortcut at Build; the executor is in "
+        "test_shortcut_execution_boundary.py"
+    ),
 }
 
 #: Kinds that change a target, and a Fabric test that runs and inspects each.
@@ -61,9 +65,13 @@ COVERED = {
     "prune_view": ("test_prune_table_action_removes_an_object_nothing_declares",),
     "prune_schema": ("test_prune_table_action_removes_an_object_nothing_declares",),
     "prune_folder": ("test_prune_table_action_removes_an_object_nothing_declares",),
-    "refresh_sql_endpoint": (
+    "start_sql_endpoint_refresh": (
         "test_each_mutated_lakehouse_had_its_endpoint_refreshed_for_real",
     ),
+    "await_sql_endpoint_refresh": (
+        "test_each_mutated_lakehouse_had_its_endpoint_refreshed_for_real",
+    ),
+    "await_table_shortcuts": ("test_the_shortcut_exists_as_a_onelake_shortcut",),
     "write_file": ("test_a_build_here_rewrites_this_items_runtime_module_alone",),
     "build_procedure": (
         "test_the_source_load_runs_and_settles_what_the_mirror_will_carry",

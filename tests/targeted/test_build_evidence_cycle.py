@@ -23,7 +23,7 @@ from test_build_fixed_point_cycle import (
 from test_build_fixed_point_cycle import build as generate_bundle
 
 import weaver.build_bundle as build_bundle
-from weaver.build_bundle import Installer, WarehouseBinding
+from weaver.build_bundle import WarehouseBinding
 from weaver.build_bundle.report import InstallationReport
 from weaver.catalogue.state import Catalogue
 from weaver.operations.build import _run_build
@@ -40,7 +40,7 @@ EXECUTORS = (
     "folder",
     "shortcut",
     "tsql_batch",
-    "sql_endpoint_refresh",
+    "shortcut_readiness",
     "load_file",
     "runtime_state",
 )
@@ -77,10 +77,15 @@ def _build(tmp_path, monkeypatch, *, catalogue, fail_at=None):
     monkeypatch.setattr(build_bundle, "catalogue_items_for_build", lambda *_a: ())
     monkeypatch.setattr(build_bundle, "read_build_state", lambda *_a, **_k: None)
     monkeypatch.setattr(build_bundle, "build_repository_bundle", generate)
+    from weaver.sessions.testing import TestSession
+
+    execute = TestSession.execute_mutation
     monkeypatch.setattr(
-        build_bundle,
-        "Installer",
-        lambda session: Installer(session, executors=executors),
+        TestSession,
+        "execute_mutation",
+        lambda session, plan, payloads=None, **options: execute(
+            session, plan, payloads, executors=executors, **options
+        ),
     )
     session = given_session(
         store=FilesystemStore(),
@@ -112,7 +117,11 @@ def _kept(result) -> InstallationReport:
 
 
 def _planned(bundle) -> list[str]:
-    return [action.id for _sequence, _batch, action in bundle.plan.actions()]
+    return [
+        action.id
+        for _sequence, _batch, action in bundle.plan.actions()
+        if action.executor != "completion_gate"
+    ]
 
 
 @weaver_test()

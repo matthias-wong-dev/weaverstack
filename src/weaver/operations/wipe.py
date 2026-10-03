@@ -30,7 +30,6 @@ from ..errors import CommandError
 from ..locations import Location
 from ..targets import (
     ItemRef,
-    WarehouseTarget,
     parse_physical_target,
     physical_item,
     physical_kind,
@@ -476,35 +475,12 @@ def wipe(
             )
         )
         with task:
-            storage = any(target.item_type == LAKEHOUSE for target in plan.targets)
-            store = opened.store(resolved) if storage else None
-            items: list[WipeItemResult] = []
-            reports: list[WipeReport] = []
-            for target in plan.targets:
-                with opened.step(f"Emptying {target}"):
-                    produced = _wipe_one(
-                        target, resolved, store=store, dry_run=dry_run, session=opened
-                    )
-                reports.extend(produced)
-                items.append(
-                    WipeItemResult(
-                        target=str(target),
-                        outcome=EMPTIED,
-                        is_catalogue=plan.is_catalogue(target),
-                        counts=_counts(produced),
-                        reports=produced,
-                    )
-                )
-
-            unbound = None
+            if dry_run:
+                items, reports = _enumerate(plan, resolved, session=opened)
+                unbound = None
+            else:
+                items, reports, unbound = _execute(plan, resolved, session=opened)
             if plan.catalogue_action == UNBIND and plan.unbound:
-                if not dry_run:
-                    with opened.step("Unbind catalogue claims"):
-                        unbound = _unbind_physical_targets(
-                            resolved,
-                            tuple(WipeTarget.parse(value) for value in plan.unbound),
-                            session=opened,
-                        )
                 items.append(
                     WipeItemResult(
                         target=plan.catalogue,
@@ -513,7 +489,6 @@ def wipe(
                         unbound=True,
                     )
                 )
-
             return WipeResult(
                 workspace=str(resolved.workspace),
                 items=tuple(items),
@@ -522,6 +497,125 @@ def wipe(
                 plan=plan,
                 dry_run=dry_run,
             )
+
+
+def _execute(plan: WipePlan, workspace, *, session):
+    """Run the plan's physical wipe as one MutationPlan and report each target."""
+
+    from ..wipe_plan import wipe_mutation_plan
+
+    unbound = None
+    statements = ()
+    if plan.catalogue_action == UNBIND and plan.unbound:
+        unbinding = _plan_unbind(plan, workspace, session=session)
+        unbound, statements = unbinding.to_mapping(), unbinding.statements
+    mutation, payloads = wipe_mutation_plan(plan, unbind_statements=statements)
+    with session.step("Emptying " + ", ".join(str(t) for t in plan.targets)):
+        report = session.execute_mutation(mutation, payloads)
+    outcomes = report.by_id
+    failed = [
+        f"{result.action_id}: {result.error or result.status}"
+        for result in report.results
+        if result.status != "succeeded"
+    ]
+    if failed:
+        raise CommandError("the wipe did not complete: " + "; ".join(failed))
+    items: list[WipeItemResult] = []
+    reports: list[WipeReport] = []
+    for target in plan.targets:
+        produced = _reports(target, mutation, outcomes)
+        reports.extend(produced)
+        items.append(
+            WipeItemResult(
+                target=str(target),
+                outcome=EMPTIED,
+                is_catalogue=plan.is_catalogue(target),
+                counts=_counts(produced),
+                reports=produced,
+            )
+        )
+    return items, reports, unbound
+
+
+def _reports(target, mutation, outcomes) -> tuple[WipeReport, ...]:
+    """Per-area reports in the shape the dry run gives, from action results."""
+
+    from ..build_bundle.executors.wipe import (
+        CLEAR_FILES,
+        CLEAR_TABLES,
+        DETACH_FILE_SHORTCUTS,
+        DETACH_TABLE_SHORTCUTS,
+    )
+
+    if target.item_type != LAKEHOUSE:
+        return (
+            WipeReport(
+                target=str(target),
+                location=Location(f"warehouse://{target.item.name}"),
+                removed=(),
+            ),
+        )
+    by_kind = {
+        action.kind: outcomes[action.id].value or {}
+        for _s, batch, action in mutation.actions()
+        if batch.target_id == f"lakehouse-{target.physical_name}"
+    }
+    return tuple(
+        WipeReport(
+            target=f"{area}:{target.item}",
+            location=Location(by_kind[clear]["location"]),
+            removed=tuple(by_kind[detach]["removed"])
+            + tuple(by_kind[clear]["removed"]),
+        )
+        for area, detach, clear in (
+            ("folder", DETACH_FILE_SHORTCUTS, CLEAR_FILES),
+            ("delta", DETACH_TABLE_SHORTCUTS, CLEAR_TABLES),
+        )
+    )
+
+
+def _enumerate(plan: WipePlan, workspace, *, session):
+    """What each target would lose, without changing anything."""
+
+    from ..physical_wipe import wipe_lakehouse
+
+    items: list[WipeItemResult] = []
+    reports: list[WipeReport] = []
+    storage = any(target.item_type == LAKEHOUSE for target in plan.targets)
+    store = session.store(workspace) if storage else None
+    for target in plan.targets:
+        if target.item_type == LAKEHOUSE:
+            produced = tuple(
+                WipeReport(
+                    target=report.target,
+                    location=report.location,
+                    removed=report.removed,
+                    dry_run=True,
+                )
+                for report in wipe_lakehouse(
+                    target.item, workspace, store=store, dry_run=True, session=session
+                )
+            )
+        else:
+            produced = (
+                WipeReport(
+                    target=str(target),
+                    location=Location(f"warehouse://{target.item.name}"),
+                    removed=(),
+                    dry_run=True,
+                ),
+            )
+        reports.extend(produced)
+        items.append(
+            WipeItemResult(
+                target=str(target),
+                outcome=EMPTIED,
+                is_catalogue=plan.is_catalogue(target),
+                counts=_counts(produced),
+                reports=produced,
+            )
+        )
+    return items, reports
 
 
 def _counts(reports: Sequence[WipeReport]) -> dict[str, int]:
@@ -543,58 +637,25 @@ def _counts(reports: Sequence[WipeReport]) -> dict[str, int]:
     return counted
 
 
-def _wipe_one(target: WipeTarget, workspace, *, store, dry_run, session):
-    from ..physical_wipe import wipe_lakehouse, wipe_sql_target
+def _plan_unbind(plan: WipePlan, workspace, *, session):
+    """Render the claim deletions for the unbound targets from the catalogue."""
 
-    if target.item_type == LAKEHOUSE:
-        low = wipe_lakehouse(
-            target.item, workspace, store=store, dry_run=dry_run, session=session
-        )
-        return tuple(
-            WipeReport(
-                target=report.target,
-                location=report.location,
-                removed=report.removed,
-                dry_run=dry_run,
-            )
-            for report in low
-        )
+    from ..catalogue.connection import catalogue_connection
+    from ..unbind import plan_unbind
 
-    report = WipeReport(
-        target=str(target),
-        location=Location(f"warehouse://{target.item.name}"),
-        removed=(),
-        dry_run=dry_run,
+    lakehouses, warehouses = _unbound_names(plan)
+    return plan_unbind(
+        catalogue_connection(session, workspace),
+        lakehouses=lakehouses,
+        warehouses=warehouses,
     )
-    if dry_run:
-        return (report,)
-    warehouse = WarehouseTarget(target.item)
-    wipe_sql_target(
-        warehouse, workspace, sql=session.sql_executor(warehouse, workspace=workspace)
-    )
-    return (report,)
 
 
-def _unbind_physical_targets(
-    workspace: Workspace, targets: Sequence[WipeTarget], *, session=None
-):
-    return unbind_catalogue_claims(
-        workspace,
-        lakehouses=sorted(
-            {
-                target.physical_name
-                for target in targets
-                if target.item_type == LAKEHOUSE
-            }
-        ),
-        warehouses=sorted(
-            {
-                target.physical_name
-                for target in targets
-                if target.item_type == WAREHOUSE
-            }
-        ),
-        session=session,
+def _unbound_names(plan: WipePlan):
+    targets = tuple(WipeTarget.parse(value) for value in plan.unbound)
+    return (
+        sorted({t.physical_name for t in targets if t.item_type == LAKEHOUSE}),
+        sorted({t.physical_name for t in targets if t.item_type == WAREHOUSE}),
     )
 
 

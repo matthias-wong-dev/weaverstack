@@ -8,7 +8,7 @@ from support.weaver_test import weaver_test
 from weaver.errors import CommandError
 from weaver.fabric.client import FabricError
 from weaver.fabric.resources import LAKEHOUSE, Item
-from weaver.fabric.shortcuts import ShortcutRequest, create_shortcuts, delete_shortcut
+from weaver.fabric.shortcuts import ShortcutRequest, delete_shortcut, submit_shortcuts
 
 BULK = (
     "workspaces/ws1/items/dest1/shortcuts/bulkCreate"
@@ -112,7 +112,7 @@ def test_shortcuts_are_overwritten_rather_than_created_strictly():
         ]
     )
 
-    result = create_shortcuts(
+    result = submit_shortcuts(
         _lakehouse("Curated", "dest1"),
         [
             _request("Landed", "Tables/Sales/Customer"),
@@ -150,8 +150,8 @@ def test_shortcuts_are_overwritten_rather_than_created_strictly():
             },
         ]
     }
-    assert result.calls == 1
-    assert [detail["path"] for detail in result.created] == [
+    assert result.waiting == ()
+    assert [result.created[i]["path"] for i in (0, 1)] == [
         "Tables/Sales/Landed",
         "Tables/Sales/Second",
     ]
@@ -172,7 +172,7 @@ def test_the_outcomes_are_read_from_the_operation_result():
         ]
     )
 
-    result = create_shortcuts(
+    result = submit_shortcuts(
         _lakehouse("Curated", "dest1"),
         [_request("Landed", "Tables/Sales/Customer")],
         client=client,
@@ -184,19 +184,15 @@ def test_the_outcomes_are_read_from_the_operation_result():
 
 
 @weaver_test()
-def test_a_source_published_a_moment_later_is_waited_for(monkeypatch):
+def test_a_source_still_being_published_is_returned_for_another_submission():
     """One build can create a thing and point at it.
 
     Fabric validates a shortcut's target, and a Warehouse publishes a table to
     OneLake shortly after creating it in its own catalogue, so the create can
-    arrive before there is anything to point at. Only the member that failed is
-    sent again: what succeeded is already made.
+    arrive before there is anything to point at. What succeeded is kept; the
+    member still waiting is returned for the caller to submit again.
     """
 
-    import weaver.fabric.shortcuts as shortcuts
-
-    slept: list[float] = []
-    monkeypatch.setattr(shortcuts.time, "sleep", slept.append)
     client = _Client(
         responses=[
             _Response(
@@ -205,12 +201,11 @@ def test_a_source_published_a_moment_later_is_waited_for(monkeypatch):
                     ("Tables/_", "Landed", None),
                     ("Tables/_", "Bookmark", MISSING),
                 ),
-            ),
-            _Response(200, body=_members(("Tables/_", "Bookmark", None))),
+            )
         ]
     )
 
-    result = create_shortcuts(
+    result = submit_shortcuts(
         _lakehouse("Curated", "dest1"),
         [
             _request("Landed", "Tables/Sales/Customer", path="Tables/_"),
@@ -219,39 +214,9 @@ def test_a_source_published_a_moment_later_is_waited_for(monkeypatch):
         client=client,
     )
 
-    assert slept == [shortcuts.SOURCE_POLL_INTERVAL]
-    assert result.calls == 2
-    # Only the member that failed is resent; the one that succeeded is not.
-    second = client.calls[1][2]["createShortcutRequests"]
-    assert [each["name"] for each in second] == ["Bookmark"]
-    # Both are reported, in the order they were requested.
-    assert [detail["path"] for detail in result.created] == [
-        "Tables/_/Landed",
-        "Tables/_/Bookmark",
-    ]
-
-
-@weaver_test()
-def test_a_source_that_never_appears_still_fails(monkeypatch):
-    """One deadline covers the batch, so an absent target fails and does not hang."""
-
-    import weaver.fabric.shortcuts as shortcuts
-
-    monkeypatch.setattr(shortcuts, "SOURCE_TIMEOUT", 0.0)
-    monkeypatch.setattr(shortcuts.time, "sleep", lambda _seconds: None)
-    client = _Client(
-        responses=[_Response(200, body=_members(("Tables/_", "Bookmark", MISSING)))]
-    )
-
-    with pytest.raises(CommandError) as raised:
-        create_shortcuts(
-            _lakehouse("Curated", "dest1"),
-            [_request("Bookmark", "Tables/_/Bookmark", path="Tables/_")],
-            client=client,
-        )
-
-    assert "Tables/_/Bookmark" in str(raised.value)
-    assert "did not appear in OneLake" in str(raised.value)
+    assert len(client.calls) == 1
+    assert result.created[0]["path"] == "Tables/_/Landed"
+    assert result.waiting == (1,)
 
 
 @weaver_test()
@@ -274,7 +239,7 @@ def test_an_occupied_path_is_reported_rather_than_retried():
     )
 
     with pytest.raises(CommandError) as raised:
-        create_shortcuts(
+        submit_shortcuts(
             _lakehouse("Curated", "dest1"),
             [_request("Landed", "Tables/Sales/Customer")],
             client=client,
@@ -309,7 +274,7 @@ def test_every_member_outcome_is_inspected():
     )
 
     with pytest.raises(CommandError) as raised:
-        create_shortcuts(
+        submit_shortcuts(
             _lakehouse("Curated", "dest1"),
             [
                 _request("Landed", "Tables/Sales/Customer"),
@@ -331,7 +296,7 @@ def test_a_member_fabric_reports_nothing_for_is_not_assumed_created():
     )
 
     with pytest.raises(CommandError) as raised:
-        create_shortcuts(
+        submit_shortcuts(
             _lakehouse("Curated", "dest1"),
             [
                 _request("Landed", "Tables/Sales/Customer"),
@@ -350,7 +315,7 @@ def test_a_refused_batch_names_what_it_could_not_create():
     client = _Client(responses=[FabricError("429: too many requests")])
 
     with pytest.raises(CommandError) as raised:
-        create_shortcuts(
+        submit_shortcuts(
             _lakehouse("Curated", "dest1"),
             [_request("Landed", "Tables/Sales/Customer")],
             client=client,
@@ -365,10 +330,10 @@ def test_an_empty_batch_sends_nothing():
 
     client = _Client()
 
-    result = create_shortcuts(_lakehouse("Curated", "dest1"), [], client=client)
+    result = submit_shortcuts(_lakehouse("Curated", "dest1"), [], client=client)
 
     assert client.calls == []
-    assert result.created == () and result.calls == 0
+    assert result.created == {} and result.waiting == ()
 
 
 @weaver_test()
@@ -398,3 +363,34 @@ def test_removing_an_absent_shortcut_is_the_intended_state_not_a_fault():
     )
 
     assert client.calls[0][0] == "DELETE"
+
+
+@weaver_test()
+def test_more_shortcuts_than_one_bulk_request_holds_are_sent_in_chunks():
+    """Fabric refuses a bulk request of more than 100 shortcuts."""
+
+    import threading
+
+    from weaver.fabric.shortcuts import submit_shortcuts
+
+    calls = []
+    lock = threading.Lock()
+
+    class Client:
+        def request(self, method, path, *, payload, expected):
+            members = payload["createShortcutRequests"]
+            with lock:
+                calls.append(len(members))
+            return _Response(
+                200,
+                body=_members(*((m["path"], m["name"], None) for m in members)),
+            )
+
+    requests = [_request(f"S{i:03d}", f"Tables/Sales/T{i:03d}") for i in range(250)]
+
+    result = submit_shortcuts(_lakehouse("Curated", "dest1"), requests, client=Client())
+
+    assert sorted(calls) == [50, 100, 100]
+    assert sorted(result.created) == list(range(250))
+    assert result.created[249]["path"] == "Tables/Sales/S249"
+    assert result.waiting == ()
