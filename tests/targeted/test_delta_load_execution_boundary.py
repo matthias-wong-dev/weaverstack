@@ -27,6 +27,7 @@ a tenant is what lets it be asserted on every commit.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
 import pytest
@@ -185,6 +186,13 @@ class _Spark:
         return _Frame(self, text)
 
     def answer(self, text: str):
+        if "AS violations" in text:
+            # Whether discovery would find anything, which is exactly whether
+            # this test configured rejects for it to find.
+            measures = re.findall(r" AS (\w+)", text)
+            return [
+                _Row({m: 0 for m in measures}, violations=self.counts.get("reject", 0))
+            ]
         if "GROUP BY `__weaver_operation`" in text:
             return [
                 _Row(op="I", n=self.counts.get("inserted", 0)),
@@ -422,20 +430,18 @@ def test_a_clean_load_creates_no_working_tables():
 
 @weaver_test()
 def test_every_phase_is_persisted_and_read_by_name():
-    """Staging, the rejects, and everything the load decided to do.
+    """Staging and everything the load decided to do.
 
-    Three relations where there were four: the delete set and the upsert set
+    Two relations where there were four: the delete set and the upsert set
     asked the target the same question, so they are one classification now, and
     the keys to remove are a projection of it rather than a phase of their own.
+    Staging that could not hold a reject is not searched for one, so there is no
+    reject relation either.
     """
 
     spark, _result = _load(BUSY)
 
-    assert [frame.role for frame in spark.persisted] == [
-        "staging",
-        "reject",
-        "change",
-    ]
+    assert [frame.role for frame in spark.persisted] == ["staging", "change"]
 
 
 @weaver_test()
@@ -533,7 +539,7 @@ def test_an_unkeyed_incremental_lakehouse_load_appends_with_generated_identity()
     assert result.rows_inserted == 2
     assert result.rows_updated == 0
     assert result.rows_deleted == 0
-    assert spark.counted == ["staging", "reject"]
+    assert spark.counted == ["staging"]
     assert len(spark.mutations) == 1
     written = spark.mutations[0]
     assert written.startswith("INSERT INTO `lh`.`DWG`.`Customer`")
@@ -686,9 +692,9 @@ def test_all_three_counts_come_from_one_pass():
     spark, result = _load(BUSY)
 
     assert (result.rows_inserted, result.rows_updated, result.rows_deleted) == (1, 1, 2)
-    # Staging and the rejects. The classification is not counted separately: the
-    # grouped pass is what materialises it.
-    assert spark.counted == ["staging", "reject"]
+    # Staging alone. The classification is not counted separately: the grouped
+    # pass is what materialises it.
+    assert spark.counted == ["staging"]
     grouped = [
         one for one in spark.statements if "GROUP BY `__weaver_operation`" in one
     ]
@@ -980,7 +986,7 @@ def test_an_incremental_load_with_no_claim_derives_no_delete_relation():
     spark, result = _load(dict(NO_OP, inserted=1), contract=_incremental())
 
     assert result.rows_deleted == 0
-    assert [frame.role for frame in spark.persisted] == ["staging", "reject", "change"]
+    assert [frame.role for frame in spark.persisted] == ["staging", "change"]
     assert not any("weaver_delete_" in one for one in spark.statements)
     assert not any("WHEN MATCHED THEN DELETE" in one for one in spark.mutations)
 
@@ -999,11 +1005,10 @@ def test_an_incremental_load_with_a_claim_settles_it_as_its_own_relation():
     assert result.rows_deleted == 2
     assert [frame.role for frame in spark.persisted] == [
         "staging",
-        "reject",
         "change",
         "delete",
     ]
-    assert spark.counted == ["staging", "reject", "delete"]
+    assert spark.counted == ["staging", "delete"]
     claim = next(
         one for one in spark.statements if one.startswith("SELECT t.`Customer")
     )
@@ -1351,3 +1356,24 @@ def test_a_tolerated_reject_is_not_a_refusal():
     assert not result.is_refusal
     assert result.rows_rejected == 1
     assert spark.mutations
+
+
+@weaver_test()
+def test_staging_that_cannot_hold_a_reject_is_not_searched_for_one():
+    """One aggregate settles it, where discovery ranks and persists a relation.
+
+    It asks every question discovery would answer: a blank key, a missing
+    required value, and a primary or unique key value held twice.
+    """
+
+    spark, result = _load(
+        BUSY,
+        contract=_incremental(unique_keys=(("Email",),), not_null_columns=("Email",)),
+    )
+
+    assert result.rows_rejected == 0
+    assert "reject" not in [frame.role for frame in spark.persisted]
+    check = next(one for one in spark.statements if "AS violations" in one)
+    assert "`Email` IS NULL" in check
+    assert "count(DISTINCT s.`Customer id`) AS duplicate_keys" in check
+    assert "count(DISTINCT s.`Email`) AS duplicate_unique_0" in check

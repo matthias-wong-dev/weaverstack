@@ -196,10 +196,12 @@ def _reconcile(
         columns if contract.appends_only else _comparison_columns(contract, columns)
     )
     signature = row_signature("s", signature_columns, types)
-    rejects, reject_view = _discover_rejects(
-        spark, held, names["target"], staging_view, contract, columns, signature
-    )
-    rows_rejected = rejects.count()
+    rows_rejected = 0
+    if _may_reject(spark, staging_view, contract):
+        rejects, reject_view = _discover_rejects(
+            spark, held, names["target"], staging_view, contract, columns, signature
+        )
+        rows_rejected = rejects.count()
     if rows_rejected:
         evidence["reject"] = reject_view
         # However this ends, it owes an explanation: it either stops here or loads
@@ -325,6 +327,32 @@ def _reconcile(
 
 
 # --- phases ------------------------------------------------------------------
+
+
+def _may_reject(spark, staging_view, contract: LoadContract) -> bool:
+    """Whether staging holds any row reject discovery could refuse.
+
+    False exactly when discovery would find nothing: no row violates a key or
+    a not-null column, and no primary or unique key value is held twice. One
+    aggregate answers it, where discovery ranks and persists a relation.
+    """
+
+    measures = [f"count_if({violation_predicate(contract)}) AS violations"]
+    if contract.primary_key:
+        # Counted as duplicates only once no key is blank, when every key counts.
+        measures.append(
+            f"count(*) - count(DISTINCT {qualified('s', contract.primary_key)}) "
+            "AS duplicate_keys"
+        )
+    measures += [
+        f"count_if({participates(unique_key)}) - "
+        f"count(DISTINCT {qualified('s', unique_key)}) AS duplicate_unique_{index}"
+        for index, unique_key in enumerate(contract.unique_keys)
+    ]
+    found = spark.sql(
+        f"SELECT {', '.join(measures)} FROM {staging_view} AS s"
+    ).collect()[0]
+    return any(int(found[measure.rsplit(" AS ", 1)[1]] or 0) for measure in measures)
 
 
 def _discover_rejects(
