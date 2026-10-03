@@ -16,12 +16,12 @@ def source_identity(reference: str) -> WeaverDocumentId:
         or any(not p or p != p.strip() for p in parts[-1].split("."))
     ):
         raise ConfigError(
-            f".source: expected a logical Table/View path, got {reference!r}"
+            f"Semantic source: expected a logical Table/View path, got {reference!r}"
         )
     if parts[0] == "Lakehouse" and len(parts) == 3:
         parts.insert(2, "Tables")
     try:
         identity = WeaverDocumentId.parse("/".join(parts))
     except WeaverError as exc:
-        raise ConfigError(f".source {reference!r}: {exc}") from exc
+        raise ConfigError(f"Semantic source {reference!r}: {exc}") from exc
     return identity

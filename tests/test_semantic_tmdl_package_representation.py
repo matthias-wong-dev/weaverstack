@@ -57,7 +57,7 @@ def test_unknown_tmdl_passes_through_as_original_definition_bytes(tmp_path):
 
 
 @weaver_test()
-def test_model_addon_changes_only_requested_property_and_local_wins(tmp_path):
+def test_model_extension_changes_only_requested_property_and_local_wins(tmp_path):
     folder, model = pbip_project(tmp_path)
     path = model / "definition/model.tmdl"
     original = path.read_bytes() + b"\n\tunknownFutureProperty: preserve-me\n"
@@ -67,19 +67,21 @@ def test_model_addon_changes_only_requested_property_and_local_wins(tmp_path):
         for p in model.rglob("*.tmdl")
         if p != path
     }
-    (folder.parent / "addon.yml").write_text(
-        "model:\n  culture: en-AU\n", encoding="utf-8"
+    (folder.parent / "extension.tmdl").write_text(
+        "model Model\n\tculture: en-AU\n", encoding="utf-8"
     )
-    (folder / "addon.yml").write_text("model:\n  culture: en-GB\n", encoding="utf-8")
+    (folder / "extension.tmdl").write_text(
+        "model Model\n\tculture: en-GB\n", encoding="utf-8"
+    )
     c = parse_item_repository(Location(tmp_path.as_posix())).semantic_models[ITEM]
     assert c.parts["definition/model.tmdl"] == original.replace(
         b"culture: en-US", b"culture: en-GB"
     )
     assert {p: c.parts[p] for p in untouched} == untouched
     assert c.requested == {"culture": "en-GB"}
-    assert c.provenance["/model/culture"]["source"] == str(ITEM) + "/addon.yml"
-    (folder.parent / "addon.yml").write_text(
-        "model:\n  culture: fr-FR\n", encoding="utf-8"
+    assert c.provenance["/model/culture"]["source"] == str(ITEM) + "/extension.tmdl"
+    (folder.parent / "extension.tmdl").write_text(
+        "model Model\n\tculture: fr-FR\n", encoding="utf-8"
     )
     assert (
         parse_item_repository(Location(tmp_path.as_posix()))
@@ -106,8 +108,8 @@ def test_column_patch_preserves_unknown_neighbours_and_expression_text(tmp_path)
         "\t\tunknownMeasureProperty: untouched\r\n"
     ).encode()
     path.write_bytes(original)
-    (folder / "addon.yml").write_text(
-        "tables:\n  Sales:\n    columns:\n      Product's ID:\n        isHidden: true\n",
+    (folder / "extension.tmdl").write_text(
+        "ref table Sales\n\tcolumn 'Product''s ID'\n\t\tisHidden: true\n",
         encoding="utf-8",
     )
     c = parse_item_repository(Location(tmp_path.as_posix())).semantic_models[ITEM]
@@ -124,7 +126,7 @@ def test_column_patch_preserves_unknown_neighbours_and_expression_text(tmp_path)
 
 @pytest.mark.parametrize("pbip", [False, True])
 @weaver_test()
-def test_dax_generates_owned_table_through_same_tmdl_package(tmp_path, pbip):
+def test_native_calculated_table_uses_the_same_tmdl_package(tmp_path, pbip):
     if pbip:
         folder, model = pbip_project(tmp_path)
         before = {
@@ -136,8 +138,8 @@ def test_dax_generates_owned_table_through_same_tmdl_package(tmp_path, pbip):
         folder = tmp_path / str(ITEM)
         folder.mkdir(parents=True)
         before = {}
-    (folder / "addon.yml").write_text(
-        "tables:\n  _Measure:\n    description: Model measures\n    .dax: INFO.VIEW.MEASURES()\n",
+    (folder / "extension.tmdl").write_text(
+        "/// Model measures\ntable '_Measure'\n\tpartition '_Measure' = calculated\n\t\tsource = INFO.VIEW.MEASURES()\n",
         encoding="utf-8",
     )
     c = parse_item_repository(Location(tmp_path.as_posix())).semantic_models[ITEM]
@@ -156,7 +158,7 @@ def test_dax_generates_owned_table_through_same_tmdl_package(tmp_path, pbip):
         c.provenance["/model/tables/_Measure/partitions/_Measure/source/expression"][
             "reason"
         ]
-        == ".dax"
+        == "extension"
     )
 
 
@@ -223,8 +225,8 @@ def test_public_build_sends_opaque_tmdl_and_projects_only_observed_tmsl(tmp_path
 
 
 @weaver_test()
-def test_source_binding_edits_only_its_partition_and_retains_mode(tmp_path):
-    from weaver.semantic_models.binding import bind_semantic_sources
+def test_shared_source_binding_preserves_partition_bytes_and_mode(tmp_path):
+    from weaver.semantic_models.expressions import bind_expression_sources
 
     folder, model = pbip_project(tmp_path)
     sales_path = model / "definition/tables/Sales.tmdl"
@@ -233,39 +235,40 @@ def test_source_binding_edits_only_its_partition_and_retains_mode(tmp_path):
         "\tcolumn ProductId\n\t\tdataType: int64\n\t\tsourceColumn: Id\n"
         "\t\tunknownColumnProperty: untouched\n"
         "\tpartition Sales = m\n\t\tmode: directQuery\n"
-        '\t\tsource = Sql.Database("old-server", "old-database"){[Schema="Old", Item="Sales"]}[Data]\n'
+        '\t\tsource = #"Warehouse/Serving"{[Schema="Cake", Item="Sales"]}[Data]\n'
         "\tmeasure Revenue = SUM(Sales[Amount])\n\t\tunknownMeasureProperty: untouched\n"
     ).encode()
     sales_path.write_bytes(original)
-    (folder / "addon.yml").write_text(
-        "tables:\n  Sales:\n    .source: Warehouse/Serving/Cake.Sales\n",
-        encoding="utf-8",
+    (model / "definition/expressions.tmdl").write_text(
+        'expression \'Warehouse/Serving\' = Sql.Database("old-server", "old-database")\n'
     )
     repository = parse_item_repository(Location(tmp_path.as_posix()))
     before = dict(repository.semantic_models[ITEM].parts)
     observation = {
-        "reference": "Warehouse/Serving/Cake.Sales",
         "server": "new-server",
         "database": "new-database",
-        "schema": "Cake",
-        "object": "Sales",
-        "source_columns": [],
+        "connector": "sql",
+        "relations": [
+            {
+                "schema": "Cake",
+                "object": "Sales",
+                "reference": "Warehouse/Serving/Cake.Sales",
+                "object_type": "table",
+            }
+        ],
     }
-    bound = bind_semantic_sources(
-        repository, {observation["reference"]: observation}, [ITEM]
+    bound = bind_expression_sources(
+        repository, {str(ITEM): {"Warehouse/Serving": observation}}
     ).semantic_models[ITEM]
-    after = bound.parts["definition/tables/Sales.tmdl"]
-    prefix, tail = original.split(b"\tpartition", 1)
-    measure = b"\tmeasure" + original.split(b"\tmeasure", 1)[1]
-    assert after.startswith(prefix) and after.endswith(measure)
-    assert b"mode: directQuery" in after
-    assert (
-        b'Sql.Database("new-server", "new-database"){[Schema="Cake", Item="Sales"]}[Data]'
-        in after
-    )
+    assert bound.parts["definition/tables/Sales.tmdl"] == original
     assert {
-        p: v for p, v in bound.parts.items() if p != "definition/tables/Sales.tmdl"
-    } == {p: v for p, v in before.items() if p != "definition/tables/Sales.tmdl"}
+        p: v for p, v in bound.parts.items() if p != "definition/expressions.tmdl"
+    } == {p: v for p, v in before.items() if p != "definition/expressions.tmdl"}
+    assert (
+        b'Sql.Database("new-server", "new-database")'
+        in bound.parts["definition/expressions.tmdl"]
+    )
     assert sales_path.read_bytes() == original
     assert bound.source_bindings["Sales"]["mode"] == "directQuery"
+    assert bound.source_bindings["Sales"]["reference"] == "Warehouse/Serving/Cake.Sales"
     assert bound.signature != repository.semantic_models[ITEM].signature

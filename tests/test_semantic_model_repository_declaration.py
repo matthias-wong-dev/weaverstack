@@ -28,14 +28,14 @@ def test_semantic_repository_retains_sources_effective_model_and_property_origin
     item_path.mkdir(parents=True)
     if pbip:
         shutil.copytree(FIXTURE, item_path, dirs_exist_ok=True)
-    org = root / "SemanticModel" / "addon.yml"
+    org = root / "SemanticModel" / "extension.tmdl"
     org.write_text(
-        "model:\n  culture: en-AU\n  discourageImplicitMeasures: true\n",
+        "model Model\n\tculture: en-AU\n\tdiscourageImplicitMeasures\n",
         encoding="utf-8",
     )
-    addon = item_path / "addon.yml"
+    addon = item_path / "extension.tmdl"
     addon.write_text(
-        'model:\n  culture: en-GB\ntables:\n  _Probe:\n    .dax: ROW("Value", 1)\n',
+        'model Model\n\tculture: en-GB\n\ntable _Probe\n\tpartition _Probe = calculated\n\t\tsource = ROW("Value", 1)\n',
         encoding="utf-8",
     )
     before = {
@@ -54,17 +54,17 @@ def test_semantic_repository_retains_sources_effective_model_and_property_origin
     assert semantic.sources == before
     assert (
         semantic.provenance["/model/culture"]["source"]
-        == "SemanticModel/Reporting/addon.yml"
+        == "SemanticModel/Reporting/extension.tmdl"
     )
     assert (
         semantic.provenance["/model/discourageImplicitMeasures"]["source"]
-        == "SemanticModel/addon.yml"
+        == "SemanticModel/extension.tmdl"
     )
     assert (
         semantic.provenance["/model/tables/_Probe/partitions/_Probe/source/expression"][
             "reason"
         ]
-        == ".dax"
+        == "extension"
     )
     model = repository[str(item)]
     assert not model.schemas and not model.documents and not model.programmables
@@ -78,7 +78,7 @@ def test_semantic_repository_retains_sources_effective_model_and_property_origin
     original_signature = semantic.signature
     # Local policy masks the organisation's culture change.
     org.write_text(
-        "model:\n  culture: fr-FR\n  discourageImplicitMeasures: true\n",
+        "model Model\n\tculture: fr-FR\n\tdiscourageImplicitMeasures\n",
         encoding="utf-8",
     )
     changed = parse_item_repository(Location(root.as_posix()))
@@ -124,16 +124,13 @@ def test_semantic_targets_are_typed_through_configuration_and_build_bindings():
 @pytest.mark.parametrize(
     "path, content",
     [
-        ("addon.yml", "tables:\n  Example:\n    .unknown: Warehouse/Sales/Dim.Date\n"),
-        ("addon.yml", ".rules: []\n"),
-        (
-            "addon.yml",
-            "tables:\n  Example:\n    partitions:\n      Example:\n        source:\n          type: calculated\n          misspelledExpression: 1\n",
-        ),
+        ("extension.tmdl", "ref table Missing\n"),
+        ("extension.tmdl", "model Model\n    culture: en-US\n    culture: en-AU\n"),
+        ("extension.tmdl", "model Model\n   culture: en-US\n"),
         ("Tables/Dim__Date.py", "invalid authored table"),
         ("Dim__Date.sql", "select 1"),
         ("tests/RowCount.dax", 'EVALUATE ROW("Count", 1)'),
-        ("addon.yml", "model:\n  culture: en-US\n  culture: en-AU\n"),
+        ("addon.yml", "model: {}\n"),
     ],
 )
 def test_unsupported_semantic_sources_fail_with_source_location(
@@ -143,7 +140,7 @@ def test_unsupported_semantic_sources_fail_with_source_location(
 
     folder = tmp_path / "SemanticModel/Reporting"
     folder.mkdir(parents=True)
-    (folder / "addon.yml").write_text("model: {}\n", encoding="utf-8")
+    (folder / "extension.tmdl").write_text("model Model\n", encoding="utf-8")
     authored = folder / path
     authored.parent.mkdir(parents=True, exist_ok=True)
     authored.write_text(content, encoding="utf-8")

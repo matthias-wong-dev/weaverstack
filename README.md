@@ -34,15 +34,22 @@ CLI sign-in and does not open a browser.
 ## Semantic model Build
 
 A semantic item lives under `SemanticModel/<logical-name>/`. A normal PBIP
-works without an addon. Build deploys its TMDL definition parts and preserves
+works without an extension. Build deploys its TMDL definition parts and preserves
 untouched source bytes, including constructs Weaver does not edit.
 
-`addon.yml` applies surgical edits to a staged TMDL package. An addon-only model
-starts from an empty TMDL package and uses the same compiler.
-`SemanticModel/addon.yml` applies first; the item addon overrides it. Named native
-collections merge by name, and ordinary lists replace the previous list.
+`extension.tmdl` contains optional partial native TMDL declarations.
+`SemanticModel/extension.tmdl` applies first, followed by
+`SemanticModel/<logical-name>/extension.tmdl`. More local values win. Object
+identity is its parent path, type and name. Supplied properties replace their
+previous values; omitted properties and unrelated source bytes remain unchanged.
+Named children merge recursively. A supplied expression replaces its full body.
+A `ref` declaration requires an existing object and reports its source line if
+that object is missing.
 
-For a new addon-only model in an existing workspace:
+An extension-only model starts from a minimal TMDL package and uses the same
+compiler. Its source folder needs only `extension.tmdl`.
+
+For a new extension-only model in an existing workspace:
 
 ```bash
 weaver initialise \
@@ -60,15 +67,14 @@ Build updates an existing item; it never creates one. A different physical name
 can be selected with
 `--item SemanticModel/Reporting=SemanticModel/Reporting_Dev`.
 
-Edit `reporting/SemanticModel/Reporting/addon.yml` to define calculated content:
+Edit `reporting/SemanticModel/Reporting/extension.tmdl` to define calculated content:
 
-```yaml
-tables:
-  Calendar:
-    .dax: CALENDAR(DATE(2026, 1, 1), DATE(2026, 12, 31))
-    measures:
-      Days:
-        expression: COUNTROWS(Calendar)
+```tmdl
+table Calendar
+    partition Calendar = calculated
+        source = CALENDAR(DATE(2026, 1, 1), DATE(2026, 12, 31))
+
+    measure Days = COUNTROWS(Calendar)
 ```
 
 The same Build is available from Python:
@@ -103,9 +109,10 @@ options override them. SQL sources use the resolved SQL endpoint. Native
 `Lakehouse.Contents` expressions use workspace and Lakehouse IDs. Ordinary
 expressions with no mapping remain unchanged.
 
-For addon-authored tables, `.source: Warehouse/Serving/Cake.Sales` owns the table's
-source fragment. Observable managed sources publish table-level dependencies
-for installed Load ordering.
+Observable shared-expression navigation publishes exact managed Table/View
+and consuming-table dependencies for installed Load ordering. Unknown M
+navigation remains unknown. Source mapping preserves authored columns,
+descriptions, partitions and storage modes.
 
 ### Load and connections
 
@@ -127,11 +134,16 @@ error and identify connection-owner action where applicable. A standalone
 it is not implemented here. Shared connections and gateways remain outside
 semantic-item ownership.
 
-Live qualification uses a service principal. Delegated-user Azure CLI/browser
-access remains a separate user check. Rules, relationship shorthand, semantic
-DAX Test/TestStatus/Health and broader addon editing remain follow-up work.
-Unsupported requested addon keys fail with source diagnostics; untouched native
-TMDL passes through to Fabric.
+Native PBIP deployment supports more TMDL than extension editing. Complete new,
+non-colliding native objects can be added without a Python schema for their type.
+An extension targeting an existing object type that Weaver cannot safely patch
+fails with a source-located diagnostic. Fabric acceptance and TMSL readback
+certify opaque new objects; known requested changes receive value checks.
+
+The former `addon.yml`, `.dax` and `.source` authoring syntax is removed.
+`Weaver.*` annotation transformations, semantic wipe and DAX Test/TestStatus/Health
+are separate follow-ups. Native TMDL expresses relationships and calculated tables.
+Delegated-user Azure CLI/browser access remains a separate user validation.
 
 ## Documentation
 

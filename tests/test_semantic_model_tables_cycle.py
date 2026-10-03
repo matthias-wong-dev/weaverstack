@@ -25,11 +25,8 @@ def test_typed_semantic_rows_keep_descriptions_native_metadata_and_claim_ownersh
     tmp_path,
 ):
     root, _, bindings, _, _ = prepared(tmp_path, True)
-    (root / str(ITEM) / "addon.yml").write_text(
-        "model:\n  description: Sales model\n"
-        "tables:\n  Sales:\n    description: Sales transactions\n"
-        "    columns:\n      ProductId:\n        description: Product identity\n"
-        "    measures:\n      Revenue:\n        description: Total revenue\n",
+    (root / str(ITEM) / "extension.tmdl").write_text(
+        "/// Sales model\nmodel Model\n\n/// Sales transactions\nref table Sales\n\t/// Product identity\n\tcolumn ProductId\n\n\t/// Total revenue\n\tmeasure Revenue\n",
         encoding="utf-8",
     )
     repository = parse_item_repository(Location(root.as_posix()))

@@ -176,10 +176,14 @@ MutationBindings and the physical drivers. A semantic-only Build starts no Spark
 `SemanticModel/Name` is the model-root document identity. Desired state is a
 TMDL definition-part package; observed state is Fabric-returned TMSL. Store source
 bytes, requested edits and provenance beside the package. `semantic_models.source`
-selects the PBIP or empty base; `patching` applies organisation then item addons.
-The source-span editor changes requested fragments and preserves unknown native
-content. Generated objects use `render`. Unsupported requested addon keys fail
-with source diagnostics. Ordinary PBIP deployment requires no full TMDL parser.
+selects the PBIP or empty base; `extensions` applies organisation then item
+`extension.tmdl`. The source-span editor changes addressed native fragments and
+preserves unrelated bytes. The hierarchy supplies object identity; missing refs,
+ambiguous targets and unsupported existing-object collisions fail with source
+locations. Complete new non-colliding native objects can pass without a bounded
+Python schema. `extension_expectations` projects known requested values for
+readback. Known generated objects use `render` and `patching`. Ordinary PBIP
+deployment requires no complete TMDL parser.
 Package paths/bytes and resolved source metadata determine the desired signature.
 
 `initialise` alone creates semantic items. Build binds the existing typed item
@@ -195,15 +199,15 @@ item without fetching its existing definition. There is no live partition
 comparison or retention step. Semantic DAX Tests and full semantic Health remain
 later feature work.
 
-Table `.source` names an existing logical Warehouse or Lakehouse Table/View.
-Session reads its typed physical identity, SQL endpoint and any missing column
-shape before Build planning. Selected sources can supply a declared schema;
-missing inferred shape requires explicit semantic columns or a prior source
-Build. Semantic deployment requires successful selected source Table/View actions
-and, for Lakehouse sources, the existing SQL endpoint refresh completion. New
-tables use Direct Lake on SQL. Authored SQL-navigation M partitions
-and Direct Lake entity partitions retain their storage mode and other properties
-when rebound. Unsupported M transformations fail with a source diagnostic.
+Shared M expressions identify optional logical Warehouse or Lakehouse sources.
+Session resolves the typed physical item and its connector metadata before pure
+Build planning. Observable table navigation joins managed source declarations
+or installed catalogue identities. Semantic deployment requires successful
+selected source Table/View actions and, for Lakehouse SQL sources, the existing
+SQL endpoint refresh completion. Authored partitions, storage modes, columns and
+descriptions remain unchanged by shared-expression substitution. Column generation
+and catalogue-description propagation belong to the separate Weaver.Source
+annotation feature. The former YAML .source and .dax directives are removed.
 Microsoft's [Direct Lake limits](https://learn.microsoft.com/en-us/fabric/fundamentals/direct-lake-overview#considerations-and-limitations)
 apply, including single-source and composite-model constraints for Direct Lake
 on SQL. Views use the native DirectQuery fallback; Weaver retains `directLake`.
@@ -222,7 +226,7 @@ with simple shared-M navigation can also publish observable managed edges.
 Unknown navigation contributes no guessed relation. Normal Load item/name
 selection still controls which producers run.
 
-Shared M environment mappings run after addons. Explicit `data_sources` values
+Shared M environment mappings run after native extensions. Explicit `data_sources` values
 from the API/CLI override workspace config; logical `Warehouse/Name` and
 `Lakehouse/Name` expressions can resolve from workspace targets. Only selected
 expressions are rewritten. SQL expressions resolve SQL endpoints; native

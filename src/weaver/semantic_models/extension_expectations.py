@@ -51,6 +51,8 @@ def requested_object(document, node, kind=None):
         result[default] = expression_text(document, node)
         if kind == "column":
             result["type"] = "calculated"
+        elif kind == "expression":
+            result["kind"] = "m"
     if kind == "partition" and node.value is not None:
         result["source"] = {"type": node.value}
     collections = {

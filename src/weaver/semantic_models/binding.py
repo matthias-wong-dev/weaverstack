@@ -54,7 +54,7 @@ def semantic_type(value, reference, column):
         if name in types:
             return native
     raise BuildError(
-        f".source {reference}: column {column!r} has unsupported type {value!r}. Author a supported source projection."
+        f"Semantic source {reference}: column {column!r} has unsupported type {value!r}. Author a supported source projection."
     )
 
 
@@ -77,7 +77,7 @@ def _rebind_m(expression, source, table):
     )
     if match is None:
         raise BuildError(
-            f"tables/{table}/.source: unsupported M source. Use a Sql.Database connection followed by one Schema/Item navigation without transforms."
+            f"tables/{table}/source: unsupported M source. Use a Sql.Database connection followed by one Schema/Item navigation without transforms."
         )
     for key in sorted(
         ("server", "database", "schema", "object"),
@@ -95,7 +95,7 @@ def _bind_partition(model, table, source):
     if partitions:
         if len(partitions) != 1:
             raise BuildError(
-                f"tables/{table['name']}/.source: rebinding multiple partitions is unsupported"
+                f"tables/{table['name']}/source: rebinding multiple partitions is unsupported"
             )
         partition = partitions[0]
         mode = partition.get("mode", model.get("defaultMode", "import"))
@@ -111,7 +111,7 @@ def _bind_partition(model, table, source):
             return mode
         if native_source.get("type") != "entity" or mode != "directLake":
             raise BuildError(
-                f"tables/{table['name']}/.source: unsupported authored partition form"
+                f"tables/{table['name']}/source: unsupported authored partition form"
             )
         original = next(
             (
@@ -126,7 +126,7 @@ def _bind_partition(model, table, source):
         )
         if original.get("kind") != "m" or match is None:
             raise BuildError(
-                f"tables/{table['name']}/.source: unsupported Direct Lake expression. Use a shared Sql.Database expression for SQL endpoint rebinding."
+                f"tables/{table['name']}/source: unsupported Direct Lake expression. Use a shared Sql.Database expression for SQL endpoint rebinding."
             )
         expression = copy.deepcopy(original)
         for key in ("database", "server"):
@@ -140,7 +140,7 @@ def _bind_partition(model, table, source):
     expressions = model.setdefault("expressions", [])
     if any(e["name"].casefold() == expression_name.casefold() for e in expressions):
         raise BuildError(
-            f"tables/{table['name']}/.source: expression {expression_name!r} already exists"
+            f"tables/{table['name']}/source: expression {expression_name!r} already exists"
         )
     expression = expression or {
         "name": expression_name,
@@ -206,7 +206,7 @@ def bind_semantic_sources(repository, observed, selected):
             before_context = copy.deepcopy(context)
             if reference not in observed:
                 raise BuildError(
-                    f".source {reference}: source metadata was not read before Build planning"
+                    f"Semantic source {reference}: source metadata was not read before Build planning"
                 )
             source = copy.deepcopy(observed[reference])
             before = leaf_properties({"model": {"tables": [table]}})
@@ -238,7 +238,7 @@ def bind_semantic_sources(repository, observed, selected):
             source["access"] = "sql"
             bindings[table["name"]] = source
             origin = contribution.provenance.get(
-                f"/model/tables/{escape(table['name'])}/.source", {"source": reference}
+                f"/model/tables/{escape(table['name'])}/source", {"source": reference}
             )
             for path, value in leaf_properties({"model": {"tables": [table]}}).items():
                 if path not in before or before[path] != value:

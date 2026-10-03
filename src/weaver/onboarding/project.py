@@ -93,16 +93,18 @@ def project_files(request: ProjectRequest) -> dict[str, str]:
     if request.warehouse and not request.example:
         files[f"{WAREHOUSE}/{request.warehouse}/{KEEP_FILE}"] = ""
     if request.semantic_model:
-        files[f"{SEMANTIC_MODEL}/{request.semantic_model}/addon.yml"] = semantic_addon()
+        files[f"{SEMANTIC_MODEL}/{request.semantic_model}/extension.tmdl"] = (
+            semantic_extension()
+        )
     return files
 
 
-def semantic_addon():
+def semantic_extension():
     from importlib.resources import files
 
     return (
         files("weaver")
-        .joinpath("fragments/semantic-addon.yml")
+        .joinpath("fragments/semantic-extension.tmdl")
         .read_text(encoding="utf-8")
     )
 

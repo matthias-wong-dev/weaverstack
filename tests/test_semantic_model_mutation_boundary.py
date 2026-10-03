@@ -118,8 +118,8 @@ def test_shared_executor_blocks_certification_without_stopping_independent_model
     for name in ("Broken", "Other"):
         folder = root / "SemanticModel" / name
         folder.mkdir(parents=True)
-        (folder / "addon.yml").write_text(
-            "model:\n  description: Published\n", encoding="utf-8"
+        (folder / "extension.tmdl").write_text(
+            "/// Published\nmodel Model\n", encoding="utf-8"
         )
     broken, other = SubmittedDefinition(), SubmittedDefinition()
     if failure == "update":
@@ -322,9 +322,8 @@ def test_lakehouse_source_requires_object_success_and_endpoint_readiness(
     )
     model = root / str(ITEM)
     model.mkdir(parents=True)
-    (model / "addon.yml").write_text(
-        "tables:\n  Sales:\n    .source: Lakehouse/Serving/Cake.Sales\n"
-        "    columns:\n      Id:\n        dataType: int64\n        sourceColumn: Id\n",
+    (model / "extension.tmdl").write_text(
+        "expression 'Lakehouse/Serving' = Sql.Database(\"previous\", \"database\")\n\ntable Sales\n\tcolumn Id\n\t\tdataType: int64\n\t\tsourceColumn: Id\n\tpartition Sales = entity\n\t\tmode: directLake\n\t\tsource\n\t\t\tschemaName: Cake\n\t\t\tentityName: Sales\n\t\t\texpressionSource: 'Lakehouse/Serving'\n",
         encoding="utf-8",
     )
     workspace = Workspace(workspace="Demo", catalogue="Warehouse/Catalogue")

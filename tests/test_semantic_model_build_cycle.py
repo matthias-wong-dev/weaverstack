@@ -45,8 +45,9 @@ def project(tmp_path, pbip):
             folder,
             dirs_exist_ok=True,
         )
-    (folder / "addon.yml").write_text(
-        'tables:\n  Calendar:\n    .dax: ROW("Year", 2026)\n', encoding="utf-8"
+    (folder / "extension.tmdl").write_text(
+        'table Calendar\n\tpartition Calendar = calculated\n\t\tsource = ROW("Year", 2026)\n',
+        encoding="utf-8",
     )
     return folder.parent.parent
 
@@ -244,7 +245,7 @@ def test_failed_deployment_or_readback_cannot_certify_changed_model(tmp_path, fa
     installed = installed_state(
         repository, bindings, deployed, observed.target_inventories
     )
-    path = root / str(ITEM) / "addon.yml"
+    path = root / str(ITEM) / "extension.tmdl"
     path.write_text(path.read_text().replace("2026", "2027"), encoding="utf-8")
     changed = parse_item_repository(Location(root.as_posix()))
     bundle = bundle_for(tmp_path, changed, bindings, installed, "changed")
@@ -322,11 +323,11 @@ def test_policy_change_selects_only_effectively_changed_models(tmp_path, policy)
         {item: {**dict(desired.rows[item]), **rows[item]} for item in rows}
     )
     if policy == "item":
-        addon = root / str(ITEM) / "addon.yml"
+        addon = root / str(ITEM) / "extension.tmdl"
         addon.write_text(addon.read_text().replace("2026", "2027"), encoding="utf-8")
     else:
-        (root / "SemanticModel" / "addon.yml").write_text(
-            "model:\n  description: Shared description\n", encoding="utf-8"
+        (root / "SemanticModel" / "extension.tmdl").write_text(
+            "/// Shared description\nmodel Model\n", encoding="utf-8"
         )
     changed = parse_item_repository(Location(root.as_posix()))
     result = bundle_for(
@@ -373,8 +374,8 @@ def test_organisation_policy_only_selects_effectively_changed_models(tmp_path):
     root, repository, bindings, session, _ = prepared(tmp_path)
     other = root / "SemanticModel/Other"
     other.mkdir()
-    (other / "addon.yml").write_text(
-        'model:\n  description: Local policy\ntables:\n  Constant:\n    .dax: ROW("Value", 1)\n',
+    (other / "extension.tmdl").write_text(
+        '/// Local policy\nmodel Model\n\ntable Constant\n\tpartition Constant = calculated\n\t\tsource = ROW("Value", 1)\n',
         encoding="utf-8",
     )
     repository = parse_item_repository(Location(root.as_posix()))
@@ -387,8 +388,8 @@ def test_organisation_policy_only_selects_effectively_changed_models(tmp_path):
         i: TargetInventory(str(i), "semanticmodel", i.item_name)
         for i, c in repository.semantic_models.items()
     }
-    (root / "SemanticModel/addon.yml").write_text(
-        "model:\n  description: Organisation policy\n", encoding="utf-8"
+    (root / "SemanticModel/extension.tmdl").write_text(
+        "/// Organisation policy\nmodel Model\n", encoding="utf-8"
     )
     changed = parse_item_repository(Location(root.as_posix()))
     selection = select_build(
@@ -510,7 +511,7 @@ def test_public_build_bootstraps_catalogue_and_reaches_fixed_point(tmp_path, pbi
         for identity in second.selection.selected_for_build
     )
 
-    addon = root / str(ITEM) / "addon.yml"
+    addon = root / str(ITEM) / "extension.tmdl"
     addon.write_text(addon.read_text().replace("2026", "2027"), encoding="utf-8")
     changed = parse_item_repository(Location(root.as_posix()))
     semantic.definition = encode_definition(engine_model(changed, year=2027))

@@ -33,7 +33,7 @@ def read_semantic_sources(repository, bindings, catalogue, *, session, workspace
             kind = registered.object_type
         else:
             raise BuildError(
-                f".source {reference}: no managed Table or View. Build the source or correct the path."
+                f"Semantic source {reference}: no managed Table or View. Build the source or correct the path."
             )
         installed = catalogue.rows.get(identity.item, {}).get("Installation", ())
         if bound is not None:
@@ -44,11 +44,11 @@ def read_semantic_sources(repository, bindings, catalogue, *, session, workspace
                 configured = physical_item(workspace.target_for(identity.item)).name
                 if configured != target_name:
                     raise BuildError(
-                        f".source {reference}: configured target {configured!r} is not the installed target {target_name!r}. Build {identity.item} first."
+                        f"Semantic source {reference}: configured target {configured!r} is not the installed target {target_name!r}. Build {identity.item} first."
                     )
         else:
             raise BuildError(
-                f".source {reference}: no installed target. Build {identity.item} first."
+                f"Semantic source {reference}: no installed target. Build {identity.item} first."
             )
         schema, name = catalogue_columns(identity)
         source_tables = catalogue.rows.get(identity.item, {})
@@ -82,7 +82,7 @@ def read_semantic_sources(repository, bindings, catalogue, *, session, workspace
         # A selected inferred source may only acquire its shape during installation.
         if needs_columns and not columns and bound is not None and authored is not None:
             raise BuildError(
-                f".source {reference}: source shape is unavailable before installation. Declare its schema or author semantic columns with dataType and sourceColumn."
+                f"Semantic source {reference}: source shape is unavailable before installation. Declare its schema or author semantic columns with dataType and sourceColumn."
             )
         metadata = session.semantic_source(
             target_name,
@@ -96,7 +96,7 @@ def read_semantic_sources(repository, bindings, catalogue, *, session, workspace
             columns = columns or metadata.get("source_columns", [])
             if not columns:
                 raise BuildError(
-                    f".source {reference}: no source columns are available. Declare its schema or author semantic columns with dataType and sourceColumn."
+                    f"Semantic source {reference}: no source columns are available. Declare its schema or author semantic columns with dataType and sourceColumn."
                 )
         observed[reference] = {
             **metadata,

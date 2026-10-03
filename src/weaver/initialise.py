@@ -482,18 +482,21 @@ def _create_missing(
         try:
             with session.step(f"Creating the {wanted.role}", wanted.name):
                 if wanted.item_type == SEMANTIC_MODEL:
-                    import yaml
-
                     from .fabric.resources import create_semantic_model
-                    from .onboarding.project import semantic_addon
+                    from .onboarding.project import semantic_extension
                     from .semantic_models.definition import encode_parts
-                    from .semantic_models.patching import apply_addons
+                    from .semantic_models.extensions import apply_extensions
                     from .semantic_models.source import SemanticContribution
 
-                    seed = apply_addons(
+                    seed = apply_extensions(
                         SemanticContribution({}, {}, {}),
                         wanted.name,
-                        ((yaml.safe_load(semantic_addon()), "initialise addon"),),
+                        (
+                            (
+                                semantic_extension().encode("utf-8"),
+                                "initialise extension.tmdl",
+                            ),
+                        ),
                     )
                     definition = encode_parts(seed.parts)
                     create_semantic_model(

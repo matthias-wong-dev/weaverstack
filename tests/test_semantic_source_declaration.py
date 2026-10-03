@@ -1,4 +1,4 @@
-"""Logical semantic sources retain exact Weaver relation identities."""
+"""Shared native sources acquire managed lineage during environment resolution."""
 
 from support.weaver_test import weaver_test
 
@@ -8,31 +8,48 @@ from weaver.locations import Location
 
 
 @weaver_test()
-def test_source_directives_are_separate_from_native_properties(tmp_path):
+def test_shared_source_declarations_remain_native_until_environment_resolution(
+    tmp_path,
+):
     folder = tmp_path / "SemanticModel/Reporting"
     folder.mkdir(parents=True)
-    (folder / "addon.yml").write_text(
-        "tables:\n"
-        "  Sales:\n"
-        "    .source: Warehouse/Serving/Cake.Sales\n"
-        "    description: Sales facts\n"
-        "  Customer:\n"
-        "    .source: Lakehouse/Curated/Cake.Customer\n"
-        "  OtherCustomer:\n"
-        "    .source: Lakehouse/Curated/Tables/Cake.Customer\n",
-        encoding="utf-8",
-    )
+    content = """expression 'Warehouse/Serving' = Sql.Database("server", "database")
+
+expression 'Lakehouse/Curated' = Sql.Database("server", "database")
+
+/// Sales facts
+table Sales
+    partition Sales = entity
+        mode: directLake
+        source
+            schemaName: Cake
+            entityName: Sales
+            expressionSource: 'Warehouse/Serving'
+
+table Customer
+    partition Customer = entity
+        mode: directLake
+        source
+            schemaName: Cake
+            entityName: Customer
+            expressionSource: 'Lakehouse/Curated'
+"""
+    (folder / "extension.tmdl").write_text(content, encoding="utf-8")
     repository = parse_item_repository(Location(tmp_path.as_posix()))
     contribution = repository.semantic_models[
         WeaverItemId.parse("SemanticModel/Reporting")
     ]
-    assert contribution.source_references == {
-        "Sales": "Warehouse/Serving/Cake.Sales",
-        "Customer": "Lakehouse/Curated/Tables/Cake.Customer",
-        "OtherCustomer": "Lakehouse/Curated/Tables/Cake.Customer",
-    }
-    assert contribution.requested["tables"] == [
-        {"name": "Sales", "description": "Sales facts"},
-        {"name": "Customer"},
-        {"name": "OtherCustomer"},
-    ]
+    assert contribution.source_references == {}
+    assert contribution.source_bindings == {}
+    assert contribution.dependencies == ()
+    tables = {t["name"]: t for t in contribution.requested["tables"]}
+    assert tables["Sales"]["description"] == "Sales facts"
+    assert (
+        tables["Sales"]["partitions"][0]["source"]["expressionSource"]
+        == "Warehouse/Serving"
+    )
+    assert (
+        tables["Customer"]["partitions"][0]["source"]["expressionSource"]
+        == "Lakehouse/Curated"
+    )
+    assert (folder / "extension.tmdl").read_text(encoding="utf-8") == content
