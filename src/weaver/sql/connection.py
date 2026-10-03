@@ -12,6 +12,11 @@ from .errors import SqlConnectionError
 DEFAULT_SQL_PORT = 1433
 DEFAULT_CONNECT_TIMEOUT = 60
 
+#: ODBC's ``SQL_ATTR_LOGIN_TIMEOUT``. ``mssql-python``'s own ``timeout``
+#: argument is the query timeout of every cursor, so the login timeout is set as
+#: a connection attribute and statements run without a client deadline.
+SQL_ATTR_LOGIN_TIMEOUT = 103
+
 #: How many times opening a connection is attempted, and how long to wait between
 #: attempts. A Fabric SQL endpoint refuses a connection while it is scaling, and
 #: nothing has been sent yet when it does, so opening again is safe.
@@ -87,11 +92,13 @@ def connect(
 
     for attempt in range(1, CONNECT_ATTEMPTS + 1):
         try:
+            arguments = dict(authentication.connection_arguments())
+            arguments["attrs_before"] = {
+                **arguments.get("attrs_before", {}),
+                SQL_ATTR_LOGIN_TIMEOUT: timeout,
+            }
             return connector(
-                build_connection_string(endpoint),
-                timeout=timeout,
-                autocommit=True,
-                **dict(authentication.connection_arguments()),
+                build_connection_string(endpoint), autocommit=True, **arguments
             )
         except SqlConnectionError:
             raise

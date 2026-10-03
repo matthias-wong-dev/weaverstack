@@ -39,10 +39,47 @@ def read_table(
             f"reading the first {top} rows of {table.qualified} needs an order"
         )
 
+    statement = table_query(
+        catalogue, table, scope=scope, predicate=predicate, order=order, top=top
+    )
+    if statement is None:
+        return ()
+    return tuple(_internal(table, row) for row in catalogue.rows(statement))
+
+
+def read_tables(catalogue: Any, tables: Sequence[CatalogueTable]) -> dict:
+    """Read whole tables together, by table name."""
+
+    statements = {table.name: table_query(catalogue, table) for table in tables}
+    present = [table for table in tables if statements[table.name] is not None]
+    wanted = [statements[table.name] for table in present]
+    row_sets = getattr(catalogue, "row_sets", None)
+    sets = (
+        row_sets(wanted)
+        if row_sets is not None
+        else [catalogue.rows(statement) for statement in wanted]
+    )
+    read = {table.name: () for table in tables}
+    for table, rows in zip(present, sets):
+        read[table.name] = tuple(_internal(table, row) for row in rows)
+    return read
+
+
+def table_query(
+    catalogue: Any,
+    table: CatalogueTable,
+    *,
+    scope: InstallationScope | InstallationScopes | None = None,
+    predicate: str | None = None,
+    order: Sequence[str] = (),
+    top: int | None = None,
+) -> str | None:
+    """The ``SELECT`` that reads ``table``, or ``None`` when it does not exist."""
+
     present = catalogue.columns_of(table)
     if present is None:
         # The build that first writes the catalogue also creates its tables.
-        return ()
+        return None
 
     projected = ", ".join(
         _projected_column(table, column, present) for column in table.columns
@@ -60,10 +97,7 @@ def read_table(
         else " ORDER BY "
         + ", ".join(identifier(table.public_name_of(name)) for name in order)
     )
-    rows = catalogue.rows(
-        f"SELECT {limit}{projected} FROM {qualified_name(table)}{where}{ordering}"
-    )
-    return tuple(_internal(table, row) for row in rows)
+    return f"SELECT {limit}{projected} FROM {qualified_name(table)}{where}{ordering}"
 
 
 def _projected_column(table: CatalogueTable, column, present: dict[str, str]) -> str:

@@ -157,8 +157,10 @@ def run_load(
         RunState,
         can_refresh,
         dispatch_primitive,
+        dispatch_python_many,
         open_run_record,
     )
+    from ..run.runner import Lanes
     from ..run.state import read_installed_catalogue
 
     started = datetime.now(timezone.utc)
@@ -238,6 +240,9 @@ def run_load(
             dispatch=dispatch_primitive,
             on_node=None if record is None else record.settled,
             before_node=None if record is None or not reload else _reset_before(record),
+            # Independent branches of a load run at once.
+            lanes=Lanes(),
+            dispatch_many=dispatch_python_many,
         )
 
     if record is not None:

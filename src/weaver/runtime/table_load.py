@@ -181,9 +181,9 @@ def _reconcile(
         names["target"],
         "staging",
     )
-    # Both the metric and the force that materialises staging for the phases after
-    # it, so the authored source is evaluated exactly once.
-    rows_read = staging.count()
+    # Both the metrics and the force that materialises staging for the phases
+    # after it, so the authored source is evaluated exactly once.
+    rows_read, may_reject = _measure_staging(spark, staging_view, contract)
     # Settled, so a failure from here on has something to leave behind. Recorded
     # as the raw proposal rather than as whatever supersedes it, because what
     # ``_Staging`` answers is what the source proposed.
@@ -196,10 +196,12 @@ def _reconcile(
         columns if contract.appends_only else _comparison_columns(contract, columns)
     )
     signature = row_signature("s", signature_columns, types)
-    rejects, reject_view = _discover_rejects(
-        spark, held, names["target"], staging_view, contract, columns, signature
-    )
-    rows_rejected = rejects.count()
+    rows_rejected = 0
+    if may_reject:
+        rejects, reject_view = _discover_rejects(
+            spark, held, names["target"], staging_view, contract, columns, signature
+        )
+        rows_rejected = rejects.count()
     if rows_rejected:
         evidence["reject"] = reject_view
         # However this ends, it owes an explanation: it either stops here or loads
@@ -229,6 +231,21 @@ def _reconcile(
             names,
             staging_view,
             columns,
+            rows_read=rows_read,
+            rows_inserted=rows_accepted,
+            rows_rejected=rows_rejected,
+        )
+        if rows_rejected:
+            return result.rejected(f"{rows_rejected} {TOLERATED_MESSAGE}")
+        return result
+
+    if _holds_no_files(spark, names["target"]):
+        result = _into_empty(
+            spark,
+            names,
+            staging_view,
+            columns,
+            signature,
             rows_read=rows_read,
             rows_inserted=rows_accepted,
             rows_rejected=rows_rejected,
@@ -300,12 +317,19 @@ def _reconcile(
             raise LoadError(f"{contract.qualified}: {breach}", result=refused)
         return refused
 
-    # Nothing is submitted for a phase that decided on no rows: a zero-row merge
+    # Nothing is submitted when the load decided on no rows: a zero-row merge
     # is a Delta commit and a scan for work that does not exist.
-    if deleted:
-        _apply_deletes(spark, names, delete_view, contract)
-    if inserted or updated:
-        _apply_changes(spark, names, change_view, contract, columns)
+    if inserted or updated or deleted:
+        _apply_changes(
+            spark,
+            names,
+            change_view,
+            contract,
+            columns,
+            # An incremental load's deletes are a claim beside the classification;
+            # a full load's are rows of it.
+            claimed=deleting if contract.incremental else None,
+        )
 
     result = LoadResult(
         succeeded=True,
@@ -325,6 +349,36 @@ def _reconcile(
 
 
 # --- phases ------------------------------------------------------------------
+
+
+def _measure_staging(spark, staging_view, contract: LoadContract) -> tuple[int, bool]:
+    """Count staging, and say whether reject discovery could refuse any of it.
+
+    Discovery could refuse nothing exactly when no row violates a key or a
+    not-null column and no primary or unique key value is held twice. One
+    aggregate answers both, where discovery ranks and persists a relation.
+    """
+
+    measures = ["count(*) AS staged"]
+    if not contract.replaces_wholesale:
+        measures.append(f"count_if({violation_predicate(contract)}) AS violations")
+        if contract.primary_key:
+            # Counted as duplicates only once no key is blank, when every key
+            # counts.
+            measures.append(
+                f"count(*) - count(DISTINCT {qualified('s', contract.primary_key)}) "
+                "AS duplicate_keys"
+            )
+        measures += [
+            f"count_if({participates(unique_key)}) - "
+            f"count(DISTINCT {qualified('s', unique_key)}) AS duplicate_unique_{index}"
+            for index, unique_key in enumerate(contract.unique_keys)
+        ]
+    found = spark.sql(
+        f"SELECT {', '.join(measures)} FROM {staging_view} AS s"
+    ).collect()[0]
+    names = [measure.rsplit(" AS ", 1)[1] for measure in measures]
+    return int(found["staged"]), any(int(found[name] or 0) for name in names[1:])
 
 
 def _discover_rejects(
@@ -622,18 +676,26 @@ def _settled_changes(
 
 
 def _incremental_changes(names, contract: LoadContract, columns) -> str:
-    """Classify writes without treating absence from an incremental window as deletion."""
+    """Classify writes without treating absence from an incremental window as deletion.
+
+    Only target rows whose key is proposed can match, so the target is narrowed
+    to those first. The proposal is the small side there, and Spark broadcasts
+    it rather than shuffling the target.
+    """
 
     stored = delta_signature_name()
-    missing = f"t.`{contract.primary_key[0]}` IS NULL"
+    key = contract.primary_key
+    missing = f"t.`{key[0]}` IS NULL"
     return (
         f"SELECT\n"
         f"  CASE WHEN {missing} THEN '{INSERT_OP}' ELSE '{UPDATE_OP}' END "
         f"AS `{OPERATION_COLUMN}`,\n"
         f"  {qualified('q', columns)}, q.`{stored}`\n"
         f"FROM weaver_proposed AS q\n"
-        f"LEFT JOIN {names['target']} AS t "
-        f"ON {key_join('q', 't', contract.primary_key)}\n"
+        f"LEFT JOIN (\n"
+        f"    SELECT {qualified('t', key)}, t.`{stored}` FROM {names['target']} AS t\n"
+        f"    LEFT SEMI JOIN weaver_proposed AS p ON {key_join('p', 't', key)}\n"
+        f") AS t ON {key_join('q', 't', key)}\n"
         f"WHERE {missing} OR q.`{stored}` <> t.`{stored}`"
     )
 
@@ -730,8 +792,14 @@ def _conflict_branch(
     )
 
 
-def _apply_changes(spark, names, change_view, contract: LoadContract, columns) -> None:
-    """Apply inserts and updates in one Delta merge."""
+def _apply_changes(
+    spark, names, change_view, contract: LoadContract, columns, *, claimed=None
+) -> None:
+    """Apply every insert, update and delete in one Delta merge, so one commit.
+
+    ``claimed`` holds the keys an incremental load deletes. They are disjoint
+    from the classified rows, which carry the rest.
+    """
 
     audit = delta_audit_names()
     stored = delta_signature_name()
@@ -746,11 +814,21 @@ def _apply_changes(spark, names, change_view, contract: LoadContract, columns) -
         f"t.`{audit[1]}` = current_timestamp()",
         f"t.`{audit[2]}` = {live_delete_literal()}",
     ]
+    source = f"SELECT * FROM {change_view}"
+    if claimed is not None:
+        keys_only = ", ".join(
+            f"d.`{column}`" if column in contract.primary_key else f"NULL AS `{column}`"
+            for column in written
+        )
+        source += (
+            f"\nUNION ALL\nSELECT '{DELETE_OP}' AS `{OPERATION_COLUMN}`, {keys_only} "
+            f"FROM {claimed} AS d"
+        )
     spark.sql(
         f"MERGE INTO {names['target']} AS t\n"
-        f"USING (SELECT * FROM {change_view} "
-        f"WHERE `{OPERATION_COLUMN}` <> '{DELETE_OP}') AS chg\n"
+        f"USING ({source}) AS chg\n"
         f"   ON {key_join('chg', 't', contract.primary_key)}\n"
+        f"WHEN MATCHED AND chg.`{OPERATION_COLUMN}` = '{DELETE_OP}' THEN DELETE\n"
         f"WHEN MATCHED AND chg.`{OPERATION_COLUMN}` = '{UPDATE_OP}' "
         f"THEN UPDATE SET {', '.join(sets)}\n"
         f"WHEN NOT MATCHED AND chg.`{OPERATION_COLUMN}` = '{INSERT_OP}' "
@@ -796,13 +874,6 @@ def _claimed_deletes(spark, held, names, staging_view, contract: LoadContract, d
     )
 
 
-def _apply_deletes(spark, names, delete_view, contract) -> None:
-    spark.sql(
-        f"MERGE INTO {names['target']} AS t USING {delete_view} AS d "
-        f"ON {key_join('d', 't', contract.primary_key)} WHEN MATCHED THEN DELETE"
-    )
-
-
 def _append_only(
     spark,
     names,
@@ -828,6 +899,49 @@ def _append_only(
         f"INSERT INTO {names['target']} ({named}, {audit_columns})\n"
         f"SELECT {named}, current_timestamp(), current_timestamp(), "
         f"{live_delete_literal()} FROM {staging_view}"
+    )
+    return LoadResult(
+        succeeded=True,
+        rows_read=rows_read,
+        rows_inserted=rows_inserted,
+        rows_rejected=rows_rejected,
+    )
+
+
+def _holds_no_files(spark, target: str) -> bool:
+    """Whether the target is empty, from its Delta log alone.
+
+    A table with files may still hold no rows, and takes the ordinary path.
+    """
+
+    detail = spark.sql(f"DESCRIBE DETAIL {target}").collect()[0]
+    return int(detail["numFiles"] or 0) == 0
+
+
+def _into_empty(
+    spark,
+    names,
+    staging_view,
+    columns,
+    signature: str,
+    *,
+    rows_read: int,
+    rows_inserted: int,
+    rows_rejected: int,
+) -> LoadResult:
+    """Append every accepted row to an empty target.
+
+    Nothing can be updated, deleted or held twice there, and no stability gate
+    applies, so there is nothing to classify and nothing to merge.
+    """
+
+    audit = delta_audit_names()
+    named = qualified("", columns)
+    spark.sql(
+        f"INSERT INTO {names['target']} "
+        f"({named}, `{delta_signature_name()}`, {qualified('', audit)})\n"
+        f"SELECT {qualified('s', columns)}, {signature}, current_timestamp(), "
+        f"current_timestamp(), {live_delete_literal()} FROM {staging_view} AS s"
     )
     return LoadResult(
         succeeded=True,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import threading
 from contextlib import contextmanager, redirect_stdout
 from dataclasses import dataclass
 from pathlib import Path
@@ -173,6 +174,7 @@ def default_lakehouse(spark: Any) -> Lakehouse:
 #: Lakehouse reuses the mount rather than asking Fabric to make another, which
 #: it refuses.
 _MOUNTS: dict[str, str] = {}
+_MOUNTING = threading.Lock()
 
 #: Where Weaver mounts a Lakehouse. Keyed by item id rather than fixed, because
 #: an estate spans several Lakehouses and one session may load from more than
@@ -206,11 +208,20 @@ def _quiet_mount():
 
 
 def _mounted(name: str, spark_root: str) -> str:
-    """Return a session mount for this resolved OneLake root."""
+    """Return a session mount for this resolved OneLake root.
 
-    cached = _MOUNTS.get(spark_root)
-    if cached:
-        return cached
+    Serialised, because loads running at once reach the same root and a mount
+    still being made has no path yet.
+    """
+
+    with _MOUNTING:
+        cached = _MOUNTS.get(spark_root)
+        if cached:
+            return cached
+        return _mount(name, spark_root)
+
+
+def _mount(name: str, spark_root: str) -> str:
 
     utils = _notebook_utils()
     if utils is None:
