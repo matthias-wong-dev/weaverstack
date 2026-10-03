@@ -55,7 +55,7 @@ def test_source_annotation_declares_the_managed_relation_in_each_layer(
     semantic = compile_source(root)
     assert semantic.source_references == {"Sales": "Warehouse/Serving/Cake.Sales"}
     assert any(
-        b"annotation Weaver.Source = Warehouse/Serving/Cake.Sales" in value
+        b"annotation 'Weaver.Source' = Warehouse/Serving/Cake.Sales" in value
         for value in semantic.parts.values()
     )
     assert ("Sales", "Warehouse/Serving/Cake.Sales") in semantic.dependencies

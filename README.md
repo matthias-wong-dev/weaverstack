@@ -119,7 +119,10 @@ descriptions, partitions and storage modes.
 `Weaver.*` annotations opt a PBIP into native transformations. They can also live
 in either `extension.tmdl` layer. Weaver merges the layers before executing the
 annotations. Ordinary annotations pass through; an unknown `Weaver.*` name is
-an error. Executed annotations remain on surviving objects.
+an error. Executed annotations remain on surviving objects. Native dotted
+annotation identifiers are quoted, such as `annotation 'Weaver.Source' = ...`.
+Weaver quotes supported bare identifiers in the effective package while retaining
+their full names and values.
 
 The public registry is
 [`semantic_models/annotation.py`](src/weaver/semantic_models/annotation.py):
@@ -155,10 +158,10 @@ keeping measures in native DAX:
 
 ```tmdl
 model Model
-    annotation Weaver.AutoHideColumns = "*SK"
+    annotation 'Weaver.AutoHideColumns' = "*SK"
 
 table Sales
-    annotation Weaver.Source = Warehouse/Serving/Cake.Sales
+    annotation 'Weaver.Source' = Warehouse/Serving/Cake.Sales
 
     measure Revenue = SUM(Sales[Amount])
         formatString: #,##0.00
@@ -167,10 +170,10 @@ table Sales
         formatString: #,##0
 
 table Metric
-    annotation Weaver.MeasureTable = true
+    annotation 'Weaver.MeasureTable' = true
 
     measure Value
-        annotation Weaver.Switch = ```
+        annotation 'Weaver.Switch' = ```
             Sales[Revenue]
             Sales[Units]
             ```

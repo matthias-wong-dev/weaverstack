@@ -43,7 +43,7 @@ def test_source_annotation_generates_columns_descriptions_and_managed_lineage(
         assert b"Sales description" in table and b"Sales key" in table
         assert b"mode: directLake" in table
         assert b"expressionSource: 'Warehouse/Serving'" in table
-        assert b"annotation Weaver.Source = Warehouse/Serving/Cake.Sales" in table
+        assert b"annotation 'Weaver.Source' = Warehouse/Serving/Cake.Sales" in table
         assert b"expression 'Warehouse/Serving'" in parts["definition/expressions.tmdl"]
         rows = published()[ITEM]
         assert rows["SemanticModelTable"][0]["description"] == "Sales description"

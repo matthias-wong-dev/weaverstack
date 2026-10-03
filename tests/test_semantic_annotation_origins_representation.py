@@ -58,9 +58,13 @@ def annotated_project(tmp_path, name, origin):
     if origin == "pbip":
         text = file.read_text()
         if name == "Weaver.AutoHideForeignKeys":
-            text = text.replace("model Model\n", "model Model\n" + addition, 1)
+            text = text.replace(
+                "\nref table Sales", "\n" + addition + "\nref table Sales", 1
+            )
         elif name == "Weaver.Exclude":
-            text = text.replace("column Id\n", "column Id\n" + addition, 1)
+            text = text.replace(
+                "\n\tcolumn ProductId", "\n" + addition + "\n\tcolumn ProductId", 1
+            )
         elif name == "Weaver.Switch":
             text = text.replace(
                 "measure Value = 1\n", "measure Value = 1\n" + addition, 1
@@ -106,6 +110,30 @@ def test_native_annotation_executes_from_each_authoring_layer(tmp_path, name, or
     assert any(name.encode() in data for data in semantic.parts.values()) is (
         name != "Weaver.Exclude"
     )
+
+
+@pytest.mark.parametrize("newline", [b"\n", b"\r\n"], ids=["lf", "crlf"])
+@pytest.mark.parametrize("quoted", [False, True], ids=["bare", "quoted"])
+@weaver_test()
+def test_weaver_annotation_namespace_is_quoted_without_rewriting_other_source(
+    tmp_path, newline, quoted
+):
+    root = annotated_project(tmp_path, "Weaver.Source", "pbip")
+    folder = root / str(ITEM) / "Probe.SemanticModel/definition"
+    source = folder / "tables/Sales.tmdl"
+    data = source.read_bytes().replace(b"\r\n", b"\n")
+    data += b"\n\tannotation Company.Note = untouched\n"
+    if quoted:
+        data = data.replace(b"annotation Weaver.Source", b"annotation 'Weaver.Source'")
+    before = data.replace(b"\n", newline)
+    source.write_bytes(before)
+    product = (folder / "tables/Product.tmdl").read_bytes()
+    semantic = compile_source(root)
+    assert semantic.parts["definition/tables/Sales.tmdl"] == before.replace(
+        b"annotation Weaver.Source", b"annotation 'Weaver.Source'"
+    )
+    assert semantic.parts["definition/tables/Product.tmdl"] == product
+    assert source.read_bytes() == before
 
 
 @weaver_test()
