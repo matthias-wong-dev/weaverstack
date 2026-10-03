@@ -3,11 +3,15 @@ workspace: Weaver Example
 environment: weaver
 catalogue: Warehouse/Weaver
 
-# The most physical actions a build runs at once, overall and against any one
-# Fabric capability. Lower it for a smaller capacity; unset, Weaver uses limits
-# qualified on an F64.
+# How many Build, Wipe and Mirror actions may run at once on each Fabric
+# capability. These are the defaults, sized for a mid-sized capacity; an F64
+# sustains twice as much, and a small capacity may need less.
 execution:
-  parallel_workers: 4
+  build:
+    warehouse_concurrency: 1   # per Warehouse
+    spark_concurrency: 4
+    onelake_concurrency: 8
+    shortcut_concurrency: 2
 
 # Weaver items are the keys; each value is the Fabric item it is deployed to in
 # this environment. The key's type says whether that value names a Lakehouse or
@@ -15,8 +19,4 @@ execution:
 targets:
   Lakehouse/Sales: Sales
 
-  # An item's own setting caps the actions run at once against its Fabric item.
-  Warehouse/Reporting:
-    name: Reporting
-    execution:
-      parallel_workers: 2
+  Warehouse/Reporting: Reporting

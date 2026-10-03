@@ -7,7 +7,6 @@ from weaver.declaration.model import WeaverItemId
 from weaver.errors import ConfigError, IdentityError
 from weaver.workspaces import (
     EnvironmentRef,
-    ExecutionSettings,
     TargetDeclaration,
     Workspace,
 )
@@ -57,37 +56,12 @@ def test_workspace_accepts_a_qualified_environment_reference():
 def test_target_configuration_is_immutable():
     item = WeaverItemId.parse("Warehouse/Curated")
     workspace = Workspace(
-        workspace="Analytics",
-        targets={item: TargetDeclaration("Reporting", ExecutionSettings(8))},
+        workspace="Analytics", targets={item: TargetDeclaration("Reporting")}
     )
-    assert workspace.settings_for(item).parallel_workers == 8
     with pytest.raises(TypeError):
         workspace.targets[WeaverItemId.parse("Warehouse/Other")] = workspace.targets[
             item
         ]
-
-
-@weaver_test()
-def test_execution_settings_reach_only_the_item_that_declared_them():
-    """Two items may deploy to one Warehouse, and each keeps its own settings."""
-
-    fast = WeaverItemId.parse("Warehouse/Curated")
-    slow = WeaverItemId.parse("Warehouse/Archive")
-    workspace = Workspace(
-        workspace="Analytics",
-        execution=ExecutionSettings(parallel_workers=1),
-        targets={
-            fast: TargetDeclaration("Shared", ExecutionSettings(parallel_workers=8)),
-            slow: TargetDeclaration("Shared"),
-        },
-    )
-
-    assert workspace.settings_for(fast).parallel_workers == 8
-    assert workspace.settings_for(slow).parallel_workers == 1
-    assert (
-        workspace.settings_for(WeaverItemId.parse("Warehouse/Absent"))
-        == workspace.execution
-    )
 
 
 @weaver_test()

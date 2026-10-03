@@ -414,45 +414,38 @@ def _capacity_plan():
 
 
 @weaver_test()
-def test_parallel_workers_caps_the_executor_and_a_target_caps_its_own_item():
-    from weaver.declaration.model import WeaverItemId
-    from weaver.sessions.archive_runtime import (
-        ONELAKE_LANES,
-        SHORTCUT_API_LANES,
-        SPARK_LANES,
-        WAREHOUSE_LANES,
-        WORKERS,
-        execution_capacity,
-    )
-    from weaver.workspaces import ExecutionSettings, TargetDeclaration, Workspace
+def test_execution_build_sets_each_capabilitys_limit():
+    from weaver.sessions.archive_runtime import WORKERS, execution_capacity
+    from weaver.workspaces import BuildConcurrency, ExecutionSettings, Workspace
 
     plan = _capacity_plan()
+    defaults = BuildConcurrency()
 
     assert execution_capacity(plan) == (
         WORKERS,
         {
-            "onelake:raw-id": ONELAKE_LANES,
-            "shortcuts:raw-id": SHORTCUT_API_LANES,
-            "spark": SPARK_LANES,
-            "warehouse:sales-id": WAREHOUSE_LANES,
+            "onelake:raw-id": defaults.onelake_concurrency,
+            "shortcuts:raw-id": defaults.shortcut_concurrency,
+            "spark": defaults.spark_concurrency,
+            "warehouse:sales-id": defaults.warehouse_concurrency,
         },
     )
 
-    throttled = Workspace(
+    configured = Workspace(
         workspace="Analytics",
-        execution=ExecutionSettings(parallel_workers=2),
-        targets={
-            WeaverItemId.parse("Lakehouse/Raw"): TargetDeclaration(
-                "Raw_Dev", ExecutionSettings(parallel_workers=1)
+        execution=ExecutionSettings(
+            build=BuildConcurrency(
+                warehouse_concurrency=4,
+                spark_concurrency=8,
+                onelake_concurrency=16,
+                shortcut_concurrency=4,
             )
-        },
+        ),
     )
-    workers, limits = execution_capacity(plan, throttled)
 
-    assert workers == 2
-    assert limits == {
-        "onelake:raw-id": 1,
-        "shortcuts:raw-id": 1,
-        "spark": min(2, SPARK_LANES),
-        "warehouse:sales-id": min(2, WAREHOUSE_LANES),
+    assert execution_capacity(plan, configured)[1] == {
+        "onelake:raw-id": 16,
+        "shortcuts:raw-id": 4,
+        "spark": 8,
+        "warehouse:sales-id": 4,
     }

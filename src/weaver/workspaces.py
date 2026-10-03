@@ -150,15 +150,29 @@ def _catalogue_value(value: object) -> str:
 
 
 @dataclass(frozen=True)
-class ExecutionSettings:
-    parallel_workers: int | None = None
+class BuildConcurrency:
+    """The most physical actions Build, Wipe and Mirror run at once, by capability.
+
+    ``warehouse_concurrency`` applies to each Warehouse, ``spark_concurrency`` to
+    the Spark session, ``onelake_concurrency`` to storage operations and
+    ``shortcut_concurrency`` to the shortcut API. The defaults suit a mid-sized
+    capacity; an F64 sustains twice as much.
+    """
+
+    warehouse_concurrency: int = 1
+    spark_concurrency: int = 4
+    onelake_concurrency: int = 8
+    shortcut_concurrency: int = 2
 
     def __post_init__(self) -> None:
-        workers = self.parallel_workers
-        if workers is not None and (
-            isinstance(workers, bool) or not isinstance(workers, int) or workers < 1
-        ):
-            raise ConfigError("parallel_workers must be a positive integer")
+        for name, value in vars(self).items():
+            if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+                raise ConfigError(f"execution.build.{name} must be a positive integer")
+
+
+@dataclass(frozen=True)
+class ExecutionSettings:
+    build: BuildConcurrency = field(default_factory=BuildConcurrency)
 
 
 @dataclass(frozen=True)
@@ -166,7 +180,6 @@ class TargetDeclaration:
     """A Fabric item name; the key in ``Workspace.targets`` supplies its type."""
 
     physical: str
-    execution: ExecutionSettings = field(default_factory=ExecutionSettings)
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -270,11 +283,3 @@ class Workspace:
                 }
             )
         )
-
-    def settings_for(self, item: WeaverItemId) -> ExecutionSettings:
-        """Use item-specific parallelism when set, otherwise the workspace default."""
-
-        declaration = self.targets.get(item)
-        if declaration is None or declaration.execution.parallel_workers is None:
-            return self.execution
-        return declaration.execution

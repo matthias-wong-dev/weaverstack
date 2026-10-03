@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from dataclasses import fields
 from pathlib import Path
 from typing import Any
 
 from .declaration.model import WeaverItemId
 from .errors import ConfigError, IdentityError
 from .workspaces import (
+    BuildConcurrency,
     EnvironmentRef,
     ExecutionSettings,
     TargetDeclaration,
@@ -126,14 +128,37 @@ def _text(value: Any, *, where: str) -> str:
 
 
 def _execution(raw: Any, *, where: str) -> ExecutionSettings:
+    """Parse ``execution``.
+
+    .. code-block:: yaml
+
+        execution:
+          build:
+            warehouse_concurrency: 2
+            spark_concurrency: 4
+            onelake_concurrency: 8
+            shortcut_concurrency: 2
+    """
+
     if raw is None:
         return ExecutionSettings()
     if not isinstance(raw, dict):
         raise ConfigError(f"{where} must be a mapping")
-    unknown = set(raw) - {"parallel_workers"}
+    unknown = set(raw) - {"build"}
     if unknown:
         raise ConfigError(f"{where} has unknown keys: " + ", ".join(sorted(unknown)))
-    return ExecutionSettings(parallel_workers=raw.get("parallel_workers"))
+    build = raw.get("build")
+    if build is None:
+        return ExecutionSettings()
+    if not isinstance(build, dict):
+        raise ConfigError(f"{where}.build must be a mapping")
+    known = {field.name for field in fields(BuildConcurrency)}
+    unknown = set(build) - known
+    if unknown:
+        raise ConfigError(
+            f"{where}.build has unknown keys: " + ", ".join(sorted(unknown))
+        )
+    return ExecutionSettings(build=BuildConcurrency(**build))
 
 
 def _targets(raw: Any) -> dict[WeaverItemId, TargetDeclaration]:
@@ -145,8 +170,6 @@ def _targets(raw: Any) -> dict[WeaverItemId, TargetDeclaration]:
           Lakehouse/Landing: Landing_Dev
           Warehouse/Curated:
             name: Curated_Dev
-            execution:
-              parallel_workers: 4
     """
 
     if raw is None:
@@ -164,9 +187,8 @@ def _targets(raw: Any) -> dict[WeaverItemId, TargetDeclaration]:
             ) from exc
         if isinstance(value, str):
             physical = _text(value, where=where)
-            execution = ExecutionSettings()
         elif isinstance(value, dict):
-            unknown = set(value) - {"name", "execution"}
+            unknown = set(value) - {"name"}
             if unknown:
                 raise ConfigError(
                     f"{where} has unknown keys: " + ", ".join(sorted(unknown))
@@ -174,8 +196,7 @@ def _targets(raw: Any) -> dict[WeaverItemId, TargetDeclaration]:
             if "name" not in value:
                 raise ConfigError(f"{where} must define 'name'")
             physical = _text(value["name"], where=f"{where}.name")
-            execution = _execution(value.get("execution"), where=f"{where}.execution")
         else:
             raise ConfigError(f"{where} must be a Fabric item name or mapping")
-        declarations[item] = TargetDeclaration(physical, execution)
+        declarations[item] = TargetDeclaration(physical)
     return declarations

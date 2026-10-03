@@ -109,59 +109,35 @@ class ArchiveSession(NotebookSession):
         )
 
 
-#: Concurrent actions by constrained capability, qualified on an F64 capacity.
-#: A Warehouse connection runs one statement at a time, and Fabric Warehouse
-#: snapshot isolation aborts concurrent DDL that contends on catalogue metadata,
-#: so each Warehouse has one lane.
-WAREHOUSE_LANES = 1
-SPARK_LANES = 8
-ONELAKE_LANES = 16
-SHORTCUT_API_LANES = 4
+#: The executor's worker pool. Resource limits, not workers, bound each
+#: capability, so the pool is generous.
 WORKERS = 32
 
 
 def execution_capacity(plan, workspace=None) -> tuple[int, dict[str, int]]:
     """The executor's workers and each resource's limit for this deployment.
 
-    The Workspace's ``parallel_workers`` caps the workers and every limit, and a
-    target's own setting caps the resources of its physical item. Capacity
-    changes how much runs at once, never what the plan orders.
+    The Workspace's ``execution.build`` sets how many actions may occupy each
+    capability at once. Capacity changes how much runs at once, never what the
+    plan orders.
     """
 
     from ..build_bundle.stages import SPARK
+    from ..workspaces import BuildConcurrency
 
+    build = BuildConcurrency() if workspace is None else workspace.execution.build
     lanes = {
-        "warehouse": WAREHOUSE_LANES,
-        SPARK: SPARK_LANES,
-        "onelake": ONELAKE_LANES,
-        "shortcuts": SHORTCUT_API_LANES,
+        "warehouse": build.warehouse_concurrency,
+        SPARK: build.spark_concurrency,
+        "onelake": build.onelake_concurrency,
+        "shortcuts": build.shortcut_concurrency,
     }
-    overall = None if workspace is None else workspace.execution.parallel_workers
-    configured = (
-        {}
-        if workspace is None
-        else {
-            declaration.physical.casefold(): declaration.execution.parallel_workers
-            for declaration in workspace.targets.values()
-            if declaration.execution.parallel_workers is not None
-        }
-    )
-    by_item = {
-        target.item_id: configured[name.casefold()]
-        for target in plan.targets
-        for name in (target.item_id, target.item_name)
-        if name and name.casefold() in configured
+    limits = {
+        key: lanes.get(key.partition(":")[0], 1)
+        for _, _, action in plan.actions()
+        for key in action.resources
     }
-
-    def capped(*values):
-        return min(value for value in values if value is not None)
-
-    limits = {}
-    for _, _, action in plan.actions():
-        for key in action.resources:
-            prefix, _, item = key.partition(":")
-            limits[key] = capped(lanes.get(prefix, 1), overall, by_item.get(item))
-    return capped(WORKERS, overall), limits
+    return WORKERS, limits
 
 
 def execute_mutation(
