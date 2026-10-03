@@ -85,6 +85,10 @@ def render_object(kind, value, *, prefix="", unit="\t", newline="\n"):
                 result += newline + render_object(
                     child[0], entry, prefix=child_prefix, unit=unit, newline=newline
                 )
+        elif key == "formatStringDefinition":
+            result += expression_lines(
+                key, member["expression"], child_prefix, unit, newline
+            )
         elif key == "dataAccessOptions":
             result += (
                 child_prefix
