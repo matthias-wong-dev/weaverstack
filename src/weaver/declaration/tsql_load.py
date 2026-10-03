@@ -80,6 +80,12 @@ def logical_result_row(row) -> dict:
 
 STAGING_SUFFIX = "_Staging"
 UPSERT_SUFFIX = "_Upsert"
+SIGNED_SUFFIX = "_Signed"
+
+#: The most staged rows a keyed load signs into a table of their own before
+#: comparing them with the target. Below it the copy costs less than compiling
+#: the comparison against staging directly.
+SIGNED_COPY_ROWS = 1_000_000
 REJECT_SUFFIX = "_Reject"
 DELETE_SUFFIX = "_Delete"
 
@@ -362,6 +368,8 @@ def _primary_key_body(names: dict, contract: LoadContract, claims_deletes: bool)
         "load/primary_key_body",
         reject_table=names["reject"],
         upsert_table=names["upsert"],
+        signed_table=names["signed"],
+        signed_copy_rows=SIGNED_COPY_ROWS,
         staging_table=names["staging"],
         target_table=names["target"],
         signature_column=SIGNATURE_COLUMN,
@@ -1081,9 +1089,9 @@ def _cleanup(names: dict, contract: LoadContract, claims_deletes: bool) -> str:
     elif contract.appends_only:
         keys = ("reject", "upsert", "staging")
     elif _has_delete_relation(contract, claims_deletes):
-        keys = ("reject", "upsert", "delete", "staging")
+        keys = ("reject", "upsert", "signed", "delete", "staging")
     else:
-        keys = ("reject", "upsert", "staging")
+        keys = ("reject", "upsert", "signed", "staging")
     return "\n".join(
         f"if object_id({_sql_literal(names[key])}, N'U') is not null "
         f"drop table {names[key]};"
@@ -1234,6 +1242,7 @@ def _table_names(document: SesDocument, procedure_name: str) -> dict:
         "target": f"{qualified}{_quote(obj)}",
         "staging": f"{qualified}{_quote(obj + STAGING_SUFFIX)}",
         "upsert": f"{qualified}{_quote(obj + UPSERT_SUFFIX)}",
+        "signed": f"{qualified}{_quote(obj + SIGNED_SUFFIX)}",
         "reject": f"{qualified}{_quote(obj + REJECT_SUFFIX)}",
         "delete": f"{qualified}{_quote(obj + DELETE_SUFFIX)}",
         "object": document.qualified,

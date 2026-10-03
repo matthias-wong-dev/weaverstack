@@ -66,21 +66,48 @@ else
 begin
     /*-- The rows this load will write: new and changed, and nothing else --*/
 
-    create table $upsert_table as
-    select
-        __QUERY_SELECT_COLUMNS__
-      , q.[$signature_column]
-      , case when $target_missing_predicate then cast(1 as int) else cast(0 as int) end as [$is_new_column]
-    from (
+    -- One statement that signs staging and reads the target takes seconds to
+    -- compile against a new staging table, and two short ones do not. A large
+    -- load signs as it reads rather than copying staging again.
+    if @weaver_rows_read <= $signed_copy_rows
+    begin
+        create table $signed_table as
         select
             __STAGING_SELECT_COLUMNS__
           , $signature_expression as [$signature_column]
-        from $staging_table as s
-    ) as q
-    left join $target_table as t on $query_target_join
-    where
-        $target_missing_predicate
-        or q.[$signature_column] <> t.[$signature_column];
+        from $staging_table as s;
+
+        create table $upsert_table as
+        select
+            __QUERY_SELECT_COLUMNS__
+          , q.[$signature_column]
+          , case when $target_missing_predicate then cast(1 as int) else cast(0 as int) end as [$is_new_column]
+        from $signed_table as q
+        left join $target_table as t on $query_target_join
+        where
+            $target_missing_predicate
+            or q.[$signature_column] <> t.[$signature_column];
+
+        drop table $signed_table;
+    end
+    else
+    begin
+        create table $upsert_table as
+        select
+            __QUERY_SELECT_COLUMNS__
+          , q.[$signature_column]
+          , case when $target_missing_predicate then cast(1 as int) else cast(0 as int) end as [$is_new_column]
+        from (
+            select
+                __STAGING_SELECT_COLUMNS__
+              , $signature_expression as [$signature_column]
+            from $staging_table as s
+        ) as q
+        left join $target_table as t on $query_target_join
+        where
+            $target_missing_predicate
+            or q.[$signature_column] <> t.[$signature_column];
+    end;
 
     $merge_uniqueness
     -- Counted before anything is written.

@@ -164,13 +164,13 @@ def test_a_view_has_no_generated_load():
 #: A fingerprint of what each generator currently emits, beside the version that
 #: describes it. See the test below.
 GENERATED_FINGERPRINTS = {
-    "tsql": (19, "f5b2983cc76565a5f3854018d6ecfbec26850b39f4cb1b343e1793642573eaba"),
+    "tsql": (20, "c5e7119093f72d925106971c35c914f6f5ba0266c04650cbd12a19bca7be519c"),
     "tsql_append": (
-        19,
+        20,
         "4683fc8dfe3f29eee6ef91a4bc9ff9ad3a13301dd8bbaf6398e81ad89419a0a3",
     ),
     "tsql_append_validated": (
-        19,
+        20,
         "746faf122d1c67842e27c7766f68ea9c099a7801ff9a93258a6a3cb59e6e68eb",
     ),
     "spark": (9, "d0cdda197f8619dc2f679b7ef270154e439b76aaaf27f5001c79b489304a6acf"),
@@ -1269,3 +1269,34 @@ def test_a_warehouse_load_builds_reject_evidence_only_when_staging_may_hold_a_re
     assert "group by [Customer id] having count(*) > 1" in checks
     assert "[Customer name] is not null" in checks
     assert "group by [Customer name] having count(*) > 1" in checks
+
+
+@weaver_test()
+def test_a_small_load_signs_staging_before_comparing_it_with_the_target():
+    """Signing and comparing in one statement compiles slowly against new staging.
+
+    A large load still does both in one statement, rather than copy staging again.
+    """
+
+    from weaver.declaration.tsql_load import SIGNED_COPY_ROWS
+
+    payload = (
+        _warehouse()
+        .create_load(item=WeaverItemId("Warehouse", "Reporting"))
+        .payload.decode()
+    )
+    branch = payload.index(f"if @weaver_rows_read <= {SIGNED_COPY_ROWS}")
+    small = payload[
+        branch : re.search(r"\n\s*else\n", payload[branch:]).start() + branch
+    ]
+
+    assert small.index("create table [Sales].[Customer_Signed]") < small.index(
+        "create table [Sales].[Customer_Upsert]"
+    )
+    assert "from [Sales].[Customer_Signed] as q" in small
+    assert "drop table [Sales].[Customer_Signed]" in small
+    # Left behind by a failure, it goes with the other working tables.
+    assert (
+        "if object_id(N''[Sales].[Customer_Signed]'', N''U'') is not null"
+        in (payload[:branch])
+    )
