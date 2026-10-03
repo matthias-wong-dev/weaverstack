@@ -7,12 +7,28 @@ from dataclasses import dataclass, field
 
 from ..errors import ConfigError
 
-_NAME = r"(?:'(?:[^']|'')*'|[^\s=:.]+)"
+_NAME = r"(?:'(?:[^']|'')*'|[^\s=:'\"]+)"
 _OBJECT = re.compile(
-    rf"(?P<ref>ref\s+)?(?P<kind>database|model|table|column|measure|partition|"
-    rf"relationship|expression|role|tablePermission|hierarchy|level|annotation)"
+    rf"(?P<ref>ref\s+)?(?P<kind>[A-Za-z][A-Za-z0-9]*)"
     rf"(?:\s+(?P<name>{_NAME}))?(?:\s*=\s*(?P<value>.*))?\Z",
     re.IGNORECASE,
+)
+_NAMED = frozenset(
+    {
+        "database",
+        "model",
+        "table",
+        "column",
+        "measure",
+        "partition",
+        "relationship",
+        "expression",
+        "role",
+        "tablepermission",
+        "hierarchy",
+        "level",
+        "annotation",
+    }
 )
 
 
@@ -95,10 +111,11 @@ class Document:
             while stack and stack[-1].indent >= indent:
                 stack.pop().end = start
             match = _OBJECT.fullmatch(text)
-            kind = match["kind"].lower() if match else ""
-            name = object_name(match["name"]) if match and match["name"] else ""
-            value = match["value"] if match else None
-            if not match:
+            named = match and (match["name"] or match["kind"].lower() in _NAMED)
+            kind = match["kind"].lower() if named else ""
+            name = object_name(match["name"]) if named and match["name"] else ""
+            value = match["value"] if named else None
+            if not named:
                 name = re.split(r"\s*[:=]\s*", text, maxsplit=1)[0]
             node = Span(
                 index,
