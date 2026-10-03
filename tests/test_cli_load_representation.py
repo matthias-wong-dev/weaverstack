@@ -975,6 +975,13 @@ def livy(monkeypatch):
         lambda self, statement, **kwargs: _FakeTds.answer(statement),
     )
     monkeypatch.setattr(
+        ConsoleSession,
+        "query_tsql_sets",
+        lambda self, statements, **kwargs: tuple(
+            _FakeTds.answer(statement) for statement in statements
+        ),
+    )
+    monkeypatch.setattr(
         ConsoleSession, "execute_tsql", lambda self, statement, **kwargs: None
     )
     monkeypatch.setattr(

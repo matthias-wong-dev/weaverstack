@@ -27,6 +27,7 @@ a tenant is what lets it be asserted on every commit.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
 import pytest
@@ -191,6 +192,20 @@ class _Spark:
         return _Frame(self, text)
 
     def answer(self, text: str):
+        if text.startswith("DESCRIBE DETAIL"):
+            # A target holding rows unless a test empties it.
+            return [_Row(numFiles=self.counts.get("files", 1))]
+        if "AS staged" in text:
+            # Staging's count, and whether discovery would find anything, which
+            # is exactly whether this test configured rejects for it to find.
+            measures = re.findall(r" AS (\w+)", text)
+            return [
+                _Row(
+                    {m: 0 for m in measures},
+                    staged=self.counts.get("staging", 0),
+                    violations=self.counts.get("reject", 0),
+                )
+            ]
         if "GROUP BY `__weaver_operation`" in text:
             return [
                 _Row(op="I", n=self.counts.get("inserted", 0)),
@@ -372,10 +387,7 @@ def _failed(
 
 #: Where a failure is injected, by the phase whose statement carries the text.
 AT_CHANGES = "weaver_proposed"
-AT_DELETE_MUTATION = "WHEN MATCHED THEN DELETE"
-#: The second mutation a busy load submits, so the deletes have already gone in
-#: when it fails and the target is left halfway through the change.
-AT_CHANGE_MUTATION = "WHEN MATCHED AND chg."
+AT_MUTATION = "MERGE INTO `lh`.`DWG`.`Customer`"
 
 
 #: A load with rows to read, nothing refused and nothing to change.
@@ -430,20 +442,18 @@ def test_a_clean_load_creates_no_working_tables():
 
 @weaver_test()
 def test_every_phase_is_persisted_and_read_by_name():
-    """Staging, the rejects, and everything the load decided to do.
+    """Staging and everything the load decided to do.
 
-    Three relations where there were four: the delete set and the upsert set
+    Two relations where there were four: the delete set and the upsert set
     asked the target the same question, so they are one classification now, and
     the keys to remove are a projection of it rather than a phase of their own.
+    Staging that could not hold a reject is not searched for one, so there is no
+    reject relation either.
     """
 
     spark, _result = _load(BUSY)
 
-    assert [frame.role for frame in spark.persisted] == [
-        "staging",
-        "reject",
-        "change",
-    ]
+    assert [frame.role for frame in spark.persisted] == ["staging", "change"]
 
 
 @weaver_test()
@@ -499,28 +509,50 @@ def test_no_upsert_mutation_when_nothing_is_new_or_changed():
 def test_a_load_with_work_submits_exactly_the_mutations_it_decided_on():
     """Guards the two tests above from passing because the load stopped working.
 
-    Two statements, not three. The inserts and the updates were an insert and a
-    merge over one relation; they are one merge whose clauses read the operation
-    the classification already settled.
+    One statement, and so one commit. The deletes, the updates and the inserts
+    are one merge whose clauses read the operation the classification settled.
     """
 
     spark, _result = _load(BUSY)
 
-    assert len(spark.mutations) == 2
-    assert "WHEN MATCHED THEN DELETE" in spark.mutations[0]
-    written = spark.mutations[1]
+    assert len(spark.mutations) == 1
+    written = spark.mutations[0]
     assert written.startswith("MERGE INTO")
+    assert "WHEN MATCHED AND chg.`__weaver_operation` = 'D' THEN DELETE" in written
     assert "WHEN MATCHED AND chg.`__weaver_operation` = 'U' THEN UPDATE" in written
     assert "WHEN NOT MATCHED AND chg.`__weaver_operation` = 'I' THEN INSERT" in written
 
 
 @weaver_test()
-def test_the_one_merge_leaves_the_deletes_out_of_what_it_writes():
-    """A delete row carries a key and no values, and this statement writes rows."""
+def test_the_one_merge_writes_no_delete_row():
+    """A delete row carries a key and no values, so it only ever matches a delete.
+
+    Only a row classified as an insert is inserted, and only one classified as
+    an update is updated.
+    """
 
     spark, _result = _load(BUSY)
 
-    assert "WHERE `__weaver_operation` <> 'D'" in spark.mutations[1]
+    written = spark.mutations[0]
+    deleted = written.split("THEN DELETE")[0]
+    assert deleted.endswith("WHEN MATCHED AND chg.`__weaver_operation` = 'D' ")
+    assert "WHEN NOT MATCHED AND chg.`__weaver_operation` = 'I' THEN INSERT" in written
+
+
+@weaver_test()
+def test_an_incremental_claim_joins_the_merge_as_keys_alone():
+    """The claim is its own relation, beside a classification that holds no deletes."""
+
+    spark, result = _load(
+        CLAIMED, contract=_incremental(), deletes=_Staged(("Customer id",))
+    )
+
+    assert result.rows_deleted == 2
+    (written,) = spark.mutations
+    source = written.split("AS chg")[0]
+    assert "UNION ALL\nSELECT 'D' AS `__weaver_operation`, d.`Customer id`," in source
+    assert "NULL AS `Customer name`" in source
+    assert "FROM weaver_delete_" in source
 
 
 @weaver_test()
@@ -537,7 +569,7 @@ def test_identity_is_absent_from_every_delta_write_and_signature():
 
     authored = "\n".join(spark.statements)
     assert "Customer key" not in authored
-    assert "`Customer id`, `Customer name`, `Email`" in spark.mutations[1]
+    assert "`Customer id`, `Customer name`, `Email`" in spark.mutations[0]
 
 
 @weaver_test()
@@ -555,7 +587,8 @@ def test_an_unkeyed_incremental_lakehouse_load_appends_with_generated_identity()
     assert result.rows_inserted == 2
     assert result.rows_updated == 0
     assert result.rows_deleted == 0
-    assert spark.counted == ["staging", "reject"]
+    # Staging is counted by the aggregate that checks it, not by a count.
+    assert spark.counted == []
     assert len(spark.mutations) == 1
     written = spark.mutations[0]
     assert written.startswith("INSERT INTO `lh`.`DWG`.`Customer`")
@@ -578,7 +611,7 @@ def test_an_unkeyed_incremental_lakehouse_load_rejects_duplicate_unique_keys():
     assert result.rows_deleted == 0
     assert result.rows_rejected == 1
     assert result.succeeded is False
-    assert spark.counted == ["staging", "reject", "clean"]
+    assert spark.counted == ["reject", "clean"]
     assert len(spark.mutations) == 1
     assert spark.mutations[0].startswith("INSERT INTO")
     submitted = "\n".join(spark.statements)
@@ -678,7 +711,7 @@ def test_the_merge_stamps_an_insert_and_leaves_an_updated_rows_insert_time():
 
     spark, _result = _load(BUSY)
 
-    written = spark.mutations[1]
+    written = spark.mutations[0]
     update = written.split("THEN UPDATE SET")[1].split("WHEN NOT MATCHED")[0]
     assert "row_insert_datetime" not in update
     assert "`row_update_datetime` = current_timestamp()" in update
@@ -708,9 +741,9 @@ def test_all_three_counts_come_from_one_pass():
     spark, result = _load(BUSY)
 
     assert (result.rows_inserted, result.rows_updated, result.rows_deleted) == (1, 1, 2)
-    # Staging and the rejects. The classification is not counted separately: the
-    # grouped pass is what materialises it.
-    assert spark.counted == ["staging", "reject"]
+    # Nothing. Staging is counted by the aggregate that checks it, and the
+    # classification by the grouped pass that materialises it.
+    assert spark.counted == []
     grouped = [
         one for one in spark.statements if "GROUP BY `__weaver_operation`" in one
     ]
@@ -1065,7 +1098,7 @@ def test_an_incremental_load_with_no_claim_derives_no_delete_relation():
     spark, result = _load(dict(NO_OP, inserted=1), contract=_incremental())
 
     assert result.rows_deleted == 0
-    assert [frame.role for frame in spark.persisted] == ["staging", "reject", "change"]
+    assert [frame.role for frame in spark.persisted] == ["staging", "change"]
     assert not any("weaver_delete_" in one for one in spark.statements)
     assert not any("WHEN MATCHED THEN DELETE" in one for one in spark.mutations)
 
@@ -1084,11 +1117,10 @@ def test_an_incremental_load_with_a_claim_settles_it_as_its_own_relation():
     assert result.rows_deleted == 2
     assert [frame.role for frame in spark.persisted] == [
         "staging",
-        "reject",
         "change",
         "delete",
     ]
-    assert spark.counted == ["staging", "reject", "delete"]
+    assert spark.counted == ["delete"]
     claim = next(
         one for one in spark.statements if one.startswith("SELECT t.`Customer")
     )
@@ -1103,8 +1135,14 @@ def test_an_incremental_load_classifies_from_staging_alone():
     spark, _result = _load(dict(NO_OP, inserted=1), contract=_incremental())
 
     changes = next(one for one in spark.statements if "weaver_proposed AS (" in one)
-    assert "LEFT JOIN `lh`.`DWG`.`Customer` AS t" in changes
+    assert "LEFT JOIN (" in changes
     assert "FULL OUTER JOIN" not in changes
+    # The target is narrowed to proposed keys first, so the proposal is the side
+    # Spark broadcasts.
+    assert (
+        "FROM `lh`.`DWG`.`Customer` AS t\n    LEFT SEMI JOIN weaver_proposed AS p"
+        in changes
+    )
     assert "'D'" not in changes
 
 
@@ -1207,39 +1245,24 @@ def test_a_failure_while_the_changes_settle_leaves_only_the_proposal():
 def test_a_failure_before_the_first_mutation_leaves_a_target_no_one_touched():
     """Nothing had moved, so the evidence is the whole of what was proposed."""
 
-    spark = _failed(BUSY, fail_on=AT_DELETE_MUTATION)
+    spark = _failed(BUSY, fail_on=AT_MUTATION)
 
     assert spark.mutations == []
     assert spark.created == ["Customer_Staging", "Customer_Delete"]
 
 
 @weaver_test()
-def test_a_failure_partway_through_the_target_leaves_the_same_evidence():
-    """The deletes went in and the upserts did not, which is what to look at.
+def test_deletes_and_upserts_commit_together():
+    """No failure can leave the target partway through a change.
 
-    A target halfway through a change is the case the evidence matters most for:
-    the delete set says which rows are already gone.
+    The deletes and the upserts are one merge, so a failure leaves the target
+    as it was or the whole change committed.
     """
 
-    spark = _failed(BUSY, fail_on=AT_CHANGE_MUTATION)
+    spark = _failed(BUSY, fail_on=AT_MUTATION)
 
-    # One mutation ran and the next did not, so the target is partway
-    # through rather than untouched.
-    assert len(spark.mutations) == 1
-    assert "WHEN MATCHED THEN DELETE" in spark.mutations[0]
+    assert spark.mutations == []
     assert spark.created == ["Customer_Staging", "Customer_Delete"]
-    # Written on the way out, after the mutation that got through.
-    written_at = next(
-        index
-        for index, one in enumerate(spark.statements)
-        if one.startswith("CREATE TABLE") and "Customer_Delete`" in one
-    )
-    deleted_at = next(
-        index
-        for index, one in enumerate(spark.statements)
-        if "WHEN MATCHED THEN DELETE" in one
-    )
-    assert written_at > deleted_at
 
 
 @weaver_test()
@@ -1252,7 +1275,7 @@ def test_a_failure_after_a_tolerated_rejection_keeps_the_rejects_it_wrote():
 
     spark = _failed(
         dict(BUSY, reject=2, clean=1),
-        fail_on=AT_DELETE_MUTATION,
+        fail_on=AT_MUTATION,
         fault_tolerant=True,
     )
 
@@ -1269,7 +1292,7 @@ def test_a_failure_after_a_tolerated_rejection_keeps_the_rejects_it_wrote():
 def test_a_failure_never_leaves_the_upsert_set():
     """Evidence describes what was proposed, and the upsert set is work."""
 
-    spark = _failed(BUSY, fail_on=AT_CHANGE_MUTATION)
+    spark = _failed(BUSY, fail_on=AT_MUTATION)
 
     assert not any("_Upsert" in one for one in spark.statements)
 
@@ -1436,3 +1459,44 @@ def test_a_tolerated_reject_is_not_a_refusal():
     assert not result.is_refusal
     assert result.rows_rejected == 1
     assert spark.mutations
+
+
+@weaver_test()
+def test_staging_that_cannot_hold_a_reject_is_not_searched_for_one():
+    """One aggregate settles it, where discovery ranks and persists a relation.
+
+    It asks every question discovery would answer: a blank key, a missing
+    required value, and a primary or unique key value held twice.
+    """
+
+    spark, result = _load(
+        BUSY,
+        contract=_incremental(unique_keys=(("Email",),), not_null_columns=("Email",)),
+    )
+
+    assert result.rows_rejected == 0
+    assert "reject" not in [frame.role for frame in spark.persisted]
+    check = next(one for one in spark.statements if "AS violations" in one)
+    assert check.startswith("SELECT count(*) AS staged,")
+    assert "`Email` IS NULL" in check
+    assert "count(DISTINCT s.`Customer id`) AS duplicate_keys" in check
+    assert "count(DISTINCT s.`Email`) AS duplicate_unique_0" in check
+
+
+@weaver_test()
+def test_an_empty_target_takes_staging_as_one_append():
+    """Every accepted row is new, so there is nothing to classify or merge."""
+
+    spark, result = _load(
+        {**BUSY, "files": 0}, contract=_incremental(), deletes=_Staged(("Customer id",))
+    )
+
+    assert (result.rows_inserted, result.rows_updated, result.rows_deleted) == (
+        BUSY["staging"],
+        0,
+        0,
+    )
+    assert [frame.role for frame in spark.persisted] == ["staging"]
+    assert len(spark.mutations) == 1
+    assert spark.mutations[0].startswith("INSERT INTO `lh`.`DWG`.`Customer`")
+    assert "`row_signature`" in spark.mutations[0]

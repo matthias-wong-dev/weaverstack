@@ -1,5 +1,10 @@
 /*-- What this load will refuse, established before anything is changed --*/
 
+-- Most loads refuse nothing, and one scan of staging proves it. Only a load
+-- that may refuse a row builds the evidence of which rows and why.
+if $reject_candidates
+begin
+
 -- Shaped from staging, so it holds the refused row itself.
 create table $reject_table as
 select
@@ -12,6 +17,7 @@ $reject_discovery
 
 select @weaver_rows_rejected = count(*) from $reject_table;
 $duplicate_key_count
+end;
 -- Nothing is written yet, so the target is left as it was.
 if @weaver_rows_rejected > 0 and @fault_tolerant = 0
 begin
@@ -29,94 +35,149 @@ $staging_purge
 
 $delete_derivation
 
-/*-- The rows this load will write: new and changed, and nothing else --*/
-
-create table $upsert_table as
-select
-    __QUERY_SELECT_COLUMNS__
-  , q.[$signature_column]
-  , case when $target_missing_predicate then cast(1 as int) else cast(0 as int) end as [$is_new_column]
-from (
-    select
-        __STAGING_SELECT_COLUMNS__
-      , $signature_expression as [$signature_column]
-    from $staging_table as s
-) as q
-left join $target_table as t on $query_target_join
-where
-    $target_missing_predicate
-    or q.[$signature_column] <> t.[$signature_column];
-
-$merge_uniqueness
 -- Counted before anything is written.
 select @weaver_target_rows = count(*) from $target_table;
 set @weaver_target_before = @weaver_target_rows;
-select @weaver_prospective_updates = count(*) from $upsert_table where [$is_new_column] = 0;
-$prospective_deletes
 
-if @ignore_stability_threshold = 0 and @weaver_target_rows > 0
-    and @weaver_target_rows >= $stability_rows
+if @weaver_target_rows = 0
 begin
-    -- Worded as the Delta gate words it, so one refusal reads the same
-    -- whichever engine reported it.
-    if @weaver_prospective_deletes * 100.0 / @weaver_target_rows > $delete_threshold
-        set @weaver_error = 'delete of ' + cast(@weaver_prospective_deletes as varchar(20))
-            + ' rows is '
-            + cast(cast(@weaver_prospective_deletes * 100.0 / @weaver_target_rows
-                as decimal(18, 1)) as varchar(20))
-            + '% of ' + cast(@weaver_target_rows as varchar(20))
-            + ', over the $delete_threshold% threshold';
-    else if @weaver_prospective_updates * 100.0 / @weaver_target_rows > $update_threshold
-        set @weaver_error = 'update of ' + cast(@weaver_prospective_updates as varchar(20))
-            + ' rows is '
-            + cast(cast(@weaver_prospective_updates * 100.0 / @weaver_target_rows
-                as decimal(18, 1)) as varchar(20))
-            + '% of ' + cast(@weaver_target_rows as varchar(20))
-            + ', over the $update_threshold% threshold';
+    /*-- An empty target: every accepted row is new --*/
 
-    -- A breach never writes. @ignore_stability_threshold is how to permit one.
-    if @weaver_error is not null
+    -- Nothing can be updated, deleted or compared, and the stability gate does
+    -- not apply, so staging is written once, without a working copy.
+    insert into $target_table (
+        __SOURCE_COLUMNS__
+      , [$signature_column]
+      , [Row insert datetime]
+      , [Row update datetime]
+      , [Row delete datetime]
+    )
+    select
+        __STAGING_SELECT_COLUMNS__
+      , $signature_expression
+      , @weaver_load_datetime
+      , @weaver_load_datetime
+      , @weaver_live_datetime
+    from $staging_table as s;
+
+    set @weaver_rows_inserted = @@rowcount;
+end
+else
+begin
+    /*-- The rows this load will write: new and changed, and nothing else --*/
+
+    -- One statement that signs staging and reads the target takes seconds to
+    -- compile against a new staging table, and two short ones do not. A large
+    -- load signs as it reads rather than copying staging again.
+    if @weaver_rows_read <= $signed_copy_rows
     begin
-        set @weaver_error = @weaver_error + '; the target was not modified';
-        -- Assigned before the throw, and read only by a caller that asked for
-        -- the refusal: an uncaught THROW returns no output values at all.
-$breach_result_assignment
-        if @fault_tolerant = 0 and @return_refusal = 0
-            throw 51021, @weaver_error, 1;
-        return;
+        create table $signed_table as
+        select
+            __STAGING_SELECT_COLUMNS__
+          , $signature_expression as [$signature_column]
+        from $staging_table as s;
+
+        create table $upsert_table as
+        select
+            __QUERY_SELECT_COLUMNS__
+          , q.[$signature_column]
+          , case when $target_missing_predicate then cast(1 as int) else cast(0 as int) end as [$is_new_column]
+        from $signed_table as q
+        left join $target_table as t on $query_target_join
+        where
+            $target_missing_predicate
+            or q.[$signature_column] <> t.[$signature_column];
+
+        drop table $signed_table;
+    end
+    else
+    begin
+        create table $upsert_table as
+        select
+            __QUERY_SELECT_COLUMNS__
+          , q.[$signature_column]
+          , case when $target_missing_predicate then cast(1 as int) else cast(0 as int) end as [$is_new_column]
+        from (
+            select
+                __STAGING_SELECT_COLUMNS__
+              , $signature_expression as [$signature_column]
+            from $staging_table as s
+        ) as q
+        left join $target_table as t on $query_target_join
+        where
+            $target_missing_predicate
+            or q.[$signature_column] <> t.[$signature_column];
     end;
+
+    $merge_uniqueness
+    -- Counted before anything is written.
+    select @weaver_prospective_updates = count(*) from $upsert_table where [$is_new_column] = 0;
+    $prospective_deletes
+
+    if @ignore_stability_threshold = 0 and @weaver_target_rows > 0
+        and @weaver_target_rows >= $stability_rows
+    begin
+        -- Worded as the Delta gate words it, so one refusal reads the same
+        -- whichever engine reported it.
+        if @weaver_prospective_deletes * 100.0 / @weaver_target_rows > $delete_threshold
+            set @weaver_error = 'delete of ' + cast(@weaver_prospective_deletes as varchar(20))
+                + ' rows is '
+                + cast(cast(@weaver_prospective_deletes * 100.0 / @weaver_target_rows
+                    as decimal(18, 1)) as varchar(20))
+                + '% of ' + cast(@weaver_target_rows as varchar(20))
+                + ', over the $delete_threshold% threshold';
+        else if @weaver_prospective_updates * 100.0 / @weaver_target_rows > $update_threshold
+            set @weaver_error = 'update of ' + cast(@weaver_prospective_updates as varchar(20))
+                + ' rows is '
+                + cast(cast(@weaver_prospective_updates * 100.0 / @weaver_target_rows
+                    as decimal(18, 1)) as varchar(20))
+                + '% of ' + cast(@weaver_target_rows as varchar(20))
+                + ', over the $update_threshold% threshold';
+
+        -- A breach never writes. @ignore_stability_threshold is how to permit one.
+        if @weaver_error is not null
+        begin
+            set @weaver_error = @weaver_error + '; the target was not modified';
+            -- Assigned before the throw, and read only by a caller that asked for
+            -- the refusal: an uncaught THROW returns no output values at all.
+    $breach_result_assignment
+            if @fault_tolerant = 0 and @return_refusal = 0
+                throw 51021, @weaver_error, 1;
+            return;
+        end;
+    end;
+
+    /*-- The target, once every gate has passed --*/
+
+    $missing_reconciliation
+
+    update c
+    set
+        __UPDATE_SET_COLUMNS__
+    from $target_table as c
+    inner join $upsert_table as u on $target_upsert_join
+    where u.[$is_new_column] = 0;
+
+    set @weaver_rows_updated = @@rowcount;
+
+    insert into $target_table (
+        __SOURCE_COLUMNS__
+      , [$signature_column]
+      , [Row insert datetime]
+      , [Row update datetime]
+      , [Row delete datetime]
+    )
+    select
+        __UPSERT_SELECT_COLUMNS__
+      , u.[$signature_column]
+      , @weaver_load_datetime
+      , @weaver_load_datetime
+      , @weaver_live_datetime
+    from $upsert_table as u
+    where u.[$is_new_column] = 1;
+
+    set @weaver_rows_inserted = @@rowcount;
 end;
-
-/*-- The target, once every gate has passed --*/
-
-$missing_reconciliation
-
-update c
-set
-    __UPDATE_SET_COLUMNS__
-from $target_table as c
-inner join $upsert_table as u on $target_upsert_join
-where u.[$is_new_column] = 0;
-
-set @weaver_rows_updated = @@rowcount;
-
-insert into $target_table (
-    __SOURCE_COLUMNS__
-  , [$signature_column]
-  , [Row insert datetime]
-  , [Row update datetime]
-  , [Row delete datetime]
-)
-select
-    __UPSERT_SELECT_COLUMNS__
-  , u.[$signature_column]
-  , @weaver_load_datetime
-  , @weaver_load_datetime
-  , @weaver_live_datetime
-from $upsert_table as u
-where u.[$is_new_column] = 1;
-
-set @weaver_rows_inserted = @@rowcount;
 
 if @weaver_rows_rejected > 0 and @weaver_error is null
     set @weaver_error = cast(@weaver_rows_rejected as varchar(20))

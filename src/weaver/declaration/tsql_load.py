@@ -80,6 +80,12 @@ def logical_result_row(row) -> dict:
 
 STAGING_SUFFIX = "_Staging"
 UPSERT_SUFFIX = "_Upsert"
+SIGNED_SUFFIX = "_Signed"
+
+#: The most staged rows a keyed load signs into a table of their own before
+#: comparing them with the target. Below it the copy costs less than compiling
+#: the comparison against staging directly.
+SIGNED_COPY_ROWS = 1_000_000
 REJECT_SUFFIX = "_Reject"
 DELETE_SUFFIX = "_Delete"
 
@@ -362,6 +368,8 @@ def _primary_key_body(names: dict, contract: LoadContract, claims_deletes: bool)
         "load/primary_key_body",
         reject_table=names["reject"],
         upsert_table=names["upsert"],
+        signed_table=names["signed"],
+        signed_copy_rows=SIGNED_COPY_ROWS,
         staging_table=names["staging"],
         target_table=names["target"],
         signature_column=SIGNATURE_COLUMN,
@@ -369,6 +377,7 @@ def _primary_key_body(names: dict, contract: LoadContract, claims_deletes: bool)
         is_new_column=IS_NEW_COLUMN,
         rejection_reason=REJECTION_REASON,
         reason_width=REJECTION_REASON_WIDTH,
+        reject_candidates=_reject_candidates(names, contract),
         reject_discovery=_reject_discovery(names, contract),
         duplicate_key_count=_duplicate_key_count(names, contract),
         staging_purge=_staging_purge(names, contract),
@@ -656,6 +665,30 @@ def _reject_discovery(names: dict, contract: LoadContract) -> str:
     chain = ",\n".join(f"{name} as (\n{_indent(sql, 4)}\n)" for name, sql in ctes)
     union = "\nunion all\n".join(f"select * from {name}" for name in rejects)
     return f";with {chain}\ninsert into {names['reject']}\n{union};"
+
+
+def _reject_candidates(names: dict, contract: LoadContract) -> str:
+    """Whether staging holds any row reject discovery could refuse.
+
+    False exactly when discovery would find nothing: no row violates a key or
+    a not-null column, and no primary or unique key value is held twice.
+    """
+
+    staging = names["staging"]
+    keys = _bare_columns(contract.primary_key)
+    checks = [
+        f"exists (select 1 from {staging} as s where {_violation_predicate(contract)})",
+        f"exists (select 1 from {staging} group by {keys} having count(*) > 1)",
+    ]
+    for unique_key in contract.unique_keys:
+        participates = " and ".join(
+            f"{_quote(column)} is not null" for column in unique_key
+        )
+        checks.append(
+            f"exists (select 1 from {staging} where {participates}\n"
+            f"    group by {_bare_columns(unique_key)} having count(*) > 1)"
+        )
+    return "\n   or ".join(checks)
 
 
 def _reject_projection(reason: str) -> str:
@@ -1056,9 +1089,9 @@ def _cleanup(names: dict, contract: LoadContract, claims_deletes: bool) -> str:
     elif contract.appends_only:
         keys = ("reject", "upsert", "staging")
     elif _has_delete_relation(contract, claims_deletes):
-        keys = ("reject", "upsert", "delete", "staging")
+        keys = ("reject", "upsert", "signed", "delete", "staging")
     else:
-        keys = ("reject", "upsert", "staging")
+        keys = ("reject", "upsert", "signed", "staging")
     return "\n".join(
         f"if object_id({_sql_literal(names[key])}, N'U') is not null "
         f"drop table {names[key]};"
@@ -1209,6 +1242,7 @@ def _table_names(document: SesDocument, procedure_name: str) -> dict:
         "target": f"{qualified}{_quote(obj)}",
         "staging": f"{qualified}{_quote(obj + STAGING_SUFFIX)}",
         "upsert": f"{qualified}{_quote(obj + UPSERT_SUFFIX)}",
+        "signed": f"{qualified}{_quote(obj + SIGNED_SUFFIX)}",
         "reject": f"{qualified}{_quote(obj + REJECT_SUFFIX)}",
         "delete": f"{qualified}{_quote(obj + DELETE_SUFFIX)}",
         "object": document.qualified,

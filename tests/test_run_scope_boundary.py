@@ -328,6 +328,24 @@ def test_every_dispatch_names_the_run_whose_scope_it_belongs_to():
 
 
 @weaver_test()
+def test_a_node_is_not_cut_short_by_the_default_statement_deadline():
+    """A load takes as long as its data does. Opening a scope is quick."""
+
+    from weaver.fabric.livy import DEFAULT_STATEMENT_TIMEOUT
+    from weaver.run.runtime_boundary import NODE_STATEMENT_TIMEOUT
+
+    session = _Recording(answer=_row())
+    scope = open_runtime_scope(session, workspace=_fabric())
+
+    _dispatch(scope)
+
+    timeouts = {program.name: program.timeout for program in session.submitted}
+    assert timeouts["open_scope"] is None
+    assert timeouts["run_python_primitive"] == NODE_STATEMENT_TIMEOUT
+    assert NODE_STATEMENT_TIMEOUT > DEFAULT_STATEMENT_TIMEOUT
+
+
+@weaver_test()
 def test_the_submitted_program_builds_its_session_around_the_interpreters_spark():
     """The construction every other crossing performs. A Session built inside
     the call would have to go looking for an active Spark session rather than
@@ -349,6 +367,7 @@ def test_the_submitted_program_builds_its_session_around_the_interpreters_spark(
     [
         "open_scope",
         "run_python_primitive",
+        "run_python_primitives",
         "run_validation_primitive",
         "close_scope",
     ],
@@ -361,6 +380,9 @@ def test_every_submitted_program_is_valid_python(name):
     session = _Recording()
     scope = open_runtime_scope(session, workspace=_fabric())
     _dispatch(scope)
+    session.answer = [{"row": _row()}, {"row": _row()}]
+    scope.dispatch_python_many(_requests("Sales__Customer", "Sales__Order"))
+    session.answer = None
     scope.dispatch_validation(_validation(), collect=True)
     scope.close()
 
@@ -626,3 +648,49 @@ def test_a_live_session_that_could_not_release_a_scope_is_reported():
     assert len(session.warnings) == 1
     assert "left imported modules in the Fabric session" in session.warnings[0]
     assert "TypeError" in session.warnings[0]
+
+
+def _requests(*expected):
+    return [
+        {
+            "node": _node(),
+            "expected_class": one,
+            "fault_tolerant": False,
+            "reload": False,
+            "ignore_stability_threshold": False,
+        }
+        for one in expected
+    ]
+
+
+@weaver_test()
+def test_python_nodes_dispatched_together_cross_in_one_statement():
+    """They run together on the far side, so one statement carries them all."""
+
+    session = _Recording(answer=[{"row": _row()}, {"row": _row()}])
+    scope = open_runtime_scope(session, workspace=_fabric())
+
+    rows = scope.dispatch_python_many(_requests("Sales__Customer", "Sales__Order"))
+
+    assert rows == [_row(), _row()]
+    batches = [one for one in session.submitted if one.name == "run_python_primitives"]
+    assert len(batches) == 1
+    assert "Sales__Customer" in batches[0].source
+    assert "Sales__Order" in batches[0].source
+
+
+@weaver_test()
+def test_a_node_that_failed_beside_others_fails_alone_as_it_would_have_alone():
+    from weaver.fabric.livy import LivyStatementError
+
+    failure = {"ename": "ValueError", "evalue": "bad rows", "traceback": "Traceback"}
+    session = _Recording(answer=[{"failure": failure}, {"row": _row()}])
+    scope = open_runtime_scope(session, workspace=_fabric())
+
+    failed, loaded = scope.dispatch_python_many(
+        _requests("Sales__Customer", "Sales__Order")
+    )
+
+    assert isinstance(failed, LivyStatementError)
+    assert str(failed).startswith("ValueError: bad rows")
+    assert loaded == _row()

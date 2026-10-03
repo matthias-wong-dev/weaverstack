@@ -124,6 +124,8 @@ class Session(ABC):
         #: Closed reporting frames, in closing order. These record logical work;
         #: telemetry separately records physical operations.
         self.timings: list[ReportingFrame] = []
+        #: Serialises what concurrent Sub-steps add to the record and report.
+        self._concurrent_lock = threading.Lock()
         self.warnings: list[str] = []
         #: Warehouse flushers by write stream. Creating a Session must not start
         #: a worker or TDS connection.
@@ -504,6 +506,36 @@ class Session(ABC):
     ) -> Any:
         """Run a T-SQL query against a Warehouse and return its rows."""
 
+    def query_tsql_sets(
+        self,
+        statements: Sequence[str],
+        *,
+        target: Any,
+        workspace: Workspace | None = None,
+    ) -> tuple[tuple[Any, ...], ...]:
+        """Run several T-SQL queries at once and return each one's rows, in order.
+
+        A Warehouse runs the statements of one batch one after another, so they
+        go on separate connections instead.
+        """
+
+        if not statements:
+            return ()
+        from concurrent.futures import ThreadPoolExecutor
+
+        from ..sql.pool import DEFAULT_MAX_CONNECTIONS
+
+        executor = self.sql_executor(target, workspace=workspace)
+        context = self.telemetry.capture_context()
+
+        def query(statement: str):
+            with self.telemetry.use_context(context):
+                return tuple(executor.query(statement))
+
+        workers = min(len(statements), DEFAULT_MAX_CONNECTIONS)
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            return tuple(pool.map(query, statements))
+
     # --- asynchronous appends -------------------------------------------------
 
     def flusher(self, table, *, warehouse, workspace: Workspace | None = None):
@@ -608,6 +640,37 @@ class Session(ABC):
     @contextmanager
     def substep(self, name: str, detail: str | None = None) -> Iterator[ReportingFrame]:
         yield from self._framed(SUBSTEP, name, detail)
+
+    @contextmanager
+    def concurrent_substep(
+        self, name: str, detail: str | None = None
+    ) -> Iterator[ReportingFrame]:
+        """A Sub-step that runs beside others of the current Step.
+
+        It is reported and timed like any Sub-step but held off the frame stack,
+        which describes nesting, and the external work inside it is attributed
+        to it in whichever thread runs it.
+        """
+
+        from dataclasses import replace
+
+        frame = ReportingFrame(
+            kind=SUBSTEP, name=name, detail=detail, depth=len(self._frames)
+        )
+        context = replace(self.telemetry.capture_context(), substep=name)
+        error = None
+        try:
+            with self.telemetry.use_context(context):
+                yield frame
+        except BaseException as exc:
+            error = exc
+            raise
+        finally:
+            frame.elapsed = time.monotonic() - frame.started
+            frame.failed = frame.failed or error is not None
+            with self._concurrent_lock:
+                self.timings.append(frame)
+                self.present(frame, "failed" if frame.failed else "completed", error)
 
     def _framed(self, kind: str, name: str, detail: str | None):
         if kind == TASK:

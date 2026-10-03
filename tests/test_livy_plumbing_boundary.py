@@ -85,6 +85,30 @@ def test_a_non_retryable_statement_submission_is_posted_once(monkeypatch):
     ]
 
 
+@weaver_test()
+def test_a_statement_is_polled_soon_and_then_less_often(monkeypatch):
+    """A short statement returns within a fraction of the poll interval."""
+
+    from weaver.fabric import livy
+
+    states = iter(["waiting", "running", "running", "running", "running", "available"])
+
+    def call(method, url, token, body=None, **kwargs):
+        if method == "POST":
+            return {"id": 1}
+        return {"state": next(states), "output": {"status": "ok", "data": {}}}
+
+    slept = []
+    monkeypatch.setattr(livy, "_call", call)
+    monkeypatch.setattr(livy.time, "sleep", slept.append)
+    session = livy.LivySession("ws", "lh", token="t", poll_interval=3.0)
+    session.session_url = f"{session.base}/7"
+
+    session.run("print('quick')")
+
+    assert slept == [0.1, 0.2, 0.4, 0.8, 1.6]
+
+
 class _CollectionClient:
     api_base_url = "https://fabric.example/v1"
 
