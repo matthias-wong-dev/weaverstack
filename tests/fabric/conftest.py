@@ -1341,8 +1341,9 @@ def _fabric_build_context(
     has always done.
     """
 
-    from weaver.build_bundle import BuildBundle, BuildPlan
+    from weaver.build_bundle import BuildBundle
     from weaver.fabric import FabricResolver, OneLakeDfsClient
+    from weaver.mutation import MutationPlan
 
     # Nothing is torn down here. The catalogue, the target and the session all
     # outlive this context; the next one empties the target again on its way in.
@@ -1458,7 +1459,7 @@ def _fabric_build_context(
         payload = _timed_session_run(
             session, "Lakehouse bundle generation", body, phase=provisioning.GENERATE
         ).payload
-        plan = BuildPlan.from_mapping(payload["plan"])
+        plan = MutationPlan.from_mapping(payload["plan"])
         # A desktop-addressed (https) handle to the same physical bundle, so the
         # test can read it and the install can re-resolve it by name in-session.
         return BuildBundle(
@@ -1473,17 +1474,18 @@ def _fabric_build_context(
         body = (
             "from weaver.workspaces import Workspace\n"
             "from weaver.resolution import resolver_for, store_for\n"
-            "from weaver.build_bundle import Installer, load_bundle\n"
+            "from weaver.build_bundle import load_bundle\n"
+            "from weaver.build_bundle.execution_plan import execute_bundle\n"
             "from weaver.sessions import NotebookSession\n"
             f"workspace = {_workspace_literal()}\n"
             "store = store_for(workspace)\n"
             "resolver = resolver_for(workspace)\n"
             # The workspace is what lets a Warehouse batch acquire SQL on the
             # session's own identity. A Lakehouse-only bundle never asks.
-            "installer = Installer(NotebookSession(workspace=workspace, spark=spark))\n"
+            "native = NotebookSession(workspace=workspace, spark=spark)\n"
             f"bundle = load_bundle({staged_bundle_source(staging.name, bundle_name)}, "
             "store=store)\n"
-            "report = installer.install(bundle)\n"
+            "report = execute_bundle(bundle, native)\n"
             "emit({'status': report.status, 'bundle_id': report.bundle_id, "
             "'sequences': [{'number': s.number, 'status': s.status} for s in report.sequences], "
             "'actions': [{'id': a.action_id, 'status': a.status, "

@@ -14,6 +14,7 @@ from .changes import FOLDER as FOLDER_KIND
 from .changes import TABLE as TABLE_KIND
 from .changes import VIEW as VIEW_KIND
 from .changes import removed
+from .dependencies import dropped_key
 from .models import (
     DROP_FOLDER,
     DROP_SHORTCUT,
@@ -160,6 +161,18 @@ def _item_drop_stages(
                         actions=tuple(actions),
                     ),
                 ),
+                # Consumers are dropped before the objects they read.
+                provides={
+                    action.id: (dropped_key(action.resource_node_id),)
+                    for action in actions
+                },
+                requires={
+                    action.id: tuple(
+                        dropped_key(consumer)
+                        for consumer in graph.downstream_of(action.resource_node_id)
+                    )
+                    for action in actions
+                },
             )
         )
     return tuple(stages)

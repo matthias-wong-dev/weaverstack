@@ -16,8 +16,9 @@ from ..store import FilesystemStore
 def install(bundle, *, session=None):
     """Validate and install a frozen bundle without rereading its repository."""
 
-    from ..build_bundle import Installer, load_bundle, materialise_bundle_archive
+    from ..build_bundle import load_bundle, materialise_bundle_archive
     from ..build_bundle.execution import execution_workspace
+    from ..build_bundle.execution_plan import execute_bundle
     from ..build_bundle.workflow import ARCHIVE_SUFFIX
     from ..sessions.host import use_or_create_session
 
@@ -34,7 +35,7 @@ def install(bundle, *, session=None):
         workspace = execution_workspace(loaded.plan.execution, loaded.plan)
         with use_or_create_session(session, workspace=workspace) as opened:
             with opened.task("Install", loaded.bundle_id) as frame:
-                report = Installer(opened).install(loaded)
+                report = execute_bundle(loaded, opened)
                 frame.failed = not report.succeeded
                 return report
 

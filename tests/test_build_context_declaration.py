@@ -24,6 +24,7 @@ import sys
 import types
 
 import pytest
+from support.bundles import build_metadata
 from support.reports import report_of
 from support.weaver_test import weaver_test
 
@@ -184,7 +185,8 @@ def test_public_build_resolves_a_physical_folder_shortcut(public_shortcut_build)
         for _sequence, _batch, action in bundle.plan.actions()
     )
     assert not any(
-        node.reason == "shortcut_unsupported" for node in bundle.plan.omitted_nodes
+        node.reason == "shortcut_unsupported"
+        for node in build_metadata(bundle.plan).omitted_nodes
     )
 
 
@@ -211,7 +213,9 @@ def test_public_partial_build_records_an_unbound_item(public_shortcut_build):
     """An object outside the requested bindings remains a scope omission."""
 
     bundle = public_shortcut_build.run()
-    omitted = {node.node_id: node.reason for node in bundle.plan.omitted_nodes}
+    omitted = {
+        node.node_id: node.reason for node in build_metadata(bundle.plan).omitted_nodes
+    }
     assert omitted["Lakehouse/Archive/Tables/History.Event"] == "target_unbound"
 
 
@@ -361,7 +365,9 @@ def test_build_reports_selection_after_the_bundle_and_before_installation(
         selected_for_build=(identities[0], identities[1], identities[2]),
     )
     bundle = types.SimpleNamespace(
-        plan=types.SimpleNamespace(selection=selection),
+        plan=types.SimpleNamespace(
+            build_envelope={"selection": selection.to_mapping()}
+        ),
         bundle_id="bundle-1",
         location=Location(str(tmp_path / "bundle")),
     )
@@ -396,7 +402,12 @@ def test_build_reports_selection_after_the_bundle_and_before_installation(
         return bundle
 
     monkeypatch.setattr(build_bundle, "build_repository_bundle", prepared)
-    monkeypatch.setattr(build_bundle, "Installer", Installer)
+
+    monkeypatch.setattr(
+        weaver.operations.build,
+        "execute_bundle",
+        lambda received, session: Installer().install(received),
+    )
     monkeypatch.setattr(
         build_bundle,
         "build_item_repository",
@@ -438,7 +449,7 @@ def test_build_reports_selection_after_the_bundle_and_before_installation(
         "    selected for build      3",
         "    selected for removal    2",
     )
-    assert result.selection is selection
+    assert result.selection == selection
     assert result.installation_report is report
     assert result.to_mapping()["actions"] == {
         "total": 0,

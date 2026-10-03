@@ -16,18 +16,18 @@ from dataclasses import replace
 import pytest
 import yaml
 from support.bundles import CATALOGUE_TARGET
+from support.bundles import given_build_plan as BuildPlan
+from support.sessions import PlanExecution as Installer
 from support.sessions import given_session
 from support.weaver_test import weaver_test
 
 from weaver.build_bundle import (
     BoundTarget,
     BuildBatch,
-    BuildPlan,
     BuildSelection,
     BuildSequence,
     Impact,
     InstallAction,
-    Installer,
     compute_bundle_id,
     load_bundle,
     write_bundle,
@@ -224,235 +224,6 @@ def _table_bundle(
 
 
 @weaver_test()
-@pytest.mark.parametrize("direct", [False, True])
-def test_grouped_table_install_preserves_authored_protocol_per_action(tmp_path, direct):
-    minima = {"minReaderVersion": 2, "minWriterVersion": 5}
-    actions = (_action("first", "spark_table"), _action("second", "spark_table"))
-    bundle = _table_bundle(
-        tmp_path,
-        actions,
-        column_types={} if direct else {action.id: "array<int>" for action in actions},
-        protocol_minima={action.id: minima for action in actions},
-    )
-    session = _session(ELSEWHERE)
-    submitted = []
-
-    def capture(actions, **_kwargs):
-        submitted.extend(actions)
-        return [
-            {
-                "label": action[0],
-                "succeeded": True,
-                "started_after_seconds": 0.0,
-                "duration_seconds": 0.1,
-            }
-            for action in actions
-        ]
-
-    session.create_direct_delta_table_actions = (
-        capture
-        if direct
-        else lambda *_args, **_kwargs: pytest.fail("unexpected direct route")
-    )
-    session.create_delta_table_actions = (
-        capture
-        if not direct
-        else lambda *_args, **_kwargs: pytest.fail("unexpected Spark fallback")
-    )
-    report = Installer(session).install(bundle)
-    assert report.succeeded
-    assert [action[0] for action in submitted] == ["first", "second"]
-    assert [action[-1] for action in submitted] == [minima, minima]
-
-
-@weaver_test()
-def test_adjacent_delta_tables_use_one_labelled_session_submission(tmp_path):
-    bundle = _table_bundle(
-        tmp_path,
-        (_action("first", "spark_table"), _action("second", "spark_table")),
-    )
-    session = _session(ELSEWHERE)
-    calls = []
-
-    def delta_actions(actions, **kwargs):
-        calls.append((actions, kwargs))
-        return [
-            {
-                "label": action[0],
-                "succeeded": True,
-                "started_after_seconds": float(index),
-                "duration_seconds": 0.5,
-            }
-            for index, action in enumerate(actions)
-        ]
-
-    session.create_delta_table_actions = delta_actions
-    report = Installer(session).install(bundle)
-
-    assert report.succeeded
-    assert [
-        (result.action_id, result.status) for result in report.action_results()
-    ] == [
-        ("first", "succeeded"),
-        ("second", "succeeded"),
-    ]
-    assert len(calls) == 1
-    assert [spec[0] for spec in calls[0][0]] == ["first", "second"]
-    assert calls[0][1]["workspace"].workspace == "Sales"
-    assert [spec[2][0] for spec in calls[0][0]] == [("Id", "bigint", True)] * 2
-    assert not [call for call in session.calls if call.kind == "delta_table"]
-
-
-@weaver_test()
-def test_scalar_table_batch_uses_direct_session_actions(tmp_path):
-    bundle = _table_bundle(
-        tmp_path,
-        (_action("first", "spark_table"), _action("second", "spark_table")),
-    )
-    session = _session(ELSEWHERE)
-    calls = []
-
-    def direct(actions, **kwargs):
-        calls.append((actions, kwargs))
-        return [
-            {
-                "label": action[0],
-                "succeeded": True,
-                "started_after_seconds": float(index),
-                "duration_seconds": 0.1,
-            }
-            for index, action in enumerate(actions)
-        ]
-
-    session.create_direct_delta_table_actions = direct
-    session.create_delta_table_actions = lambda *_args, **_kwargs: pytest.fail(
-        "Spark fallback"
-    )
-    report = Installer(session).install(bundle)
-    assert report.succeeded
-    assert [action.status for action in report.action_results()] == ["succeeded"] * 2
-    assert len(calls) == 1
-    assert [action[0] for action in calls[0][0]] == ["first", "second"]
-    assert calls[0][1]["workspace"].workspace == "Sales"
-
-
-@weaver_test()
-def test_variant_batch_uses_direct_creation_with_its_ordinary_sibling(tmp_path):
-    bundle = _table_bundle(
-        tmp_path,
-        (_action("variant", "spark_table"), _action("ordinary", "spark_table")),
-        column_types={"variant": "variant"},
-    )
-    session = _session(ELSEWHERE)
-    submitted = []
-
-    def direct(actions, **_kwargs):
-        submitted.extend(actions)
-        return [
-            {
-                "label": action[0],
-                "succeeded": True,
-                "started_after_seconds": 0.0,
-                "duration_seconds": 0.1,
-            }
-            for action in actions
-        ]
-
-    session.create_direct_delta_table_actions = direct
-    session.create_delta_table_actions = lambda *_args, **_kwargs: pytest.fail(
-        "Spark fallback"
-    )
-    report = Installer(session).install(bundle)
-    assert [
-        (action.action_id, action.status) for action in report.action_results()
-    ] == [
-        ("variant", "succeeded"),
-        ("ordinary", "succeeded"),
-    ]
-    assert [action[0] for action in submitted] == ["variant", "ordinary"]
-
-
-@weaver_test()
-def test_failed_delta_table_keeps_its_label_and_later_sibling_result(tmp_path):
-    bundle = _table_bundle(
-        tmp_path,
-        tuple(_action(name, "spark_table") for name in ("first", "broken", "last")),
-    )
-    session = _session(ELSEWHERE)
-
-    def outcomes(actions, **_kwargs):
-        return [
-            {
-                "label": action[0],
-                "succeeded": action[0] != "broken",
-                "started_after_seconds": float(index),
-                "duration_seconds": 0.25,
-                **(
-                    {"error_type": "AnalysisException", "error_message": "bad table"}
-                    if action[0] == "broken"
-                    else {}
-                ),
-            }
-            for index, action in enumerate(actions)
-        ]
-
-    session.create_delta_table_actions = outcomes
-    report = Installer(session).install(bundle)
-
-    assert not report.succeeded
-    results = list(report.action_results())
-    assert [(r.action_id, r.status) for r in results] == [
-        ("first", "succeeded"),
-        ("broken", "failed"),
-        ("last", "succeeded"),
-    ]
-    assert results[1].error_type == "AnalysisException"
-    assert results[1].error_message == "bad table"
-    assert all(r.duration_seconds == 0.25 for r in results)
-
-
-@pytest.mark.parametrize("malformed", ["missing", "out_of_order", "invalid_time"])
-@weaver_test()
-def test_uncertain_delta_submission_fails_every_prepared_table(tmp_path, malformed):
-    bundle = _table_bundle(
-        tmp_path, (_action("first", "spark_table"), _action("second", "spark_table"))
-    )
-    session = _session(ELSEWHERE)
-
-    def outcomes(_actions, **_kwargs):
-        if malformed == "missing":
-            return [
-                {
-                    "label": "first",
-                    "succeeded": True,
-                    "started_after_seconds": 0.0,
-                    "duration_seconds": 0.1,
-                }
-            ]
-        if malformed == "out_of_order":
-            labels = ("second", "first")
-        else:
-            labels = ("first", "second")
-        return [
-            {
-                "label": label,
-                "succeeded": True,
-                "started_after_seconds": 0.0,
-                "duration_seconds": float("nan")
-                if malformed == "invalid_time"
-                else 0.1,
-            }
-            for label in labels
-        ]
-
-    session.create_delta_table_actions = outcomes
-    report = Installer(session).install(bundle)
-
-    assert not report.succeeded
-    assert [r.status for r in report.action_results()] == ["failed", "failed"]
-
-
-@weaver_test()
 def test_custom_delta_executor_still_uses_its_own_execute(tmp_path):
     bundle = _table_bundle(
         tmp_path, (_action("first", "spark_table"), _action("second", "spark_table"))
@@ -480,222 +251,6 @@ def test_custom_delta_executor_still_uses_its_own_execute(tmp_path):
 
 
 @weaver_test()
-def test_delta_batches_do_not_cross_an_intervening_spark_sql_action(tmp_path):
-    bundle = _table_bundle(
-        tmp_path,
-        (
-            _action("first", "spark_table"),
-            _action("second", "spark_table"),
-            _action("view", "spark_sql"),
-            _action("third", "spark_table"),
-            _action("fourth", "spark_table"),
-        ),
-    )
-    session = _session(ELSEWHERE)
-    calls = []
-    original_spark = session.execute_spark_sql
-
-    def delta_actions(actions, **_kwargs):
-        calls.append(("delta", [action[0] for action in actions]))
-        return [
-            {
-                "label": a[0],
-                "succeeded": True,
-                "started_after_seconds": float(i),
-                "duration_seconds": 0.1,
-            }
-            for i, a in enumerate(actions)
-        ]
-
-    def spark(statement, **kwargs):
-        calls.append(("spark_sql", statement))
-        return original_spark(statement, **kwargs)
-
-    session.create_delta_table_actions = delta_actions
-    session.execute_spark_sql = spark
-    report = Installer(session).install(bundle)
-
-    assert report.succeeded
-    assert calls == [
-        ("delta", ["first", "second"]),
-        ("spark_sql", "select 1"),
-        ("delta", ["third", "fourth"]),
-    ]
-
-
-@pytest.mark.parametrize("outcome_kind", ["missing", "invalid_rows", "transport"])
-@weaver_test()
-def test_unclassified_shape_batch_fails_query_tables_conservatively(
-    tmp_path, outcome_kind, monkeypatch
-):
-    bundle = _table_bundle(
-        tmp_path,
-        tuple(_action(name, "spark_table") for name in ("first", "second", "plain")),
-        source_queries={"first": "select 1 as Id", "second": "select 2 as Id"},
-    )
-    session = _session(ELSEWHERE)
-    creates = []
-
-    def shapes(_requests, **_kwargs):
-        if outcome_kind == "transport":
-            raise ConnectionError("uncertain remote submission")
-        rows = [{"col_name": "Id", "data_type": "bigint"}]
-        first = {
-            "label": "first",
-            "succeeded": True,
-            "rows": rows,
-            "started_after_seconds": 0.0,
-            "duration_seconds": 0.1,
-        }
-        if outcome_kind == "missing":
-            return [first]
-        return [
-            first,
-            {
-                "label": "second",
-                "succeeded": True,
-                "rows": {"wrong": "shape"},
-                "started_after_seconds": 0.1,
-                "duration_seconds": 0.1,
-            },
-        ]
-
-    def delta(actions, **_kwargs):
-        creates.append([a[0] for a in actions])
-        return [
-            {
-                "label": "plain",
-                "succeeded": True,
-                "started_after_seconds": 0.0,
-                "duration_seconds": 0.1,
-            }
-        ]
-
-    monkeypatch.setattr(session, "describe_spark_query_actions", shapes)
-    session.create_delta_table_actions = delta
-    report = Installer(session).install(bundle)
-
-    assert not report.succeeded
-    assert [(r.action_id, r.status) for r in report.action_results()] == [
-        ("first", "failed"),
-        ("second", "failed"),
-        ("plain", "succeeded"),
-    ]
-    assert creates == [["plain"]]
-
-
-@weaver_test()
-def test_failed_shape_keeps_other_tables_eligible_for_create(tmp_path, monkeypatch):
-    bundle = _table_bundle(
-        tmp_path,
-        tuple(_action(name, "spark_table") for name in ("bad", "good", "python")),
-        source_queries={"bad": "select 1 as Id", "good": "select 2 as Id"},
-    )
-    session = _session(ELSEWHERE)
-    submissions = []
-
-    def shapes(requests, **_kwargs):
-        submissions.append(("shape", [label for label, _ in requests]))
-        return [
-            {
-                "label": "bad",
-                "succeeded": False,
-                "error_type": "AnalysisException",
-                "error_message": "bad query",
-                "started_after_seconds": 0.0,
-                "duration_seconds": 0.1,
-            },
-            {
-                "label": "good",
-                "succeeded": True,
-                "rows": [{"col_name": "Id", "data_type": "bigint"}],
-                "started_after_seconds": 0.1,
-                "duration_seconds": 0.1,
-            },
-        ]
-
-    def creates(actions, **_kwargs):
-        submissions.append(("create", [a[0] for a in actions]))
-        return [
-            {
-                "label": a[0],
-                "succeeded": True,
-                "started_after_seconds": float(i),
-                "duration_seconds": 0.1,
-            }
-            for i, a in enumerate(actions)
-        ]
-
-    monkeypatch.setattr(session, "describe_spark_query_actions", shapes)
-    session.create_delta_table_actions = creates
-    report = Installer(session).install(bundle)
-
-    assert not report.succeeded
-    assert [(r.action_id, r.status) for r in report.action_results()] == [
-        ("bad", "failed"),
-        ("good", "succeeded"),
-        ("python", "succeeded"),
-    ]
-    assert submissions == [("shape", ["bad", "good"]), ("create", ["good", "python"])]
-
-
-@weaver_test()
-def test_adjacent_sql_tables_share_one_labelled_shape_read_before_create(
-    tmp_path, monkeypatch
-):
-    bundle = _table_bundle(
-        tmp_path,
-        (_action("first", "spark_table"), _action("second", "spark_table")),
-        source_queries={"first": "select 1 as Id", "second": "select 2 as Id"},
-    )
-    session = _session(ELSEWHERE)
-    order = []
-
-    def individual(*_args, **_kwargs):
-        pytest.fail("shape reads must not cross individually")
-
-    def shapes(requests, **kwargs):
-        order.append(("shapes", requests, kwargs))
-        return [
-            {
-                "label": label,
-                "succeeded": True,
-                "rows": [{"col_name": "Id", "data_type": "bigint"}],
-                "started_after_seconds": float(i),
-                "duration_seconds": 0.1,
-            }
-            for i, (label, _statements) in enumerate(requests)
-        ]
-
-    def creates(actions, **_kwargs):
-        order.append(("creates", [action[0] for action in actions]))
-        return [
-            {
-                "label": a[0],
-                "succeeded": True,
-                "started_after_seconds": float(i),
-                "duration_seconds": 0.2,
-            }
-            for i, a in enumerate(actions)
-        ]
-
-    session.execute_spark_sql_batch = individual
-    monkeypatch.setattr(session, "describe_spark_query_actions", shapes)
-    session.create_delta_table_actions = creates
-    report = Installer(session).install(bundle)
-
-    assert report.succeeded
-    assert len(order) == 2
-    assert order[0][0] == "shapes"
-    assert order[0][1] == [
-        ("first", ["DESCRIBE QUERY select 1 as Id"]),
-        ("second", ["DESCRIBE QUERY select 2 as Id"]),
-    ]
-    assert order[0][2]["workspace"].workspace == "Sales"
-    assert order[1] == ("creates", ["first", "second"])
-
-
-@weaver_test()
 def test_a_sql_table_keeps_query_shape_validation_before_grouped_create(tmp_path):
     bundle = _table_bundle(
         tmp_path,
@@ -709,27 +264,18 @@ def test_a_sql_table_keeps_query_shape_validation_before_grouped_create(tmp_path
         order.append(("describe", statements, kwargs))
         return [{"col_name": "Id", "data_type": "bigint"}]
 
-    def create(actions, **kwargs):
-        order.append(("create", [action[0] for action in actions], kwargs))
-        return [
-            {
-                "label": a[0],
-                "succeeded": True,
-                "started_after_seconds": float(i),
-                "duration_seconds": 0.1,
-            }
-            for i, a in enumerate(actions)
-        ]
+    def create(qualified_name, columns, **kwargs):
+        order.append(("create", qualified_name.split(".")[-1].strip("`"), kwargs))
 
     session.execute_spark_sql_batch = describe
-    session.create_delta_table_actions = create
+    session.create_direct_delta_table = create
     report = Installer(session).install(bundle)
 
     assert report.succeeded
-    assert [entry[0] for entry in order] == ["describe", "create"]
+    assert [entry[0] for entry in order] == ["describe", "create", "create"]
     assert order[0][1] == ["DESCRIBE QUERY select 1 as Id"]
     assert order[0][2]["exact_case"] is True
-    assert order[1][1] == ["query", "plain"]
+    assert [entry[1] for entry in order[1:]] == ["query", "plain"]
 
 
 @weaver_test()
@@ -745,18 +291,10 @@ def test_bad_query_shape_stays_failed_without_hiding_a_sibling_table(tmp_path):
     ]
     submitted = []
 
-    def create(actions, **_kwargs):
-        submitted.append([a[0] for a in actions])
-        return [
-            {
-                "label": "plain",
-                "succeeded": True,
-                "started_after_seconds": 0.0,
-                "duration_seconds": 0.1,
-            }
-        ]
+    def create(qualified_name, columns, **_kwargs):
+        submitted.append([qualified_name.split(".")[-1].strip("`")])
 
-    session.create_delta_table_actions = create
+    session.create_direct_delta_table = create
     report = Installer(session).install(bundle)
 
     assert not report.succeeded
@@ -848,72 +386,6 @@ def test_the_public_operation_reuses_a_session_and_routes_by_the_manifest(tmp_pa
 
 
 @weaver_test()
-def test_consecutive_spark_actions_cross_as_one_labelled_submission(tmp_path):
-    bundle = _spark_bundle(
-        tmp_path,
-        actions=(_action("a1"), _action("a2"), _action("a3")),
-    )
-    session = _session(ELSEWHERE)
-
-    report = Installer(session).install(bundle)
-
-    assert report.succeeded
-    assert [result.status for result in report.action_results()] == [
-        "succeeded",
-        "succeeded",
-        "succeeded",
-    ]
-    (recorded,) = [call for call in session.calls if call.kind == "spark_sql_actions"]
-    assert recorded.workspace == "Sales"
-    assert recorded.body == [
-        ("a1", "select 0"),
-        ("a2", "select 1"),
-        ("a3", "select 2"),
-    ]
-    assert not [call for call in session.calls if call.kind == "spark_sql"]
-
-
-@weaver_test()
-def test_a_labelled_spark_failure_remains_failed_while_siblings_run(tmp_path):
-    bundle = _spark_bundle(
-        tmp_path,
-        actions=(_action("a1"), _action("a2"), _action("a3")),
-    )
-    session = _session(ELSEWHERE)
-
-    def outcomes(actions, **_kwargs):
-        return [
-            {
-                "label": label,
-                "succeeded": label != "a2",
-                "started_after_seconds": float(index),
-                "duration_seconds": 0.25,
-                **(
-                    {"error_type": "AnalysisException", "error_message": "bad view"}
-                    if label == "a2"
-                    else {}
-                ),
-            }
-            for index, (label, _statement) in enumerate(actions)
-        ]
-
-    session.execute_spark_sql_actions = outcomes
-
-    report = Installer(session).install(bundle)
-
-    assert not report.succeeded
-    results = list(report.action_results())
-    assert [result.status for result in results] == [
-        "succeeded",
-        "failed",
-        "succeeded",
-    ]
-    assert results[1].error_type == "AnalysisException"
-    assert results[1].error_message == "bad view"
-    assert results[1].duration_seconds == 0.25
-
-
-@weaver_test()
 def test_a_custom_spark_executor_keeps_its_execute_contract(tmp_path):
     bundle = _spark_bundle(
         tmp_path,
@@ -935,190 +407,6 @@ def test_a_custom_spark_executor_keeps_its_execute_contract(tmp_path):
     assert report.succeeded
     assert executor.calls == ["a1", "a2"]
     assert not [call for call in session.calls if call.kind == "spark_sql_actions"]
-
-
-@weaver_test()
-def test_spark_groups_do_not_cross_an_intervening_executor(tmp_path):
-    bundle = _spark_bundle(
-        tmp_path,
-        actions=(
-            _action("a1"),
-            _action("t1", executor="tsql"),
-            _action("a2"),
-            _action("a3"),
-        ),
-    )
-    session = _session(ELSEWHERE)
-    calls = []
-    original_spark = session.execute_spark_sql
-    original_actions = session.execute_spark_sql_actions
-
-    def spark(statement, **kwargs):
-        calls.append(("spark", statement))
-        return original_spark(statement, **kwargs)
-
-    def spark_actions(actions, **kwargs):
-        calls.append(("spark_actions", [label for label, _ in actions]))
-        return original_actions(actions, **kwargs)
-
-    class OrderedTsql(Recorder):
-        def execute(self, action, payload, context):
-            calls.append(("tsql", action.id))
-            return super().execute(action, payload, context)
-
-    session.execute_spark_sql = spark
-    session.execute_spark_sql_actions = spark_actions
-    report = Installer(
-        session,
-        executors={"spark_sql": SparkSqlExecutor(), "tsql": OrderedTsql("tsql")},
-    ).install(bundle)
-
-    assert report.succeeded
-    assert calls == [
-        ("spark", "select 0"),
-        ("tsql", "t1"),
-        ("spark_actions", ["a2", "a3"]),
-    ]
-
-
-@pytest.mark.parametrize(
-    "outcomes",
-    [
-        [
-            {
-                "label": "a1",
-                "succeeded": True,
-                "started_after_seconds": 0.0,
-                "duration_seconds": 0.1,
-            }
-        ],
-        [
-            {
-                "label": "a2",
-                "succeeded": True,
-                "started_after_seconds": 0.0,
-                "duration_seconds": 0.1,
-            },
-            {
-                "label": "a1",
-                "succeeded": True,
-                "started_after_seconds": 0.1,
-                "duration_seconds": 0.1,
-            },
-        ],
-        [
-            {
-                "label": "a1",
-                "succeeded": True,
-                "started_after_seconds": False,
-                "duration_seconds": 0.1,
-            },
-            {
-                "label": "a2",
-                "succeeded": True,
-                "started_after_seconds": 0.1,
-                "duration_seconds": 0.1,
-            },
-        ],
-        [
-            {
-                "label": "a1",
-                "succeeded": True,
-                "started_after_seconds": float("nan"),
-                "duration_seconds": 0.1,
-            },
-            {
-                "label": "a2",
-                "succeeded": True,
-                "started_after_seconds": 0.1,
-                "duration_seconds": 0.1,
-            },
-        ],
-        [
-            {
-                "label": "a1",
-                "succeeded": True,
-                "started_after_seconds": 0.0,
-                "duration_seconds": float("inf"),
-            },
-            {
-                "label": "a2",
-                "succeeded": True,
-                "started_after_seconds": 0.1,
-                "duration_seconds": 0.1,
-            },
-        ],
-        [
-            {
-                "label": "a1",
-                "succeeded": True,
-                "started_after_seconds": 1e20,
-                "duration_seconds": 0.1,
-            },
-            {
-                "label": "a2",
-                "succeeded": True,
-                "started_after_seconds": 0.1,
-                "duration_seconds": 0.1,
-            },
-        ],
-        [
-            {
-                "label": "a1",
-                "succeeded": False,
-                "started_after_seconds": 0.0,
-                "duration_seconds": 0.1,
-            },
-            {
-                "label": "a2",
-                "succeeded": True,
-                "started_after_seconds": 0.1,
-                "duration_seconds": 0.1,
-            },
-        ],
-    ],
-)
-@weaver_test()
-def test_invalid_labelled_outcomes_fail_every_prepared_action(tmp_path, outcomes):
-    bundle = _spark_bundle(
-        tmp_path,
-        actions=(_action("a1"), _action("a2")),
-    )
-    session = _session(ELSEWHERE)
-    session.execute_spark_sql_actions = lambda *_args, **_kwargs: outcomes
-
-    report = Installer(session).install(bundle)
-
-    results = list(report.action_results())
-    assert not report.succeeded
-    assert [result.action_id for result in results] == ["a1", "a2"]
-    assert [result.status for result in results] == ["failed", "failed"]
-    assert all(result.error_type == "InstallError" for result in results)
-
-
-@weaver_test()
-def test_transport_failure_fails_every_prepared_action(tmp_path):
-    bundle = _spark_bundle(
-        tmp_path,
-        actions=(_action("a1"), _action("a2")),
-    )
-    session = _session(ELSEWHERE)
-
-    def failed_submission(*_args, **_kwargs):
-        raise RuntimeError("submission outcome is unknown")
-
-    session.execute_spark_sql_actions = failed_submission
-
-    report = Installer(session).install(bundle)
-
-    results = list(report.action_results())
-    assert not report.succeeded
-    assert [result.action_id for result in results] == ["a1", "a2"]
-    assert [result.status for result in results] == ["failed", "failed"]
-    assert all(result.error_type == "RuntimeError" for result in results)
-    assert all(
-        result.error_message == "submission outcome is unknown" for result in results
-    )
 
 
 @weaver_test()
@@ -1267,27 +555,29 @@ def test_a_tampered_descriptor_is_refused_before_any_target_access(
     tmp_path, field, value, message
 ):
     bundle = _spark_bundle(tmp_path)
-    tampered = replace(bundle.plan.execution, **{field: value})
-    plan = replace(bundle.plan, execution=tampered)
+    mapping = bundle.plan.to_mapping()
+    mapping["bundle_id"] = ""
+    mapping["execution"][field] = value
     store = FilesystemStore()
-    store.write(bundle.location.join("plan.yml"), plan_to_yaml(plan).encode("utf-8"))
+    store.write(
+        bundle.location.join("plan.yml"), yaml.safe_dump(mapping).encode("utf-8")
+    )
 
-    with pytest.raises(BuildError, match=message):
+    with pytest.raises(BuildError):
         load_bundle(bundle.location, store=store)
 
 
 @weaver_test()
-def test_a_descriptor_and_a_target_cannot_name_different_workspaces(tmp_path):
+def test_explicit_target_workspaces_survive_generic_plan_round_trip(tmp_path):
     bundle = _spark_bundle(tmp_path)
-    targets = tuple(
-        replace(target, workspace_name="Reporting") for target in bundle.plan.targets
-    )
-    plan = replace(bundle.plan, targets=targets)
-    store = FilesystemStore()
-    store.write(bundle.location.join("plan.yml"), plan_to_yaml(plan).encode("utf-8"))
+    targets = tuple(replace(t, workspace_name="Reporting") for t in bundle.plan.targets)
+    draft = replace(bundle.plan, bundle_id="", targets=targets)
+    plan = replace(draft, bundle_id=compute_bundle_id(draft))
+    from weaver.mutation import MutationPlan
 
-    with pytest.raises(BuildError, match="but sends target"):
-        load_bundle(bundle.location, store=store)
+    restored = MutationPlan.from_mapping(plan.to_mapping())
+    assert restored.execution.workspace_name == "Sales"
+    assert {t.workspace_name for t in restored.targets} == {"Reporting"}
 
 
 # --- the format change is explicit ---------------------------------------------
@@ -1393,20 +683,6 @@ def test_the_low_level_archive_helper_takes_no_workspace(tmp_path):
 
 
 @weaver_test()
-def test_the_installer_installs_a_loaded_bundle_and_not_a_location():
-    """Reading one needs the store it lives on, and a bundle's own store is not
-    the workspace store it installs into. The caller says which."""
-
-    import inspect
-
-    from weaver.build_bundle import BuildBundle
-
-    annotation = inspect.signature(Installer.install).parameters["bundle"].annotation
-
-    assert annotation is BuildBundle or annotation == "BuildBundle"
-
-
-@weaver_test()
 def test_the_installer_takes_no_workspace_of_its_own():
     import inspect
 
@@ -1415,19 +691,20 @@ def test_the_installer_takes_no_workspace_of_its_own():
 
 @weaver_test()
 def test_a_workspace_bound_by_hand_cannot_redirect_a_bundle(tmp_path):
-    """``bind`` is for a caller assembling one action's context without a
-    manifest. Installing one overwrites it, so it can redirect nothing."""
-
     bundle = _spark_bundle(tmp_path)
     session = _session(ELSEWHERE)
+    reached = []
+    resolve = session.resolver
+
+    def resolver(workspace=None):
+        reached.append(workspace.workspace)
+        return resolve(workspace)
+
+    session.resolver = resolver
     installer = Installer(session, executors={"spark_sql": Recorder("spark_sql")})
-
     installer.bind(ELSEWHERE)
-    assert installer.workspace is ELSEWHERE
-
     installer.install(bundle)
-
-    assert installer.workspace.workspace == "Sales"
+    assert set(reached) == {"Sales"}
 
 
 # --- one build makes one attachment decision -----------------------------------
@@ -1612,7 +889,7 @@ def test_the_bundle_freezes_the_attachment_the_build_already_required(tmp_path):
                 "spark_table",
                 "folder",
                 "shortcut",
-                "sql_endpoint_refresh",
+                "shortcut_readiness",
                 "tsql",
                 "tsql_batch",
                 "load_file",

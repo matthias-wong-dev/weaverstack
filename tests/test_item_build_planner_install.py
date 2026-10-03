@@ -7,6 +7,7 @@ import shutil
 
 import pytest
 from factories import FixtureInventory, lakehouse_catalogue
+from support.bundles import build_metadata, runs_before
 from support.sessions import given_installer
 from support.weaver_test import weaver_test
 from support.workspaces import WORKSPACE
@@ -164,6 +165,7 @@ def test_one_bundle_coordinates_multiple_typed_items(tmp_path):
         batch.target_id in bundle.plan.target_ids
         for sequence in bundle.plan.sequences
         for batch in sequence.batches
+        if any(a.executor != "completion_gate" for a in batch.actions)
     )
 
 
@@ -241,6 +243,7 @@ def test_a_warehouse_shortcut_is_a_view_over_the_bound_target(tmp_path):
     shortcut = next(
         action
         for _s, _b, action in bundle.plan.actions()
+        if action.executor != "completion_gate"
         if action.kind == "create_shortcut" and action.executor == "tsql_batch"
     )
     # One action for the item's shortcuts, and each statement its own batch:
@@ -255,8 +258,9 @@ def test_a_warehouse_shortcut_is_a_view_over_the_bound_target(tmp_path):
         "[Curated_Dev].[Sales].[Customer];"
     ) in statements
     assert any("[_].[Bookmark]" in statement for statement in statements)
-    assert not bundle.plan.omitted_nodes or all(
-        node.reason != "shortcut_unsupported" for node in bundle.plan.omitted_nodes
+    assert not build_metadata(bundle.plan).omitted_nodes or all(
+        node.reason != "shortcut_unsupported"
+        for node in build_metadata(bundle.plan).omitted_nodes
     )
 
 
@@ -285,6 +289,7 @@ def test_a_bound_shortcut_freezes_both_addresses_by_target_id(tmp_path):
     shortcut = next(
         action
         for _s, _b, action in bundle.plan.actions()
+        if action.executor != "completion_gate"
         if action.id == "shortcuts-Lakehouse--Curated"
     )
     assert shortcut.executor == "shortcut"
@@ -324,17 +329,48 @@ def test_a_shortcut_is_materialised_before_the_documents_that_use_it(tmp_path):
         store=FilesystemStore(),
     )
 
-    at = {
-        action.id: sequence.number for sequence, _batch, action in bundle.plan.actions()
-    }
     # The source item produces the table, its endpoint catches up, and only then
     # does the consuming item's shortcut, and the document reading it, exist.
-    assert (
-        at["object-Lakehouse--Curated--Tables--Sales.Customer"]
-        < at["refresh-sql-endpoint-Lakehouse--Curated"]
-        < at["shortcuts-Warehouse--Reporting"]
-        < at["object-Warehouse--Reporting--Sales.Customer"]
+    chain = (
+        "object-Lakehouse--Curated--Tables--Sales.Customer",
+        "start-sql-endpoint-refresh-Lakehouse--Curated",
+        "await-sql-endpoint-refresh-Lakehouse--Curated",
+        "shortcuts-Warehouse--Reporting",
+        "object-Warehouse--Reporting--Sales.Customer",
     )
+    assert all(
+        runs_before(bundle.plan, first, second)
+        for first, second in zip(chain, chain[1:])
+    )
+
+
+@weaver_test()
+def test_warehouse_runtime_procedures_wait_for_the_items_catalogue_surface(tmp_path):
+    """Fabric refuses a procedure while DDL on an object it reads is running."""
+
+    repository = _repository(_dependency_estate(tmp_path))
+    bundle = generate_item_build_bundle(
+        repository,
+        bindings=ItemBindings(
+            (
+                _binding("Lakehouse/Curated", "Curated_Dev"),
+                _binding("Warehouse/Reporting", "Reporting_Dev"),
+            )
+        ),
+        output=Location(str(tmp_path / "bundle")),
+        store=FilesystemStore(),
+    )
+
+    # The surface views land in ``_``, which must exist first.
+    assert runs_before(
+        bundle.plan, "schema-Warehouse--Reporting-_", "shortcuts-Warehouse--Reporting"
+    )
+    for procedure in ("_--Load", "_--Test", "_--Load-Sales.Customer"):
+        assert runs_before(
+            bundle.plan,
+            "shortcuts-Warehouse--Reporting",
+            f"runtime-Warehouse--Reporting--procedure-{procedure}",
+        )
 
 
 @weaver_test()
@@ -383,6 +419,7 @@ def test_a_physical_shortcut_can_feed_a_logical_warehouse_shortcut(tmp_path):
     warehouse_shortcuts = next(
         action
         for _sequence, _batch, action in bundle.plan.actions()
+        if action.executor != "completion_gate"
         if action.id == "shortcuts-Warehouse--Reporting"
     )
     statements = json.loads(
@@ -395,13 +432,18 @@ def test_a_physical_shortcut_can_feed_a_logical_warehouse_shortcut(tmp_path):
         "[Raw_Dev].[Sales].[Customer];"
     ) in statements
 
-    at = {
-        action.id: sequence.number for sequence, _batch, action in bundle.plan.actions()
-    }
-    assert (
-        at["shortcuts-Lakehouse--Raw"]
-        < at["refresh-sql-endpoint-Lakehouse--Raw"]
-        < at["shortcuts-Warehouse--Reporting"]
+    assert runs_before(
+        bundle.plan, "shortcuts-Lakehouse--Raw", "await-tables-shortcuts-Lakehouse--Raw"
+    )
+    assert runs_before(
+        bundle.plan,
+        "await-tables-shortcuts-Lakehouse--Raw",
+        "start-sql-endpoint-refresh-Lakehouse--Raw",
+    )
+    assert runs_before(
+        bundle.plan,
+        "await-sql-endpoint-refresh-Lakehouse--Raw",
+        "shortcuts-Warehouse--Reporting",
     )
 
 
@@ -421,7 +463,9 @@ def test_an_items_schemas_are_created_before_its_shortcuts(tmp_path):
     )
 
     at = {
-        action.id: sequence.number for sequence, _batch, action in bundle.plan.actions()
+        action.id: sequence.number
+        for sequence, _batch, action in bundle.plan.actions()
+        if action.executor != "completion_gate"
     }
     assert (
         at["schema-Warehouse--Reporting-Sales"] < at["shortcuts-Warehouse--Reporting"]
@@ -448,6 +492,7 @@ def test_an_shortcut_destination_is_not_pruned_as_an_orphan(tmp_path):
     pruned = {
         action.id
         for _s, _b, action in bundle.plan.actions()
+        if action.executor != "completion_gate"
         if action.kind.startswith("prune")
     }
     assert "Warehouse--Reporting-prune-view-Sales.PortableCustomer" not in pruned
@@ -468,6 +513,7 @@ def test_authored_three_part_name_is_preserved_in_payload(tmp_path):
         .read(bundle.location.join(*action.payload.split("/")))
         .decode()
         for _, _, action in bundle.plan.actions()
+        if action.executor != "completion_gate"
         if action.payload and action.kind == "build_table"
     ]
     assert any("Raw_LH.Sales.Customer" in payload for payload in payloads)
@@ -530,7 +576,7 @@ def test_installer_never_reopens_or_interprets_source_repository(tmp_path):
             "folder": noop,
             "shortcut": noop,
             "tsql_batch": noop,
-            "sql_endpoint_refresh": noop,
+            "shortcut_readiness": noop,
             "load_file": noop,
             "runtime_state": noop,
         },
@@ -563,20 +609,30 @@ def test_item_prune_reconciles_tables_and_files_owned_by_one_lakehouse_item(
     )
 
     prune = _stage(bundle, "prune unmanaged objects by logical item")
-    assert {action.kind for batch in prune.batches for action in batch.actions} == {
+    assert {
+        action.kind
+        for batch in prune.batches
+        if any(a.executor != "completion_gate" for a in batch.actions)
+        for action in batch.actions
+        if action.executor != "completion_gate"
+    } == {
         "prune_table",
         "prune_folder",
     }
     assert {
         action.resource_node_id
         for batch in prune.batches
+        if any(a.executor != "completion_gate" for a in batch.actions)
         for action in batch.actions
+        if action.executor != "completion_gate"
         if action.kind == "prune_folder"
     } == {"folder:Sales.OldFolder"}
     assert all(
         "Customer" not in action.id
         for batch in prune.batches
+        if any(a.executor != "completion_gate" for a in batch.actions)
         for action in batch.actions
+        if action.executor != "completion_gate"
     )
 
 
@@ -605,10 +661,14 @@ def test_item_prune_is_the_default_and_false_is_the_explicit_escape_hatch(
     )
 
     assert any(
-        action.kind.startswith("prune") for _s, _b, action in reconciled.plan.actions()
+        action.kind.startswith("prune")
+        for _s, _b, action in reconciled.plan.actions()
+        if action.executor != "completion_gate"
     )
     assert not any(
-        action.kind.startswith("prune") for _s, _b, action in jammed.plan.actions()
+        action.kind.startswith("prune")
+        for _s, _b, action in jammed.plan.actions()
+        if action.executor != "completion_gate"
     )
 
 
@@ -637,10 +697,21 @@ def test_two_same_type_items_have_independent_prune_batches(tmp_path, more_lakeh
     )
 
     prune = _stage(bundle, "prune unmanaged objects by logical item")
-    assert len(prune.batches) == 2
+    assert (
+        sum(
+            any(a.executor != "completion_gate" for a in b.actions)
+            for b in prune.batches
+        )
+        == 2
+    )
     by_target = {
-        batch.target_id: {action.id for action in batch.actions}
+        batch.target_id: {
+            action.id
+            for action in batch.actions
+            if action.executor != "completion_gate"
+        }
         for batch in prune.batches
+        if any(a.executor != "completion_gate" for a in batch.actions)
     }
     assert any(
         "Lakehouse--Raw-prune-table-Sales.RawGhost" in ids for ids in by_target.values()
@@ -677,6 +748,7 @@ def test_rebinding_prune_has_no_opinion_about_the_old_physical_item(
         batch.target_id
         for sequence in _stages(bundle, "prune unmanaged objects by logical item")
         for batch in sequence.batches
+        if any(a.executor != "completion_gate" for a in batch.actions)
     }
     assert prune_targets == {"Lakehouse-Raw--lakehouse-Raw_New"}
     assert lakehouses.store.exists(
@@ -756,7 +828,11 @@ def test_independent_items_share_their_barriers(tmp_path):
     )
 
     shared = _stage(bundle, "build dependency layer")
-    assert {batch.target_id for batch in shared.batches} == {
+    assert {
+        batch.target_id
+        for batch in shared.batches
+        if any(a.executor != "completion_gate" for a in batch.actions)
+    } == {
         "Lakehouse-Raw--lakehouse-Raw_Dev",
         "Lakehouse-Curated--lakehouse-Curated_Dev",
     }
@@ -769,7 +845,8 @@ def _refreshed(bundle):
     return {
         batch.target_id
         for sequence, batch, action in bundle.plan.actions()
-        if action.kind == "refresh_sql_endpoint"
+        if action.executor != "completion_gate"
+        if action.kind == "start_sql_endpoint_refresh"
     }
 
 
@@ -821,7 +898,9 @@ def test_an_item_whose_only_work_is_folders_needs_no_refresh(tmp_path):
 
     assert _refreshed(bundle) == {"Lakehouse-Raw--lakehouse-Raw_Dev"}
     assert any(
-        action.kind == "build_folder" for _s, _b, action in bundle.plan.actions()
+        action.kind == "build_folder"
+        for _s, _b, action in bundle.plan.actions()
+        if action.executor != "completion_gate"
     )
 
 
@@ -850,6 +929,7 @@ def test_warehouse_item_prune_uses_its_item_owned_keep_set(tmp_path):
     actions = [
         action
         for sequence, _batch, action in bundle.plan.actions()
+        if action.executor != "completion_gate"
         if sequence.description == "prune unmanaged objects by logical item"
     ]
     assert [action.kind for action in actions] == ["prune_table"]
@@ -882,15 +962,25 @@ def test_catalogue_tail_is_item_scoped_and_registry_is_last(tmp_path):
     assert all(
         action.kind == "publish_registry"
         for batch in registry.batches
+        if any(a.executor != "completion_gate" for a in batch.actions)
         for action in batch.actions
+        if action.executor != "completion_gate"
     )
-    assert len(registry.batches) == 1
+    assert (
+        sum(
+            any(a.executor != "completion_gate" for a in b.actions)
+            for b in registry.batches
+        )
+        == 1
+    )
     registry_payloads = [
         FilesystemStore()
         .read(bundle.location.join(*action.payload.split("/")))
         .decode()
         for batch in registry.batches
+        if any(a.executor != "completion_gate" for a in batch.actions)
         for action in batch.actions
+        if action.executor != "completion_gate"
     ]
     assert "[Item name] = N'Raw'" in registry_payloads[0]
     assert "[Item name] = N'Audit'" in registry_payloads[0]
@@ -898,20 +988,19 @@ def test_catalogue_tail_is_item_scoped_and_registry_is_last(tmp_path):
     # What no longer happens is a refresh after the catalogue: it is written
     # over TDS into the Warehouse that holds it, and is readable when it commits.
     assert not any(
-        action.kind == "refresh_sql_endpoint"
+        action.kind == "start_sql_endpoint_refresh"
         for sequence, _b, action in bundle.plan.actions()
+        if action.executor != "completion_gate"
         if sequence.number >= registry.number
     )
 
 
 @weaver_test()
-def test_each_affected_lakehouse_refreshes_inside_its_own_item_group(tmp_path):
-    """The refresh moved from a global tail into each item's group.
+def test_each_affected_lakehouse_refreshes_once_before_the_build_completes(tmp_path):
+    """Each mutated Lakehouse refreshes after its own mutations.
 
-    A single barrier after all physical work is correct for one item and wrong the
-    moment a second reads the first: the consumer would be built against endpoint
-    metadata that had not caught up. So each mutated Lakehouse is closed by its own
-    refresh, before anything in a later item layer starts.
+    A consumer reading through the endpoint waits for that Lakehouse's refresh,
+    and the Build completes only once every refresh is current.
     """
 
     repository = _repository(_estate(tmp_path))
@@ -931,7 +1020,8 @@ def test_each_affected_lakehouse_refreshes_inside_its_own_item_group(tmp_path):
     refreshed = {
         batch.target_id
         for _sequence, batch, action in bundle.plan.actions()
-        if action.kind == "refresh_sql_endpoint"
+        if action.executor != "completion_gate"
+        if action.kind == "start_sql_endpoint_refresh"
     }
     # Both Lakehouses, and nothing else. A Warehouse is reached over SQL and has
     # no endpoint of its own to sync, and neither has the catalogue, which is a
@@ -941,14 +1031,17 @@ def test_each_affected_lakehouse_refreshes_inside_its_own_item_group(tmp_path):
         "Lakehouse-Curated--lakehouse-Curated_Dev",
     }
 
-    at = {
-        action.id: sequence.number for sequence, _batch, action in bundle.plan.actions()
-    }
-    # Each item's refresh closes that item, before the catalogue tail.
-    assert (
-        at["object-Lakehouse--Raw--Tables--Sales.Customer"]
-        < at["refresh-sql-endpoint-Lakehouse--Raw"]
-        < at["publish-registry"]
+    assert runs_before(
+        bundle.plan,
+        "object-Lakehouse--Raw--Tables--Sales.Customer",
+        "start-sql-endpoint-refresh-Lakehouse--Raw",
+    )
+    # Publication runs beside the refresh; the Build completes after it.
+    assert not runs_before(
+        bundle.plan, "await-sql-endpoint-refresh-Lakehouse--Raw", "publish-registry"
+    )
+    assert runs_before(
+        bundle.plan, "await-sql-endpoint-refresh-Lakehouse--Raw", "complete-build"
     )
 
 
@@ -993,7 +1086,8 @@ def test_a_lakehouse_without_delta_mutations_gets_no_refresh(tmp_path):
     refreshed = {
         batch.target_id
         for _sequence, batch, action in bundle.plan.actions()
-        if action.kind == "refresh_sql_endpoint"
+        if action.executor != "completion_gate"
+        if action.kind == "start_sql_endpoint_refresh"
     }
     assert refreshed == {"Lakehouse-Raw--lakehouse-Raw_Dev"}
 
@@ -1028,6 +1122,7 @@ def test_builtin_weaver_item_builds_through_the_same_planner(tmp_path):
     physical = [
         action
         for _sequence, _batch, action in bundle.plan.actions()
+        if action.executor != "completion_gate"
         if action.kind == "build_table"
     ]
     # Every catalogue table: the projected dictionaries, and the runtime tables

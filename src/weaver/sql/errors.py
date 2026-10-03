@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ..errors import WeaverError
+from ..errors import OutcomeUnknown, WeaverError
 
 
 class SqlError(WeaverError):
@@ -17,6 +17,10 @@ class SqlConnectionError(SqlError):
 
 class SqlExecutionError(SqlError):
     """Raised when a SQL statement, script, or query fails."""
+
+
+class SqlOutcomeUnknown(SqlExecutionError, OutcomeUnknown):
+    """Raised when the connection is lost or times out once a statement is sent."""
 
 
 class SqlPoolClosedError(SqlError):

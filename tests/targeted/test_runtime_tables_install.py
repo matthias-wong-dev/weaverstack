@@ -25,6 +25,7 @@ from factories import (
     single_document_repository,
     warehouse_table,
 )
+from support.bundles import build_metadata
 from support.catalogues import LOADED_AT
 from support.weaver_test import weaver_test
 from support.workspaces import WORKSPACE
@@ -175,6 +176,7 @@ def _runtime_state_actions(bundle, slug: str = RECONCILE_SLUG):
     return [
         (sequence, action)
         for sequence, _batch, action in bundle.plan.actions()
+        if action.executor != "completion_gate"
         if action.kind == "reconcile_runtime_state" and action.id == slug
     ]
 
@@ -364,9 +366,9 @@ def test_a_first_build_removes_nothing_and_establishes_everything(first_build):
 
     bundle = first_build
 
-    assert bundle.plan.runtime_state == ()
+    assert build_metadata(bundle.plan).runtime_state == ()
     assert _runtime_state_actions(bundle)
-    assert _invalidated(bundle.plan.runtime_state_established) == {
+    assert _invalidated(build_metadata(bundle.plan).runtime_state_established) == {
         ("Lakehouse", "Sales", "Tables/DWG", "Customer"),
         ("Lakehouse", "Sales", "Tables/DWG", "Summary"),
         ("Lakehouse", "Sales", "Files/Raw", "CustomerCsv"),
@@ -384,10 +386,10 @@ def test_a_rebuild_returns_what_it_replaces_to_the_sentinel(rebuild):
 
     bundle = rebuild
 
-    assert bundle.plan.runtime_state == ()
+    assert build_metadata(bundle.plan).runtime_state == ()
     rows = {
         (row["object_name"], row["bookmark_datetime"])
-        for one in bundle.plan.runtime_state_established
+        for one in build_metadata(bundle.plan).runtime_state_established
         if one.table == BOOKMARK.name
         for row in one.rows
     }
@@ -404,9 +406,9 @@ def test_only_current_state_is_reconciled(rebuild):
 
     bundle = rebuild
 
-    assert {one.table for one in bundle.plan.runtime_state_established} <= {
-        table.name for table in CURRENT_STATE_TABLES
-    }
+    assert {
+        one.table for one in build_metadata(bundle.plan).runtime_state_established
+    } <= {table.name for table in CURRENT_STATE_TABLES}
 
 
 # --- where the action sits -----------------------------------------------------
@@ -427,7 +429,11 @@ def test_bookmarks_are_reconciled_before_the_first_physical_action(rebuild):
         "drop_table",
         "prune_table",
     }
-    kinds = [action.kind for _sequence, _batch, action in bundle.plan.actions()]
+    kinds = [
+        action.kind
+        for _sequence, _batch, action in bundle.plan.actions()
+        if action.executor != "completion_gate"
+    ]
 
     assert kinds.index("reconcile_runtime_state") < min(
         index for index, kind in enumerate(kinds) if kind in physical
@@ -460,7 +466,7 @@ def test_the_action_carries_the_intent_the_plan_states(rebuild):
     carried = read_invalidation(bundle.store.read(bundle.location / action.payload))
     established, invalidated = carried
 
-    assert invalidated == bundle.plan.runtime_state
+    assert invalidated == build_metadata(bundle.plan).runtime_state
     # The reset half. The Views the build records travel in their own stage.
     assert sorted(one.table for one in established) == [BOOKMARK.name, LOAD_STATUS.name]
     assert all(
@@ -476,7 +482,11 @@ def test_a_view_is_recorded_after_the_physical_work(first_build):
     """A View is Succeeded once its DDL has run, so its stage follows the build."""
 
     bundle = first_build
-    order = [action.id for _sequence, _batch, action in bundle.plan.actions()]
+    order = [
+        action.id
+        for _sequence, _batch, action in bundle.plan.actions()
+        if action.executor != "completion_gate"
+    ]
 
     assert VIEW_STATE_SLUG in order
     assert order.index(VIEW_STATE_SLUG) > order.index(
@@ -497,7 +507,11 @@ def test_a_first_build_still_records_the_Views_it_created(estate, tmp_path):
         tmp_path,
         inventories=_inventories(estate, holding_runtime_tables=False),
     )
-    order = [action.id for _sequence, _batch, action in bundle.plan.actions()]
+    order = [
+        action.id
+        for _sequence, _batch, action in bundle.plan.actions()
+        if action.executor != "completion_gate"
+    ]
 
     assert RECONCILE_SLUG not in order
     assert VIEW_STATE_SLUG in order
@@ -518,7 +532,11 @@ def test_runtime_references_precede_warehouse_documents_that_read_them(first_bui
     """A table build may execute authored SQL that selects ``_.Bookmark``."""
 
     bundle = first_build
-    order = [action.id for _sequence, _batch, action in bundle.plan.actions()]
+    order = [
+        action.id
+        for _sequence, _batch, action in bundle.plan.actions()
+        if action.executor != "completion_gate"
+    ]
 
     reference = order.index(_references(bundle, "Warehouse")[0])
     table = order.index("object-Warehouse--Reporting--Sales.Customer")
@@ -706,7 +724,11 @@ def test_the_build_that_creates_the_table_also_points_at_it(estate, tmp_path):
     assert _references(creating, "Lakehouse")
     assert _references(creating, "Warehouse")
     # And each comes after the catalogue table it points at, in the same bundle.
-    order = [action.id for _sequence, _batch, action in creating.plan.actions()]
+    order = [
+        action.id
+        for _sequence, _batch, action in creating.plan.actions()
+        if action.executor != "completion_gate"
+    ]
     table = order.index("object-Warehouse--_weaver--_.Bookmark")
     assert table < order.index(_references(creating, "Lakehouse")[0])
     assert table < order.index(_references(creating, "Warehouse")[0])
@@ -719,6 +741,7 @@ def _references(bundle, item_type: str) -> list[str]:
     return [
         action.id
         for _sequence, _batch, action in bundle.plan.actions()
+        if action.executor != "completion_gate"
         if action.id.startswith(wanted)
     ]
 
@@ -863,6 +886,7 @@ def test_a_bundle_for_a_warehouse_that_is_its_own_catalogue_plans_no_reference(
     shortcut_actions = [
         action.id
         for _sequence, _batch, action in bundle.plan.actions()
+        if action.executor != "completion_gate"
         if action.kind == "create_shortcut" and "Warehouse" in action.id
     ]
 

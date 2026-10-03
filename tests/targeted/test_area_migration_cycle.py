@@ -27,6 +27,7 @@ from datetime import datetime, timezone
 import pytest
 import test_build_fixed_point_cycle as harness
 from factories import ITEM, full_estate
+from support.bundles import build_metadata
 from support.weaver_test import weaver_test
 from test_build_fixed_point_cycle import actions, build, installed_catalogue
 
@@ -150,7 +151,7 @@ def test_the_delta_table_is_neither_dropped_nor_rebuilt(estate, tmp_path):
     bundle = _migrating_build(estate, tmp_path)
     table = WeaverDocumentId.parse(TABLE)
 
-    assert table not in bundle.plan.selection.selected_for_build
+    assert table not in build_metadata(bundle.plan).selection.selected_for_build
     assert not [
         action
         for action in actions(bundle)
@@ -239,7 +240,10 @@ def test_the_key_moving_rebuilds_no_table_and_drops_nothing(estate, tmp_path):
     )
     planned = actions(bundle)
 
-    assert WeaverDocumentId.parse(TABLE) not in bundle.plan.selection.selected_for_build
+    assert (
+        WeaverDocumentId.parse(TABLE)
+        not in build_metadata(bundle.plan).selection.selected_for_build
+    )
     assert not [
         action
         for action in planned
@@ -290,7 +294,9 @@ def test_the_key_moving_costs_the_bookmark_and_says_so(estate, tmp_path):
     # And the build clears the row the old key held, rather than leaving it.
     invalidated = {
         (one.table, row["schema_name"], row["object_name"])
-        for one in build(estate, tmp_path, catalogue=old).plan.runtime_state
+        for one in build_metadata(
+            build(estate, tmp_path, catalogue=old).plan
+        ).runtime_state
         for row in one.rows
     }
     assert ("Bookmark", "DWG", "Customer") in invalidated

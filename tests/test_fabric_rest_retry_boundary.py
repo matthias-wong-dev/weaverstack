@@ -172,3 +172,40 @@ def test_a_refused_sql_connection_is_opened_again(monkeypatch):
 
     with pytest.raises(SqlConnectionError, match="failed to connect"):
         connect(endpoint, Authentication(), connector=refusing)
+
+
+@weaver_test()
+def test_a_mutation_whose_reply_was_lost_has_an_unknown_outcome(monkeypatch):
+    """Fabric may have acted on a call it received and failed to answer."""
+
+    from weaver.errors import OutcomeUnknown
+
+    client, _sent = _client(monkeypatch, [_response(500)])
+    with pytest.raises(FabricError) as raised:
+        client.request("POST", "workspaces/w/items/i/shortcuts/bulkCreate")
+    assert isinstance(raised.value, OutcomeUnknown)
+
+    client, _sent = _client(monkeypatch, [_response(400)])
+    with pytest.raises(FabricError) as raised:
+        client.request("POST", "workspaces/w/items/i/shortcuts/bulkCreate")
+    assert not isinstance(raised.value, OutcomeUnknown)
+
+
+@weaver_test()
+def test_a_request_that_never_left_has_a_known_outcome(monkeypatch):
+    import requests
+    from urllib3.exceptions import NewConnectionError
+
+    from weaver.errors import OutcomeUnknown
+
+    def unsent(method, url, **kwargs):
+        raise requests.exceptions.ConnectionError(NewConnectionError(None, "refused"))
+
+    def lost(method, url, **kwargs):
+        raise requests.exceptions.ReadTimeout("read timed out")
+
+    for transport, unknown in ((unsent, False), (lost, True)):
+        monkeypatch.setattr("weaver.fabric.client.send", transport)
+        with pytest.raises(FabricError) as raised:
+            FabricClient(token="token").request("POST", "workspaces/w/items")
+        assert isinstance(raised.value, OutcomeUnknown) is unknown

@@ -1,12 +1,12 @@
-"""Create and remove frozen OneLake shortcut addresses.
+"""Create, remove and await frozen OneLake shortcut addresses.
 
 Bound sources resolve through another build target; direct sources carry the
 workspace, item and path frozen during generation. Actions use the shortcut API
 because deleting a shortcut through storage or Spark could reach source data.
 
-Table creation completes only when both the named relation and Delta path are
-readable. Schema shortcuts expose a changing source namespace and are not waited
-on.
+Creation finishes when Fabric has accepted every definition. Readiness is a
+separate action, because metadata can appear before a consumer surface can read
+it. Every wait returns ``Waiting`` rather than holding a worker.
 """
 
 from __future__ import annotations
@@ -21,9 +21,11 @@ from ...locations import Location
 from ...targets import DeltaTarget, FolderTarget
 from ..models import InstallAction
 from ..targets import WAREHOUSE_TARGET
-from .base import InstallationContext, ResolvedTarget
+from .base import InstallationContext, ResolvedTarget, Waiting
 
 FILES_AREA = "Files"
+TABLES_SURFACE = "tables"
+FILES_SURFACE = "files"
 
 # Bound discovery reports a missing shortcut before its consumer runs.
 ADDRESSABLE_TIMEOUT = 300.0
@@ -35,14 +37,26 @@ NAME_RELEASE_POLL_INTERVAL = 3.0
 
 
 class ShortcutExecutor:
+    """Waiting states are plain data, because the invocation ledger records them."""
+
     name = "shortcut"
+    resumable = True
+
+    def __init__(self) -> None:
+        # Sources are resolved once per action; a retried submission reuses them.
+        self._requests: dict[str, list] = {}
 
     def execute(
         self,
         action: InstallAction,
         payload: bytes | None,
         context: InstallationContext,
-    ) -> dict[str, Any] | None:
+        state=None,
+    ) -> dict[str, Any] | Waiting | None:
+        if state is not None:
+            if state["phase"] == "release":
+                return self._released(state, context)
+            return self._submit(action, payload, state, context)
         if payload is None:
             raise InstallError(f"shortcut action {action.id!r} has no payload")
         manifest = json.loads(payload.decode("utf-8"))
@@ -51,32 +65,68 @@ class ShortcutExecutor:
         frozen = manifest["shortcuts"]
         if not frozen:
             return {"shortcuts": []}
-
-        create = getattr(context.resolver, "create_onelake_shortcuts", None)
-        if create is None:
+        if getattr(context.resolver, "submit_onelake_shortcuts", None) is None:
             raise InstallError(
                 f"shortcut action {action.id!r} cannot be materialised here: this "
                 "environment offers no way to create a OneLake shortcut"
             )
+        state = {
+            "phase": "create",
+            "pending": list(range(len(frozen))),
+            "made": {},
+            "deadline": None,
+        }
+        return self._submit(action, payload, state, context)
 
-        # Resolve every case-exact source before the single bulk create request.
-        requested = [self._request(each, context) for each in frozen]
-        created = create(context.target.lakehouse, requested)
-        made = [
-            {"shortcut": each["shortcut"], "source": each["source"], **(detail or {})}
-            for each, detail in zip(frozen, created)
-        ]
+    def _submit(self, action, payload, state, context):
+        from ...fabric.shortcuts import (
+            SOURCE_POLL_INTERVAL,
+            SOURCE_TIMEOUT,
+            sources_not_published,
+        )
 
-        details: dict[str, Any] = {"shortcuts": made}
-        # Wait for all created shortcuts in one discovery window.
-        waited = self._await_addressable(context, frozen)
-        if waited is not None:
-            details["addressable_after_seconds"] = waited
-        return details
+        frozen = json.loads(payload.decode("utf-8"))["shortcuts"]
+        requests = self._requests.get(action.id)
+        if requests is None:
+            requests = self._requests[action.id] = [
+                self._request(each, context) for each in frozen
+            ]
+        pending = list(state["pending"])
+        submitted = context.resolver.submit_onelake_shortcuts(
+            context.target.lakehouse, [requests[i] for i in pending]
+        )
+        made = dict(state["made"])
+        for position, detail in submitted.created.items():
+            made[str(pending[position])] = detail
+        pending = [pending[i] for i in submitted.waiting]
+        if pending:
+            # A Warehouse table can reach OneLake after its transaction settles.
+            now = time.monotonic()
+            deadline = state["deadline"] or now + SOURCE_TIMEOUT
+            if now >= deadline:
+                raise sources_not_published(
+                    context.target.bound.name,
+                    [frozen[i]["shortcut"] for i in pending],
+                )
+            return Waiting(
+                {**state, "pending": pending, "made": made, "deadline": deadline},
+                SOURCE_POLL_INTERVAL,
+            )
+        self._requests.pop(action.id, None)
+        return {
+            "shortcuts": [
+                {
+                    "shortcut": each["shortcut"],
+                    "source": each["source"],
+                    **(made.get(str(i)) or {}),
+                }
+                for i, each in enumerate(frozen)
+            ]
+        }
 
     def _remove(
         self, action: InstallAction, frozen: list, context: InstallationContext
-    ) -> dict[str, Any]:
+    ) -> dict[str, Any] | Waiting:
         """Remove pointer roots through the API without touching source data."""
 
         remove = getattr(context.resolver, "remove_onelake_shortcut", None)
@@ -88,34 +138,32 @@ class ShortcutExecutor:
         for each in frozen:
             remove(context.target.lakehouse, path=each["path"], name=each["name"])
         details: dict[str, Any] = {"removed": [each["shortcut"] for each in frozen]}
-        if action.awaits_name_release:
-            waited = self._await_name_release(context, frozen)
-            if waited is not None:
-                details["released_after_seconds"] = waited
-        return details
+        if not action.awaits_name_release or getattr(context, "store", None) is None:
+            return details
+        release = {
+            "phase": "release",
+            "details": details,
+            "locations": [
+                _location(context.target, each, context, source=False).value
+                for each in frozen
+            ],
+            "started": time.monotonic(),
+        }
+        return self._released(release, context)
 
-    def _await_name_release(
-        self, context: InstallationContext, frozen: list
-    ) -> float | None:
-        """Wait one window for removed paths to release their names.
+    def _released(self, release, context) -> dict[str, Any] | Waiting:
+        """Return once removed paths release their names, or the wait is spent.
 
         A spent wait returns so the following create can report the occupied
         name directly.
         """
 
-        store = getattr(context, "store", None)
-        if store is None:
-            return None
-        locations = [
-            _location(context.target, each, context, source=False) for each in frozen
-        ]
-        started = time.monotonic()
-        deadline = started + NAME_RELEASE_TIMEOUT
-        while time.monotonic() < deadline:
-            if not any(store.exists(location) for location in locations):
-                break
-            time.sleep(NAME_RELEASE_POLL_INTERVAL)
-        return round(time.monotonic() - started, 1)
+        elapsed = time.monotonic() - release["started"]
+        if elapsed < NAME_RELEASE_TIMEOUT and any(
+            context.store.exists(Location(value)) for value in release["locations"]
+        ):
+            return Waiting(release, NAME_RELEASE_POLL_INTERVAL)
+        return {**release["details"], "released_after_seconds": round(elapsed, 1)}
 
     def _request(self, frozen: dict, context) -> dict:
         if "source_target_id" in frozen:
@@ -143,87 +191,108 @@ class ShortcutExecutor:
             "source_path": source_path,
         }
 
-    def _await_addressable(
-        self, context: InstallationContext, frozen: list
-    ) -> float | None:
-        if context.spark_sql is None:
-            # Skipping the wait would expose the discovery race this executor owns.
+
+class ShortcutReadinessExecutor:
+    """Wait until created shortcuts are readable from their consumer surface.
+
+    Tables need both the named relation and the Delta path; Files need the
+    storage path. Addresses resolve once, and each poll is one sweep over every
+    shortcut not yet ready.
+    """
+
+    name = "shortcut_readiness"
+    resumable = True
+
+    def execute(
+        self,
+        action: InstallAction,
+        payload: bytes | None,
+        context: InstallationContext,
+        state=None,
+    ) -> dict[str, Any] | Waiting:
+        if state is None:
+            if payload is None:
+                raise InstallError(f"readiness action {action.id!r} has no payload")
+            manifest = json.loads(payload.decode("utf-8"))
+            state = {
+                "pending": readiness_checks(
+                    manifest["surface"], manifest["shortcuts"], context=context
+                ),
+                "started": time.monotonic(),
+                "failure": None,
+            }
+        pending, failure = readiness_sweep(state["pending"], context=context)
+        failure = failure or state["failure"]
+        elapsed = time.monotonic() - state["started"]
+        if not pending:
+            return {"ready_after_seconds": round(elapsed, 1)}
+        if elapsed >= ADDRESSABLE_TIMEOUT:
             raise InstallError(
-                "a table shortcut was created but this context offers no way to "
-                "ask Spark whether it is readable yet, so the discovery wait "
-                "cannot run"
+                f"shortcut(s) {', '.join(sorted(pending))} were created but did "
+                f"not become readable within {int(ADDRESSABLE_TIMEOUT)}s: {failure}"
             )
-        destination = context.target.destination
-        if destination is None:
-            raise InstallError(
-                f"target {context.target.bound.id!r} resolved to no Spark "
-                "destination, so a shortcut in it cannot be named"
-            )
-        location = context.target.location
-        if location is None:
-            raise InstallError(
-                f"target {context.target.bound.id!r} resolved to no Spark "
-                "location, so a shortcut's Delta path cannot be checked"
-            )
-        return await_addressable(
-            frozen,
-            destination=destination,
-            location=location,
-            spark_sql=context.spark_sql,
+        return Waiting(
+            {**state, "pending": pending, "failure": failure},
+            ADDRESSABLE_POLL_INTERVAL,
         )
 
 
-def await_addressable(frozen, *, destination, location, spark_sql) -> float | None:
-    """Wait until every table shortcut's relation and Delta path can be read.
+def readiness_checks(surface: str, frozen, *, context) -> dict:
+    """Resolve each shortcut's consumer checks once, keyed by shortcut."""
 
-    Metadata can appear before either consumer surface is ready. Mirror uses this
-    same readiness contract.
-    """
-
-    tables = [each for each in frozen if each.get("type", "table") == "table"]
-    if not tables:
-        return None
-
-    pending = {
-        each["shortcut"]: {
-            "relation": str(
-                destination.qualify(each["path"].split("/", 1)[1], each["name"])
-            ),
-            "delta path": location.table_path(
-                each["path"].split("/", 1)[1], each["name"]
-            ),
+    if surface == FILES_SURFACE:
+        return {
+            each["shortcut"]: {
+                "storage": _location(context.target, each, context, source=False).value
+            }
+            for each in frozen
         }
-        for each in tables
-    }
+    if surface != TABLES_SURFACE:
+        raise InstallError(f"unknown shortcut readiness surface {surface!r}")
+    if context.spark_sql is None:
+        raise InstallError(
+            "a table shortcut was created but this context offers no way to "
+            "ask Spark whether it is readable yet"
+        )
+    destination, location = context.target.destination, context.target.location
+    if destination is None or location is None:
+        raise InstallError(
+            f"target {context.target.bound.id!r} resolved to no Spark destination, "
+            "so a shortcut in it cannot be read"
+        )
+    checks = {}
+    for each in frozen:
+        schema = each["path"].split("/", 1)[1]
+        relation = destination.qualify(schema, each["name"])
+        path = location.table_path(schema, each["name"])
+        checks[each["shortcut"]] = {
+            "relation": f"SELECT * FROM {relation} LIMIT 0",
+            "delta path": f"SELECT * FROM delta.`{path}` LIMIT 0",
+        }
+    return checks
 
-    started = time.monotonic()
-    deadline = started + ADDRESSABLE_TIMEOUT
-    failure: Exception | None = None
-    while pending:
-        for shortcut, surfaces in list(pending.items()):
-            for surface, address in list(surfaces.items()):
-                statement = (
-                    f"SELECT * FROM {address} LIMIT 0"
-                    if surface == "relation"
-                    else f"SELECT * FROM delta.`{address}` LIMIT 0"
-                )
-                try:
-                    spark_sql(statement, exact_case=True)
-                    del surfaces[surface]
-                except Exception as exc:
-                    failure = exc
-            if not surfaces:
-                del pending[shortcut]
-        if not pending:
-            break
-        if time.monotonic() >= deadline:
-            raise InstallError(
-                f"shortcut(s) {', '.join(sorted(pending))} were created but "
-                f"did not become readable within {int(ADDRESSABLE_TIMEOUT)}s: "
-                f"{failure}"
-            ) from failure
-        time.sleep(ADDRESSABLE_POLL_INTERVAL)
-    return round(time.monotonic() - started, 1)
+
+def readiness_sweep(pending: dict, *, context) -> tuple[dict, str | None]:
+    """Check every unready surface once; return those still unready."""
+
+    remaining: dict = {}
+    failure = None
+    for shortcut, surfaces in pending.items():
+        unready = {}
+        for surface, check in surfaces.items():
+            try:
+                if surface == "storage":
+                    ready = context.store.exists(Location(check))
+                else:
+                    context.spark_sql(check, exact_case=True)
+                    ready = True
+            except Exception as exc:  # noqa: BLE001 - not yet readable
+                failure, ready = f"{type(exc).__name__}: {exc}", False
+            if not ready:
+                unready[surface] = check
+        if unready:
+            remaining[shortcut] = unready
+    return remaining, failure
 
 
 @dataclass(frozen=True)

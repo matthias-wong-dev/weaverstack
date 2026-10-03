@@ -28,7 +28,7 @@ from ..errors import BuildError
 from ..etl import LOAD_ROOT, item_runtime_artefacts
 from ..store import Store, StoreNotFoundError
 from ..targets import TABLES_AREA, ItemRef
-from ..workspaces import CLI_AREA
+from ..workspaces import CARRIER_AREA, CLI_AREA
 from .changes import (
     FOLDER as FOLDER_KIND,
 )
@@ -48,6 +48,7 @@ from .changes import (
     TargetChange,
     removed,
 )
+from .dependencies import pruned_objects_key
 from .models import (
     PRUNE_FOLDER,
     PRUNE_SCHEMA,
@@ -62,7 +63,7 @@ from .stages import PRUNE, PlannedStage
 from .targets import WAREHOUSE_TARGET, BoundTarget
 
 #: Weaver-owned Files areas that are not item Folder objects.
-_RESERVED_FILES_AREAS = frozenset({CLI_AREA})
+_RESERVED_FILES_AREAS = frozenset({CLI_AREA, CARRIER_AREA})
 
 #: Delta schemas Weaver does not manage.
 _RESERVED_SCHEMAS = frozenset({"dbo", CATALOGUE_SCHEMA})
@@ -156,9 +157,15 @@ class TargetInventory:
         behaviour from actions. Action ids hold the summary and actions to a bijection.
         """
 
-        from .changes import apply_to
+        from .changes import TargetChange, apply_to
 
-        return apply_to(self, plan.target_changes.get(self.target_id, ()))
+        changes = (plan.build_envelope or {}).get("target_changes", {})
+        return apply_to(
+            self,
+            tuple(
+                TargetChange.from_mapping(c) for c in changes.get(self.target_id, ())
+            ),
+        )
 
     def has_object(self, schema: str, name: str, object_type: str) -> bool:
         """Return whether the matching inventory collection holds this object.
@@ -229,13 +236,19 @@ def _holds(values: Iterable[str], qualified: str) -> bool:
 
 
 def read_lakehouse_inventory(
-    target: BoundTarget, *, resolver, store: Store, catalogue=None
+    target: BoundTarget,
+    *,
+    resolver,
+    store: Store,
+    catalogue=None,
+    known_views=None,
 ) -> TargetInventory:
     """Read every Weaver-manageable object in one Lakehouse.
 
     Storage answers everything but the views, which exist only in the
     catalogue, so ``catalogue`` is optional and its absence means the views cannot
-    be listed rather than that there are none.
+    be listed rather than that there are none. ``known_views`` names the
+    ``schema.name`` views Weaver recorded installing here.
     """
 
     lakehouse = ItemRef(target.item_id)
@@ -302,12 +315,20 @@ def read_lakehouse_inventory(
     )
     views: tuple[str, ...] = ()
     if catalogue is not None:
-        views = tuple(
-            f"{schema}.{view}"
-            for schema in schemas
-            if schema.casefold() not in shortcut_schemas
-            for view in catalogue.views(schema)
+        views, unstored = _catalogue_relations(
+            catalogue,
+            schemas=[s for s in schemas if s.casefold() not in shortcut_schemas],
+            named={table.casefold() for table in tables}
+            | {
+                f"{shortcut.path.split('/', 1)[1]}.{shortcut.name}".casefold()
+                for shortcut in shortcuts
+                if shortcut.path.strip("/")
+                .casefold()
+                .startswith(TABLES_AREA.casefold() + "/")
+            },
+            known_views={name.casefold() for name in known_views or ()},
         )
+        tables += unstored
     # Runtime references are shortcuts under Tables/_, whether or not Spark has
     # registered them as tables. The ordinary schema inventory excludes ``_``.
     references = tuple(
@@ -353,6 +374,36 @@ def _load_files(store: Store, files_root) -> tuple[str, ...]:
             key=str.casefold,
         )
     )
+
+
+def _catalogue_relations(catalogue, *, schemas, named, known_views):
+    """Split the relations storage does not name into views and unstored tables.
+
+    Views exist only in the Spark catalogue, and one relation listing names
+    them with every table. A relation Weaver recorded as a view is one; any
+    other is resolved by name, and a registered table whose storage is missing
+    is a table, so prune drops it as one.
+    """
+
+    views, unstored = [], []
+    for schema in schemas:
+        unresolved = []
+        for relation in catalogue.relations(schema):
+            qualified = f"{schema}.{relation}"
+            if qualified.casefold() in named:
+                continue
+            if qualified.casefold() in known_views:
+                views.append(qualified)
+            else:
+                unresolved.append(relation)
+        if unresolved:
+            resolved = {
+                name.casefold() for name in catalogue.views_among(schema, unresolved)
+            }
+            for relation in unresolved:
+                kind = views if relation.casefold() in resolved else unstored
+                kind.append(f"{schema}.{relation}")
+    return tuple(views), tuple(unstored)
 
 
 def read_warehouse_inventory(target: BoundTarget, *, sql) -> TargetInventory:
@@ -768,6 +819,9 @@ def _item_prune_stage(
         return None
 
     item_slug = _slug(item)
+    prefixed = tuple(_prefixed(action, item_slug) for action in actions)
+    # A schema drop needs its remaining objects gone; other prunes are independent.
+    objects = pruned_objects_key(target.id)
     return PlannedStage(
         phase=PRUNE,
         slug="item-prune",
@@ -783,9 +837,17 @@ def _item_prune_stage(
             BuildBatch(
                 id=f"item-prune-{item_slug}",
                 target_id=target.id,
-                actions=tuple(_prefixed(action, item_slug) for action in actions),
+                actions=prefixed,
             ),
         ),
+        provides={
+            action.id: (objects,)
+            for action in prefixed
+            if action.kind in (PRUNE_TABLE, PRUNE_VIEW)
+        },
+        requires={
+            action.id: (objects,) for action in prefixed if action.kind == PRUNE_SCHEMA
+        },
     )
 
 

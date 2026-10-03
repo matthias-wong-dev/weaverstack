@@ -269,15 +269,10 @@ class Session(ABC):
 
     # --- execution capabilities ---------------------------------------------
 
-    def install_bundle(self, bundle, *, workspace: Workspace | None = None):
-        """Install a frozen bundle as one host-owned unit, or decline before work."""
-        return None
+    def execute_mutation(self, plan, payloads=None, **options):
+        from .archive_runtime import execute_mutation
 
-    def install_batches(
-        self, bundle, *, sequence_number, batch_ids, build_datetime, workspace=None
-    ):
-        """Install contiguous Lakehouse batches, or decline before work."""
-        return None
+        return execute_mutation(plan, payloads, self, **options)
 
     @abstractmethod
     def create_delta_table(

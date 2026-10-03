@@ -114,6 +114,11 @@ class TestSession(Session):
             store=self._store,
         )
 
+    def execute_mutation(self, plan, payloads=None, **options):
+        # One worker keeps recorded calls in plan order; the DAG is unchanged.
+        options.setdefault("workers", 1)
+        return super().execute_mutation(plan, payloads, **options)
+
     def create_delta_table(
         self,
         qualified_name: str,
@@ -214,6 +219,33 @@ class TestSession(Session):
             parameters=None if parameters is None else list(parameters),
         )
         return None
+
+    def sql_executor(self, target: Any, *, workspace: Workspace | None = None):
+        """A Warehouse connection whose statements are recorded."""
+
+        session = self
+
+        class _Recorded:
+            def execute_script(self, script: str) -> None:
+                session.execute_tsql(script, target=target, workspace=workspace)
+
+            def execute(self, statement: str, parameters=()) -> None:
+                session.execute_tsql(
+                    statement, target=target, workspace=workspace, parameters=parameters
+                )
+
+            def execute_each(self, groups) -> list:
+                for group in groups:
+                    for statement in group:
+                        self.execute_script(statement)
+                return [None for _group in groups]
+
+            def query(self, statement: str, parameters=()):
+                return session.query_tsql(
+                    statement, target=target, workspace=workspace, parameters=parameters
+                )
+
+        return _Recorded()
 
     def query_tsql(
         self,

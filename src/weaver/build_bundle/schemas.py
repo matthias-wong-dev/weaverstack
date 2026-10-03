@@ -5,6 +5,7 @@ from __future__ import annotations
 from ..declaration.model import WeaverItemId
 from .changes import SCHEMA as SCHEMA_KIND
 from .changes import added
+from .dependencies import schema_key
 from .models import CREATE_SCHEMA, BuildBatch, InstallAction
 from .payloads import sha256_hex
 from .sql_templates import render_sql_statement, tsql_ident
@@ -86,6 +87,7 @@ def _schema_stage(
     payloads: dict[str, bytes] = {}
     actions = []
     changes = []
+    provides = {}
     for schema in schemas:
         content = render(schema)
         filename = f"create-{item_slug}-{schema}{extension}"
@@ -102,6 +104,7 @@ def _schema_stage(
             )
         )
         changes.append(added(SCHEMA_KIND, schema, action_id))
+        provides[action_id] = (schema_key(target.id, schema),)
     return PlannedStage(
         phase=SCHEMA,
         slug="create-schemas",
@@ -111,4 +114,5 @@ def _schema_stage(
         batches=(
             BuildBatch(id=f"{item_slug}", target_id=target.id, actions=tuple(actions)),
         ),
+        provides=provides,
     )

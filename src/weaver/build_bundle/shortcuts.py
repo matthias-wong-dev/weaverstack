@@ -41,7 +41,16 @@ from .changes import (
 from .changes import (
     added,
 )
+from .dependencies import (
+    action_key,
+    dropped_key,
+    endpoint_object_key,
+    object_key,
+    schema_key,
+)
 from .models import (
+    AWAIT_FILE_SHORTCUTS,
+    AWAIT_TABLE_SHORTCUTS,
     CREATE_SHORTCUT,
     OMIT_SHORTCUT_UNSUPPORTED,
     BuildBatch,
@@ -231,6 +240,7 @@ def _plan_item_shortcuts(
             sources=sources,
             logical_sources=logical_sources,
         )
+        awaited = _readiness_actions(action, payloads, item_slug=item_slug)
         # One action creates several destinations, so it records one change per
         # declaration in the inventory form selected by this binding.
         stage = PlannedStage(
@@ -252,9 +262,28 @@ def _plan_item_shortcuts(
                 BuildBatch(
                     id=f"item-shortcuts-{item_slug}",
                     target_id=target.id,
-                    actions=(action,),
+                    actions=(action, *(each for each, _ in awaited)),
                 ),
             ),
+            requires={
+                action.id: _creation_requirements(
+                    supported, target=target, logical_sources=logical_sources
+                ),
+                **{each.id: (action_key(action.id),) for each, _ in awaited},
+            },
+            provides={
+                action.id: tuple(
+                    object_key(declaration.destination)
+                    for declaration, _ in supported
+                    if not any(
+                        str(declaration.destination) in names for _, names in awaited
+                    )
+                ),
+                **{
+                    each.id: tuple(object_key(name) for name in names)
+                    for each, names in awaited
+                },
+            },
         )
     return ItemShortcutPlan(
         stage=stage,
@@ -262,6 +291,97 @@ def _plan_item_shortcuts(
         omitted=tuple(omitted),
         omitted_destinations=tuple(omitted_destinations),
     )
+
+
+def _creation_requirements(supported, *, target, logical_sources) -> tuple[str, ...]:
+    """Destination schemas, released destination names, and in-plan sources."""
+
+    keys = []
+    for declaration, source_target in supported:
+        # A runtime reference lands in ``_``, which the item's schemas create.
+        if not declaration.is_schema:
+            keys.append(schema_key(target.id, declaration.schema))
+        keys.append(dropped_key(declaration.destination))
+        if not declaration.is_logical:
+            continue
+        source = logical_sources[declaration.destination]
+        keys.append(object_key(source))
+        if target.kind == WAREHOUSE_TARGET and source_target.kind != WAREHOUSE_TARGET:
+            # A Warehouse view reads a Lakehouse table through its SQL endpoint.
+            keys.append(endpoint_object_key(source))
+    return tuple(keys)
+
+
+#: Readiness kind for each shortcut type a consumer reads through.
+_READINESS = {"table": AWAIT_TABLE_SHORTCUTS, "folder": AWAIT_FILE_SHORTCUTS}
+_SURFACE = {AWAIT_TABLE_SHORTCUTS: "tables", AWAIT_FILE_SHORTCUTS: "files"}
+
+
+def _readiness_actions(create, payloads, *, item_slug):
+    """Await each consumer surface of a OneLake shortcut creation separately.
+
+    A schema shortcut exposes a changing source namespace and is not awaited.
+    Returns each readiness action with the destinations it makes readable.
+    """
+
+    if create.executor != "shortcut":
+        return ()
+    frozen = json.loads(payloads[create.payload].decode("utf-8"))["shortcuts"]
+    return readiness_actions(
+        frozen, payloads, name=f"shortcuts-{item_slug}", file=item_slug
+    )
+
+
+#: Shortcuts one readiness action checks. Each check is one or two Spark reads,
+#: so chunks spread a large creation's wait across the Spark lanes.
+READINESS_CHUNK = 25
+
+
+def readiness_actions(frozen, payloads, *, name: str, file: str):
+    """Readiness actions for created shortcuts, by surface and in chunks.
+
+    ``name`` and ``file`` distinguish the action ids and payload names. Returns
+    each action with the destinations it makes readable.
+    """
+
+    awaited = []
+    for kind in (AWAIT_TABLE_SHORTCUTS, AWAIT_FILE_SHORTCUTS):
+        members = [
+            {key: each[key] for key in ("shortcut", "path", "name")}
+            for each in frozen
+            if _READINESS.get(each.get("type", "table")) == kind
+        ]
+        chunks = [
+            members[start : start + READINESS_CHUNK]
+            for start in range(0, len(members), READINESS_CHUNK)
+        ]
+        for index, chunk in enumerate(chunks):
+            suffix = "" if len(chunks) == 1 else f"-{index:03d}"
+            content = (
+                json.dumps(
+                    {"surface": _SURFACE[kind], "shortcuts": chunk},
+                    indent=2,
+                    sort_keys=True,
+                    ensure_ascii=False,
+                )
+                + "\n"
+            ).encode("utf-8")
+            filename = f"{_SURFACE[kind]}-{file}{suffix}.shortcut-readiness.json"
+            payloads[filename] = content
+            awaited.append(
+                (
+                    InstallAction(
+                        id=f"await-{_SURFACE[kind]}-{name}{suffix}",
+                        kind=kind,
+                        resource_node_id=None,
+                        executor="shortcut_readiness",
+                        payload=filename,
+                        payload_sha256=sha256_hex(content),
+                    ),
+                    tuple(each["shortcut"] for each in chunk),
+                )
+            )
+    return tuple(awaited)
 
 
 def declaration_key(declaration) -> str:

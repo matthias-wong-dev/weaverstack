@@ -27,6 +27,7 @@ from factories import (
     item_id,
     plan_actions,
 )
+from support.bundles import build_metadata
 from support.weaver_test import weaver_test
 from support.workspaces import WORKSPACE
 
@@ -255,7 +256,10 @@ def test_the_name_is_waited_on_before_an_owned_object_takes_it(tmp_path):
 def test_the_changed_object_is_built_and_the_rest_stays_borrowed(tmp_path):
     _reconciled, bundle = _selective(tmp_path)
 
-    selected = {str(identity) for identity in bundle.plan.selection.selected_for_build}
+    selected = {
+        str(identity)
+        for identity in build_metadata(bundle.plan).selection.selected_for_build
+    }
 
     assert str(_object(MATERIALISED)) in selected
     assert str(_object("DWG.Summary")) not in selected

@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
-from ..declaration.model import WeaverItemId
+from ..catalogue.builtin import standard_surface_references
+from ..declaration.metadata import ObjectId
+from ..declaration.model import WeaverDocumentId, WeaverItemId
 from ..etl import FILE_TYPE, PROCEDURE_TYPE
 from .changes import FILE as FILE_KIND
 from .changes import STORED_PROCEDURE as PROCEDURE_KIND
 from .changes import added
 from .changes import removed as change_removed
+from .dependencies import object_key, runtime_removal_key, schema_key
 from .documents import RenderedAction
 from .models import (
     BUILD_PROCEDURE,
@@ -49,7 +52,7 @@ def render_runtime_build_action(artefact) -> RenderedAction:
 
 
 def item_runtime_stages(
-    artefacts, selected_for_build, *, item: WeaverItemId, target
+    artefacts, selected_for_build, *, item: WeaverItemId, target, repository
 ) -> tuple[PlannedStage, ...]:
     selected = [
         artefact
@@ -61,10 +64,14 @@ def item_runtime_stages(
     payloads: dict[str, bytes] = {}
     actions = []
     changes = []
+    requires = {}
     for artefact in sorted(selected, key=lambda value: str(value.identity)):
         rendered = render_runtime_build_action(artefact)
         payloads.update(rendered.payloads)
         actions.append(rendered.action)
+        requires[rendered.action.id] = _runtime_requirements(
+            artefact, repository=repository, target_id=target.id
+        )
         changes.append(
             added(
                 FILE_KIND if artefact.is_file else PROCEDURE_KIND,
@@ -86,8 +93,46 @@ def item_runtime_stages(
                     id=f"{_slug(item)}", target_id=target.id, actions=tuple(actions)
                 ),
             ),
+            requires=requires,
+            # A removed artefact never shares a path with an installed one, but
+            # ordering after removal keeps a case-folded collision safe.
+            follows={a.id: (runtime_removal_key(target.id),) for a in actions},
         ),
     )
+
+
+def _runtime_requirements(artefact, *, repository, target_id) -> tuple[str, ...]:
+    """What an artefact needs before it installs.
+
+    A file needs the declared folder it is written into. A procedure needs its
+    schema, the objects its declaration reads and the item's ``_`` surface:
+    Fabric refuses a procedure while DDL on an object it references is running.
+    """
+
+    if artefact.is_file:
+        schema, folder = artefact.target_path.split("/")[:2]
+        return (
+            object_key(
+                WeaverDocumentId(
+                    artefact.identity.item, ObjectId(schema, folder), is_files=True
+                )
+            ),
+        )
+    keys = [schema_key(target_id, artefact.identity.object_id.schema)]
+    keys.extend(
+        object_key(pair.destination)
+        for pair in standard_surface_references(artefact.identity.item)[1]
+    )
+    if artefact.origin is not None:
+        keys.append(object_key(artefact.origin))
+        if str(artefact.origin) in repository.dependency_graph:
+            keys.extend(
+                object_key(upstream)
+                for upstream in repository.dependency_graph.upstream_of(
+                    str(artefact.origin)
+                )
+            )
+    return tuple(keys)
 
 
 def item_runtime_removals(
@@ -170,5 +215,6 @@ def item_runtime_removals(
                     actions=tuple(actions),
                 ),
             ),
+            provides={a.id: (runtime_removal_key(target.id),) for a in actions},
         ),
     )

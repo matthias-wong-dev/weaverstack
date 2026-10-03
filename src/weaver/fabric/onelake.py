@@ -11,12 +11,15 @@ from urllib.parse import quote, unquote, urlencode, urlsplit
 
 from ..errors import CommandError
 from ..locations import Location
-from ..store import Entry, StoreError, StoreNotFoundError
+from ..store import Entry, StoreError, StoreNotFoundError, StoreOutcomeUnknown
 from .auth import STORAGE_SCOPE, token_source
 from .client import (
     ONELAKE_DFS,
     READ_METHODS,
+    TRANSIENT_STATUSES,
     _response_message,
+    never_sent,
+    outcome_unknown,
     send_until_answered,
 )
 
@@ -151,12 +154,18 @@ class OneLakeDfsClient:
                     timeout=self.timeout,
                 )
             except requests.exceptions.RequestException as exc:
-                raise StoreError(
+                error = StoreError if never_sent(exc) else StoreOutcomeUnknown
+                raise error(
                     f"{method} {url.split('?')[0]} could not be reached: {exc}",
                     executor="OneLake",
                 ) from exc
             if response.status_code not in expected:
-                raise StoreError(
+                # A mutation refused with a transient status may have been acted on.
+                unknown = outcome_unknown(method, response.status_code) or (
+                    method not in READ_METHODS
+                    and response.status_code in TRANSIENT_STATUSES
+                )
+                raise (StoreOutcomeUnknown if unknown else StoreError)(
                     f"{method} {url.split('?')[0]} returned {response.status_code}: "
                     f"{_response_message(response)}",
                     executor="OneLake",

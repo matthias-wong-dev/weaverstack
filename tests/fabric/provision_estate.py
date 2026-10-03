@@ -35,9 +35,11 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from collections.abc import Callable
 from typing import Any
 
+import performance_estate
 from support import external_estate
 
 from weaver.fabric import (
@@ -63,6 +65,7 @@ LAKEHOUSE_ROLES = {
     "warehouse_producer": "PYTEST_HOUSE",
     # Where a mirrored Lakehouse item is built. Emptied by every mirror.
     "lakehouse_mirror": "PYTEST_LH_MIRROR",
+    **performance_estate.LAKEHOUSE_ROLES,
 }
 
 WAREHOUSE_ROLES = {
@@ -75,6 +78,7 @@ WAREHOUSE_ROLES = {
     "warehouse": "PYTEST_WH_1",
     # Where a mirrored Warehouse item is built. Emptied by every mirror.
     "warehouse_mirror": "PYTEST_WH_MIRROR",
+    **performance_estate.WAREHOUSE_ROLES,
 }
 
 
