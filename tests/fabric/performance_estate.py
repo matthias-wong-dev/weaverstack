@@ -1,7 +1,8 @@
 """Fixed items the performance qualification builds, wipes and mirrors into.
 
 Separate from the suite's items so a 1,000-object estate never meets a test's
-fixture state. Each name is overridable by ``WEAVER_PYTEST_<ROLE>``.
+fixture state. The Load benchmark has items of its own, because its largest
+target is kept between runs and the qualification empties its items. Each name is overridable by ``WEAVER_PYTEST_<ROLE>``.
 
 Usage, to create whichever are missing and nothing else:
     python -m tests.fabric.performance_estate
@@ -16,6 +17,8 @@ LAKEHOUSE_ROLES = {
     "perf_lakehouse_1": "PYTEST_PERF_LH_1",
     "perf_lakehouse_mirror_0": "PYTEST_PERF_LH_MIRROR_0",
     "perf_lakehouse_mirror_1": "PYTEST_PERF_LH_MIRROR_1",
+    "perf_load_lakehouse": "PYTEST_PERF_LOAD_LH",
+    "perf_flow_lakehouse": "PYTEST_PERF_FLOW_LH",
 }
 
 WAREHOUSE_ROLES = {
@@ -25,6 +28,9 @@ WAREHOUSE_ROLES = {
     "perf_warehouse_1": "PYTEST_PERF_WH_1",
     "perf_warehouse_mirror_0": "PYTEST_PERF_WH_MIRROR_0",
     "perf_warehouse_mirror_1": "PYTEST_PERF_WH_MIRROR_1",
+    "perf_load_weaver": "PYTEST_PERF_LOAD_WEAVER",
+    "perf_load_warehouse": "PYTEST_PERF_LOAD_WH",
+    "perf_flow_warehouse": "PYTEST_PERF_FLOW_WH",
 }
 
 

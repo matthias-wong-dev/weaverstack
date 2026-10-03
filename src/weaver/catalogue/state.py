@@ -25,7 +25,7 @@ from .claims import (
     claim_rules_for_object_type,
     stored_area,
 )
-from .reader import read_installations, read_table
+from .reader import read_installations, read_table, read_tables
 from .render import InstallationScope, InstallationScopes
 from .tables import (
     BOOKMARK,
@@ -854,9 +854,9 @@ def read_installed_catalogue(
     from .history import read_load_history
 
     rows: dict[WeaverItemId, dict[str, list[Mapping[str, object]]]] = {}
+    read = read_tables(catalogue, tables)
     for table in tables:
-        table_rows = read_table(catalogue, table)
-        for row in table_rows:
+        for row in read[table.name]:
             item = _item_of(row)
             if not item.item_type or not item.item_name:
                 raise BuildError(

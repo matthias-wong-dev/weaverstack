@@ -411,7 +411,23 @@ plan identity. Catalogue-free physical plans bind a Workspace without a catalogu
 Real Fabric qualification covers desktop plan execution, binary payload delivery,
 physical actions and failures, lost-response uncertainty without replay, and
 ordinary Build convergence. Local executor and bootstrap tests establish their
-own boundaries, not Fabric readiness. Load and Test scheduling is unchanged.
+own boundaries, not Fabric readiness.
+
+## Load scheduling
+
+A load's `Runner` dispatches every node whose upstream has settled, within
+`Lanes`: four Warehouse procedures per Warehouse, and four Python primitives.
+Python primitives that start together go to the host together
+(`dispatch_python_many`), and each runs in a Spark session of its own within
+the one Spark application, so settings and temporary views stay its own. From
+the desktop they cross as one Livy statement, because a Livy session runs its
+statements one at a time. Every node is decided as a serial run decides it, in
+graph order once its upstream has settled, and every settlement and catalogue
+write happens in the thread running the run. Without fault tolerance a failure
+starts nothing more: running nodes finish and settle, and nodes not yet started
+stay pending. Two concurrent load commands are separate writers of the same
+catalogue tables, which a Warehouse can refuse as an update conflict. A test run
+is serial.
 
 ## Architecture invariants
 

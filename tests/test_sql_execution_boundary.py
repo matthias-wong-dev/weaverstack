@@ -345,3 +345,22 @@ def test_each_physical_connection_requests_current_authentication_material():
 
     assert len(seen) == 2
     assert seen[0] != seen[1]
+
+
+@weaver_test()
+def test_a_connection_bounds_its_login_and_leaves_statements_unbounded():
+    """A Warehouse load can run for longer than any login should take."""
+
+    from weaver.sql.connection import DEFAULT_CONNECT_TIMEOUT, SQL_ATTR_LOGIN_TIMEOUT
+
+    seen = {}
+
+    def driver(connection_string, **kwargs):
+        seen.update(kwargs)
+        return object()
+
+    connect(ENDPOINT, AccessTokenAuthentication(lambda: "token"), connector=driver)
+
+    assert seen["attrs_before"][SQL_ATTR_LOGIN_TIMEOUT] == DEFAULT_CONNECT_TIMEOUT
+    assert 1256 in seen["attrs_before"]
+    assert "timeout" not in seen

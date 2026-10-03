@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .dispatch import can_refresh, dispatch_primitive
+from .dispatch import can_refresh, dispatch_primitive, dispatch_python_many
 from .graph import RunGraph, RunNode, graph_for
 from .record import RunRecord, new_workflow_id, open_run_record
 from .result import (
@@ -31,6 +31,7 @@ __all__ = [
     "can_refresh",
     "reports_outcome",
     "dispatch_primitive",
+    "dispatch_python_many",
     "graph_for",
     "RunRecord",
     "new_workflow_id",
