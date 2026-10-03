@@ -186,6 +186,9 @@ class _Spark:
         return _Frame(self, text)
 
     def answer(self, text: str):
+        if text.startswith("DESCRIBE DETAIL"):
+            # A target holding rows unless a test empties it.
+            return [_Row(numFiles=self.counts.get("files", 1))]
         if "AS violations" in text:
             # Whether discovery would find anything, which is exactly whether
             # this test configured rejects for it to find.
@@ -1377,3 +1380,22 @@ def test_staging_that_cannot_hold_a_reject_is_not_searched_for_one():
     assert "`Email` IS NULL" in check
     assert "count(DISTINCT s.`Customer id`) AS duplicate_keys" in check
     assert "count(DISTINCT s.`Email`) AS duplicate_unique_0" in check
+
+
+@weaver_test()
+def test_an_empty_target_takes_staging_as_one_append():
+    """Every accepted row is new, so there is nothing to classify or merge."""
+
+    spark, result = _load(
+        {**BUSY, "files": 0}, contract=_incremental(), deletes=_Staged(("Customer id",))
+    )
+
+    assert (result.rows_inserted, result.rows_updated, result.rows_deleted) == (
+        BUSY["staging"],
+        0,
+        0,
+    )
+    assert [frame.role for frame in spark.persisted] == ["staging"]
+    assert len(spark.mutations) == 1
+    assert spark.mutations[0].startswith("INSERT INTO `lh`.`DWG`.`Customer`")
+    assert "`row_signature`" in spark.mutations[0]

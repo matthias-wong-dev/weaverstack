@@ -239,6 +239,21 @@ def _reconcile(
             return result.rejected(f"{rows_rejected} {TOLERATED_MESSAGE}")
         return result
 
+    if _holds_no_files(spark, names["target"]):
+        result = _into_empty(
+            spark,
+            names,
+            staging_view,
+            columns,
+            signature,
+            rows_read=rows_read,
+            rows_inserted=rows_accepted,
+            rows_rejected=rows_rejected,
+        )
+        if rows_rejected:
+            return result.rejected(f"{rows_rejected} {TOLERATED_MESSAGE}")
+        return result
+
     change_view = _settled_changes(
         spark, held, names, staging_view, contract, columns, signature
     )
@@ -856,6 +871,49 @@ def _append_only(
         f"INSERT INTO {names['target']} ({named}, {audit_columns})\n"
         f"SELECT {named}, current_timestamp(), current_timestamp(), "
         f"{live_delete_literal()} FROM {staging_view}"
+    )
+    return LoadResult(
+        succeeded=True,
+        rows_read=rows_read,
+        rows_inserted=rows_inserted,
+        rows_rejected=rows_rejected,
+    )
+
+
+def _holds_no_files(spark, target: str) -> bool:
+    """Whether the target is empty, from its Delta log alone.
+
+    A table with files may still hold no rows, and takes the ordinary path.
+    """
+
+    detail = spark.sql(f"DESCRIBE DETAIL {target}").collect()[0]
+    return int(detail["numFiles"] or 0) == 0
+
+
+def _into_empty(
+    spark,
+    names,
+    staging_view,
+    columns,
+    signature: str,
+    *,
+    rows_read: int,
+    rows_inserted: int,
+    rows_rejected: int,
+) -> LoadResult:
+    """Append every accepted row to an empty target.
+
+    Nothing can be updated, deleted or held twice there, and no stability gate
+    applies, so there is nothing to classify and nothing to merge.
+    """
+
+    audit = delta_audit_names()
+    named = qualified("", columns)
+    spark.sql(
+        f"INSERT INTO {names['target']} "
+        f"({named}, `{delta_signature_name()}`, {qualified('', audit)})\n"
+        f"SELECT {qualified('s', columns)}, {signature}, current_timestamp(), "
+        f"current_timestamp(), {live_delete_literal()} FROM {staging_view} AS s"
     )
     return LoadResult(
         succeeded=True,
