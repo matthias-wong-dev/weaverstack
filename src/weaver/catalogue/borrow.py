@@ -192,11 +192,19 @@ def view_statement(identity: WeaverDocumentId, *, source_target: str) -> str:
     )
 
 
-def surface_statements(catalogue_name: str) -> tuple[str, ...]:
+def catalogue_schema_statements() -> tuple[str, ...]:
     return (
         f"if schema_id(N'{CATALOGUE_SCHEMA}') is null "
         f"exec('create schema {identifier(CATALOGUE_SCHEMA)}');",
-    ) + tuple(
+    )
+
+
+def surface_statements(catalogue_name: str) -> tuple[str, ...]:
+    return catalogue_schema_statements() + surface_view_statements(catalogue_name)
+
+
+def surface_view_statements(catalogue_name: str) -> tuple[str, ...]:
+    return tuple(
         f"create or alter view "
         f"{identifier(CATALOGUE_SCHEMA)}.{identifier(table.name)} as select * from "
         + ".".join(
@@ -295,7 +303,7 @@ def _insert(rows: Sequence[Mapping[str, str]]) -> str:
     values = ",\n       ".join(
         "("
         + ", ".join(literal(row[column]) for column in columns)
-        + ", sysdatetime(), sysdatetime(), "
+        + ", sysutcdatetime(), sysutcdatetime(), "
         + f"convert(datetime2(6), '{AUDIT_LIVE_DELETE_DATETIME}'))"
         for row in rows
     )
@@ -312,6 +320,7 @@ __all__ = [
     "Borrowed",
     "borrow_statements",
     "borrowable",
+    "catalogue_schema_statements",
     "executable",
     "missing_programmables",
     "programmable_statements",
@@ -320,6 +329,7 @@ __all__ = [
     "pointer_shortcuts",
     "surface_shortcuts",
     "surface_statements",
+    "surface_view_statements",
     "view_statement",
     "wrapper_view_statement",
 ]

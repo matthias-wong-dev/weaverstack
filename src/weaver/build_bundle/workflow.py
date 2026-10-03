@@ -25,13 +25,13 @@ from ..declaration.model import WeaverItemId, WeaverRepository
 from ..declaration.repository import parse_item_repository
 from ..errors import BuildError, DiscoveryError
 from ..locations import Location
+from ..mutation.models import MutationPlan
 from ..store import FilesystemStore, Store
 from ..targets import ItemRef
 from .builder import Builder
 from .bundle import BuildBundle, load_bundle
 from .execution import ExecutionIdentity, resolve_execution_identity
-from .installer import Installer
-from .models import BuildPlan
+from .execution_plan import execute_bundle
 from .prune import (
     TargetInventory,
     read_lakehouse_inventory,
@@ -68,7 +68,7 @@ class PreparedRepository:
 
 @dataclass(frozen=True)
 class ItemBuildResult:
-    plan: BuildPlan
+    plan: MutationPlan
     report: InstallationReport
     repository_signature: str
     item_signatures: Mapping[WeaverItemId, str]
@@ -205,15 +205,19 @@ def read_build_state(
     # Check occupancy before the slower per-target inventory and Spark reads.
     with session.step("Check target occupancy"):
         _refuse_occupied_targets(bindings, session=session, workspace=workspace)
-    with session.step("Read target inventories"):
-        inventories = read_target_inventories(
-            bindings, session=session, workspace=workspace, sql_by_item=sql_by_item
-        )
     with session.step("Read catalogue"):
         catalogue = _read_catalogue(
             session=session,
             workspace=workspace,
             required=tuple(required_catalogue_items),
+        )
+    with session.step("Read target inventories"):
+        inventories = read_target_inventories(
+            bindings,
+            session=session,
+            workspace=workspace,
+            sql_by_item=sql_by_item,
+            catalogue=catalogue,
         )
     sources = {}
     physical = physical_shortcuts(shortcuts, bindings=bindings)
@@ -493,7 +497,7 @@ def install_bundle_archive(
     """Install an archive against the execution context it froze."""
 
     with materialise_bundle_archive(archive, store=archive_store) as bundle:
-        return Installer(session, executors=executors).install(bundle)
+        return execute_bundle(bundle, session, executors=executors)
 
 
 def build_item_repository(
@@ -511,8 +515,6 @@ def build_item_repository(
 ) -> ItemBuildResult:
     """Build and install, optionally retaining the generated bundle at ``output``."""
 
-    installer = Installer(session, executors=executors)
-
     with tempfile.TemporaryDirectory(prefix="weaver-build-") as temporary:
         bundle = build_repository_bundle(
             repository,
@@ -528,7 +530,7 @@ def build_item_repository(
             source_store=source_store,
             output=output or Location((Path(temporary) / "bundle").as_posix()),
         )
-        report = installer.install(bundle)
+        report = execute_bundle(bundle, session, executors=executors)
         return ItemBuildResult(
             plan=bundle.plan,
             report=report,
@@ -645,7 +647,14 @@ def read_target_inventories(
     session,
     workspace=None,
     sql_by_item=None,
+    catalogue=None,
 ) -> dict:
+    """Read each bound target's physical inventory.
+
+    ``catalogue`` names the views Weaver recorded installing in each Lakehouse,
+    so the inventory resolves only the relations it does not account for.
+    """
+
     supplied_sql = sql_by_item or {}
     workspace = workspace if workspace is not None else session.workspace
     inventories = {}
@@ -694,13 +703,16 @@ def read_target_inventories(
                 [target for _item, target in delta],
                 session=session,
                 workspace=workspace,
+                known_views={
+                    target.id: recorded_views(catalogue, item) for item, target in delta
+                },
             )
         for item, target in delta:
             inventories[item] = observed[target.id]
     return inventories
 
 
-def _lakehouse_inventories(targets, *, session, workspace) -> dict:
+def _lakehouse_inventories(targets, *, session, workspace, known_views) -> dict:
     """Read Delta objects from storage and views from the Spark catalogue."""
 
     resolver = session.resolver(workspace)
@@ -711,9 +723,32 @@ def _lakehouse_inventories(targets, *, session, workspace) -> dict:
             resolver=resolver,
             store=store,
             catalogue=session_catalogue(session, workspace, ItemRef(target.item_id)),
+            known_views=known_views[target.id],
         )
         for target in targets
     }
+
+
+def recorded_views(catalogue, item) -> frozenset[str]:
+    """``schema.name`` of each view the catalogue records for ``item``."""
+
+    if catalogue is None:
+        return frozenset()
+    registered = (
+        identity
+        for identity, document in catalogue.registered.items()
+        if document.object_type == "view"
+    )
+    borrowed = (
+        identity
+        for identity, mirrored in catalogue.mirrors.items()
+        if mirrored.physical_type == "view"
+    )
+    return frozenset(
+        identity.object_id.qualified
+        for identity in (*registered, *borrowed)
+        if identity.item == item
+    )
 
 
 @contextmanager

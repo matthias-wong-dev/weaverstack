@@ -23,6 +23,10 @@ def extract_verified(archive_path: Path, destination: Path, manifest: dict[str, 
             raise ValueError("archive inventory differs from manifest")
         if sum(member.file_size for member in members) > MAX_EXPANDED_BYTES:
             raise ValueError("archive expanded size exceeds the installation limit")
+        inventory = set(names)
+        for name in names:
+            if any(str(parent) in inventory for parent in PurePosixPath(name).parents):
+                raise ValueError("unsafe archive file parent collision")
         for member in members:
             name = member.filename
             path = PurePosixPath(name)
@@ -50,7 +54,9 @@ def read_receipt(receipt, data: bytes):
         or receipt.get("sha256") != hashlib.sha256(data).hexdigest()
     ):
         raise ValueError("installation result differs from receipt")
-    result = json.loads(data)
+    from .mutation_report import loads
+
+    result = loads(data)
     if not isinstance(result, dict):
         raise ValueError("invalid installation result")
     return result
@@ -66,44 +72,23 @@ class Carrier:
         return hashlib.sha256(self.data).hexdigest()
 
 
-def pack_bundle(bundle, *, request=None) -> Carrier | None:
-    """Carry frozen payloads and the installed caller's matching runtime."""
-    import yaml
+def pack_mutation(plan, payloads=None, *, request=None) -> Carrier | None:
+    """Carry a plan, exact payload bytes and the caller's matching runtime."""
+    from ..mutation.bundle import plan_to_yaml
+    from ..mutation.executor import validate_inputs
 
-    from ..errors import InstallError
-
+    payloads = validate_inputs(plan, payloads)
+    files = {
+        "bundle/plan.yml": plan_to_yaml(plan).encode("utf-8"),
+        "request.json": json.dumps(
+            request or {"plan_id": plan.bundle_id}, sort_keys=True, allow_nan=False
+        ).encode("utf-8"),
+    }
+    files.update({"bundle/" + path: data for path, data in payloads.items()})
     runtime = Path(__file__).resolve().parents[1]
-    manifest = bundle.store.read(bundle.location / "plan.yml")
-    try:
-        stored = json.dumps(yaml.safe_load(manifest), sort_keys=True, allow_nan=False)
-        frozen = json.dumps(bundle.plan.to_mapping(), sort_keys=True, allow_nan=False)
-    except (TypeError, ValueError, yaml.YAMLError) as error:
-        raise InstallError(
-            "Stored bundle differs from frozen installation plan"
-        ) from error
-    if stored != frozen:
-        raise InstallError("Stored bundle differs from frozen installation plan")
-    files = {"bundle/plan.yml": manifest}
-    if request is not None:
-        files["request.json"] = json.dumps(
-            request, sort_keys=True, allow_nan=False
-        ).encode("utf-8")
-    size = len(files["bundle/plan.yml"])
-    for sequence in bundle.plan.sequences:
-        for batch in sequence.batches:
-            for action in batch.actions:
-                if action.payload is None:
-                    continue
-                name = "bundle/" + action.payload
-                if name in files:
-                    continue
-                data = bundle.store.read(
-                    bundle.location.join(*action.payload.split("/"))
-                )
-                size += len(data)
-                if size > MAX_EXPANDED_BYTES:
-                    return None
-                files[name] = data
+    size = sum(len(data) for data in files.values())
+    if size > MAX_EXPANDED_BYTES:
+        return None
     for source in sorted(runtime.rglob("*")):
         if (
             source.suffix not in (".py", ".sql", ".yaml", ".yml", ".json")
@@ -124,141 +109,6 @@ def pack_bundle(bundle, *, request=None) -> Carrier | None:
             archive.writestr(name, data)
             manifest[name] = hashlib.sha256(data).hexdigest()
     return Carrier(stream.getvalue(), manifest)
-
-
-def decode_report(mapping, plan, *, partial=False):
-    import math
-    from datetime import datetime
-
-    from ..build_bundle.report import InstallationReport
-
-    planned = plan if isinstance(plan, dict) else plan.to_mapping()
-    if mapping["bundle_id"] != planned["bundle_id"]:
-        raise ValueError("installation report bundle differs")
-    sequences = mapping["sequences"]
-    expected = planned["sequences"]
-    if partial:
-        if mapping["status"] != "running" or len(sequences) > len(expected):
-            raise ValueError("invalid partial installation report")
-        expected = expected[: len(sequences)]
-    elif mapping["status"] not in ("succeeded", "failed"):
-        raise ValueError("invalid installation status")
-    if [row["number"] for row in sequences] != [row["number"] for row in expected]:
-        raise ValueError("installation sequence order differs")
-    stopped = False
-    for returned, original in zip(sequences, expected, strict=True):
-        wanted = [
-            (
-                action["id"],
-                batch["target_id"],
-                action["executor"],
-                action.get("resource_node_id"),
-            )
-            for batch in original["batches"]
-            for action in batch["actions"]
-        ]
-        rows = returned["actions"]
-        if [
-            (
-                row["action_id"],
-                row["target_id"],
-                row["executor"],
-                row.get("resource_node_id"),
-            )
-            for row in rows
-        ] != wanted:
-            raise ValueError("installation action identities differ")
-        if returned["description"] != original["description"]:
-            raise ValueError("installation sequence description differs")
-        for row in rows:
-            status = row["status"]
-            if status not in ("succeeded", "failed", "skipped"):
-                raise ValueError("invalid installation action status")
-            if status == "skipped":
-                continue
-            duration = row.get("duration_seconds")
-            if (
-                type(duration) not in (int, float)
-                or not math.isfinite(duration)
-                or not 0 <= duration <= 86400
-            ):
-                raise ValueError("invalid installation action duration")
-            begin, end = (
-                datetime.fromisoformat(row[key])
-                for key in ("started_at", "finished_at")
-            )
-            if begin.utcoffset() is None or end.utcoffset() is None or end < begin:
-                raise ValueError("invalid installation action clocks")
-            if status == "failed" and not all(
-                isinstance(row.get(key), str) and row[key]
-                for key in ("error_type", "error_message")
-            ):
-                raise ValueError("failed action has no error")
-        sequence_status = (
-            "skipped"
-            if stopped
-            else "failed"
-            if any(row["status"] == "failed" for row in rows)
-            else "succeeded"
-        )
-        if returned["status"] != sequence_status or (
-            stopped and any(row["status"] != "skipped" for row in rows)
-        ):
-            raise ValueError("installation sequence outcome differs")
-        stopped = stopped or sequence_status == "failed"
-    if not partial and mapping["status"] != ("failed" if stopped else "succeeded"):
-        raise ValueError("installation outcome differs from action results")
-    report = InstallationReport.from_mapping(mapping)
-    if report.started_at.utcoffset() is None:
-        raise ValueError("invalid installation report clock")
-    if not partial and (
-        report.finished_at is None
-        or report.finished_at.utcoffset() is None
-        or report.finished_at < report.started_at
-    ):
-        raise ValueError("invalid installation report completion")
-    return report
-
-
-def uncertain_report(plan, error: str, remote_result: str, *, settled=None):
-    from datetime import datetime, timezone
-
-    from ..build_bundle.report import ActionResult, InstallationReport, SequenceResult
-
-    mapping = plan if isinstance(plan, dict) else plan.to_mapping()
-    now = datetime.now(timezone.utc)
-    sequences = list(settled.sequences) if settled is not None else []
-    for sequence in mapping["sequences"][len(sequences) :]:
-        rows = tuple(
-            ActionResult(
-                action_id=action["id"],
-                executor=action["executor"],
-                target_id=batch["target_id"],
-                resource_node_id=action.get("resource_node_id"),
-                status="failed",
-                error_type="UncertainInstallation",
-                error_message=error,
-                source_path=action.get("source_path"),
-                details={"uncertain": True, "remote_result": remote_result},
-            )
-            for batch in sequence["batches"]
-            for action in batch["actions"]
-        )
-        sequences.append(
-            SequenceResult(
-                number=sequence["number"],
-                description=sequence["description"],
-                status="failed",
-                actions=rows,
-            )
-        )
-    return InstallationReport(
-        bundle_id=mapping["bundle_id"],
-        status="failed",
-        started_at=settled.started_at if settled is not None else now,
-        finished_at=now,
-        sequences=tuple(sequences),
-    )
 
 
 def bootstrap_source(carrier: Carrier, incoming: str, output: str, *, workers: int):
@@ -316,11 +166,7 @@ try:
         _archive_module = importlib.import_module("weaver.sessions.archive_runtime")
         if Path(_archive_module.__file__).resolve() != (_archive_root / "runtime/weaver/sessions/archive_runtime.py").resolve():
             raise ValueError("archive runtime did not win import resolution")
-        _archive_result = _archive_module.run_bundle(_archive_root, spark, _archive_output, _archive_sha256, workers={workers!r})
-    _archive_result["archive_sha256"] = _archive_sha256
-    _archive_bytes = json.dumps(_archive_result, separators=(",", ":"), allow_nan=False).encode("utf-8")
-    fs.put(_archive_output, _archive_bytes.decode("utf-8"), True)
-    emit({{"sha256": hashlib.sha256(_archive_bytes).hexdigest(), "bytes": len(_archive_bytes)}})
+        _archive_result = _archive_module.run_mutation(_archive_root, spark, _archive_output, _archive_sha256, workers={workers!r})
 finally:
     if _archive_switched:
         for _name in list(sys.modules):
@@ -329,176 +175,204 @@ finally:
         sys.modules.update(_archive_previous_modules)
         sys.path[:] = _archive_previous_path
         importlib.invalidate_caches()
-    shutil.rmtree(_archive_private, ignore_errors=True)
+    try:
+        shutil.rmtree(_archive_private)
+    except Exception as _archive_cleanup_error:
+        if "_archive_result" in locals():
+            _archive_result["runtime_cleanup_failure"] = {{"path": str(_archive_private), "error": str(_archive_cleanup_error)}}
+_archive_result["archive_sha256"] = _archive_sha256
+_archive_bytes = json.dumps(_archive_result, separators=(",", ":"), allow_nan=False).encode("utf-8")
+fs.put(_archive_output, _archive_bytes.decode("utf-8"), True)
+emit({{"sha256": hashlib.sha256(_archive_bytes).hexdigest(), "bytes": len(_archive_bytes)}})
 """
-    return "exec(" + repr(body) + ', {"spark": spark, "emit": emit})\n'
+    isolated = (
+        "import builtins, threading\nwith builtins.__dict__.setdefault('_weaver_archive_namespace_lock', threading.RLock()):\n"
+        + "\n".join("    " + line for line in body.splitlines())
+    )
+    return "exec(" + repr(isolated) + ', {"spark": spark, "emit": emit})\n'
 
 
-def install_in_scope(session, bundle, *, workspace=None, timeout=None, request=None):
-    import math
-    import time
-    from urllib.parse import urlsplit
+def execute_mutation_in_fabric(
+    session,
+    plan,
+    payloads=None,
+    *,
+    workspace=None,
+    timeout=600,
+    build_datetime=None,
+    observer=None,
+):
+    """Submit one complete plan once; an uncertain invocation is never replayed.
+
+    The carrier is staged under the plan's Spark-home Lakehouse and removed after
+    every outcome. It is transport, not a mutation target, so it is outside the
+    plan's physical scopes. ``observer`` follows the progress Fabric writes beside
+    the carrier while the plan runs.
+    """
+    from datetime import datetime, timezone
     from uuid import uuid4
 
-    from ..build_bundle.executors import default_executors
-    from ..build_bundle.installer import select_install_batches
-    from ..fabric.livy import DEFAULT_STATEMENT_TIMEOUT
-
-    plan = bundle.plan
-    if request is not None:
-        plan = select_install_batches(
-            plan,
-            sequence_number=request["sequence_number"],
-            batch_ids=request["batch_ids"],
-        )
-    if (
-        plan.execution is None
-        or plan.execution.spark_home_target_id is None
-        or bundle.store is None
-    ):
-        return None
-    actions = [
-        action
-        for sequence in plan.sequences
-        for batch in sequence.batches
-        for action in batch.actions
-    ]
-    if not actions or any(
-        action.executor not in default_executors() for action in actions
-    ):
-        return None
-    targets = {target.id: target for target in plan.targets}
-    if any(
-        targets[batch.target_id].kind == "warehouse"
-        and batch.target_id != plan.execution.catalogue_target_id
-        for sequence in plan.sequences
-        for batch in sequence.batches
-    ):
-        return None
-    allowance = DEFAULT_STATEMENT_TIMEOUT if timeout is None else timeout
-    if (
-        type(allowance) not in (int, float)
-        or not math.isfinite(allowance)
-        or allowance <= 0
-    ):
-        raise ValueError("archive timeout must be a positive per-action allowance")
-    started = time.monotonic()
-    carrier = pack_bundle(bundle, request=request)
-    if carrier is None:
-        return None
-    target = next(
-        target
-        for target in plan.targets
-        if target.id == plan.execution.spark_home_target_id
-    )
-    scope = session.scope(workspace)
-    store = scope.transport_store
+    from ..build_bundle.execution import execution_workspace, spark_home_of
+    from ..errors import BuildError
+    from ..fabric.onelake import abfss_path
+    from ..mutation.executor import MutationReport, MutationResult, validate_inputs
     from ..targets import ItemRef
+    from ..workspaces import CARRIER_AREA
+    from .mutation_report import decode_report
 
-    root = scope.resolver.lakehouse(ItemRef(target.item_id))
-    stage = root.join("Files", "_weaver_install_" + uuid4().hex)
-    incoming = stage / "carrier.zip"
-    output = stage / "result.json"
-
-    def native(location):
-        value = location.value
-        if value.startswith("https://"):
-            address = urlsplit(value)
-            parts = address.path.strip("/").split("/", 1)
-            if (
-                address.hostname != "onelake.dfs.fabric.microsoft.com"
-                or len(parts) != 2
-                or address.query
-                or address.fragment
-            ):
-                raise ValueError("archive carrier requires a bound OneLake destination")
-            return "abfss://" + parts[0] + "@" + address.hostname + "/" + parts[1]
-        return value
-
-    source = bootstrap_source(
-        carrier, native(incoming), native(output), workers=session.direct_delta_workers
+    payloads = validate_inputs(plan, payloads)
+    actions = [a for _, _, a in plan.actions()]
+    invocation_id = uuid4().hex
+    if not actions:
+        return MutationReport(plan.bundle_id, (), invocation_id=invocation_id)
+    frozen_workspace = execution_workspace(plan.execution, plan)
+    if workspace is not None and workspace != frozen_workspace:
+        raise BuildError("mutation workspace differs from sealed plan")
+    home_id = plan.execution.spark_home_target_id
+    home = (
+        spark_home_of(plan.targets)
+        if home_id is None
+        else next(t for t in plan.targets if t.id == home_id)
     )
-    try:
-        store.make_directory(stage)
-        store.write(incoming, carrier.data)
-    except BaseException:
+    if home is None:
+        raise BuildError("a mutation run in Fabric requires a Lakehouse target")
+    build_datetime = build_datetime or datetime.now(timezone.utc).strftime(
+        "%Y-%m-%d %H:%M:%S.%f"
+    )
+    if home_id is not None:
+        session.require_spark_home(home.name, workspace=frozen_workspace)
+    scope = session.scope(frozen_workspace)
+    store = scope.transport_store
+    area = scope.resolver.files_root(ItemRef(home.name)) / CARRIER_AREA
+    stage = area / invocation_id
+    incoming, output = stage / "carrier.zip", stage / "result.json"
+    progress = stage / "progress.json"
+
+    def remove_stage():
         store.delete(stage, recursive=True)
-        raise
-    settled = None
-    verified_status = None
-    received = False
-
-    def record(result):
-        if not hasattr(session, "archive_installations"):
-            session.archive_installations = []
-        session.archive_installations.append(
-            result
-            | {
-                "carrier_bytes": len(carrier.data),
-                "archive_seconds": time.monotonic() - started,
-            }
-        )
-
-    try:
-        receipt = scope.livy_run(
-            source,
-            name="install_bundle_archive",
-            timeout=allowance * len(actions),
-            retry_submission=False,
-        )
-        received = True
-        result = read_receipt(receipt, store.read(output))
-        if result.get("archive_sha256") != carrier.sha256:
-            raise ValueError("archive result belongs to a different carrier")
-        if (
-            result.get("status") == "declined"
-            and result.get("mutated") is False
-            and isinstance(result.get("reason"), str)
-        ):
-            verified_status = "declined"
-            return None
-        if result.get("status") != "completed":
-            raise ValueError("archive installation has not completed")
-        if request is not None and result.get("request") != request:
-            raise ValueError("archive result belongs to a different batch selection")
-        report = decode_report(result["report"], plan)
-        verified_status = "completed"
-        record(result)
-        return report
-    except Exception as error:
         try:
-            result = json.loads(store.read(output))
-            if result.get("archive_sha256") == carrier.sha256:
-                if request is not None and result.get("request") != request:
-                    raise ValueError(
-                        "archive recovery belongs to a different batch selection"
-                    )
-                if result.get("status") == "completed" and not received:
-                    report = decode_report(result["report"], plan)
-                    verified_status = "completed"
-                    record(result)
-                    return report
-                if result.get("status") == "running":
-                    settled = decode_report(result["report"], plan, partial=True)
+            # Non-recursive, so another invocation's carrier keeps the area.
+            store.delete(area)
         except Exception:
             pass
-        return uncertain_report(plan, str(error), output.value, settled=settled)
+
+    from .archive_runtime import execution_capacity
+
+    # Fabric runs the plan with this deployment's capacity, which the plan omits.
+    workers, limits = execution_capacity(plan, session.workspace)
+    request = {
+        "plan_id": plan.bundle_id,
+        "invocation_id": invocation_id,
+        "build_datetime": build_datetime,
+        "timeout": timeout,
+        "workers": workers,
+        "limits": limits,
+    }
+    if observer is not None:
+        request["progress"] = abfss_path(progress)
+    carrier = pack_mutation(plan, payloads, request=request)
+    if carrier is None:
+        raise BuildError("mutation carrier exceeds expanded size bound")
+
+    source = bootstrap_source(
+        carrier,
+        abfss_path(incoming),
+        abfss_path(output),
+        workers=session.direct_delta_workers,
+    )
+    store.make_directory(stage)
+    try:
+        store.write(incoming, carrier.data)
+    except BaseException:
+        remove_stage()
+        raise
+    record = {
+        "plan_id": plan.bundle_id,
+        "invocation_id": invocation_id,
+        "request": request,
+        "archive_sha256": carrier.sha256,
+        "carrier": incoming.value,
+        "status": "uncertain",
+    }
+    if not hasattr(session, "archive_mutations"):
+        session.archive_mutations = []
+    session.archive_mutations.append(record)
+    following = (
+        None if observer is None else _follow(session, store, progress, observer)
+    )
+    try:
+        try:
+            receipt = scope.livy_run(
+                source,
+                name="mutation_archive",
+                timeout=timeout * len(actions),
+                retry_submission=False,
+                livy=session.foreground_livy(scope),
+            )
+        finally:
+            if following is not None:
+                following()
+        result = read_receipt(receipt, store.read(output))
+        if result.get("archive_sha256") != carrier.sha256:
+            raise BuildError("mutation carrier result differs")
+        if result.get("status") == "declined" and result.get("mutated") is False:
+            raise BuildError(result["reason"])
+        if result.get("status") != "completed" or result.get("request") != request:
+            raise BuildError("mutation result differs from request")
+        report = decode_report(plan, result["report"], invocation_id=invocation_id)
+        record["status"] = "completed"
+        record["action_ids"] = [result.action_id for result in report.results]
+        if "runtime_cleanup_failure" in result:
+            record["runtime_cleanup_failure"] = result["runtime_cleanup_failure"]
+        return report
+    except Exception as error:
+        record["error"] = str(error)
+        return MutationReport(
+            plan.bundle_id,
+            tuple(MutationResult(a.id, "uncertain", error=str(error)) for a in actions),
+            invocation_id=invocation_id,
+        )
     finally:
-        if verified_status is not None:
-            try:
-                store.delete(stage, recursive=True)
-            except Exception as cleanup_error:
-                failure = {
-                    "status": verified_status,
-                    "stage": stage.value,
-                    "remote_result": output.value,
-                    "error_type": type(cleanup_error).__name__,
-                    "error_message": str(cleanup_error),
-                }
-                session.archive_cleanup_failures.append(failure)
+        try:
+            remove_stage()
+        except Exception as error:
+            record["cleanup_error"] = str(error)
+
+
+def _follow(session, store, location, observer):
+    """Read Fabric's progress beside the Livy wait; return what stops reading.
+
+    A read that fails is retried at the next interval, and the final report
+    supplies anything the progress never showed.
+    """
+
+    import threading
+
+    from .archive_runtime import PROGRESS_INTERVAL
+
+    done = threading.Event()
+    context = session.telemetry.capture_context()
+
+    def read():
+        seen = 0
+        with session.telemetry.use_context(context):
+            while not done.wait(PROGRESS_INTERVAL):
                 try:
-                    session.warn(
-                        f"Installation carrier cleanup failed: {stage.value}. Result retained at {output.value}: {cleanup_error}"
-                    )
-                except Exception:
-                    pass
+                    records = json.loads(store.read(location))
+                except Exception:  # noqa: BLE001 - progress never changes an outcome
+                    continue
+                for record in records[seen:]:
+                    try:
+                        observer(record)
+                    except Exception:  # noqa: BLE001 - presentation only
+                        pass
+                seen = len(records)
+
+    reader = threading.Thread(target=read, name="weaver-progress", daemon=True)
+    reader.start()
+
+    def stop():
+        done.set()
+        reader.join(PROGRESS_INTERVAL * 5)
+
+    return stop

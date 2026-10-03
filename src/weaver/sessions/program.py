@@ -1,14 +1,14 @@
-"""Python work that runs locally in Fabric or remotely through Livy.
+"""Python work that runs in Fabric, called in place or sent from a client.
 
-In a notebook, the work is a function call. On a desktop, the equivalent Python
-runs through Livy. A :class:`RemoteProgram` carries both forms:
+In a notebook, the work is a function call. From a client, the equivalent Python
+is sent to Fabric through Livy. A :class:`FabricProgram` carries both forms:
 
 .. code-block:: text
 
     call()   → the payload, computed in this process
     source   → Python that computes the same payload and emits it
 
-The local and remote forms must return the same value. This mechanism is for a
+Both forms must return the same value. This mechanism is for a
 run's deployed Python primitives; build reads and installs use statements.
 """
 
@@ -19,8 +19,8 @@ from typing import Any, Callable
 
 
 @dataclass(frozen=True)
-class RemoteProgram:
-    """A named unit of work with equivalent local and remote forms.
+class FabricProgram:
+    """A named unit of Fabric work, as a call and as source a client sends.
 
     ``name`` identifies the work in timing and reporting. Use
     ``read_build_state``, not ``run_livy_body``.
@@ -31,6 +31,28 @@ class RemoteProgram:
     source: str
     timeout: float | None = None
     detail: str | None = None
+    #: Whether a submission that may already have reached Fabric can be sent
+    #: again. A load that records itself cannot.
+    resubmit: bool = True
 
 
-__all__ = ["RemoteProgram"]
+@dataclass(frozen=True)
+class FabricRun:
+    """A load or test run, as it runs here and as Fabric runs it whole.
+
+    ``call`` runs it with the Session given. ``entry`` is a module-level
+    function Fabric imports and calls with a Session, the Workspace and
+    ``arguments()``; it returns the report as data, which ``decode`` turns into
+    the report ``call`` returns.
+    """
+
+    name: str
+    #: Whether the run executes anything on Spark.
+    needs_spark: bool
+    call: Callable[[Any], Any]
+    entry: Callable[..., dict]
+    arguments: Callable[[], dict]
+    decode: Callable[[dict], Any]
+
+
+__all__ = ["FabricProgram", "FabricRun"]

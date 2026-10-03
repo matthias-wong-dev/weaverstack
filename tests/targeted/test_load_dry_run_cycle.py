@@ -66,7 +66,7 @@ class Prepared:
 
 
 class Refreshing(FabricResolver):
-    def refresh_sql_endpoint(self, item):
+    def refresh_sql_endpoint(self, item, *, tables=None):
         raise AssertionError("a dry run must not refresh an endpoint")
 
 
@@ -154,11 +154,10 @@ def test_naming_an_item_leaves_the_rest_of_the_estate_alone(session):
 def test_load_dry_run_resolves_the_complete_physical_dag(session):
     report = dry_run(session)
 
-    assert report.order == (EXPORT, ORDER, DAILY, REFRESH, SUMMARY)
-    # Sorted, and a Folder's ``Files/`` area sorts ahead of a bare schema.
+    assert report.order == (EXPORT, ORDER, REFRESH, DAILY, SUMMARY)
+    # Sorted, and a Folder's ``Files/`` area sorts ahead of a bare schema. The
+    # refresh waits only for what the Warehouse reads through it.
     assert report.edges == (
-        (EXPORT, REFRESH),
-        (DAILY, REFRESH),
         (ORDER, DAILY),
         (ORDER, REFRESH),
         (REFRESH, SUMMARY),

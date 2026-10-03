@@ -5,6 +5,7 @@ Fabric item identity is workspace, type and name. A bare name can be ambiguous.
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 
 from ..errors import CommandError
@@ -210,29 +211,160 @@ def delete_item(item: Item, *, client: FabricClient | None = None) -> None:
     )
 
 
+#: The most tables Fabric syncs for one refresh request.
+TABLES_PER_REFRESH = 25
+
+
 def refresh_sql_endpoint_metadata(
-    endpoint: Item, *, client: FabricClient | None = None
+    endpoint: Item, *, tables=None, client: FabricClient | None = None
 ) -> dict:
-    """Refresh every table in one SQL analytics endpoint and await completion."""
+    """Refresh one SQL analytics endpoint and await completion."""
+
+    client = client or FabricClient()
+    refresh = start_sql_endpoint_refresh(endpoint, tables=tables, client=client)
+    while not refresh["done"]:
+        time.sleep(refresh["retry_after"])
+        refresh = observe_sql_endpoint_refresh(refresh, client=client)
+    return refresh_details(refresh)
+
+
+def start_sql_endpoint_refresh(
+    endpoint: Item,
+    *,
+    tables=None,
+    timeout: float | None = None,
+    client: FabricClient | None = None,
+) -> dict:
+    """Ask Fabric to refresh an endpoint and return the plain-data handle.
+
+    ``tables`` names the ``(schema, table)`` pairs to sync, and ``None`` syncs
+    every table. Fabric syncs 25 tables a request, so the handle keeps the rest
+    and observation asks for each batch once the one before it completes.
+    Fabric cancels a request still running after ``timeout`` seconds, 15
+    minutes when it is omitted.
+    """
 
     if endpoint.type != SQL_ENDPOINT:
         raise CommandError(
             f"SQL endpoint refresh requires a {SQL_ENDPOINT} item. Received {endpoint.type!r}."
         )
-    client = client or FabricClient()
+    batches = None if tables is None else _batches(tables)
+    handle = {
+        "lakehouse": endpoint.name,
+        "workspace_id": endpoint.workspace_id,
+        "sql_endpoint_id": endpoint.id,
+        "timeout": timeout,
+        "remaining": batches[1:] if batches else [],
+    }
+    if batches == []:
+        return {
+            **handle,
+            "operation_id": None,
+            "location": None,
+            "retry_after": 0.0,
+            "done": True,
+            "status": "Succeeded",
+        }
+    return _request(
+        handle, None if batches is None else batches[0], client or FabricClient()
+    )
+
+
+def _batches(tables) -> list[list[dict]]:
+    """Fabric's table definitions, at most 25 tables to a request."""
+
+    pairs = sorted(dict.fromkeys((str(schema), str(table)) for schema, table in tables))
+    batches = []
+    for first in range(0, len(pairs), TABLES_PER_REFRESH):
+        by_schema: dict[str, list[str]] = {}
+        for schema, table in pairs[first : first + TABLES_PER_REFRESH]:
+            by_schema.setdefault(schema, []).append(table)
+        batches.append(
+            [
+                {"schema": schema, "tableNames": names}
+                for schema, names in by_schema.items()
+            ]
+        )
+    return batches
+
+
+def _request(handle: dict, batch, client: FabricClient) -> dict:
+    from .client import accepted_operation
+
+    payload: dict = {"recreateTables": False}
+    if batch is not None:
+        payload["tables"] = batch
+    if handle["timeout"] is not None:
+        payload["timeout"] = {"timeUnit": "Seconds", "value": int(handle["timeout"])}
     response = client.request(
         "POST",
-        f"workspaces/{endpoint.workspace_id}/sqlEndpoints/{endpoint.id}/refreshMetadata",
-        payload={"recreateTables": False},
+        f"workspaces/{handle['workspace_id']}/sqlEndpoints/"
+        f"{handle['sql_endpoint_id']}/refreshMetadata",
+        payload=payload,
         expected=(200, 202),
     )
-    result = client.wait_for_operation(response)
-    return {
-        "lakehouse": endpoint.name,
-        "sql_endpoint_id": endpoint.id,
+    started = {
+        **handle,
         "operation_id": response.headers.get("x-ms-operation-id"),
-        "status": result.get("status", "Succeeded"),
+        "location": None,
+        "retry_after": 0.0,
+        "done": response.status_code != 202,
+        "status": "Running",
     }
+    if started["done"]:
+        return _next({**started, "status": _refresh_status(response)}, client)
+    operation = accepted_operation(response)
+    return {
+        **started,
+        "location": operation.location,
+        "retry_after": operation.retry_after,
+    }
+
+
+def _next(refresh: dict, client: FabricClient) -> dict:
+    """Ask for the next batch once the one before it has completed."""
+
+    if not refresh["remaining"]:
+        return refresh
+    batch, *rest = refresh["remaining"]
+    return _request({**refresh, "remaining": rest}, batch, client)
+
+
+def observe_sql_endpoint_refresh(
+    refresh: dict, *, client: FabricClient | None = None
+) -> dict:
+    """Poll a started refresh once; a failed refresh raises."""
+
+    if refresh["done"]:
+        return refresh
+    from .client import Operation
+
+    client = client or FabricClient()
+    operation = client.poll_operation(
+        Operation(location=refresh["location"], operation_id=refresh["operation_id"])
+    )
+    observed = {
+        **refresh,
+        "location": operation.location,
+        "retry_after": operation.retry_after,
+        "done": operation.done,
+        "status": operation.body.get("status", "Succeeded")
+        if operation.done and isinstance(operation.body, dict)
+        else "Running",
+    }
+    return _next(observed, client) if operation.done else observed
+
+
+def refresh_details(refresh: dict) -> dict:
+    return {
+        key: refresh[key]
+        for key in ("lakehouse", "sql_endpoint_id", "operation_id", "status")
+    }
+
+
+def _refresh_status(response) -> str:
+    body = response.json() if response.content else {}
+    return body.get("status", "Succeeded") if isinstance(body, dict) else "Succeeded"
 
 
 def _await_item(
@@ -244,8 +376,6 @@ def _await_item(
     attempts: int = 30,
     pause: float = 2.0,
 ) -> Item:
-    import time
-
     for _ in range(attempts):
         try:
             return find_item(workspace, name, item_type=item_type, client=client)

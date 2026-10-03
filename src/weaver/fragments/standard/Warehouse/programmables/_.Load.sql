@@ -150,7 +150,7 @@ begin
                 , target.[Started datetime] = @weaver_started
                 , target.[Completed datetime] = null
                 , target.[Duration milliseconds] = null
-                , target.[Row update datetime] = sysdatetime()
+                , target.[Row update datetime] = sysutcdatetime()
             when not matched then insert (
                 [Item type]
                 , [Item name]
@@ -171,8 +171,8 @@ begin
                 , @weaver_workflow
                 , N'Pending'
                 , @weaver_started
-                , sysdatetime()
-                , sysdatetime()
+                , sysutcdatetime()
+                , sysutcdatetime()
                 , convert(datetime2(6), '9999-12-31 23:59:59.999999')
             );
 
@@ -190,7 +190,7 @@ begin
                   and target.[Object name] = source.[Object name]
             when matched then update set
                 target.[Bookmark datetime] = @weaver_bookmark_sentinel
-                , target.[Row update datetime] = sysdatetime()
+                , target.[Row update datetime] = sysutcdatetime()
             when not matched then insert (
                 [Item type]
                 , [Item name]
@@ -207,8 +207,8 @@ begin
                 , source.[Schema name]
                 , source.[Object name]
                 , @weaver_bookmark_sentinel
-                , sysdatetime()
-                , sysdatetime()
+                , sysutcdatetime()
+                , sysutcdatetime()
                 , convert(datetime2(6), '9999-12-31 23:59:59.999999')
             );
         end;
@@ -307,8 +307,8 @@ begin
         , datediff(millisecond, @weaver_started, @weaver_completed)
         , @weaver_message
         , null
-        , sysdatetime()
-        , sysdatetime()
+        , sysutcdatetime()
+        , sysutcdatetime()
         , convert(datetime2(6), '9999-12-31 23:59:59.999999')
     );
 
@@ -330,7 +330,7 @@ begin
         , target.[Started datetime] = @weaver_started
         , target.[Completed datetime] = @weaver_completed
         , target.[Duration milliseconds] = datediff(millisecond, @weaver_started, @weaver_completed)
-        , target.[Row update datetime] = sysdatetime()
+        , target.[Row update datetime] = sysutcdatetime()
     when not matched then insert (
         [Item type]
         , [Item name]
@@ -355,8 +355,8 @@ begin
         , @weaver_started
         , @weaver_completed
         , datediff(millisecond, @weaver_started, @weaver_completed)
-        , sysdatetime()
-        , sysdatetime()
+        , sysutcdatetime()
+        , sysutcdatetime()
         , convert(datetime2(6), '9999-12-31 23:59:59.999999')
     );
 
@@ -404,8 +404,8 @@ begin
         , coalesce(@rows_rejected, 0)
         , cast(@reload as bit)
         , cast(coalesce(@is_static_skip, 0) as bit)
-        , sysdatetime()
-        , sysdatetime()
+        , sysutcdatetime()
+        , sysutcdatetime()
         , convert(datetime2(6), '9999-12-31 23:59:59.999999')
     );
 
@@ -425,7 +425,7 @@ begin
               and target.[Object name] = source.[Object name]
         when matched then update set
             target.[Bookmark datetime] = @bookmark_datetime
-            , target.[Row update datetime] = sysdatetime()
+            , target.[Row update datetime] = sysutcdatetime()
         when not matched then insert (
             [Item type]
             , [Item name]
@@ -442,8 +442,8 @@ begin
             , source.[Schema name]
             , source.[Object name]
             , @bookmark_datetime
-            , sysdatetime()
-            , sysdatetime()
+            , sysutcdatetime()
+            , sysutcdatetime()
             , convert(datetime2(6), '9999-12-31 23:59:59.999999')
         );
     end;

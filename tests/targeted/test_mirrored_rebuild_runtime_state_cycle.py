@@ -29,6 +29,7 @@ from factories import (
     schema_document,
     warehouse_table,
 )
+from support.bundles import build_metadata
 from support.weaver_test import weaver_test
 from support.workspaces import WORKSPACE
 from test_health_representation import REPORTING, YESTERDAY, _Estate, at
@@ -162,7 +163,7 @@ def _established(bundle, table) -> dict[str, dict]:
 
     return {
         row["object_name"]: row
-        for one in bundle.plan.runtime_state_established
+        for one in build_metadata(bundle.plan).runtime_state_established
         if one.table == table.name
         for row in one.rows
     }
@@ -175,7 +176,7 @@ def _established(bundle, table) -> dict[str, dict]:
 def test_a_changed_source_carries_its_borrowed_dependants_into_the_build(rebuilt):
     """The dependency impact, which is the reason these objects are rebuilt."""
 
-    selection = rebuilt.plan.selection
+    selection = build_metadata(rebuilt.plan).selection
     changed = {str(identity) for identity in selection.impact.changed}
     descendants = {str(identity) for identity in selection.impact.impacted_descendants}
     selected = {str(identity) for identity in selection.selected_for_build}

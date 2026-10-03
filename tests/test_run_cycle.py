@@ -92,6 +92,7 @@ def node(node_id: str, **kwargs) -> RunNode:
             ),
         ),
         role=kwargs.pop("role", "load"),
+        installed=kwargs.pop("installed", None),
     )
 
 
@@ -323,6 +324,33 @@ def test_a_refresh_this_host_cannot_do_is_skipped_rather_than_failed():
 
     assert result.by_node["refresh"].status == SKIPPED
     assert result.succeeded
+
+
+@weaver_test()
+def test_a_refresh_syncs_the_tables_its_barrier_names():
+    from dataclasses import replace
+    from types import SimpleNamespace
+
+    from weaver.run.dispatch import _endpoint_refresh
+
+    asked = []
+
+    class Resolver:
+        def refresh_sql_endpoint(self, item, *, tables=None):
+            asked.append((item.name, tables))
+
+    session = SimpleNamespace(resolver=lambda workspace: Resolver())
+    barrier = RunNode(
+        node_id="refresh:Lakehouse/Sales_LH",
+        physical_target=SALES,
+        primitive_kind="endpoint_refresh",
+        refresh_tables=(("Sales", "Order"),),
+    )
+
+    _endpoint_refresh(barrier, session, None)
+    _endpoint_refresh(replace(barrier, refresh_tables=None), session, None)
+
+    assert asked == [(SALES.name, [("Sales", "Order")]), (SALES.name, None)]
 
 
 @weaver_test()

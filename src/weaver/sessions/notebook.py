@@ -13,7 +13,7 @@ from ..delta_protocol import DirectDeltaAction, ProtocolMinima, SparkDeltaAction
 from ..errors import CommandError
 from ..workspaces import Workspace
 from .base import Session, WorkspaceScope, run_spark_statements
-from .program import RemoteProgram
+from .program import FabricProgram
 from .resources import Resource
 
 
@@ -169,7 +169,7 @@ class NotebookSession(Session):
 
     def execute_python(
         self,
-        program: RemoteProgram,
+        program: FabricProgram,
         *,
         workspace: Workspace | None = None,
         timeout: float | None = None,

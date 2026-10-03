@@ -1,22 +1,10 @@
 """A dead Livy fails its Task, and the next Task gets a live one.
 
-The persistent Session made a real gap visible. Before it, each command opened
-its own Livy session and closed it, so a session that died cost one command and
-the next started fresh. With one session shared for a console's lifetime, a
-death was permanent: `livy_run` marked the resource failed, `reacquire()` was
-never called by anything, and every later command answered
-
-    The livy resource failed and has not been reacquired
-
-**Recovery belongs at a Task boundary, and nowhere else.** A `Resource.get()`
-that healed itself would hand a replacement Livy interpreter to a run already
-in progress, and that interpreter has none of the RuntimeScopes the run opened
-in the dead one. The nodes would import into scopes that do not exist, and the
-run would carry on succeeding at nothing. So the failure stands, the Task fails,
-and the next Task acquires again.
-
-Bounded, because a resource that cannot come back must eventually say so rather
-than making every command pay for the discovery.
+A failed resource is reacquired at a Task boundary, never part way through one,
+and only a bounded number of times in a row, so a resource that cannot come back
+says so rather than making every command pay for the discovery. A session Fabric
+ended while idle is not a failed resource: ``LivySession`` replaces it in place
+(``tests/test_livy_session_recovery_boundary.py``).
 """
 
 from __future__ import annotations
@@ -38,12 +26,12 @@ class _Flaky:
         return f"session-{self.acquired}"
 
 
-def _resource(**kwargs) -> Resource:
+def _resource(acquire=None, **kwargs) -> Resource:
     from concurrent.futures import ThreadPoolExecutor
 
     return Resource(
         name="livy",
-        acquire=_Flaky(),
+        acquire=acquire or _Flaky(),
         executor=ThreadPoolExecutor(max_workers=1),
         **kwargs,
     )
@@ -102,15 +90,19 @@ def test_the_allowance_is_bounded():
     """A resource that will not come back says so, rather than making every
     command pay to find out again."""
 
-    resource = _resource(max_attempts=2)
-    resource.get()
-    resource.fail(RuntimeError("dead"))
+    resource = _resource(_refuse, max_attempts=2)
+    with pytest.raises(RuntimeError):
+        resource.get()
     resource.reacquire()
-    resource.get()
-    resource.fail(RuntimeError("dead again"))
+    with pytest.raises(RuntimeError):
+        resource.get()
 
     with pytest.raises(ResourceError, match="cannot be acquired again"):
         resource.reacquire()
+
+
+def _refuse():
+    raise RuntimeError("no capacity")
 
 
 # --- where recovery happens ---------------------------------------------------
@@ -130,12 +122,6 @@ def test_a_task_boundary_reacquires_what_died():
 
 @weaver_test()
 def test_nothing_is_reacquired_part_way_through_a_task():
-    """The claim the whole design rests on.
-
-    A replacement interpreter has none of the RuntimeScopes the run opened in
-    the dead one, so a run that continued on it would dispatch into scopes that
-    do not exist, succeeding at nothing, silently.
-    """
 
     resource = _resource()
     holder = _Session(resource)
@@ -174,10 +160,10 @@ def test_a_task_still_starts_when_the_allowance_is_spent():
     """Exhausted is the *user's* problem to hear about from the thing that
     needed it, naming what it was for, not a Task that refuses to begin."""
 
-    resource = _resource(max_attempts=1)
+    resource = _resource(_refuse, max_attempts=1)
     holder = _Session(resource)
-    resource.get()
-    resource.fail(RuntimeError("dead"))
+    with pytest.raises(RuntimeError):
+        resource.get()
 
     with holder.session.task("Load"):
         assert resource.state is ResourceState.FAILED

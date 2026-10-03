@@ -156,15 +156,11 @@ def run_load(
     not green. ``as_of`` is the freshness cutoff, resolved by the caller.
     """
 
-    from ..run import (
-        Runner,
-        RunRequest,
-        RunState,
-        can_refresh,
-        dispatch_primitive,
-        open_run_record,
-    )
+    from ..run import RunRequest, RunState
+    from ..run.entry import run_load_in_fabric
+    from ..run.runner import needs_spark
     from ..run.state import read_installed_catalogue
+    from ..sessions.program import FabricRun
 
     started = datetime.now(timezone.utc)
     with session.step("Read catalogue"):
@@ -206,35 +202,73 @@ def run_load(
         ).unsettled_identities()
 
     # Fabric requires a Lakehouse attachment before Spark starts.
-    session.offer_spark_home(lakehouse_names(installed.values()))
+    session.offer_spark_home(lakehouse_names(installed.values()), workspace=workspace)
 
+    request = RunRequest.load(
+        items,
+        names=names,
+        selected=selected,
+        fault_tolerant=fault_tolerant,
+        dry_run=dry_run,
+        reload=reload,
+        ignore_stability_threshold=ignore_stability_threshold,
+    )
     with session.step("Build run graph"):
         if state is None:
             state = RunState(catalogue=catalogue)
-        runner = Runner(
-            state,
-            RunRequest.load(
-                items,
-                names=names,
-                selected=selected,
-                fault_tolerant=fault_tolerant,
-                dry_run=dry_run,
-                reload=reload,
-                ignore_stability_threshold=ignore_stability_threshold,
-            ),
-            workspace=workspace,
-            can_refresh=can_refresh(session, workspace),
-        )
+        runner = load_runner(session, workspace, state, request)
         if reload:
             # Refuse unsupported work before execution or dry-run reporting.
             _refuse_unsupported_reload(runner.plan())
 
+    run = FabricRun(
+        name="load",
+        needs_spark=not dry_run and needs_spark(runner.graph),
+        call=lambda here: execute_load(
+            here, workspace=workspace, runner=runner, started=started
+        ),
+        entry=run_load_in_fabric,
+        arguments=lambda: {
+            "catalogue": state.catalogue.to_mapping(),
+            "request": request.to_mapping(),
+            "started": started.isoformat(),
+        },
+        decode=LoadRunReport.from_mapping,
+    )
+    report = session.execute_run(run, workspace=workspace)
+    if not fault_tolerant and not dry_run:
+        _raise_for_failure(report)
+    return report
+
+
+def load_runner(session, workspace, state, request):
+    """The Runner for a load, for the Session that executes it."""
+
+    from ..run import Runner, can_refresh
+
+    return Runner(
+        state,
+        request,
+        workspace=workspace,
+        can_refresh=can_refresh(session, workspace),
+    )
+
+
+def execute_load(session, *, workspace, runner, started) -> LoadRunReport:
+    """Execute a planned load and record what it did, where ``session`` runs."""
+
+    from ..run import dispatch_primitive, open_run_record
+    from ..run.runner import Lanes
+
     # A dry run must not create run evidence or move bookmarks.
     record = (
         None
-        if dry_run
+        if runner.request.dry_run
         else open_run_record(
-            catalogue, workspace=workspace, task_type=TASK_TYPE, session=session
+            runner.state.catalogue,
+            workspace=workspace,
+            task_type=TASK_TYPE,
+            session=session,
         )
     )
     with session.step("Execute"):
@@ -242,7 +276,11 @@ def run_load(
             session=session,
             dispatch=dispatch_primitive,
             on_node=None if record is None else record.settled,
-            before_node=None if record is None or not reload else _reset_before(record),
+            before_node=None
+            if record is None or not runner.request.reload
+            else _reset_before(record),
+            # Independent branches of a load run at once.
+            lanes=Lanes.configured(workspace),
         )
 
     if record is not None:
@@ -250,10 +288,7 @@ def run_load(
         with session.step("Record what the run did"):
             record.flush()
 
-    report = _as_load_report(result, started=started, record=record)
-    if not fault_tolerant and not dry_run:
-        _raise_for_failure(report)
-    return report
+    return _as_load_report(result, started=started, record=record)
 
 
 #: The primitive kinds a reload can reconstruct.

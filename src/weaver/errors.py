@@ -54,6 +54,14 @@ def reported_executor(exc: BaseException) -> str | None:
     return None
 
 
+class OutcomeUnknown(WeaverError):
+    """A request may have reached its service, and the response was lost.
+
+    A mutation that raised this may have been applied, so its outcome is
+    uncertain, never a known failure.
+    """
+
+
 class CommandError(WeaverError):
     """Raised when an explicitly requested operation is invalid."""
 
@@ -127,7 +135,3 @@ class BuildError(WeaverError):
 
 class InstallError(WeaverError):
     """Raised when a build bundle cannot be installed."""
-
-
-class RuntimeScopeError(WeaverError):
-    """Raised when this interpreter holds no runtime scope under a given name."""

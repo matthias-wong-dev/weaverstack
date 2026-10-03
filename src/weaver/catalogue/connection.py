@@ -16,9 +16,11 @@ class CatalogueConnection:
         self,
         query: Callable[[str], Any],
         execute: Callable[[str], Any] | None = None,
+        query_sets: Callable[[list[str]], Any] | None = None,
     ) -> None:
         self._query = query
         self._execute = execute
+        self._query_sets = query_sets
         self._shape: dict[str, dict[str, str]] | None = None
 
     # --- the shape of `_` ----------------------------------------------------
@@ -55,6 +57,13 @@ class CatalogueConnection:
     def rows(self, statement: str):
         return self._query(statement)
 
+    def row_sets(self, statements: list[str]) -> tuple:
+        """Each statement's rows, read together where the transport allows."""
+
+        if self._query_sets is None:
+            return tuple(self._query(statement) for statement in statements)
+        return tuple(self._query_sets(statements))
+
     def execute(self, statement: str) -> None:
         if self._execute is None:
             raise CommandError(
@@ -77,6 +86,9 @@ def catalogue_connection(session, workspace=None) -> CatalogueConnection:
         ),
         lambda statement: session.execute_tsql(
             statement, target=target, workspace=resolved
+        ),
+        lambda statements: session.query_tsql_sets(
+            statements, target=target, workspace=resolved
         ),
     )
 

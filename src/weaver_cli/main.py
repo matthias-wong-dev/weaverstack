@@ -1319,24 +1319,23 @@ def _run_load(
 
 
 def _print_load(report) -> None:
+    from weaver.run.result import rows_moved
+
     mode = "plan" if report.dry_run else "load"
     reload = " (reload)" if getattr(report, "reload", False) else ""
     report_status = _style(report.status, _status_colour(report.status))
     requested = _public_requested(report.requested)
-    print(f"{mode}{reload} {report_status}: {', '.join(requested)}\n")
-    for node in report.nodes:
+    print(f"{mode}{reload} {report_status}: {', '.join(requested)}")
+    # Progress has already said each node started and finished. A plan has no
+    # progress, so it lists every node.
+    listed = [node for node in report.nodes if report.dry_run or _needs_attention(node)]
+    if listed:
+        print()
+    for node in listed:
         mark = _status_symbol(node.status)
         colour = _status_colour(node.status)
-        counts = ""
-        # Failures before row movement have no row-count fields.
-        if node.result is not None and hasattr(node.result, "rows_read"):
-            counts = (
-                f"  (read {node.result.rows_read}, "
-                f"+{node.result.rows_inserted} "
-                f"~{node.result.rows_updated} "
-                f"-{node.result.rows_deleted} "
-                f"!{node.result.rows_rejected})"
-            )
+        moved = rows_moved(node.result)
+        counts = f"  ({moved})" if moved else ""
         status = f"{node.status:<24}"
         print(
             f"  {_style(mark, colour)} {_style(status, colour)} {node.node_id}{counts}"
@@ -1349,6 +1348,14 @@ def _print_load(report) -> None:
     _print_load_summary(report)
     if report.workflow_id:
         print(f"\n  Workflow: {_style(report.workflow_id, _DIM)}")
+
+
+def _needs_attention(node) -> bool:
+    from weaver.load_report import SUCCEEDED
+
+    return node.status != SUCCEEDED or any(
+        message.severity != "info" for message in node.messages
+    )
 
 
 def _print_load_summary(report) -> None:
@@ -1485,26 +1492,19 @@ def _run_test(workspace, *, items, name, file, dry_run: bool, session=None):
 
 
 def _print_test(report) -> None:
+    from weaver.run.result import findings
+
     status = _style(report.status, _status_colour(report.status))
-    print(f"test {status}\n")
-    for node in report.nodes:
+    print(f"test {status}")
+    # Progress has already said each validation started and finished. A plan's
+    # validations are all planned, so a plan lists every one.
+    listed = [node for node in report.nodes if _test_needs_attention(node)]
+    if listed:
+        print()
+    for node in listed:
         result = node.result
-        found = ""
-        if (
-            result is not None
-            and getattr(result, "error_message", None) is None
-            and hasattr(result, "violation_count")
-        ):
-            found = f"  ({result.violation_count} violation(s))"
-        elif (
-            result is not None
-            and getattr(result, "error_message", None) is None
-            and hasattr(result, "missing_count")
-        ):
-            found = (
-                f"  ({result.missing_count} missing, "
-                f"{result.unexpected_count} unexpected)"
-            )
+        found = findings(result)
+        found = f"  ({found})" if found else ""
         status = f"{node.status:<10}"
         print(
             f"  {_style(status, _status_colour(node.status))} "
@@ -1533,6 +1533,12 @@ def _print_test(report) -> None:
         print(f"\n  {node.logical_id}:")
         for row in node.diagnostics:
             print(f"    {row}")
+
+
+def _test_needs_attention(node) -> bool:
+    from weaver.test_report import PASSED
+
+    return node.status != PASSED or bool(node.messages)
 
 
 def _test_mapping(report, *, targeted: bool) -> dict:
@@ -1852,7 +1858,10 @@ def _print_action_counts(report, *, indent: str = "  ") -> None:
 
 
 def _print_build(result) -> None:
-    if result.installation:
+    if result.installation and not result.installation_report.action_counts()["total"]:
+        print("Installation")
+        print("  nothing to install")
+    elif result.installation:
         print("Installation")
         _print_action_counts(result.installation_report)
         if result.report_path:

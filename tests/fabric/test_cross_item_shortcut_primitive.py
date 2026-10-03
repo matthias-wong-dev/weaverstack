@@ -14,9 +14,9 @@ asking the workspace proves one exists.
 consumer's next statement failed with "neither a view nor a table" until the
 action learned to wait for a real read to succeed.
 
-**A Lakehouse's SQL analytics endpoint lags its Delta tables**, which is why an
-item that mutated Delta is closed by a refresh. Nothing below a real workspace
-exercises that refresh.
+**A Lakehouse's SQL analytics endpoint lags its Delta tables**, which is why a
+Warehouse reading through it waits for a refresh of the tables it reads.
+Nothing below a real workspace exercises that refresh.
 
 So the bundle is generated here, in pure Python, and **only the shortcut action is
 run** out of it, not the estate around it. Schemas, tables, views, catalogue
@@ -171,20 +171,20 @@ def run_from_here(
     **The Session is given, never built here.** This capacity permits one
     concurrent Livy session and the harness already holds it, so a Session that
     acquired its own would ask for a second and be handed one in state 'dead'.
-    That did not matter while the Installer ran inside Fabric and this helper
-    needed no Spark; it matters now that the desktop Installer reaches for one.
+    That did not matter while the MutationBindings ran inside Fabric and this helper
+    needed no Spark; it matters now that the desktop MutationBindings reaches for one.
     """
 
     from weaver.build_bundle import execute_install_action
     from weaver.build_bundle.executors.base import InstallationContext
-    from weaver.build_bundle.installer import Installer
+    from weaver.build_bundle.installer import MutationBindings
 
     if session is None:
         raise AssertionError(
             "run_from_here needs the harness's Session: building one here asks "
             "the capacity for a second Livy session and gets a dead one"
         )
-    installer = Installer(session).bind(workspace)
+    installer = MutationBindings(session).bind(workspace)
     resolved = {
         target.id: installer.resolve_target(target) for target in bundle.plan.targets
     }
@@ -195,7 +195,7 @@ def run_from_here(
         action,
         payload,
         context=InstallationContext(
-            # From the Installer, as every production context gets them. An
+            # From the MutationBindings, as every production context gets them. An
             # executor stays on the desktop and only its physical requests cross, a
             # table shortcut asking whether it has become readable, a table build
             # asking what shape its query has.
@@ -213,6 +213,57 @@ def run_from_here(
             sql=sql,
         ),
     )
+
+
+def refresh_from_here(plan, *, naming: str, workspace, session):
+    """Run one planned endpoint refresh, start then await, against real Fabric.
+
+    The Session's typed drivers, as an installation binds them, observed until
+    Fabric reports the endpoint current.
+    """
+
+    import time
+    from types import SimpleNamespace
+
+    from weaver.build_bundle.executors.base import InstallationContext
+    from weaver.build_bundle.executors.sql_endpoint_refresh import (
+        AWAIT_EXECUTOR,
+        START_EXECUTOR,
+        endpoint_refresh_drivers,
+    )
+    from weaver.build_bundle.installer import MutationBindings
+    from weaver.mutation.executor import Completed, DriverRequest, Pending
+    from weaver.sessions.archive_runtime import error_outcome
+
+    batch, start = action_of(plan, "start_sql_endpoint_refresh", naming=naming)
+    _batch, finish = action_of(plan, "await_sql_endpoint_refresh", naming=naming)
+    installer = MutationBindings(session).bind(workspace)
+    target = installer.resolve_target(
+        next(t for t in plan.targets if t.id == batch.target_id)
+    )
+    drivers = endpoint_refresh_drivers(
+        {batch.target_id: InstallationContext(installer.resolver, None, target)},
+        outcome=error_outcome,
+    )
+    started = drivers[START_EXECUTOR].run(DriverRequest(start, None))
+    if not isinstance(started, Completed):
+        return SimpleNamespace(
+            status="failed", error_message=started.error, details=None
+        )
+    continuation = None
+    while True:
+        outcome = drivers[AWAIT_EXECUTOR].run(
+            DriverRequest(finish, None, continuation, input=started.value)
+        )
+        if not isinstance(outcome, Pending):
+            break
+        time.sleep(max(0.0, outcome.next_poll_at - time.monotonic()))
+        continuation = outcome.continuation
+    if isinstance(outcome, Completed):
+        return SimpleNamespace(
+            status="succeeded", error_message=None, details=outcome.value
+        )
+    return SimpleNamespace(status="failed", error_message=outcome.error, details=None)
 
 
 def _forget_shortcuts(item, *, client) -> None:
@@ -288,9 +339,6 @@ def shortcut_estate(
     batch, shortcut_action = action_of(
         bundle.plan, "create_shortcut", naming=consumer_item
     )
-    _refresh_batch, refresh_action = action_of(
-        bundle.plan, "refresh_sql_endpoint", naming=consumer_item
-    )
 
     at = {
         role: resolver.spark_destination(ItemRef(item.name))
@@ -317,18 +365,41 @@ def shortcut_estate(
         session=weaver_session,
     )
     assert shortcut_result.status == "succeeded", shortcut_result.error_message
-    refresh_result = run_from_here(
-        refresh_action,
+    _batch, readiness_action = action_of(
+        bundle.plan, "await_table_shortcuts", naming=consumer_item
+    )
+    readiness_result = run_from_here(
+        readiness_action,
         bundle,
         workspace=fabric_workspace,
         store=store,
         batch_target=batch.target_id,
         session=weaver_session,
     )
+    assert readiness_result.status == "succeeded", readiness_result.error_message
+    # Nothing in this estate reads through the consumer's endpoint, so its build
+    # plans no refresh. The request a reader of the shortcut would cause, one
+    # table named, is made directly.
+    planned_refreshes = [
+        action.id
+        for _sequence, _batch, action in bundle.plan.actions()
+        if action.kind.startswith("start_sql_endpoint") and consumer_item in action.id
+    ]
+    try:
+        refresh = {
+            "status": "succeeded",
+            "error": None,
+            "details": resolver.refresh_sql_endpoint(
+                ItemRef(consumer.name), tables=[("DWG", "PortableCustomer")]
+            ),
+        }
+    except Exception as refused:  # noqa: BLE001 - asserted by the test
+        refresh = {"status": "failed", "error": str(refused), "details": None}
 
     shortcut = at["consumer"].qualify("DWG", "PortableCustomer")
-    # Fabric discovers a shortcut asynchronously, and running the action from
-    # here skipped the executor's own wait, so the read retries.
+    # The readiness action has confirmed both read surfaces, and a single read
+    # attempt would prove the same; the retry keeps a lagging catalogue from
+    # failing the fixture rather than the readiness claim below.
     seen = livy_session.run(
         "import time\n"
         "_deadline = time.monotonic() + 180\n"
@@ -351,11 +422,8 @@ def shortcut_estate(
     return {
         "payload": {
             "seen": seen,
-            "refresh": {
-                "status": refresh_result.status,
-                "error": refresh_result.error_message,
-                "details": refresh_result.details,
-            },
+            "refresh": refresh,
+            "planned_refreshes": planned_refreshes,
         },
         "plan": bundle.plan,
         "repository": repository,
@@ -443,16 +511,17 @@ def test_the_consumers_endpoint_reports_the_shortcuted_table(shortcut_estate):
 
 
 @weaver_test(remote=True)
-def test_each_mutated_lakehouse_had_its_endpoint_refreshed_for_real(shortcut_estate):
-    """That the refresh is planned is pure Python. That it found a real
-    endpoint and did work is not."""
+def test_a_refresh_naming_one_table_syncs_it_for_real(shortcut_estate):
+    """Which tables a refresh names is pure Python. That Fabric accepts the
+    request and completes it against a real endpoint is not."""
 
     refresh = shortcut_estate["payload"]["refresh"]
 
+    assert not shortcut_estate["payload"]["planned_refreshes"]
     assert refresh["status"] == "succeeded", refresh["error"]
     details = refresh["details"] or {}
-    assert "skipped" not in details, "the refresh was skipped in Fabric"
     assert details.get("sql_endpoint_id"), "the refresh found no endpoint"
+    assert details.get("status") == "Succeeded", details
 
 
 @weaver_test(remote=True)
@@ -603,32 +672,19 @@ def test_a_warehouse_shortcut_is_a_view_over_the_bound_lakehouse(
     # table through it, a REST call, made from here.
     #
     # Whether the plan contains that refresh is a claim in its own right: the
-    # stage is only emitted when the item's planned work mutated Delta (see
-    # `weaver.build_bundle.endpoints.item_refresh_stage`). A plan that dropped it
+    # stage is only kept when something in the plan reads through the endpoint
+    # (see `weaver.build_bundle.endpoints.narrow_endpoint_refreshes`). A plan that dropped it
     # would leave the Warehouse reading an endpoint that never caught up, and the
     # shortcut below would fail with "Invalid object name", a symptom that reads
     # like broken shortcut SQL and is nothing of the kind. So the search says so
     # rather than falling through in silence.
-    refreshes = [
-        (refresh_batch, action)
-        for _sequence, refresh_batch, action in bundle.plan.actions()
-        if action.kind == "refresh_sql_endpoint"
-        and "ShortcutHouseProducer" in action.id
-    ]
-    assert refreshes, (
-        "the plan carries no SQL endpoint refresh for the producer, so the "
-        "Warehouse would read an endpoint that never caught up: "
-        f"{[a.id for _s, _b, a in bundle.plan.actions()]}"
-    )
-    refresh_batch, refresh_action = refreshes[0]
-    run_from_here(
-        refresh_action,
-        bundle,
+    refreshed = refresh_from_here(
+        bundle.plan,
+        naming="ShortcutHouseProducer",
         workspace=fabric_workspace,
-        store=store,
-        batch_target=refresh_batch.target_id,
         session=weaver_session,
     )
+    assert refreshed.status == "succeeded", refreshed.error_message
 
     result = run_from_here(
         shortcut_action,

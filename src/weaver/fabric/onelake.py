@@ -11,12 +11,15 @@ from urllib.parse import quote, unquote, urlencode, urlsplit
 
 from ..errors import CommandError
 from ..locations import Location
-from ..store import Entry, StoreError, StoreNotFoundError
+from ..store import Entry, StoreError, StoreNotFoundError, StoreOutcomeUnknown
 from .auth import STORAGE_SCOPE, token_source
 from .client import (
     ONELAKE_DFS,
     READ_METHODS,
+    TRANSIENT_STATUSES,
     _response_message,
+    never_sent,
+    outcome_unknown,
     send_until_answered,
 )
 
@@ -51,6 +54,26 @@ def onelake_url(
 
 def abfss_root(workspace_id: str, item_id: str) -> str:
     return f"abfss://{workspace_id}@onelake.dfs.fabric.microsoft.com/{item_id}"
+
+
+def abfss_path(location: Location) -> str:
+    """A bound OneLake location as Spark and NotebookUtils in Fabric address it."""
+
+    from urllib.parse import urlsplit
+
+    value = location.value
+    if not value.startswith("https://"):
+        return value
+    address = urlsplit(value)
+    parts = address.path.strip("/").split("/", 1)
+    if (
+        address.hostname != "onelake.dfs.fabric.microsoft.com"
+        or len(parts) != 2
+        or address.query
+        or address.fragment
+    ):
+        raise CommandError(f"{value!r} is not a bound OneLake location.")
+    return "abfss://" + parts[0] + "@" + address.hostname + "/" + parts[1]
 
 
 @dataclass(frozen=True)
@@ -151,12 +174,18 @@ class OneLakeDfsClient:
                     timeout=self.timeout,
                 )
             except requests.exceptions.RequestException as exc:
-                raise StoreError(
+                error = StoreError if never_sent(exc) else StoreOutcomeUnknown
+                raise error(
                     f"{method} {url.split('?')[0]} could not be reached: {exc}",
                     executor="OneLake",
                 ) from exc
             if response.status_code not in expected:
-                raise StoreError(
+                # A mutation refused with a transient status may have been acted on.
+                unknown = outcome_unknown(method, response.status_code) or (
+                    method not in READ_METHODS
+                    and response.status_code in TRANSIENT_STATUSES
+                )
+                raise (StoreOutcomeUnknown if unknown else StoreError)(
                     f"{method} {url.split('?')[0]} returned {response.status_code}: "
                     f"{_response_message(response)}",
                     executor="OneLake",

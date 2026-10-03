@@ -26,24 +26,6 @@ from ..workspaces import Workspace
 from .base import Session, WorkspaceScope
 
 
-class _RecordedSql:
-    def __init__(self, session, target, workspace):
-        self.session, self.target, self.workspace = session, target, workspace
-
-    def query(self, statement, parameters=None):
-        return self.session.query_tsql(
-            statement,
-            target=self.target,
-            workspace=self.workspace,
-            parameters=parameters,
-        )
-
-    def execute_script(self, statement):
-        return self.session.execute_tsql(
-            statement, target=self.target, workspace=self.workspace
-        )
-
-
 @dataclass
 class RecordedCall:
     kind: str
@@ -93,9 +75,6 @@ class TestSession(Session):
 
     def answer_python(self, value) -> None:
         self._python_answers.append(value)
-
-    def sql_executor(self, target, *, workspace=None):
-        return _RecordedSql(self, target, workspace)
 
     def answer_semantic_model(self, workspace: str, item: str, client) -> None:
         self._semantic_answers[(workspace, item)] = client
@@ -156,6 +135,11 @@ class TestSession(Session):
             store=self._store,
         )
 
+    def execute_mutation(self, plan, payloads=None, **options):
+        # One worker keeps recorded calls in plan order; the DAG is unchanged.
+        options.setdefault("workers", 1)
+        return super().execute_mutation(plan, payloads, **options)
+
     def create_delta_table(
         self,
         qualified_name: str,
@@ -199,6 +183,17 @@ class TestSession(Session):
                 "answer_python() first."
             )
         return self._python_answers.pop(0)
+
+    def execute_run_in_fabric(self, run, *, workspace: Workspace | None = None):
+        """Record the run and its arguments, and decode a configured report."""
+
+        self._record("run", {"name": run.name, "arguments": run.arguments()}, workspace)
+        if not self._python_answers:
+            raise CommandError(
+                f"No report is configured for the {run.name} this TestSession sends "
+                "to Fabric. Call answer_python() first."
+            )
+        return run.decode(self._python_answers.pop(0))
 
     def execute_spark_sql_batch(
         self,
@@ -257,6 +252,33 @@ class TestSession(Session):
         )
         return None
 
+    def sql_executor(self, target: Any, *, workspace: Workspace | None = None):
+        """A Warehouse connection whose statements are recorded."""
+
+        session = self
+
+        class _Recorded:
+            def execute_script(self, script: str) -> None:
+                session.execute_tsql(script, target=target, workspace=workspace)
+
+            def execute(self, statement: str, parameters=()) -> None:
+                session.execute_tsql(
+                    statement, target=target, workspace=workspace, parameters=parameters
+                )
+
+            def execute_each(self, groups) -> list:
+                for group in groups:
+                    for statement in group:
+                        self.execute_script(statement)
+                return [None for _group in groups]
+
+            def query(self, statement: str, parameters=()):
+                return session.query_tsql(
+                    statement, target=target, workspace=workspace, parameters=parameters
+                )
+
+        return _Recorded()
+
     def query_tsql(
         self,
         statement: str,
@@ -273,6 +295,21 @@ class TestSession(Session):
             parameters=None if parameters is None else list(parameters),
         )
         return self._answer(self._tsql_answers, [statement])
+
+    def query_tsql_sets(
+        self,
+        statements,
+        *,
+        target: Any,
+        workspace: Workspace | None = None,
+    ) -> tuple:
+        """Record one round trip, and answer each statement as it would alone."""
+
+        self._record("tsql", list(statements), workspace, target=target)
+        return tuple(
+            tuple(self._answer(self._tsql_answers, [statement]))
+            for statement in statements
+        )
 
     # --- recording -----------------------------------------------------------
 

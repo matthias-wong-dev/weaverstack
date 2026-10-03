@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import threading
 from contextlib import contextmanager, redirect_stdout
 from dataclasses import dataclass
 from pathlib import Path
@@ -80,16 +81,24 @@ class Lakehouse:
 
         return self.location.folder_path(schema, name)
 
+    def qualified_schema(self, schema: str) -> str:
+        """One schema, as a statement in this session must name it."""
+
+        return self._destination().qualified_schema(schema)
+
     def qualify(self, schema: str, name: str) -> str:
         """One object, as a statement in this session must name it."""
 
+        return self._destination().qualify(schema, name)
+
+    def _destination(self):
         if self.destination is None:
             raise LoadError(
                 f"Lakehouse {self.name!r} was resolved without a Spark destination, so "
                 "a statement cannot name its objects. Resolve it with "
                 "weaver.lakehouse_for(resolver, item), which supplies one"
             )
-        return self.destination.qualify(schema, name)
+        return self.destination
 
     def __str__(self) -> str:
         return f"{self.name} ({self.spark_root})"
@@ -173,6 +182,7 @@ def default_lakehouse(spark: Any) -> Lakehouse:
 #: Lakehouse reuses the mount rather than asking Fabric to make another, which
 #: it refuses.
 _MOUNTS: dict[str, str] = {}
+_MOUNTING = threading.Lock()
 
 #: Where Weaver mounts a Lakehouse. Keyed by item id rather than fixed, because
 #: an estate spans several Lakehouses and one session may load from more than
@@ -206,11 +216,20 @@ def _quiet_mount():
 
 
 def _mounted(name: str, spark_root: str) -> str:
-    """Return a session mount for this resolved OneLake root."""
+    """Return a session mount for this resolved OneLake root.
 
-    cached = _MOUNTS.get(spark_root)
-    if cached:
-        return cached
+    Serialised, because loads running at once reach the same root and a mount
+    still being made has no path yet.
+    """
+
+    with _MOUNTING:
+        cached = _MOUNTS.get(spark_root)
+        if cached:
+            return cached
+        return _mount(name, spark_root)
+
+
+def _mount(name: str, spark_root: str) -> str:
 
     utils = _notebook_utils()
     if utils is None:
@@ -245,6 +264,25 @@ def _notebook_utils() -> Any:
         except Exception:
             continue
     return None
+
+
+def release_mounts() -> None:
+    """Unmount every Files mount this process made.
+
+    The host keeps a mount for the life of the process, and its listings can
+    still show a file deleted through OneLake. A run in a long-lived
+    interpreter starts with none, so it lists what storage holds.
+    """
+
+    utils = _notebook_utils()
+    with _MOUNTING:
+        for spark_root in list(_MOUNTS):
+            if utils is not None:
+                try:
+                    utils.fs.unmount(_MOUNT_POINT.format(item=_item_of(spark_root)))
+                except Exception:  # noqa: BLE001 - the next mount reports a failure
+                    pass
+            del _MOUNTS[spark_root]
 
 
 def _item_of(spark_root: str) -> str:

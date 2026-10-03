@@ -107,14 +107,14 @@ def notebook():
 def test_spark_creation_honours_explicit_protocol_minimums(remote, delta_module):
     from weaver.sessions.delta_table import (
         create_delta_table_in_session,
-        remote_delta_table_program,
+        fabric_delta_table_program,
     )
 
     spark = SimpleNamespace(conf=_Conf())
     minima = {"minReaderVersion": 2, "minWriterVersion": 5}
     if remote:
         exec(
-            remote_delta_table_program(
+            fabric_delta_table_program(
                 TARGET,
                 COLUMNS[1:],
                 identity_column=None,
@@ -180,7 +180,7 @@ def test_notebook_labelled_spark_actions_preserve_authored_protocol_minima(
 
 @weaver_test()
 def test_remote_table_batch_preserves_each_explicit_policy(delta_module):
-    from weaver.sessions.delta_table import remote_delta_table_actions_program
+    from weaver.sessions.delta_table import fabric_delta_table_actions_program
 
     spark = SimpleNamespace(conf=_Conf())
     actions = [
@@ -195,7 +195,7 @@ def test_remote_table_batch_preserves_each_explicit_policy(delta_module):
         ),
     ]
     exec(
-        remote_delta_table_actions_program(actions),
+        fabric_delta_table_actions_program(actions),
         {"spark": spark, "emit": lambda _: None},
     )
     for builder, expected in zip(
@@ -207,7 +207,7 @@ def test_remote_table_batch_preserves_each_explicit_policy(delta_module):
 
 @weaver_test()
 def test_remote_table_batch_preserves_the_common_floor_for_every_action(delta_module):
-    from weaver.sessions.delta_table import remote_delta_table_actions_program
+    from weaver.sessions.delta_table import fabric_delta_table_actions_program
 
     spark = SimpleNamespace(conf=_Conf())
     actions = [
@@ -215,7 +215,7 @@ def test_remote_table_batch_preserves_the_common_floor_for_every_action(delta_mo
         ("second", TARGET + "Two", COLUMNS[1:], None, True),
     ]
     exec(
-        remote_delta_table_actions_program(actions),
+        fabric_delta_table_actions_program(actions),
         {"spark": spark, "emit": lambda _: None},
     )
     assert len(_DeltaTable.builders) == 2
@@ -229,13 +229,13 @@ def test_remote_table_batch_preserves_the_common_floor_for_every_action(delta_mo
 def test_spark_creation_uses_weaver_common_protocol_floor(remote, delta_module):
     from weaver.sessions.delta_table import (
         create_delta_table_in_session,
-        remote_delta_table_program,
+        fabric_delta_table_program,
     )
 
     spark = SimpleNamespace(conf=_Conf())
     if remote:
         exec(
-            remote_delta_table_program(
+            fabric_delta_table_program(
                 TARGET, COLUMNS[1:], identity_column=None, column_mapping=True
             ),
             {"spark": spark, "emit": lambda _: None},
@@ -692,12 +692,12 @@ def test_console_delta_batch_preserves_the_default_timeout_per_table(monkeypatch
 def test_console_delta_batch_names_an_unsupported_identity_and_keeps_siblings(
     delta_module,
 ):
-    from weaver.sessions.delta_table import remote_delta_table_actions_program
+    from weaver.sessions.delta_table import fabric_delta_table_actions_program
 
     del delta_module.IdentityGenerator
     spark = SimpleNamespace(conf=_Conf())
     emitted = []
-    source = remote_delta_table_actions_program(
+    source = fabric_delta_table_actions_program(
         [
             ("identity", TARGET, COLUMNS, "Customer key", True),
             ("ordinary", TARGET + "Two", COLUMNS[1:], None, True),
@@ -714,11 +714,11 @@ def test_console_delta_batch_names_an_unsupported_identity_and_keeps_siblings(
 
 @weaver_test()
 def test_console_program_restores_exact_case_after_a_create_error(delta_module):
-    from weaver.sessions.delta_table import remote_delta_table_program
+    from weaver.sessions.delta_table import fabric_delta_table_program
 
     _DeltaTable.fail = True
     spark = SimpleNamespace(conf=_Conf())
-    source = remote_delta_table_program(
+    source = fabric_delta_table_program(
         TARGET,
         COLUMNS,
         identity_column="Customer key",
@@ -733,11 +733,11 @@ def test_console_program_restores_exact_case_after_a_create_error(delta_module):
 
 @weaver_test()
 def test_console_program_names_the_target_when_identity_is_unsupported(delta_module):
-    from weaver.sessions.delta_table import remote_delta_table_program
+    from weaver.sessions.delta_table import fabric_delta_table_program
 
     del delta_module.IdentityGenerator
     spark = SimpleNamespace(conf=_Conf())
-    source = remote_delta_table_program(
+    source = fabric_delta_table_program(
         TARGET,
         COLUMNS,
         identity_column="Customer key",

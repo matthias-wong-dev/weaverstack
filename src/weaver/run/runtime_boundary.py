@@ -1,39 +1,22 @@
 """Hold deployed Python imports for exactly one run.
 
-Closing each scope prevents a later run from reusing modules replaced by a
-rebuild.
+Deployed modules are imported where Spark is, so a run that executes one runs
+in Fabric: a client sends such a run there whole. Closing each scope prevents a
+later run from reusing modules replaced by a rebuild.
 """
 
 from __future__ import annotations
 
-import uuid
+import threading
 from typing import Any, Protocol
-
-from ..sessions.program import RemoteProgram
-
-#: Livy states and resource wording that mean the interpreter released the scope.
-_INTERPRETER_GONE = ("dead", "killed", "shutting_down", "error", "not usable")
-
-
-def _interpreter_is_gone(exc: BaseException) -> bool:
-    """Return whether a dead interpreter already released the scope.
-
-    Only Livy state lacks a typed signal and requires message matching.
-    """
-
-    from ..fabric.livy import LivyError
-    from ..sessions.resources import ResourceError
-
-    if isinstance(exc, ResourceError):
-        return True
-    if isinstance(exc, LivyError):
-        message = str(exc).casefold()
-        return any(state in message for state in _INTERPRETER_GONE)
-    return False
 
 
 class RunScope(Protocol):
-    """A run-scoped importer and dispatcher for deployed modules."""
+    """A run-scoped importer and dispatcher for deployed modules.
+
+    ``isolated`` runs a module in a Spark session of its own, for one that runs
+    beside others.
+    """
 
     def dispatch_python(
         self,
@@ -43,10 +26,13 @@ class RunScope(Protocol):
         fault_tolerant: bool,
         reload: bool = False,
         ignore_stability_threshold: bool = False,
+        isolated: bool = False,
     ) -> dict:
-        """Run one deployed module and return its transport-neutral row."""
+        """Run one deployed module and return its load result as a row."""
 
-    def dispatch_validation(self, installed, *, collect: bool) -> Any: ...
+    def dispatch_validation(
+        self, installed, *, collect: bool, isolated: bool = False
+    ) -> Any: ...
 
     def close(self) -> None: ...
 
@@ -61,6 +47,19 @@ class DirectRunScope:
         self._session = session
         self._workspace = workspace
         self._catalogue = catalogue
+        self._inherited: dict | None = None
+        self._inheriting = threading.Lock()
+
+    def _spark(self, isolated: bool):
+        from .dispatch import inherited_settings, isolated_spark
+
+        if not isolated or self._session is None:
+            return None
+        parent = self._session.spark(self._workspace)
+        with self._inheriting:
+            if self._inherited is None:
+                self._inherited = inherited_settings(parent)
+        return isolated_spark(parent, self._inherited)
 
     def dispatch_python(
         self,
@@ -70,6 +69,33 @@ class DirectRunScope:
         fault_tolerant: bool,
         reload: bool = False,
         ignore_stability_threshold: bool = False,
+        isolated: bool = False,
+    ):
+        from .dispatch import own_pool
+
+        spark = self._spark(isolated)
+        with own_pool(spark or self._parent()):
+            return self._python(
+                node,
+                expected_class=expected_class,
+                fault_tolerant=fault_tolerant,
+                reload=reload,
+                ignore_stability_threshold=ignore_stability_threshold,
+                spark=spark,
+            )
+
+    def _parent(self):
+        return None if self._session is None else self._session.spark(self._workspace)
+
+    def _python(
+        self,
+        node,
+        *,
+        expected_class,
+        fault_tolerant,
+        reload,
+        ignore_stability_threshold,
+        spark,
     ):
         from .dispatch import python_primitive
 
@@ -88,18 +114,23 @@ class DirectRunScope:
             workspace=self._workspace,
             catalogue=self._catalogue,
             node_identity=node.logical_id,
+            spark=spark,
         ).as_row()
 
-    def dispatch_validation(self, installed, *, collect: bool):
+    def dispatch_validation(self, installed, *, collect: bool, isolated: bool = False):
         from ..test_execution import run_installed_validation
+        from .dispatch import own_pool
 
-        return run_installed_validation(
-            installed,
-            session=self._session,
-            workspace=self._workspace,
-            runtime_scope=self.runtime_scope,
-            collect_diagnostics=collect,
-        )
+        spark = self._spark(isolated)
+        with own_pool(spark or self._parent()):
+            return run_installed_validation(
+                installed,
+                session=self._session,
+                workspace=self._workspace,
+                runtime_scope=self.runtime_scope,
+                collect_diagnostics=collect,
+                spark=spark,
+            )
 
     def close(self) -> None:
         self.runtime_scope.close()
@@ -109,210 +140,39 @@ def open_runtime_scope(session, *, workspace=None, catalogue=None) -> RunScope:
     """Open the scope that will import this run's Python primitives."""
 
     from ..runtime.python_context import RuntimeScope
-    from ..sessions.base import ACROSS_BOUNDARY
+    from ..sessions.base import CLIENT
+    from .result import RunError
 
     if session is None:
         return DirectRunScope(RuntimeScope.new(), catalogue=catalogue)
-
     # An unplaced Session has nothing to reach into, so the imports happen here.
     # That judgement is the Session's: inferring it from an error would turn a
     # bad configuration into a local scope, and the run would report success
     # against an estate it never reached.
-    if session.position(workspace) == ACROSS_BOUNDARY:
-        return FabricRunScope.begin(session, workspace=workspace, catalogue=catalogue)
+    if session.position(workspace) == CLIENT:
+        raise RunError(
+            "A client imports no deployed module. Run the load or test through "
+            "the Session, which sends it to Fabric."
+        )
     return DirectRunScope(RuntimeScope.new(), session, workspace, catalogue=catalogue)
-
-
-def _as_data(catalogue) -> dict | None:
-    """Use the catalogue's canonical boundary representation."""
-
-    return None if catalogue is None else catalogue.to_mapping()
-
-
-class FabricRunScope:
-    """A named import scope held by a Fabric session."""
-
-    def __init__(self, session, workspace, run_id: str) -> None:
-        self._session = session
-        self._workspace = workspace
-        self.run_id = run_id
-        self._closed = False
-
-    @classmethod
-    def begin(cls, session, *, workspace=None, catalogue=None) -> "FabricRunScope":
-        from ..runtime.session_scopes import open_scope
-
-        run_id = uuid.uuid4().hex
-        scope = cls(session, workspace, run_id)
-        # The bookmarks cross once, with the scope that will outlive every node.
-        # As text, because what crosses is a submitted program's arguments.
-        scope._submit(
-            open_scope,
-            {"run_id": run_id, "catalogue": _as_data(catalogue)},
-            addressed=False,
-        )
-        return scope
-
-    # --- what dispatch asks of it -------------------------------------------
-
-    def dispatch_python(
-        self,
-        node,
-        *,
-        expected_class: str,
-        fault_tolerant: bool,
-        reload: bool = False,
-        ignore_stability_threshold: bool = False,
-    ):
-        """Dispatch a flattened node without serialising the Runner model."""
-
-        from .entry import run_python_primitive
-
-        arguments = {
-            "run_id": self.run_id,
-            "node_id": node.node_id,
-            "item": str(node.logical_id.item),
-            "target": node.physical_target.name,
-            "schema": node.primitive_object.schema,
-            "object": node.primitive_object.object,
-            "expected_class": expected_class,
-            "fault_tolerant": fault_tolerant,
-            "reload": reload,
-            "identity": str(node.logical_id) if node.logical_id else None,
-        }
-        if ignore_stability_threshold:
-            # Named only when set, so an ordinary load still crosses to a
-            # published Weaver that predates the waiver. A requested waiver is
-            # always named, so an older runtime fails loudly rather than
-            # loading without it.
-            arguments["ignore_stability_threshold"] = True
-        return self._submit(run_python_primitive, arguments, detail=node.node_id)
-
-    def dispatch_validation(self, installed, *, collect: bool):
-
-        from .entry import run_validation_primitive
-
-        carried = self._submit(
-            run_validation_primitive,
-            {
-                "run_id": self.run_id,
-                "installed": installed.to_mapping(),
-                "collect": collect,
-            },
-            detail=str(getattr(installed, "logical", "")) or None,
-        )
-        return _carried(carried, installed)
-
-    def close(self) -> None:
-        """Release imports without changing the outcome of a finished run.
-
-        Ignore a dead interpreter; warn when a live session may retain modules.
-        """
-
-        from ..runtime.session_scopes import close_scope
-
-        if self._closed:
-            return
-        self._closed = True
-        try:
-            self._submit(close_scope, {"run_id": self.run_id}, addressed=False)
-        except Exception as exc:  # noqa: BLE001 - never fails a finished run
-            if _interpreter_is_gone(exc):
-                return
-            self._report_leak(exc)
-
-    def _report_leak(self, exc: BaseException) -> None:
-
-        telemetry = getattr(self._session, "telemetry", None)
-        if telemetry is not None:
-            telemetry.count("run.scope_not_released")
-        warn = getattr(self._session, "warn", None)
-        if warn is not None:
-            warn(
-                f"Run {self.run_id} left imported modules in the Fabric session: "
-                f"{type(exc).__name__}: {exc}. Restart the session before running "
-                "rebuilt primitives."
-            )
-
-    # --- the crossing --------------------------------------------------------
-
-    def _submit(self, here, arguments: dict, *, addressed=True, detail=None):
-        """Submit the exact function used locally.
-
-        ``addressed`` adds a Workspace and Session only for estate operations.
-        """
-
-        workspace = self._workspace
-        name = here.__name__
-        if addressed:
-            # The Session is built in the submitted body, around the
-            # interpreter's own ``spark`` global, the construction every other
-            # crossing performs. One built inside the call would have to go
-            # looking for an active Spark session rather than being handed the
-            # one the statement is running in.
-            preamble = (
-                "from weaver.sessions import NotebookSession\n"
-                "session = NotebookSession(workspace=workspace, spark=spark)\n"
-            )
-            passed = f"session=session, workspace=workspace, **{arguments!r}"
-
-            def call():
-                return here(session=self._session, workspace=workspace, **arguments)
-
-        else:
-            preamble = ""
-            passed = f"**{arguments!r}"
-
-            def call():
-                return here(**arguments)
-
-        source = (
-            "from weaver.workspaces import Workspace\n"
-            f"from {here.__module__} import {name}\n"
-            f"workspace = {_workspace_literal(workspace)}\n"
-            f"{preamble}"
-            f"emit({name}({passed}))\n"
-        )
-        return self._session.execute_python(
-            RemoteProgram(name=name, call=call, source=source, detail=detail),
-            workspace=workspace,
-        )
-
-
-def _carried(payload, installed):
-
-    from ..declaration.metadata import ASSUMPTION
-    from ..runtime.validation_result import AssumptionResult, TestResult
-    from ..test_execution import _WithDiagnostics
-
-    shape = AssumptionResult if installed.kind == ASSUMPTION else TestResult
-    return _WithDiagnostics(
-        shape.from_mapping(payload["result"]), tuple(payload.get("diagnostics") or ())
-    )
-
-
-def _workspace_literal(workspace) -> str:
-    if workspace is None:
-        return "None"
-    environment = None if workspace.environment is None else str(workspace.environment)
-    return (
-        f"Workspace(workspace={workspace.workspace!r}, "
-        f"catalogue={workspace.catalogue!r}, "
-        f"environment={environment!r})"
-    )
 
 
 class LazyRunScope:
     """A lazy scope whose ``close()`` never opens it."""
 
     def __init__(self, open_scope) -> None:
+        import threading
+
         self._open = open_scope
         self._scope: RunScope | None = None
+        # Concurrent nodes may be the first to need it at the same moment.
+        self._lock = threading.Lock()
 
     def get(self) -> RunScope:
-        if self._scope is None:
-            self._scope = self._open()
-        return self._scope
+        with self._lock:
+            if self._scope is None:
+                self._scope = self._open()
+            return self._scope
 
     @property
     def opened(self) -> bool:
@@ -326,7 +186,6 @@ class LazyRunScope:
 
 __all__ = [
     "DirectRunScope",
-    "FabricRunScope",
     "LazyRunScope",
     "RunScope",
     "open_runtime_scope",

@@ -294,7 +294,6 @@ def test_source_absent_load_uses_published_dependencies_for_order_and_blocking(
     from weaver.errors import LoadError
     from weaver.load_plan import load_dag
     from weaver.runtime.load_result import LoadResult
-    from weaver.sessions.testing import _RecordedSql
 
     root = source_project(tmp_path)
     with source_session(tmp_path / "storage") as session:
@@ -323,23 +322,25 @@ def test_source_absent_load_uses_published_dependencies_for_order_and_blocking(
         assert sum(n.primitive_kind == "onelake_publication" for n in plan.nodes) == 1
         order = []
 
-        class ProcedureSql(_RecordedSql):
-            def call_procedure(self, procedure, **kwargs):
-                order.append(procedure)
-                if failure:
-                    raise RuntimeError("source failed")
-                result = LoadResult(succeeded=True).as_row()
-                return {
-                    physical: result.get(logical)
-                    for logical, physical in RESULT_PARAMETER_NAMES.items()
-                }
+        def call_procedure(procedure, **kwargs):
+            order.append(procedure)
+            if failure:
+                raise RuntimeError("source failed")
+            result = LoadResult(succeeded=True).as_row()
+            return {
+                physical: result.get(logical)
+                for logical, physical in RESULT_PARAMETER_NAMES.items()
+            }
 
         original_sql = session.sql_executor
 
         def executor(target, *, workspace=None):
+            connection = original_sql(target, workspace=workspace)
             if str(target) == "Serving_Dev":
-                return ProcedureSql(session, target, workspace)
-            return original_sql(target, workspace=workspace)
+                monkeypatch.setattr(
+                    connection, "call_procedure", call_procedure, raising=False
+                )
+            return connection
 
         monkeypatch.setattr(session, "sql_executor", executor)
         model = session.semantic_model("Reporting_Dev")
@@ -475,7 +476,10 @@ def test_direct_lake_pbip_rebind_keeps_partition_properties_and_shared_expressio
 
 
 @weaver_test()
-def test_selected_declared_source_shape_orders_public_build(tmp_path):
+@pytest.mark.parametrize("failed_source", [False, True])
+def test_selected_declared_source_shape_orders_public_build(
+    tmp_path, monkeypatch, failed_source
+):
     from weaver.build_bundle.bundle import load_bundle
     from weaver.declaration.model import WeaverDocumentId
 
@@ -519,10 +523,54 @@ def test_selected_declared_source_shape_orders_public_build(tmp_path):
             i for i, a in enumerate(actions) if a.executor == "semantic_model"
         )
         assert source_index < semantic_index
+        from weaver.graph import Graph
+
+        success = Graph(
+            (a.id for a in actions),
+            ((dep, a.id) for a in actions for dep in a.depends_on),
+        )
+        assert actions[source_index].id in success.ancestors(actions[semantic_index].id)
         assert not any(
             "Cake" in s and "INFORMATION_SCHEMA.COLUMNS" in s for s in session.tsql
         )
         assert not session.semantic_model("Reporting_Dev").calls
+
+        from weaver.build_bundle.execution_plan import execute_bundle
+
+        source_sql = bundle.store.read(
+            bundle.location / actions[source_index].payload
+        ).decode("utf-8")
+        sql_executor = session.sql_executor
+        injected = []
+
+        def source_connection(target, *, workspace=None):
+            connection = sql_executor(target, workspace=workspace)
+            execute_each = connection.execute_each
+
+            def faulting(groups):
+                outcomes = []
+                for group in groups:
+                    if failed_source and source_sql in group:
+                        injected.append(source_sql)
+                        outcomes.append("source DDL refused")
+                    else:
+                        outcomes.extend(execute_each([group]))
+                return outcomes
+
+            connection.execute_each = faulting
+            return connection
+
+        monkeypatch.setattr(session, "sql_executor", source_connection)
+        report = execute_bundle(bundle, session)
+        assert report.succeeded is (not failed_source), report.to_mapping()
+        if failed_source:
+            assert injected == [source_sql]
+            assert not session.semantic_model("Reporting_Dev").calls
+            assert not any("MERGE INTO [_].[Registry]" in s for s in session.tsql)
+        else:
+            assert [
+                method for method, _ in session.semantic_model("Reporting_Dev").calls
+            ] == ["update_definition", "get_definition"]
 
 
 @weaver_test()

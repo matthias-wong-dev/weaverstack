@@ -43,14 +43,17 @@ from support.observation import observation_from, observe_body
 from support.weaver_test import weaver_test
 
 import weaver
-from weaver.sessions.program import RemoteProgram
+from weaver.errors import CommandError
+from weaver.sessions.program import FabricProgram
 
-#: What a scenario crosses, named for the operation it drives. The two sets hold
-#: the same four resources: a build and a run each reach Livy, OneLake, REST and
-#: TDS over this estate. Pytest compares a declaration with the crossings its
-#: claim body made, so a set that stopped being accurate would fail.
+#: What a scenario crosses, named for the operation it drives. A build reaches
+#: Livy, OneLake, REST and TDS over this estate. A run with Spark work reads the
+#: catalogue over TDS, stages itself in OneLake and goes to Fabric over Livy;
+#: Fabric refreshes endpoints from inside the run. Pytest compares a declaration
+#: with the crossings its claim body made, so a set that stopped being accurate
+#: would fail.
 BUILDING = {"livy", "onelake", "rest", "tds"}
-RUNNING = {"livy", "onelake", "rest", "tds"}
+RUNNING = {"livy", "onelake", "tds"}
 
 #: What emptying a Lakehouse and cleaning the catalogue's claims crosses.
 #: Storage and the shortcut control plane for the item, TDS for the catalogue.
@@ -153,7 +156,7 @@ def _observe(journey, queries):
 
     return observation_from(
         journey.session.execute_python(
-            RemoteProgram(
+            FabricProgram(
                 name="observe the acceptance estate",
                 call=lambda: None,
                 source=observe_body(queries, {}, {}),
@@ -530,18 +533,18 @@ def test_a_realistic_estate_builds_from_nothing(acceptance, monkeypatch):
     acceptance.step("seed-neighbour", lambda: _seed_the_neighbour(acceptance))
     acceptance.require("seed-neighbour")
 
-    from weaver.build_bundle import Installer
-
     plans = []
-    install = Installer.install
+    remote = type(acceptance.session).execute_mutation_in_fabric
 
-    def capture_install(installer, bundle, *args, **kwargs):
-        plans.append(bundle.plan)
-        return install(installer, bundle, *args, **kwargs)
+    def capture_remote(session, plan, payloads=None, **options):
+        plans.append(plan)
+        return remote(session, plan, payloads, **options)
 
-    archive_offset = len(getattr(acceptance.session, "archive_installations", ()))
+    archive_offset = len(getattr(acceptance.session, "archive_mutations", ()))
     with monkeypatch.context() as capture:
-        capture.setattr(Installer, "install", capture_install)
+        capture.setattr(
+            type(acceptance.session), "execute_mutation_in_fabric", capture_remote
+        )
         step = acceptance.step(
             "build",
             lambda: weaver.build(
@@ -551,26 +554,11 @@ def test_a_realistic_estate_builds_from_nothing(acceptance, monkeypatch):
             ),
         )
     acceptance.require("build")
-
-    archives = acceptance.session.archive_installations[archive_offset:]
-    assert len(plans) == 1
-    plan = plans[0]
-    targets = {target.id: target for target in plan.targets}
-    expected = [
-        action.id
-        for _, batch, action in plan.actions()
-        if targets[batch.target_id].kind == "lakehouse"
-    ]
-    installed = [
-        action["action_id"]
-        for archive in archives
-        for sequence in archive["report"]["sequences"]
-        for action in sequence["actions"]
-    ]
-    assert expected and installed == expected, (
-        "mixed Build bypassed archived Lakehouse installation"
-    )
-    assert all(archive["request"] is not None for archive in archives)
+    archives = acceptance.session.archive_mutations[archive_offset:]
+    assert len(plans) == 1 and len(archives) == 1
+    expected = [action.id for _, _, action in plans[0].actions()]
+    assert archives[0]["status"] == "completed"
+    assert archives[0]["action_ids"] == expected
 
     landing = _item(acceptance, "Lakehouse/Landing")
     curated = _item(acceptance, "Lakehouse/Curated")
@@ -947,7 +935,7 @@ def _mutate_the_foreign_world(journey) -> None:
     # Written through Spark, because the target is Delta. The instant is now, so
     # the changed rows fall inside the next incremental window.
     journey.session.execute_python(
-        RemoteProgram(
+        FabricProgram(
             name="mutate the foreign world",
             call=lambda: None,
             source="from pyspark.sql import functions as F\n"
@@ -1075,7 +1063,7 @@ def test_the_installed_graph_holds_the_relationships_the_repository_declared(
         assert node.artefact
 
 
-@weaver_test(integration=True, resources=RUNNING)
+@weaver_test(integration=True, resources=RUNNING | REPORTING)
 def test_loading_an_upstream_after_a_test_passed_turns_health_amber(acceptance):
     """
     Intent: Freshness is decided against the same installed graph load planning
@@ -1692,7 +1680,8 @@ def test_unbind_empties_one_target_and_keeps_the_catalogue(acceptance):
 def test_the_whole_estate_comes_from_the_catalogue_and_goes_last(acceptance):
     """
     Intent: naming no target empties the estate the catalogue records, the
-    catalogue last, without mutating the foreign source workspace.
+    catalogue last, without mutating the foreign source workspace. Configured
+    targets that do not account for that estate refuse the wipe.
 
     Proof: the planned targets are the installed bindings plus the catalogue at
     the end; afterwards the catalogue holds no `_` tables, and the foreign
@@ -1706,9 +1695,19 @@ def test_the_whole_estate_comes_from_the_catalogue_and_goes_last(acceptance):
         for item in ("Lakehouse/Landing", "Lakehouse/Curated", "Warehouse/Serving")
     }
 
+    # The suite's configured targets name only the Spark home, so they do not
+    # account for this estate, and a wipe planned from them is refused.
+    with pytest.raises(CommandError, match="Name the physical items"):
+        weaver.plan_wipe(session=acceptance.session)
+
+    # Named by workspace and catalogue alone, a wipe follows the catalogue.
     acceptance.step(
         "estate-plan",
-        lambda: weaver.plan_wipe(session=acceptance.session),
+        lambda: weaver.plan_wipe(
+            workspace=acceptance.workspace.workspace,
+            catalogue=str(catalogue),
+            session=acceptance.session,
+        ),
     )
     acceptance.require("estate-plan")
     plan = acceptance["estate-plan"].result
@@ -1848,7 +1847,7 @@ def _restore_the_foreign_baseline(journey) -> None:
 
     item = journey.external_lakehouse
     journey.session.execute_python(
-        RemoteProgram(
+        FabricProgram(
             name="restore the foreign baseline",
             call=lambda: None,
             source=external_seed.lakehouse_seed_program(

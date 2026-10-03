@@ -23,6 +23,8 @@ ONELAKE_PUBLICATION = "onelake_publication"
 SEMANTIC_REFRESH = "semantic_refresh"
 #: How a validation is reached, from where it is installed.
 PYTHON_VALIDATION = "python_validation"
+#: The primitive kinds that run on Spark, as deployed modules.
+SPARK_KINDS = (PYTHON_TABLE, PYTHON_FOLDER, PYTHON_VALIDATION)
 
 PYTHON_KINDS = (PYTHON_TABLE, PYTHON_FOLDER)
 

@@ -34,6 +34,9 @@ class RunNode:
     publication_targets: tuple[object, ...] = ()
     produced_by: str | None = None
     bound_item: Item | None = None
+    #: A refresh barrier only: the ``(schema, table)`` pairs it syncs, or
+    #: ``None`` for every table.
+    refresh_tables: tuple[tuple[str, str], ...] | None = ()
 
     @property
     def sort_key(self) -> tuple[str, str, str, str, str]:
@@ -125,6 +128,7 @@ def _load_graph(request, state) -> RunGraph:
                 publication_targets=node.publication_targets,
                 produced_by=node.produced_by,
                 bound_item=node.bound_item,
+                refresh_tables=node.refresh_tables,
                 role="load",
             )
             for node in dag.nodes

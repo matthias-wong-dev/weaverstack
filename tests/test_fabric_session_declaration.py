@@ -278,3 +278,52 @@ def test_fabric_store_copies_between_onelake_and_the_driver_without_byte_decodin
         ),
         (f"file:{local_archive.as_posix()}", remote_archive.value, False),
     ]
+
+
+@weaver_test()
+def test_a_sql_endpoint_is_resolved_once_through_the_workspace_api():
+    """An endpoint refresh inside Fabric needs the endpoint paired with a Lakehouse."""
+
+    asked = []
+
+    class Client:
+        def paged(self, path):
+            asked.append(path)
+            return [
+                {"id": "endpoint-id", "displayName": "Sales", "type": "SQLEndpoint"}
+            ]
+
+    resolver = FabricSessionResolver(
+        Workspace(workspace="Analytics"),
+        runtime=_runtime(),
+        lakehouse=_LakehouseUtils(),
+        client=Client(),
+    )
+
+    first = resolver.resolve(ItemRef("Sales"), item_type="SQLEndpoint")
+    again = resolver.resolve(ItemRef("Sales"), item_type="SQLEndpoint")
+
+    assert first.id == "endpoint-id" and again is first
+    assert asked == ["workspaces/workspace-id/items?type=SQLEndpoint"]
+
+
+@weaver_test()
+def test_fabric_store_reads_a_file_whole_rather_than_its_head(tmp_path):
+    """``head`` stops at 100 KB in Fabric; a staged run's catalogue is larger."""
+
+    remote = "abfss://workspace-id@onelake.dfs.fabric.microsoft.com/lakehouse/Files/a"
+    content = b"x" * 300_000
+
+    class HeadlessFs:
+        def exists(self, path):
+            return path == remote
+
+        def head(self, path, max_bytes):
+            return content[:102_400].decode()
+
+        def cp(self, source, destination, recurse):
+            assert (source, recurse) == (remote, False)
+            Path(destination.removeprefix("file:")).write_bytes(content)
+            return True
+
+    assert FabricStore(HeadlessFs()).read(Location(remote)) == content

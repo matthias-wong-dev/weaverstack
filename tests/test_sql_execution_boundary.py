@@ -306,6 +306,31 @@ def test_failure_rolls_back_normalises_the_error_and_discards_the_connection():
 
 
 @weaver_test()
+@pytest.mark.parametrize(
+    ("driver_error", "unknown"),
+    [
+        ("Communication link failure", True),
+        ("Timeout expired", True),
+        ("Connection failure during transaction", True),
+        ("Serialization failure", False),
+        ("General error", False),
+    ],
+)
+def test_a_lost_response_leaves_the_statements_outcome_unknown(driver_error, unknown):
+    """A refusal is the server's answer; a lost link may follow a commit."""
+
+    from weaver.errors import OutcomeUnknown
+
+    error = RuntimeError(f"Driver Error: {driver_error}; DDBC Error: detail")
+    executor, _created = _executor([Connection(Cursor(error=error))])
+
+    with pytest.raises(SqlExecutionError) as raised:
+        executor.execute("create view [S].[V] as select 1 as x")
+
+    assert isinstance(raised.value, OutcomeUnknown) is unknown
+
+
+@weaver_test()
 def test_each_physical_connection_requests_current_authentication_material():
     tokens = iter(("first", "second"))
     auth = AccessTokenAuthentication(lambda: next(tokens))
@@ -320,3 +345,22 @@ def test_each_physical_connection_requests_current_authentication_material():
 
     assert len(seen) == 2
     assert seen[0] != seen[1]
+
+
+@weaver_test()
+def test_a_connection_bounds_its_login_and_leaves_statements_unbounded():
+    """A Warehouse load can run for longer than any login should take."""
+
+    from weaver.sql.connection import DEFAULT_CONNECT_TIMEOUT, SQL_ATTR_LOGIN_TIMEOUT
+
+    seen = {}
+
+    def driver(connection_string, **kwargs):
+        seen.update(kwargs)
+        return object()
+
+    connect(ENDPOINT, AccessTokenAuthentication(lambda: "token"), connector=driver)
+
+    assert seen["attrs_before"][SQL_ATTR_LOGIN_TIMEOUT] == DEFAULT_CONNECT_TIMEOUT
+    assert 1256 in seen["attrs_before"]
+    assert "timeout" not in seen

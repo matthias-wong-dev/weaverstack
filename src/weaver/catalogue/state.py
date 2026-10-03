@@ -25,7 +25,7 @@ from .claims import (
     claim_rules_for_object_type,
     stored_area,
 )
-from .reader import read_installations, read_table
+from .reader import read_installations, read_table, read_tables
 from .render import InstallationScope, InstallationScopes
 from .tables import (
     BOOKMARK,
@@ -322,7 +322,7 @@ class Catalogue:
         return installed_dag(self)
 
     def to_mapping(self) -> dict[str, object]:
-        """A versioned JSON-safe representation for remote callers."""
+        """A versioned JSON-safe representation that crosses into Fabric."""
 
         return {
             "format_version": 1,
@@ -353,7 +353,9 @@ class Catalogue:
         }
 
     @classmethod
-    def from_mapping(cls, mapping) -> "Catalogue":
+    def from_mapping(cls, mapping, *, writer=None, session=None) -> "Catalogue":
+        """The catalogue ``to_mapping`` carried, writing through ``writer``."""
+
         version = mapping.get("format_version")
         if version != 1:
             raise BuildError(
@@ -375,6 +377,8 @@ class Catalogue:
             rows=MappingProxyType(rows),
             materialised=frozenset(mapping.get("materialised", ())),
             schema_additions=mapping.get("schema_additions", ()),
+            writer=writer,
+            session=session,
         )
 
     # --- constructors ---------------------------------------------------------
@@ -426,10 +430,22 @@ class Catalogue:
         Historical tables are unchanged because rebuilds do not invalidate them.
         """
 
-        from .runtime_state import with_established, without_invalidated
+        from .runtime_state import (
+            RuntimeStateEstablishment,
+            RuntimeStateInvalidation,
+            with_established,
+            without_invalidated,
+        )
 
-        invalidation = tuple(getattr(plan, "runtime_state", ()))
-        establishment = tuple(getattr(plan, "runtime_state_established", ()))
+        envelope = plan.build_envelope or {}
+        invalidation = tuple(
+            RuntimeStateInvalidation.from_mapping(row)
+            for row in envelope.get("runtime_state", ())
+        )
+        establishment = tuple(
+            RuntimeStateEstablishment.from_mapping(row)
+            for row in envelope.get("runtime_state_established", ())
+        )
         if not invalidation and not establishment:
             return self
         return Catalogue(
@@ -870,9 +886,9 @@ def read_installed_catalogue(
     from .history import read_load_history
 
     rows: dict[WeaverItemId, dict[str, list[Mapping[str, object]]]] = {}
+    read = read_tables(catalogue, tables)
     for table in tables:
-        table_rows = read_table(catalogue, table)
-        for row in table_rows:
+        for row in read[table.name]:
             item = _item_of(row)
             if not item.item_type or not item.item_name:
                 raise BuildError(

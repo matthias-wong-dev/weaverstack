@@ -6,7 +6,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-from .errors import SqlError, SqlExecutionError
+from .errors import SqlError, SqlExecutionError, SqlOutcomeUnknown
 from .pool import SqlConnectionPool
 
 SqlRow = dict[str, Any]
@@ -28,6 +28,8 @@ class SqlExecutor(Protocol):
     ) -> None: ...
 
     def execute_script(self, script: str) -> None: ...
+
+    def execute_each(self, groups: Sequence[Sequence[str]]) -> list[str | None]: ...
 
     def query(
         self, statement: str, parameters: Sequence[object] | None = None
@@ -68,6 +70,22 @@ class PooledSqlExecutor:
 
     def execute_script(self, script: str) -> None:
         self._run(script, parameters=None, query=False, drain=True)
+
+    def execute_each(self, groups: Sequence[Sequence[str]]) -> list[str | None]:
+        """Run independent statement groups in one round trip; each group's error."""
+
+        from .round_trip import read_outcomes, round_trip_script
+
+        # The outcome is the batch's last result set, after every group's own.
+        rows = self._run(
+            round_trip_script(groups),
+            parameters=None,
+            query=True,
+            drain=False,
+            last_result_set=True,
+        )
+        outcomes = read_outcomes(str(rows[0]["outcome"] or ""), len(groups))
+        return [outcomes[position] for position in range(len(groups))]
 
     def query(
         self, statement: str, parameters: Sequence[object] | None = None
@@ -195,7 +213,8 @@ class PooledSqlExecutor:
                 lease.discard()
                 _rollback(connection)
                 operation = "query" if query else "SQL execution"
-                raise SqlExecutionError(
+                error = SqlOutcomeUnknown if _response_lost(exc) else SqlExecutionError
+                raise error(
                     f"{operation} failed on {self.pool.endpoint}: {exc}"
                 ) from exc
             finally:
@@ -215,6 +234,26 @@ class PooledSqlExecutor:
     def __exit__(self, *exc) -> bool:
         self.close()
         return False
+
+
+#: ``mssql-python`` driver errors raised after a statement may have been sent
+#: (SQLSTATE 08S01, 08003, 08007, HYT00, HYT01 and 01002). A server's own
+#: refusal, a serialization failure included, is a known failure.
+_LOST_RESPONSE = (
+    "Communication link failure",
+    "Connection not open",
+    "Connection failure during transaction",
+    "Timeout expired",
+    "Connection timeout expired",
+    "Disconnect error",
+)
+
+
+def _response_lost(exc: BaseException) -> bool:
+    if isinstance(exc, (ConnectionError, TimeoutError)):
+        return True
+    message = str(exc.args[0]) if exc.args else str(exc)
+    return any(f"Driver Error: {lost};" in message for lost in _LOST_RESPONSE)
 
 
 def _output_parameter_batch(

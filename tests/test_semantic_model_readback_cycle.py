@@ -9,7 +9,7 @@ from test_semantic_model_build_cycle import (
     prepared,
 )
 
-from weaver.build_bundle import Installer
+from weaver.build_bundle.execution_plan import execute_bundle
 from weaver.declaration.repository import parse_item_repository
 from weaver.locations import Location
 from weaver.semantic_models.definition import encode_definition
@@ -32,7 +32,7 @@ def test_role_members_must_be_empty_before_build_can_certify_removal(tmp_path):
     session.semantic_model("Reporting_Dev").definition = encode_definition(deployed)
     bundle = bundle_for(tmp_path, repository, bindings, state, "remove-members")
     session.calls.clear()
-    report = Installer(session).install(bundle)
+    report = execute_bundle(bundle, session)
     assert not report.succeeded
     assert any(
         "members" in (action.error_message or "") for action in report.action_results()
@@ -68,7 +68,7 @@ def test_removed_writable_property_prevents_certification(
     properties[property_name] = stale_value
     session.semantic_model("Reporting_Dev").definition = encode_definition(deployed)
     bundle = bundle_for(tmp_path, repository, bindings, state, "remove-property")
-    report = Installer(session).install(bundle)
+    report = execute_bundle(bundle, session)
     assert not report.succeeded
     assert any(
         property_name in (action.error_message or "")
@@ -113,7 +113,7 @@ def test_multiline_text_equivalence_allows_build_certification(tmp_path, field):
     owner[field] = lines
     session.semantic_model("Reporting_Dev").definition = encode_definition(deployed)
     bundle = bundle_for(tmp_path, repository, bindings, state, "text-equivalence")
-    report = Installer(session).install(bundle)
+    report = execute_bundle(bundle, session)
     assert report.succeeded, report.to_mapping()
     assert any(
         "MERGE" in statement and "[_].[SemanticModelDictionary]" in statement

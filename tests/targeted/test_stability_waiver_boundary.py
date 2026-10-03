@@ -6,8 +6,7 @@ would load without the waiver and report success, so each hand-off is asserted
 rather than assumed.
 
 The refusal half is the other direction: a gate refuses before writing, and its
-counts have to reach the operator through TDS and through Livy, neither of which
-moves an exception.
+counts have to reach the operator through TDS, which moves no exception.
 """
 
 from __future__ import annotations
@@ -29,13 +28,6 @@ from weaver.run.outcome import settle, status_of
 from weaver.run.resolution import WAREHOUSE_PROCEDURE
 from weaver.run.result import FAILED, SUCCEEDED, SUCCEEDED_WITH_REJECTS
 from weaver.run.runner import RunRequest
-from weaver.runtime.load_refusal import (
-    REFUSAL_KEY,
-    REFUSAL_VERSION,
-    decoded_refusal,
-    refusal_envelope,
-    refused,
-)
 from weaver.runtime.load_result import LoadResult
 from weaver.targets import PhysicalTargetRef
 
@@ -316,30 +308,6 @@ def test_an_unwaived_folder_load_is_unchanged(tmp_path):
 
 
 @weaver_test()
-def test_a_remote_folder_dispatch_submits_no_table_policy():
-    """Across Livy the policy crosses as a program's arguments, so it is visible."""
-
-    from weaver.run.runtime_boundary import FabricRunScope
-
-    submitted = []
-
-    class Session:
-        def execute_python(self, program, workspace=None):
-            submitted.append(program.source)
-            return LoadResult(succeeded=True).as_row()
-
-    node = _node("python_folder", object="Raw")
-    node.logical_id.item = "Lakehouse/Sales"
-    node.primitive_object = SimpleNamespace(schema="Sales", object="Raw")
-    scope = FabricRunScope(Session(), None, "run-1")
-
-    _dispatch(node, SimpleNamespace(get=lambda: scope), ignore_stability_threshold=True)
-
-    assert "ignore_stability_threshold" not in submitted[-1]
-    assert "'reload': False" in submitted[-1]
-
-
-@weaver_test()
 def test_the_self_recording_entry_point_asks_for_the_refusal_too():
     """``_.Load`` records what a refusal counted, so it cannot let it throw.
 
@@ -359,40 +327,14 @@ def test_the_self_recording_entry_point_asks_for_the_refusal_too():
 
 
 @weaver_test()
-def test_a_remote_dispatch_names_the_waiver_only_when_it_is_asked_for():
-    """The argument crosses as data, so an unset waiver need not cross at all.
+def test_the_waiver_crosses_to_fabric_with_the_request():
+    """A load with Spark work runs in Fabric, planned from the request it is sent."""
 
-    A requested one always does: an older published Weaver must fail rather than
-    load without it.
-    """
+    waived = RunRequest.load(["Lakehouse/Sales"], ignore_stability_threshold=True)
+    ordinary = RunRequest.load(["Lakehouse/Sales"])
 
-    from weaver.run.runtime_boundary import FabricRunScope
-
-    submitted = []
-
-    class Session:
-        def execute_python(self, program, workspace=None):
-            submitted.append(program.source)
-            return LoadResult(succeeded=True).as_row()
-
-    scope = FabricRunScope(Session(), None, "run-1")
-    node = SimpleNamespace(
-        node_id="n",
-        logical_id=SimpleNamespace(item="Lakehouse/Sales"),
-        physical_target=PhysicalTargetRef("lakehouse", "Sales_LH"),
-        primitive_object=SimpleNamespace(schema="Sales", object="Customer"),
-    )
-
-    scope.dispatch_python(node, expected_class="Sales__Customer", fault_tolerant=False)
-    assert "ignore_stability_threshold" not in submitted[-1]
-
-    scope.dispatch_python(
-        node,
-        expected_class="Sales__Customer",
-        fault_tolerant=False,
-        ignore_stability_threshold=True,
-    )
-    assert "'ignore_stability_threshold': True" in submitted[-1]
+    assert RunRequest.from_mapping(waived.to_mapping()).ignore_stability_threshold
+    assert not RunRequest.from_mapping(ordinary.to_mapping()).ignore_stability_threshold
 
 
 @weaver_test()
@@ -540,104 +482,6 @@ def test_a_warehouse_procedure_that_predates_the_contract_says_to_rebuild():
         dispatch_primitive(node, session=session)
 
 
-@weaver_test()
-def test_a_python_refusal_crosses_livy_as_data():
-    refusal = LoadResult.refusal("over the threshold", rows_read=10, rows_rejected=4)
-    envelope = refusal_envelope(LoadError("Sales.Customer: over", result=refusal))
-
-    assert refused(envelope)
-    assert envelope[REFUSAL_KEY] == REFUSAL_VERSION
-
-    rebuilt = decoded_refusal(envelope)
-    assert isinstance(rebuilt, LoadError)
-    assert rebuilt.result == refusal
-    assert "over" in str(rebuilt)
-
-
-@weaver_test()
-def test_a_decoded_refusal_reaches_the_run_as_a_raised_load_error():
-    refusal = LoadResult.refusal("over the threshold", rows_read=10)
-    envelope = refusal_envelope(LoadError("Sales.Customer: over", result=refusal))
-
-    with pytest.raises(LoadError) as raised:
-        _python(envelope)
-
-    assert raised.value.result == refusal
-
-
-@weaver_test()
-def test_an_unknown_failure_is_not_turned_into_a_refusal():
-    """Only a load error carrying a settled result crosses as one."""
-
-    assert refusal_envelope(RuntimeError("the interpreter died")) is None
-    assert refusal_envelope(LoadError("no result carried")) is None
-    assert not refused(LoadResult(succeeded=True).as_row())
-
-
-@weaver_test()
-def test_an_envelope_this_version_cannot_read_says_what_to_publish():
-    with pytest.raises(LoadError, match="Publish this version"):
-        decoded_refusal({REFUSAL_KEY: REFUSAL_VERSION + 1, "result": {}})
-
-
-@weaver_test()
-def test_the_remote_entry_point_returns_a_refusal_instead_of_raising(monkeypatch):
-    """The one place the envelope is produced, on the far side of Livy."""
-
-    import weaver.run.entry as entry
-
-    refusal = LoadResult.refusal("over the threshold", rows_read=10)
-
-    def refuse(**_kwargs):
-        raise LoadError("Sales.Customer: over the threshold", result=refusal)
-
-    monkeypatch.setattr("weaver.run.dispatch.python_primitive", refuse)
-    monkeypatch.setattr(entry, "get_scope", lambda run_id: None)
-    monkeypatch.setattr(
-        "weaver.runtime.session_scopes.scope_catalogue", lambda run_id: None
-    )
-
-    returned = entry.run_python_primitive(
-        run_id="r",
-        node_id="n",
-        item="Lakehouse/Sales",
-        target="Sales_LH",
-        schema="Sales",
-        object="Customer",
-        expected_class="Sales__Customer",
-        session=object(),
-    )
-
-    assert refused(returned)
-    assert decoded_refusal(returned).result == refusal
-
-
-@weaver_test()
-def test_the_remote_entry_point_lets_an_unknown_failure_through(monkeypatch):
-    import weaver.run.entry as entry
-
-    def die(**_kwargs):
-        raise RuntimeError("the interpreter died")
-
-    monkeypatch.setattr("weaver.run.dispatch.python_primitive", die)
-    monkeypatch.setattr(entry, "get_scope", lambda run_id: None)
-    monkeypatch.setattr(
-        "weaver.runtime.session_scopes.scope_catalogue", lambda run_id: None
-    )
-
-    with pytest.raises(RuntimeError, match="interpreter died"):
-        entry.run_python_primitive(
-            run_id="r",
-            node_id="n",
-            item="Lakehouse/Sales",
-            target="Sales_LH",
-            schema="Sales",
-            object="Customer",
-            expected_class="Sales__Customer",
-            session=object(),
-        )
-
-
 # --- and nothing was written before it refused ---------------------------------
 
 
@@ -670,7 +514,10 @@ def test_every_refusal_returns_before_the_target_is_written():
     mutation, so what commits is the evidence the load settled and nothing else.
 
     An explicit reload empties the target before the load body, under its own
-    contract; the gates below are what these indexes measure.
+    contract; the gates below are what these indexes measure. An empty target
+    is written from staging in a branch of its own, which no stability gate
+    guards, so the reject refusal precedes both branches and the breach refusal
+    precedes the writes of the branch it guards.
     """
 
     payload = _generated_procedure()
@@ -679,13 +526,17 @@ def test_every_refusal_returns_before_the_target_is_written():
         for index in range(len(payload))
         if payload.startswith("set @weaver_is_refusal = cast(1 as bit);", index)
     ]
-    written = min(
-        payload.index("\n    update c\n"),
-        payload.index("\n    insert into [Sales].[Customer] ("),
+    empty = payload.index(
+        "insert into [Sales].[Customer] (", payload.index("if @weaver_target_rows = 0")
+    )
+    working = payload.index("create table [Sales].[Customer_Upsert]")
+    existing = min(
+        payload.index("update c\n", working),
+        payload.index("insert into [Sales].[Customer] (", working),
     )
 
     assert len(refusals) == 2
-    assert max(refusals) < written
+    assert min(refusals) < empty < max(refusals) < existing
 
 
 @weaver_test()

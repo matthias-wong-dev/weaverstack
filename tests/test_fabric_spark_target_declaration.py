@@ -166,6 +166,22 @@ def test_listing_views_asks_the_destination_not_the_session(fabric):
 
 
 @weaver_test()
+def test_views_among_resolves_only_the_names_it_is_given(fabric):
+    spark = _Spark(
+        listings={
+            "SHOW VIEWS IN `Weaver`.`Play_Lakehouse_1`.`Sales` LIKE 'Broken|Summary'": [
+                _Row(viewName="Summary", isTemporary=False)
+            ]
+        }
+    )
+
+    found = SparkCatalogue(spark, fabric).views_among("Sales", ["Summary", "Broken"])
+
+    assert found == ("Summary",)
+    assert len(spark.executed) == 1
+
+
+@weaver_test()
 def test_listing_tables_takes_the_views_back_out(fabric):
     """``SHOW TABLES`` returns views as well: confirmed in a real workspace."""
 

@@ -12,7 +12,7 @@ from support.weaver_test import weaver_test
 
 from weaver.build_bundle import execute_install_action
 from weaver.build_bundle.executors.base import InstallationContext, ResolvedTarget
-from weaver.build_bundle.installer import Installer
+from weaver.build_bundle.installer import MutationBindings
 from weaver.build_bundle.models import InstallAction
 from weaver.declaration.metadata import AUDIT_LIVE_DELETE_DATETIME
 from weaver.declaration.model import LAKEHOUSE
@@ -108,7 +108,7 @@ def protocol_estate(
         [f"DROP SCHEMA IF EXISTS {schema} CASCADE", f"CREATE SCHEMA {schema}"],
         workspace=fabric_workspace,
     )
-    installer = Installer(weaver_session).bind(fabric_workspace)
+    installer = MutationBindings(weaver_session).bind(fabric_workspace)
     direct_creator = installer.direct_delta_table_creator()
     allocations = {}
 

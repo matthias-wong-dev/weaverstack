@@ -329,13 +329,15 @@ def test_naming_no_workspace_at_all_fails_saying_which_value_is_missing(capsys):
 
 
 @weaver_test()
-def test_a_successful_run_renders_its_nodes_and_exits_zero(recorded, capsys):
+def test_a_successful_run_renders_its_summary_and_exits_zero(recorded, capsys):
+    """Progress has already said each node finished; the report adds the totals."""
+
     exit_code = main(_command())
     captured = capsys.readouterr()
 
     assert exit_code == 0
-    assert "load:Lakehouse/Sales/Tables/Sales.Customer" in captured.out
-    assert "succeeded" in captured.out
+    assert "load:Lakehouse/Sales/Tables/Sales.Customer" not in captured.out
+    assert "load succeeded: Lakehouse/Sales" in captured.out
     assert "1 succeeded" in captured.out
     assert "Rows" in captured.out
     assert "read" in captured.out and "5" in captured.out
@@ -379,8 +381,10 @@ def test_load_rollup_sums_loaders_without_counting_publication_nodes(capsys):
     assert "1 succeeded with rejects" in output
     assert "read                  12" in output
     assert "inserted               8" in output
-    assert "999" in output  # still visible on the publication node's own line
     assert "read               1,011" not in output
+    # The node with rejects is listed with its counts; plain successes are not.
+    assert "Sales.Order  (read 7, +3 ~2 -1 !1)" in output
+    assert "refresh:Lakehouse/Sales" not in output
 
 
 @weaver_test()
@@ -542,7 +546,7 @@ def test_load_status_colour_is_semantic_on_a_terminal(monkeypatch):
     _cli_module()._print_load(report)
 
     printed = output.getvalue()
-    assert "\x1b[32m✓\x1b[0m" in printed
+    assert "\x1b[32m    1 succeeded" in printed
     assert "\x1b[33msucceeded_with_rejects" in printed
     assert "\x1b[31mfailed" in printed
     assert "\x1b[33mblocked" in printed
@@ -916,6 +920,13 @@ class _FakeResolver:
     def __init__(self, workspace, **kwargs) -> None:
         self.workspace = workspace
 
+    def files_root(self, item):
+        from weaver.locations import Location
+
+        return Location(
+            f"https://onelake.dfs.fabric.microsoft.com/My Workspace/{item.name}/Files"
+        )
+
     def spark_destination(self, item):
         from weaver.spark import FabricSparkTarget
 
@@ -928,6 +939,30 @@ class _FakeResolver:
         if item.name not in type(self).present:
             raise ItemNotFoundError(f"no {item_type} named {item.name!r} in workspace")
         return object()
+
+
+class _FakeStore:
+    """OneLake as the client stages a run there: bytes by location."""
+
+    def __init__(self) -> None:
+        self.files: dict[str, bytes] = {}
+
+    def make_directory(self, location) -> None:
+        pass
+
+    def write(self, location, data: bytes) -> None:
+        self.files[location.value] = data
+
+    def read(self, location) -> bytes:
+        from weaver.store import StoreError
+
+        if location.value not in self.files:
+            raise StoreError(f"cannot read {location.value}")
+        return self.files[location.value]
+
+    def delete(self, location, *, recursive: bool = False) -> None:
+        for key in [key for key in self.files if key.startswith(location.value)]:
+            del self.files[key]
 
 
 @pytest.fixture
@@ -943,8 +978,8 @@ def livy(monkeypatch):
 
     _FakeLivy.submitted = []
     _FakeLivy.started = 0
-    # One node's load result: the catalogue is read over TDS now, so the only
-    # thing that crosses Livy is the primitive that fills a table.
+    # The receipt for a load sent to Fabric. The catalogue is read over TDS, so
+    # the only thing that crosses Livy is the run.
     _FakeLivy.answer = {
         "succeeded": True,
         "rows_read": 5,
@@ -964,6 +999,9 @@ def livy(monkeypatch):
     monkeypatch.setattr(
         ConsoleScope, "resolver", property(lambda self: _FakeResolver(self.workspace))
     )
+    store = _FakeStore()
+    monkeypatch.setattr(ConsoleScope, "transport_store", property(lambda self: store))
+    monkeypatch.setattr(ConsoleScope, "store", property(lambda self: store))
     # The catalogue is a Warehouse now, so a load reads it over TDS before it
     # crosses. Doubled at the Session's own capability, for the same reason the
     # Livy transport is: what is under test is the crossing, not the engine.
@@ -973,6 +1011,13 @@ def livy(monkeypatch):
         ConsoleSession,
         "query_tsql",
         lambda self, statement, **kwargs: _FakeTds.answer(statement),
+    )
+    monkeypatch.setattr(
+        ConsoleSession,
+        "query_tsql_sets",
+        lambda self, statements, **kwargs: tuple(
+            _FakeTds.answer(statement) for statement in statements
+        ),
     )
     monkeypatch.setattr(
         ConsoleSession, "execute_tsql", lambda self, statement, **kwargs: None

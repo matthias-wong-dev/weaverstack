@@ -3,23 +3,30 @@
 from __future__ import annotations
 
 import json
+import threading
 import time
 from dataclasses import dataclass
 from typing import Any, Mapping
 
-from ..errors import WeaverError
+from ..errors import OutcomeUnknown, WeaverError
 from .auth import FABRIC_SCOPE, token_source
 from .client import (
     CONNECTION_ATTEMPTS,
     FABRIC_API,
+    READ_METHODS,
     TRANSIENT_STATUSES,
     _response_message,
+    never_sent,
+    outcome_unknown,
     retry_delay,
     send,
 )
 
 DEFAULT_LIVY_API_VERSION = "2023-12-01"
 DEFAULT_POLL_INTERVAL = 3.0
+#: A statement's first poll waits this long, and each later one twice as long
+#: up to the poll interval, so a short statement is not held for a whole interval.
+FIRST_STATEMENT_POLL = 0.1
 DEFAULT_SESSION_TIMEOUT = 600.0
 DEFAULT_STATEMENT_TIMEOUT = 900.0
 #: A close waits for Fabric to release the session's capacity slot.
@@ -30,7 +37,7 @@ RESULT_PREFIX = "__weaver_result__"
 
 
 class LivyError(WeaverError):
-    """A Livy session could not start or has died."""
+    """A Livy request failed, or a Livy session could not start or has died."""
 
     executor = "Livy"
 
@@ -42,6 +49,18 @@ class LivyStatementError(LivyError):
         super().__init__(message)
         self.ename = ename
         self.evalue = evalue
+
+
+class LivyRefused(LivyError):
+    """Fabric refused a request without acting on it; the session is unaffected."""
+
+
+class LivySessionEnded(LivyRefused):
+    """Fabric refused a request because it has ended the session."""
+
+
+class LivyOutcomeUnknown(LivyError, OutcomeUnknown):
+    """A statement may have run, and how it ended is unknown."""
 
 
 @dataclass(frozen=True)
@@ -241,7 +260,12 @@ def _call(
                 timeout=120,
             )
         except requests.exceptions.RequestException as exc:
-            raise LivyError(f"{method} {url} could not be reached: {exc}") from exc
+            error = (
+                LivyError
+                if method in READ_METHODS or never_sent(exc)
+                else LivyOutcomeUnknown
+            )
+            raise error(f"{method} {url} could not be reached: {exc}") from exc
         if response.status_code in expected:
             return response.json() if response.content else {}
         if (
@@ -251,11 +275,22 @@ def _call(
         ):
             time.sleep(retry_delay(response, attempt))
             continue
-        raise LivyError(
-            f"{method} {url} returned {response.status_code}: "
-            f"{_response_message(response)}"
-        )
+        raise _answered(method, url, response)
     raise LivyError(f"{method} {url} did not settle")
+
+
+def _answered(method: str, url: str, response) -> LivyError:
+    """The error for a request Fabric answered with anything but success."""
+
+    status = response.status_code
+    message = f"{method} {url} returned {status}: {_response_message(response)}"
+    if status == 404 or (status == 400 and "terminal state" in message):
+        return LivySessionEnded(message)
+    if 400 <= status < 500:
+        return LivyRefused(message)
+    if outcome_unknown(method, status):
+        return LivyOutcomeUnknown(message)
+    return LivyError(message)
 
 
 class LivySession:
@@ -285,6 +320,11 @@ class LivySession:
         self.weaver_bootstrap = weaver_bootstrap
         self.session_url: str | None = None
         self._weaver_asserted = False
+        #: Held while a replacement starts, so callers that find the session
+        #: ended wait for the one replacement rather than each starting one.
+        self._restarting = threading.Lock()
+        #: Called after Fabric's ended session has been replaced.
+        self.restarted = None
 
     @property
     def token(self) -> str:
@@ -344,16 +384,17 @@ class LivySession:
 
         if self._weaver_asserted:
             return
+        self.run(self._weaver_source())
+        self._weaver_asserted = True
+
+    def _weaver_source(self) -> str:
         if self.weaver_bootstrap is not None:
-            self.run(self.weaver_bootstrap)
-            self._weaver_asserted = True
-            return
+            return self.weaver_bootstrap
         if not self.environment_id:
             from ..errors import CommandError
 
             raise CommandError(missing_environment())
-        self.run(environment_bootstrap())
-        self._weaver_asserted = True
+        return environment_bootstrap()
 
     def __enter__(self) -> "LivySession":
         self.start()
@@ -365,6 +406,15 @@ class LivySession:
 
     def start(self, *, timeout: float = DEFAULT_SESSION_TIMEOUT) -> None:
         self._weaver_asserted = False
+        self.session_url = self._started(timeout=timeout)
+
+    def _started(self, *, timeout: float) -> str:
+        """Create a session, wait until it is idle and bootstrap it.
+
+        Returns its URL without publishing it, so no caller submits into a
+        session that is not ready.
+        """
+
         payload: dict[str, Any] = {"name": "weaver"}
         if self.environment_id:
             # Fabric attaches published Environment libraries through Spark
@@ -379,8 +429,8 @@ class LivySession:
             session_id = created.get("id") or created.get("livyId")
             if session_id is None:
                 raise LivyError(f"Livy did not return a session id: {created}")
-            self.session_url = f"{self.base}/{session_id}"
-            self._await("idle", timeout=timeout)
+            url = f"{self.base}/{session_id}"
+            self._await(url, "idle", timeout=timeout)
         except LivyError as exc:
             if self.environment_reference and self.workspace_name:
                 raise LivyError(
@@ -389,12 +439,13 @@ class LivySession:
                 ) from exc
             raise
         if self.bootstrap:
-            self.run(self.bootstrap)
+            self._run_on(url, self.bootstrap)
+        return url
 
-    def _await(self, wanted: str, *, timeout: float) -> dict:
+    def _await(self, url: str, wanted: str, *, timeout: float) -> dict:
         deadline = time.time() + timeout
         while time.time() < deadline:
-            state = _call("GET", self.session_url, self.token, expected=(200,))
+            state = _call("GET", url, self.token, expected=(200,))
             current = (state.get("state") or "").lower()
             if current == wanted:
                 return state
@@ -418,31 +469,91 @@ class LivySession:
         A statement that needs to return something calls :func:`emit`, which
         prints a tagged JSON line, so printed output and returned values stay
         distinguishable and a result survives whatever else was logged.
+
+        Fabric ends a session left idle, and refuses a statement for it before
+        accepting it. The session is then replaced in place and the statement
+        submitted once to the new one, whatever ``retry_submission`` says. Once
+        Fabric has accepted a statement, a failure to learn its outcome raises
+        :class:`LivyOutcomeUnknown`.
         """
 
-        if self.session_url is None:
+        url = self.session_url
+        if url is None:
             raise LivyError("The Livy session has not been started.")
+        try:
+            statement_url = self._submit(url, code, retry_submission=retry_submission)
+        except LivySessionEnded:
+            self._replace(url)
+            url = self.session_url
+            if url is None:
+                raise LivyError("The Livy session was closed.") from None
+            statement_url = self._submit(url, code, retry_submission=retry_submission)
+        return self._follow(statement_url, timeout=timeout)
 
-        submitted = _call(
-            "POST",
-            f"{self.session_url}/statements",
-            self.token,
-            {"code": code, "kind": "pyspark"},
-            retry_transient=retry_submission,
+    def _run_on(
+        self, url: str, code: str, *, timeout: float = DEFAULT_STATEMENT_TIMEOUT
+    ) -> StatementResult:
+        """Run a statement on one session, never a replacement."""
+
+        return self._follow(
+            self._submit(url, code, retry_submission=True), timeout=timeout
         )
-        statement_url = f"{self.session_url}/statements/{submitted['id']}"
+
+    def _follow(self, statement_url: str, *, timeout: float) -> StatementResult:
+        """Poll an accepted statement on the session that accepted it."""
 
         deadline = time.time() + timeout
+        wait = min(FIRST_STATEMENT_POLL, self.poll_interval)
         while time.time() < deadline:
-            statement = _call("GET", statement_url, self.token, expected=(200,))
+            try:
+                statement = _call("GET", statement_url, self.token, expected=(200,))
+            except LivyOutcomeUnknown:
+                raise
+            except LivyError as exc:
+                raise LivyOutcomeUnknown(
+                    f"Livy statement {statement_url} was accepted and could not be "
+                    f"followed: {exc}"
+                ) from exc
             if (statement.get("state") or "").lower() in {
                 "available",
                 "error",
                 "cancelled",
             }:
                 return _result(statement)
-            time.sleep(self.poll_interval)
-        raise LivyError(f"Livy statement did not finish within {int(timeout)}s")
+            time.sleep(wait)
+            wait = min(wait * 2, self.poll_interval)
+        raise LivyOutcomeUnknown(
+            f"Livy statement did not finish within {int(timeout)}s"
+        )
+
+    def _submit(self, url: str, code: str, *, retry_submission: bool) -> str:
+        """Submit to one session; the statement is followed there and nowhere else."""
+
+        submitted = _call(
+            "POST",
+            f"{url}/statements",
+            self.token,
+            {"code": code, "kind": "pyspark"},
+            retry_transient=retry_submission,
+        )
+        return f"{url}/statements/{submitted['id']}"
+
+    def _replace(self, ended: str) -> None:
+        """Start a new session unless a concurrent caller already has.
+
+        The replacement is published only once it is idle and bootstrapped as
+        the ended one was.
+        """
+
+        with self._restarting:
+            if self.session_url != ended:
+                return
+            url = self._started(timeout=DEFAULT_SESSION_TIMEOUT)
+            if self._weaver_asserted:
+                self._run_on(url, self._weaver_source())
+            self.session_url = url
+        if self.restarted is not None:
+            self.restarted()
 
     def close(self, *, timeout: float = DEFAULT_CLOSE_TIMEOUT) -> None:
         """End the session and wait for Fabric to release its capacity slot.

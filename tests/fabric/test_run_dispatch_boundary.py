@@ -4,7 +4,7 @@ Every link in the chain is production code:
 
 .. code-block:: text
 
-    Runner → dispatch → Session → Livy → import → a trivial installed artefact
+    client → Livy → Runner in Fabric → dispatch → import → a trivial artefact
 
 The only thing not real is what the primitive does, and that is the point. A
 thin run proves the wiring. That the Runner reaches dispatch, that dispatch
@@ -29,16 +29,15 @@ says. Both are arranged directly, which is why paying for a build to make a
 primitive callable is unnecessary when the claim is about dispatch.
 
 ``hosted``, because the modules are imported where Spark is, as the installed
-wheel: :mod:`weaver.runtime.session_scopes` and :mod:`weaver.run.entry` inside
-the Fabric session. The orchestration is here; what is imported over there is
-the published package.
+wheel: a client sends the whole run to Fabric through :mod:`weaver.run.entry`,
+and Fabric plans, dispatches and records it.
 
 ``Files`` is object storage and a deployed module sits in a package tree, so a
 dispatch that resolved against a directory would prove nothing about either.
 
 The run also writes its evidence, so the last test here reads ``_.Log`` back:
-a desktop Session appends through a flusher of its own, and every settlement
-above has to arrive in the Warehouse under the frozen ``[Result]`` vocabulary.
+Fabric records the run before it returns, and every settlement above has to
+arrive in the Warehouse under the frozen ``[Result]`` vocabulary.
 """
 
 from __future__ import annotations
@@ -177,7 +176,7 @@ def test_tolerated_rejections_are_reported_without_failing_the_node(tolerated):
     assert node.result.rows_inserted == 2
 
 
-@weaver_test(hosted=True, resources={"livy", "tds"})
+@weaver_test(hosted=True, resources={"livy", "onelake"})
 def test_an_intolerant_run_raises_and_names_the_node_that_stopped_it(thin):
     """The other half: intolerance raises rather than returning a report.
 
@@ -195,12 +194,6 @@ def test_an_intolerant_run_raises_and_names_the_node_that_stopped_it(thin):
     assert "Thin." in said, f"the failure named no node: {said}"
     assert "reported failure" in said or "rejected" in said
 
-    # The run submitted a log row, and a desktop Session appends through a
-    # flusher on a worker thread. Waited for here rather than left to land
-    # whenever the worker gets to it, so the TDS write this run causes is inside
-    # the body that caused it and the declaration above is not a race.
-    thin.session.flush()
-
 
 def _said(node) -> str:
     """Everything one node reported, as one string to look in."""
@@ -213,15 +206,10 @@ def _said(node) -> str:
 
 
 @weaver_test(hosted=True, resources={"tds"})
-def test_every_settled_node_reaches_the_log_from_the_desktop(
-    thin, tolerated, fabric_target_lakehouse
-):
+def test_every_settled_node_reaches_the_log(thin, tolerated, fabric_target_lakehouse):
     """The run's evidence, read back out of `_.Log`.
 
-    A desktop Session appends asynchronously through a flusher it owns, so the
-    rows exist only once something waits for the worker, `Session.flush`, or
-    the Session closing. The suite's Session outlives this module, so the wait
-    is explicit here.
+    Fabric flushed it before the run returned, so the rows are there to read.
 
     Every outcome the run settled is checked at once rather than a row at a
     time: one query is one observation of one moment, and the estate is live.
@@ -232,7 +220,6 @@ def test_every_settled_node_reaches_the_log_from_the_desktop(
     workflow_id = tolerated.workflow_id
     assert workflow_id, "the run recorded no workflow, so there is nothing to read"
 
-    thin.session.flush()
     rows = catalogue_connection(thin.session, thin.workspace).rows(
         "select [Task type], [Target type], [Target name], [Schema name], "
         "[Object name], [Result] from [_].[Log] "

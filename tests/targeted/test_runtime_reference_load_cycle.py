@@ -139,6 +139,7 @@ def test_public_load_reconstructs_a_built_runtime_reference_without_manual_depen
         workspace=workspace,
         lakehouses=("Landing",),
         warehouses=("Weaver", "Curated"),
+        executes_here=True,
     )
     catalogue = installed_catalogue(repository, bindings, session=session)
 

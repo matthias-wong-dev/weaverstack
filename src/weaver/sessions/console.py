@@ -16,8 +16,8 @@ from ..delta_protocol import DirectDeltaAction, ProtocolMinima, SparkDeltaAction
 from ..errors import CommandError
 from ..targets import ItemRef, WarehouseTarget
 from ..workspaces import Workspace
-from .base import TASK, Session, WorkspaceScope
-from .program import RemoteProgram
+from .base import SUBSTEP, TASK, Session, WorkspaceScope
+from .program import FabricProgram
 from .resources import Resource
 
 RESET = "\x1b[0m"
@@ -98,7 +98,6 @@ class ConsoleSession(Session):
             raise ValueError("direct Delta workers must be an integer from 1 to 16")
         self.direct_delta_workers = direct_delta_workers
         self._delta_resolution_lock = threading.Lock()
-        self.archive_cleanup_failures: list[dict[str, Any]] = []
         from ..fabric.auth import checked_credential
 
         # Validate the supplied credential now; acquire its token lazily.
@@ -117,47 +116,30 @@ class ConsoleSession(Session):
 
     # --- progress -----------------------------------------------------------
 
-    def install_bundle(self, bundle, *, workspace=None, timeout=None):
-        return self._install_archive(bundle, workspace=workspace, timeout=timeout)
+    def execute_mutation_in_fabric(self, plan, payloads=None, **options):
+        from .install_archive import execute_mutation_in_fabric
 
-    def install_batches(
-        self,
-        bundle,
-        *,
-        sequence_number,
-        batch_ids,
-        build_datetime,
-        workspace=None,
-        timeout=None,
-    ):
-        request = {
-            "sequence_number": sequence_number,
-            "batch_ids": list(batch_ids),
-            "build_datetime": build_datetime,
-        }
-        return self._install_archive(
-            bundle, workspace=workspace, timeout=timeout, request=request
-        )
+        return execute_mutation_in_fabric(self, plan, payloads, **options)
 
-    def _install_archive(self, bundle, *, workspace=None, timeout=None, request=None):
-        from ..fabric.livy import LivySession
+    def execute_mutation(self, plan, payloads=None, **options):
+        from .mutation_progress import StageProgress
 
-        if (
-            type(self) is not ConsoleSession
-            or any(
-                value is not None for value in (self._given_store, self._given_resolver)
+        progress = StageProgress(plan, self)
+        # Only Spark work needs the plan carried into Fabric. TDS, OneLake and
+        # REST are reached from here, so a plan without Spark starts no session.
+        if plan.execution.spark_home_target_id is None:
+            report = super().execute_mutation(
+                plan, payloads, observer=progress.observe, **options
             )
-            or (
-                self._given_livy is not None
-                and type(self._given_livy) is not LivySession
+        else:
+            report = self.execute_mutation_in_fabric(
+                plan, payloads, observer=progress.follow, **options
             )
-        ):
-            return None
-        from .install_archive import install_in_scope
-
-        return install_in_scope(
-            self, bundle, workspace=workspace, timeout=timeout, request=request
-        )
+        try:
+            progress.finish(report)
+        except Exception:  # noqa: BLE001 - presentation never changes an outcome
+            pass
+        return report
 
     # --- progress -----------------------------------------------------------
 
@@ -185,6 +167,16 @@ class ConsoleSession(Session):
               Install Lakehouse/Sales                    18.6s
             ✓ Build                                      40.7s
 
+        A concurrent frame is off the stack, so it is marked when it starts as
+        well as when it ends, and the two may be far apart:
+
+        .. code-block:: text
+
+            →   Load Warehouse/Reporting/Sales.Customer
+            →   Load Warehouse/Reporting/Sales.Order
+            ✓   Load Warehouse/Reporting/Sales.Order  (read 9, +9 ~0 -0 !0)     5.1s
+            ✓   Load Warehouse/Reporting/Sales.Customer  (read 4, +1 ~3 -0 !0)  8.3s
+
         A transient line shows the innermost active frame:
 
         .. code-block:: text
@@ -203,15 +195,19 @@ class ConsoleSession(Session):
             if event == "started":
                 if frame.kind == TASK:
                     print(f"\n{frame.name}\n", file=stream)
+                elif frame.concurrent:
+                    print(
+                        f"{_styled('→', DIM, stream)} {self._label(frame)}", file=stream
+                    )
             else:
                 if event == "failed":
                     mark = "✗"
-                elif frame.kind == TASK:
+                elif frame.kind == TASK or frame.concurrent:
                     mark = "✓"
                 else:
                     mark = " "
                 colour = RED if event == "failed" else GREEN if mark == "✓" else ""
-                label = f"{self._label(frame):<{self._width() - 2}}"
+                label = f"{self._named(frame):<{self._width() - 2}}"
                 duration = f"{_duration(frame.elapsed):>{self.DURATION_WIDTH}}"
                 print(
                     f"{_styled(mark, colour, stream)} {label}"
@@ -225,6 +221,10 @@ class ConsoleSession(Session):
 
     def _label(self, frame) -> str:
         return "  " * max(frame.depth - 1, 0) + frame.name
+
+    def _named(self, frame) -> str:
+        label = self._label(frame)
+        return f"{label}  ({frame.note})" if frame.note else label
 
     def _width(self) -> int:
         """Return a name-column width that follows terminal resizing.
@@ -247,10 +247,10 @@ class ConsoleSession(Session):
         if frame is None:
             return
         text = (
-            f"⋯ {self._label(frame):<{self._width() - 2}}"
+            f"⋯ {self._named(frame):<{self._width() - 2}}"
             f"{_duration(frame.age):>{self.DURATION_WIDTH}}"
         )
-        label = f"{self._label(frame):<{self._width() - 2}}"
+        label = f"{self._named(frame):<{self._width() - 2}}"
         duration = f"{_duration(frame.age):>{self.DURATION_WIDTH}}"
         rendered = (
             f"{_styled('⋯', DIM, stream)} {label}{_styled(duration, DIM, stream)}"
@@ -455,9 +455,9 @@ class ConsoleSession(Session):
         workspace: Workspace | None = None,
         timeout: float | None = None,
     ) -> Any:
-        from .delta_table import remote_delta_table_program
+        from .delta_table import fabric_delta_table_program
 
-        source = remote_delta_table_program(
+        source = fabric_delta_table_program(
             qualified_name,
             columns,
             identity_column=identity_column,
@@ -465,7 +465,7 @@ class ConsoleSession(Session):
             protocol_minima=protocol_minima,
         )
         scope = self.scope(workspace)
-        livy = self._foreground_livy(scope)
+        livy = self.foreground_livy(scope)
         return scope.livy_run(
             source,
             name="delta_table",
@@ -484,13 +484,13 @@ class ConsoleSession(Session):
         if not ordered:
             return []
         from ..fabric.livy import DEFAULT_STATEMENT_TIMEOUT
-        from .delta_table import remote_delta_table_actions_program
+        from .delta_table import fabric_delta_table_actions_program
 
         allowance = DEFAULT_STATEMENT_TIMEOUT if timeout is None else timeout
         scope = self.scope(workspace)
-        livy = self._foreground_livy(scope)
+        livy = self.foreground_livy(scope)
         return scope.livy_run(
-            remote_delta_table_actions_program(ordered),
+            fabric_delta_table_actions_program(ordered),
             name="delta_table_actions",
             timeout=allowance * len(ordered),
             livy=livy,
@@ -499,17 +499,17 @@ class ConsoleSession(Session):
 
     def execute_python(
         self,
-        program: RemoteProgram,
+        program: FabricProgram,
         *,
         workspace: Workspace | None = None,
         timeout: float | None = None,
     ) -> Any:
         # The caller owns the reporting frame; telemetry records the Livy cost.
         scope = self.scope(workspace)
-        # Remote Python imports Weaver, so it requires a published Environment.
+        # Python run in Fabric imports Weaver, so it requires a published Environment.
         # Spark SQL and TDS do not.
         scope._check_weaver_available()
-        livy = self._foreground_livy(scope)
+        livy = self.foreground_livy(scope)
         scope.ensure_weaver(livy=livy)
         scope.check_published_version(self.warn, livy=livy)
         return scope.livy_run(
@@ -517,7 +517,13 @@ class ConsoleSession(Session):
             name=program.name,
             timeout=timeout if timeout is not None else program.timeout,
             livy=livy,
+            retry_submission=program.resubmit,
         )
+
+    def execute_run_in_fabric(self, run, *, workspace: Workspace | None = None):
+        from .run_in_fabric import send
+
+        return send(self, run, workspace=workspace)
 
     def execute_spark_sql_batch(
         self,
@@ -556,7 +562,7 @@ class ConsoleSession(Session):
             "        spark.conf.set(_key, _previous)\n"
             "emit(_rows)\n"
         )
-        livy = self._foreground_livy(scope)
+        livy = self.foreground_livy(scope)
         return scope.livy_run(source, name="spark_sql", timeout=timeout, livy=livy)
 
     def describe_spark_query_actions(
@@ -608,7 +614,7 @@ class ConsoleSession(Session):
             "        spark.conf.set(_key, _previous)\n"
             "emit(_results)\n"
         )
-        livy = self._foreground_livy(scope)
+        livy = self.foreground_livy(scope)
         return scope.livy_run(
             source,
             name="spark_sql_query_shapes",
@@ -673,7 +679,7 @@ class ConsoleSession(Session):
             "        spark.conf.set(_key, _previous)\n"
             "emit(_results)\n"
         )
-        livy = self._foreground_livy(scope)
+        livy = self.foreground_livy(scope)
         return scope.livy_run(
             source,
             name="spark_sql_actions",
@@ -682,13 +688,26 @@ class ConsoleSession(Session):
             retry_submission=False,
         )
 
-    def _foreground_livy(self, scope: "ConsoleScope"):
+    def foreground_livy(self, scope: "ConsoleScope"):
+        """The scope's Livy session, with any wait for it shown as a Sub-step."""
+
         if scope.livy is None:
             raise CommandError("No Livy session is available for this workspace.")
         if scope.livy.ready:
             return scope.livy.get()
-        with self.substep("Wait for Spark session"):
+        frame = self._innermost()
+        if frame is None or frame.kind != SUBSTEP:
+            with self.substep("Wait for Spark session"):
+                return scope.livy.get()
+        # A Sub-step has no level beneath it, so the wait is said on its line.
+        import time
+
+        started = time.monotonic()
+        frame.note = "waiting for Spark"
+        try:
             return scope.livy.get()
+        finally:
+            frame.note = f"{_duration(time.monotonic() - started)} waiting for Spark"
 
     def execute_tsql(
         self,
@@ -932,6 +951,7 @@ class ConsoleScope(WorkspaceScope):
             token=self.token_provider(),
             lakehouse=self.spark_home,
         )
+        session.restarted = lambda: self.telemetry.count("livy.restarted")
         session.start()
         return session
 
@@ -990,13 +1010,18 @@ class ConsoleScope(WorkspaceScope):
     ):
         """Submit one statement to this scope's Livy session and return its payload.
 
-        A statement that fails is the caller's failure, not the session's: the
-        exception is re-raised and the resource left as it was, because the
-        session is still up and costs a minute to replace. Only a session that
-        has died is marked failed.
+        A statement that fails, or that Fabric refuses, is the caller's failure,
+        not the session's: the exception is re-raised and the resource left as it
+        was, because the session is still up and costs a minute to replace. Only
+        a session that has died is marked failed.
         """
 
-        from ..fabric import LivyError, LivyStatementError
+        from ..fabric import (
+            LivyError,
+            LivyRefused,
+            LivySessionEnded,
+            LivyStatementError,
+        )
 
         if self.livy is None:
             raise CommandError("No Livy session is available for this workspace.")
@@ -1010,8 +1035,12 @@ class ConsoleScope(WorkspaceScope):
                 result = livy.run(source, **kwargs)
             except LivyStatementError as exc:
                 raise self._statement_failure(exc, name) from exc
+            except LivySessionEnded:
+                self.livy.fail()
+                raise
+            except LivyRefused:
+                raise
             except LivyError:
-                # Only a transport failure invalidates the shared Livy resource.
                 self.livy.fail()
                 raise
         if not result.returned:
@@ -1021,7 +1050,7 @@ class ConsoleScope(WorkspaceScope):
         return result.payload
 
     def _statement_failure(self, exc, name: str):
-        """Add publishing guidance when remote Weaver cannot be imported.
+        """Add publishing guidance when Fabric cannot import Weaver.
 
         A missing Weaver import means the published Environment lacks code the
         submitted program needs.

@@ -6,6 +6,8 @@ Delta tables are reserved for failure evidence.
 
 from __future__ import annotations
 
+import re
+import threading
 from contextlib import contextmanager
 
 from ..errors import LoadError
@@ -53,6 +55,88 @@ def _exact_case(spark):
     finally:
         if restore:
             spark.conf.set(_CASE_SENSITIVE, previous)
+
+
+# --- Fabric Spark 4.1 workarounds ---------------------------------------------
+#
+# Each changes only how a relation is planned or cached, so a load gives the
+# same result whether or not Fabric still has the defect. Remove one once the
+# runtime no longer has its defect: without it,
+# tests/fabric/test_fabric_staging_defects_primitive.py must still pass.
+
+
+def _fabric_staging_shuffle(frame) -> str:
+    """The hint staging is cached with: a shuffle when its plan reports an ordering.
+
+    SPARK-59009: a cached relation whose plan reports an ordering, as staging
+    from ``spark.range`` or a sort does, fails once an inlined CTE references it
+    more than once, as reject discovery does. Remove once Fabric's runtime has
+    the Apache Spark fix.
+
+    The ordering is the one the cached relation would carry. PySpark exposes it
+    only through the JVM plan, so a plan that cannot be read counts as ordered:
+    not knowing costs a shuffle, never a load.
+    """
+
+    try:
+        ordering = frame._jdf.queryExecution().optimizedPlan().outputOrdering()
+        ordered = not ordering.isEmpty()
+    except Exception:  # noqa: BLE001 - see above
+        ordered = True
+    return "/*+ REPARTITION */ " if ordered else ""
+
+
+#: Fabric fails a CREATE TABLE AS SELECT that reads cached staging directly
+#: ("Heavy batch should consist of arrow vectors"), whatever the source, and a
+#: shuffle between them avoids it. The evidence tables and a full replace write
+#: this way. Remove once that write succeeds on Fabric.
+_FABRIC_WRITE_SHUFFLE = "/*+ REPARTITION */ "
+
+
+#: Fabric caches a CTE that a later query repeats and keeps it after both
+#: queries, under a name nothing can release, so the caches accumulate in the
+#: session. Reject discovery and the purge repeat the validation chain. The
+#: setting is undocumented, so every step of the hold is fail-open and no load
+#: depends on it. Remove once Fabric releases those caches itself.
+_FABRIC_CTE_CACHE = "spark.sql.optimizer.cte.cache.enabled"
+_FABRIC_CTE_CACHE_HOLDS: dict = {}
+_FABRIC_CTE_CACHE_LOCK = threading.Lock()
+
+
+@contextmanager
+def _fabric_without_cte_cache(spark):
+    """Hold Fabric's CTE cache off, restoring it when the last holder leaves.
+
+    Reading, changing or restoring the setting can fail without affecting the
+    load: the cache is then simply left as it is.
+    """
+
+    key = id(spark)
+    with _FABRIC_CTE_CACHE_LOCK:
+        hold = _FABRIC_CTE_CACHE_HOLDS.get(key)
+        if hold is None:
+            restore = None
+            try:
+                previous = spark.conf.get(_FABRIC_CTE_CACHE, None)
+                if str(previous).lower() == "true":
+                    spark.conf.set(_FABRIC_CTE_CACHE, "false")
+                    restore = previous
+            except Exception:  # noqa: BLE001 - see above
+                pass
+            hold = _FABRIC_CTE_CACHE_HOLDS[key] = {"holders": 0, "restore": restore}
+        hold["holders"] += 1
+    try:
+        yield
+    finally:
+        with _FABRIC_CTE_CACHE_LOCK:
+            hold["holders"] -= 1
+            if not hold["holders"]:
+                del _FABRIC_CTE_CACHE_HOLDS[key]
+                if hold["restore"] is not None:
+                    try:
+                        spark.conf.set(_FABRIC_CTE_CACHE, hold["restore"])
+                    except Exception:  # noqa: BLE001 - see above
+                        pass
 
 
 #: Weaver-owned columns carried only by working relations.
@@ -119,7 +203,7 @@ def load_table(
     # Evidence an earlier faulted run left, dropped before this run can write any
     # of its own. Otherwise the last failure's reject table stands beside a load
     # that has just succeeded and reads as evidence about it.
-    _drop_evidence(spark, names)
+    _drop_evidence(spark, names, lakehouse.qualified_schema(schema), name)
 
     held: list = []
     # What the load has settled so far, and which of it has already been written
@@ -127,30 +211,33 @@ def load_table(
     # working the state machine out a second time.
     kept: set = set()
     evidence: dict = {}
-    try:
-        return _reconcile(
-            spark,
-            held,
-            kept=kept,
-            evidence=evidence,
-            names=names,
-            contract=contract,
-            columns=columns,
-            types=types,
-            staging_frame=staging_frame,
-            deletes=deletes,
-            fault_tolerant=fault_tolerant,
-            ignore_stability_threshold=ignore_stability_threshold,
-        )
-    except Exception:
-        # An outcome Weaver did not classify, so the relations it had settled are
-        # all there is to read afterwards. Written here, and the original failure
-        # goes out unchanged.
-        _keep_unclassified_evidence(spark, names, kept, evidence)
-        raise
-    finally:
-        # Every exit: a clean load, a refusal at any gate, an unexpected failure.
-        _release(spark, held)
+    with _fabric_without_cte_cache(spark):
+        try:
+            return _reconcile(
+                spark,
+                held,
+                kept=kept,
+                evidence=evidence,
+                names=names,
+                contract=contract,
+                columns=columns,
+                types=types,
+                staging_frame=staging_frame,
+                deletes=deletes,
+                fault_tolerant=fault_tolerant,
+                ignore_stability_threshold=ignore_stability_threshold,
+            )
+        except Exception:
+            # An outcome Weaver did not classify, so the relations it had settled
+            # are all there is to read afterwards. Written here, and the original
+            # failure goes out unchanged.
+            _keep_unclassified_evidence(spark, names, kept, evidence)
+            raise
+        finally:
+            # Every exit: a clean load, a refusal at any gate, an unexpected
+            # failure. Inside the hold, because releasing staging re-caches what
+            # was built over it.
+            _release(spark, held)
 
 
 def _reconcile(
@@ -174,20 +261,23 @@ def _reconcile(
         _keep_evidence(spark, names, kept, **relations)
 
     source = _register(spark, held, staging_frame, names["target"], "source")
+    projection = f"{qualified('s', columns)} FROM {source} AS s"
+    shuffle = _fabric_staging_shuffle(spark.sql(f"SELECT {projection}"))
     staging, staging_view = _hold(
-        spark,
-        held,
-        f"SELECT {qualified('s', columns)} FROM {source} AS s",
-        names["target"],
-        "staging",
+        spark, held, f"SELECT {shuffle}{projection}", names["target"], "staging"
     )
-    # Both the metric and the force that materialises staging for the phases after
-    # it, so the authored source is evaluated exactly once.
-    rows_read = staging.count()
+    # Both the metrics and the force that materialises staging for the phases
+    # after it, so the authored source is evaluated exactly once.
+    rows_read, may_reject = _measure_staging(spark, staging_view, contract)
     # Settled, so a failure from here on has something to leave behind. Recorded
     # as the raw proposal rather than as whatever supersedes it, because what
     # ``_Staging`` answers is what the source proposed.
     evidence["staging"] = staging_view
+
+    # An incremental window with no rows and no claimed deletion changes nothing,
+    # and most windows are empty on most days.
+    if not rows_read and contract.incremental and _claims_nothing(deletes):
+        return LoadResult(succeeded=True)
 
     if contract.replaces_wholesale:
         return _full_replace(spark, names, staging_view, columns, rows_read)
@@ -196,10 +286,12 @@ def _reconcile(
         columns if contract.appends_only else _comparison_columns(contract, columns)
     )
     signature = row_signature("s", signature_columns, types)
-    rejects, reject_view = _discover_rejects(
-        spark, held, names["target"], staging_view, contract, columns, signature
-    )
-    rows_rejected = rejects.count()
+    rows_rejected = 0
+    if may_reject:
+        rejects, reject_view = _discover_rejects(
+            spark, held, names["target"], staging_view, contract, columns, signature
+        )
+        rows_rejected = rejects.count()
     if rows_rejected:
         evidence["reject"] = reject_view
         # However this ends, it owes an explanation: it either stops here or loads
@@ -229,6 +321,21 @@ def _reconcile(
             names,
             staging_view,
             columns,
+            rows_read=rows_read,
+            rows_inserted=rows_accepted,
+            rows_rejected=rows_rejected,
+        )
+        if rows_rejected:
+            return result.rejected(f"{rows_rejected} {TOLERATED_MESSAGE}")
+        return result
+
+    if _holds_no_files(spark, names["target"]):
+        result = _into_empty(
+            spark,
+            names,
+            staging_view,
+            columns,
+            signature,
             rows_read=rows_read,
             rows_inserted=rows_accepted,
             rows_rejected=rows_rejected,
@@ -300,12 +407,19 @@ def _reconcile(
             raise LoadError(f"{contract.qualified}: {breach}", result=refused)
         return refused
 
-    # Nothing is submitted for a phase that decided on no rows: a zero-row merge
+    # Nothing is submitted when the load decided on no rows: a zero-row merge
     # is a Delta commit and a scan for work that does not exist.
-    if deleted:
-        _apply_deletes(spark, names, delete_view, contract)
-    if inserted or updated:
-        _apply_changes(spark, names, change_view, contract, columns)
+    if inserted or updated or deleted:
+        _apply_changes(
+            spark,
+            names,
+            change_view,
+            contract,
+            columns,
+            # An incremental load's deletes are a claim beside the classification;
+            # a full load's are rows of it.
+            claimed=deleting if contract.incremental else None,
+        )
 
     result = LoadResult(
         succeeded=True,
@@ -325,6 +439,36 @@ def _reconcile(
 
 
 # --- phases ------------------------------------------------------------------
+
+
+def _measure_staging(spark, staging_view, contract: LoadContract) -> tuple[int, bool]:
+    """Count staging, and say whether reject discovery could refuse any of it.
+
+    Discovery could refuse nothing exactly when no row violates a key or a
+    not-null column and no primary or unique key value is held twice. One
+    aggregate answers both, where discovery ranks and persists a relation.
+    """
+
+    measures = ["count(*) AS staged"]
+    if not contract.replaces_wholesale:
+        measures.append(f"count_if({violation_predicate(contract)}) AS violations")
+        if contract.primary_key:
+            # Counted as duplicates only once no key is blank, when every key
+            # counts.
+            measures.append(
+                f"count(*) - count(DISTINCT {qualified('s', contract.primary_key)}) "
+                "AS duplicate_keys"
+            )
+        measures += [
+            f"count_if({participates(unique_key)}) - "
+            f"count(DISTINCT {qualified('s', unique_key)}) AS duplicate_unique_{index}"
+            for index, unique_key in enumerate(contract.unique_keys)
+        ]
+    found = spark.sql(
+        f"SELECT {', '.join(measures)} FROM {staging_view} AS s"
+    ).collect()[0]
+    names = [measure.rsplit(" AS ", 1)[1] for measure in measures]
+    return int(found["staged"]), any(int(found[name] or 0) for name in names[1:])
 
 
 def _discover_rejects(
@@ -622,18 +766,26 @@ def _settled_changes(
 
 
 def _incremental_changes(names, contract: LoadContract, columns) -> str:
-    """Classify writes without treating absence from an incremental window as deletion."""
+    """Classify writes without treating absence from an incremental window as deletion.
+
+    Only target rows whose key is proposed can match, so the target is narrowed
+    to those first. The proposal is the small side there, and Spark broadcasts
+    it rather than shuffling the target.
+    """
 
     stored = delta_signature_name()
-    missing = f"t.`{contract.primary_key[0]}` IS NULL"
+    key = contract.primary_key
+    missing = f"t.`{key[0]}` IS NULL"
     return (
         f"SELECT\n"
         f"  CASE WHEN {missing} THEN '{INSERT_OP}' ELSE '{UPDATE_OP}' END "
         f"AS `{OPERATION_COLUMN}`,\n"
         f"  {qualified('q', columns)}, q.`{stored}`\n"
         f"FROM weaver_proposed AS q\n"
-        f"LEFT JOIN {names['target']} AS t "
-        f"ON {key_join('q', 't', contract.primary_key)}\n"
+        f"LEFT JOIN (\n"
+        f"    SELECT {qualified('t', key)}, t.`{stored}` FROM {names['target']} AS t\n"
+        f"    LEFT SEMI JOIN weaver_proposed AS p ON {key_join('p', 't', key)}\n"
+        f") AS t ON {key_join('q', 't', key)}\n"
         f"WHERE {missing} OR q.`{stored}` <> t.`{stored}`"
     )
 
@@ -730,8 +882,14 @@ def _conflict_branch(
     )
 
 
-def _apply_changes(spark, names, change_view, contract: LoadContract, columns) -> None:
-    """Apply inserts and updates in one Delta merge."""
+def _apply_changes(
+    spark, names, change_view, contract: LoadContract, columns, *, claimed=None
+) -> None:
+    """Apply every insert, update and delete in one Delta merge, so one commit.
+
+    ``claimed`` holds the keys an incremental load deletes. They are disjoint
+    from the classified rows, which carry the rest.
+    """
 
     audit = delta_audit_names()
     stored = delta_signature_name()
@@ -746,11 +904,21 @@ def _apply_changes(spark, names, change_view, contract: LoadContract, columns) -
         f"t.`{audit[1]}` = current_timestamp()",
         f"t.`{audit[2]}` = {live_delete_literal()}",
     ]
+    source = f"SELECT * FROM {change_view}"
+    if claimed is not None:
+        keys_only = ", ".join(
+            f"d.`{column}`" if column in contract.primary_key else f"NULL AS `{column}`"
+            for column in written
+        )
+        source += (
+            f"\nUNION ALL\nSELECT '{DELETE_OP}' AS `{OPERATION_COLUMN}`, {keys_only} "
+            f"FROM {claimed} AS d"
+        )
     spark.sql(
         f"MERGE INTO {names['target']} AS t\n"
-        f"USING (SELECT * FROM {change_view} "
-        f"WHERE `{OPERATION_COLUMN}` <> '{DELETE_OP}') AS chg\n"
+        f"USING ({source}) AS chg\n"
         f"   ON {key_join('chg', 't', contract.primary_key)}\n"
+        f"WHEN MATCHED AND chg.`{OPERATION_COLUMN}` = '{DELETE_OP}' THEN DELETE\n"
         f"WHEN MATCHED AND chg.`{OPERATION_COLUMN}` = '{UPDATE_OP}' "
         f"THEN UPDATE SET {', '.join(sets)}\n"
         f"WHEN NOT MATCHED AND chg.`{OPERATION_COLUMN}` = '{INSERT_OP}' "
@@ -758,6 +926,10 @@ def _apply_changes(spark, names, change_view, contract: LoadContract, columns) -
         f"     VALUES ({qualified('chg', written)}, current_timestamp(), "
         f"current_timestamp(), {live_delete_literal()})"
     )
+
+
+def _claims_nothing(deletes) -> bool:
+    return deletes is None or deletes.isEmpty()
 
 
 def _delete_driver(contract: LoadContract, deletes):
@@ -796,13 +968,6 @@ def _claimed_deletes(spark, held, names, staging_view, contract: LoadContract, d
     )
 
 
-def _apply_deletes(spark, names, delete_view, contract) -> None:
-    spark.sql(
-        f"MERGE INTO {names['target']} AS t USING {delete_view} AS d "
-        f"ON {key_join('d', 't', contract.primary_key)} WHEN MATCHED THEN DELETE"
-    )
-
-
 def _append_only(
     spark,
     names,
@@ -837,6 +1002,49 @@ def _append_only(
     )
 
 
+def _holds_no_files(spark, target: str) -> bool:
+    """Whether the target is empty, from its Delta log alone.
+
+    A table with files may still hold no rows, and takes the ordinary path.
+    """
+
+    detail = spark.sql(f"DESCRIBE DETAIL {target}").collect()[0]
+    return int(detail["numFiles"] or 0) == 0
+
+
+def _into_empty(
+    spark,
+    names,
+    staging_view,
+    columns,
+    signature: str,
+    *,
+    rows_read: int,
+    rows_inserted: int,
+    rows_rejected: int,
+) -> LoadResult:
+    """Append every accepted row to an empty target.
+
+    Nothing can be updated, deleted or held twice there, and no stability gate
+    applies, so there is nothing to classify and nothing to merge.
+    """
+
+    audit = delta_audit_names()
+    named = qualified("", columns)
+    spark.sql(
+        f"INSERT INTO {names['target']} "
+        f"({named}, `{delta_signature_name()}`, {qualified('', audit)})\n"
+        f"SELECT {qualified('s', columns)}, {signature}, current_timestamp(), "
+        f"current_timestamp(), {live_delete_literal()} FROM {staging_view} AS s"
+    )
+    return LoadResult(
+        succeeded=True,
+        rows_read=rows_read,
+        rows_inserted=rows_inserted,
+        rows_rejected=rows_rejected,
+    )
+
+
 def _full_replace(spark, names, staging_view, columns, rows_read: int) -> LoadResult:
     """Write staging to Delta before emptying a target the source may read."""
 
@@ -846,7 +1054,7 @@ def _full_replace(spark, names, staging_view, columns, rows_read: int) -> LoadRe
     with _exact_case(spark):
         spark.sql(
             f"CREATE TABLE {names['staging']} USING delta {COLUMN_MAPPING} AS "
-            f"SELECT {named} FROM {staging_view}"
+            f"SELECT {_FABRIC_WRITE_SHUFFLE}{named} FROM {staging_view}"
         )
     rows_deleted = _count(spark, names["target"])
     spark.sql(f"DELETE FROM {names['target']}")
@@ -937,11 +1145,29 @@ def _give_back(spark, frame, view: str) -> None:
 # --- evidence ----------------------------------------------------------------
 
 
-def _drop_evidence(spark, names) -> None:
-    """Remove evidence from the preceding faulted load before this run writes."""
+def _drop_evidence(spark, names, schema: str, name: str) -> None:
+    """Remove evidence from the preceding faulted load before this run writes.
 
-    for role in ("reject", "delete", "staging"):
-        spark.sql(f"DROP TABLE IF EXISTS {names[role]}")
+    Evidence is rare and each drop is a catalogue call, so one listing finds it.
+    The listing's pattern is a regular expression apart from ``*`` and ``|``,
+    written inside a SQL string, so each name is escaped for both.
+    """
+
+    roles = {
+        (name + suffix).casefold(): role
+        for role, suffix in (
+            ("reject", REJECT_SUFFIX),
+            ("delete", DELETE_SUFFIX),
+            ("staging", STAGING_SUFFIX),
+        )
+    }
+    pattern = "|".join(
+        re.escape(table).replace("\\", "\\\\").replace("'", "\\'") for table in roles
+    )
+    for row in spark.sql(f"SHOW TABLES IN {schema} LIKE '{pattern}'").collect():
+        role = roles.get(str(row["tableName"]).casefold())
+        if role is not None:
+            spark.sql(f"DROP TABLE IF EXISTS {names[role]}")
 
 
 def _keep_evidence(spark, names, kept: set, **relations) -> None:
@@ -953,7 +1179,7 @@ def _keep_evidence(spark, names, kept: set, **relations) -> None:
         with _exact_case(spark):
             spark.sql(
                 f"CREATE TABLE {names[role]} USING delta {COLUMN_MAPPING} AS "
-                f"SELECT * FROM {view}"
+                f"SELECT {_FABRIC_WRITE_SHUFFLE}* FROM {view}"
             )
         # Recorded after the write, so being in ``kept`` means the table is
         # there. A write that failed leaves the role to be attempted again.

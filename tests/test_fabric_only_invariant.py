@@ -109,6 +109,18 @@ RETIRED = (
     "stale_shortcut_destinations",
     "REPLACE_TIMEOUT",
     "REPLACE_POLL_INTERVAL",
+    # A MutationPlan executes once. An ambiguous remote invocation is uncertain
+    # and the next Build replans from the catalogue and physical inventory, so
+    # nothing journals, checkpoints or recovers an invocation.
+    "DurableJournal",
+    "MutationJournal",
+    "journal_errors",
+    "admission_refused",
+    # Format 5 only; an older bundle is regenerated.
+    "compile_legacy_build",
+    # The remote carrier is staged in the plan's Spark-home Lakehouse.
+    "ArchiveStaging",
+    "select_staging",
 )
 
 

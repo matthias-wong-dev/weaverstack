@@ -232,8 +232,10 @@ def test_a_mixed_run_exits_non_zero_and_still_reports_what_it_found(captured, ca
     assert "  1 passed" in printed
     assert "  1 failed" in printed
     assert "  1 could not run" in printed
-    assert "2 violation(s)" in printed
+    assert "Sales.NoOrphans  (2 violations)" in printed
     assert "not installed" in printed
+    # Progress already said it passed; the report lists what needs attention.
+    assert "Sales.OrdersReconcile" not in printed
 
 
 @weaver_test()
@@ -277,7 +279,7 @@ def test_the_counts_are_rendered_per_validation(captured, capsys):
 
     printed = capsys.readouterr().out
     assert "2 missing, 1 unexpected" in printed
-    assert "4 violation(s)" in printed
+    assert "4 violations" in printed
     assert "  0 passed" in printed
     assert "  2 failed" in printed
 

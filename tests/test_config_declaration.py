@@ -24,20 +24,22 @@ def test_typical_configuration_maps_logical_items_to_physical_ones():
             "workspace": "Analytics",
             "environment": "WeaverRuntime",
             "catalogue": "Warehouse/Weaver",
-            "execution": {"parallel_workers": 8},
+            "execution": {
+                "build": {"warehouse_concurrency": 4, "spark_concurrency": 8}
+            },
             "targets": {
                 "Lakehouse/Sales": "Dev_Data",
-                "Warehouse/Reporting": {
-                    "name": "Dev_Reporting",
-                    "execution": {"parallel_workers": 4},
-                },
+                "Warehouse/Reporting": {"name": "Dev_Reporting"},
             },
         }
     )
     assert workspace.environment == EnvironmentRef(None, "WeaverRuntime")
-    assert workspace.execution.parallel_workers == 8
+    assert workspace.execution.build.warehouse_concurrency == 4
+    assert workspace.execution.build.spark_concurrency == 8
+    # An unnamed capability keeps its default.
+    assert workspace.execution.build.onelake_concurrency == 8
     assert str(workspace.target_for(_item("Lakehouse/Sales"))) == "Dev_Data/Tables"
-    assert workspace.settings_for(_item("Warehouse/Reporting")).parallel_workers == 4
+    assert str(workspace.target_for(_item("Warehouse/Reporting"))) == "Dev_Reporting"
 
 
 @weaver_test()
@@ -155,10 +157,50 @@ def test_workspace_is_required():
 
 
 @weaver_test()
-def test_parallel_workers_must_be_positive():
-    with pytest.raises(ConfigError, match="parallel_workers"):
+def test_build_concurrency_must_be_positive():
+    with pytest.raises(ConfigError, match="warehouse_concurrency"):
         parse_workspace(
-            {"workspace": "Analytics", "execution": {"parallel_workers": 0}}
+            {
+                "workspace": "Analytics",
+                "execution": {"build": {"warehouse_concurrency": 0}},
+            }
+        )
+
+
+@weaver_test()
+def test_a_load_and_test_run_their_configured_lanes():
+    from weaver.run.runner import Lanes
+
+    workspace = parse_workspace(
+        {
+            "workspace": "Analytics",
+            "execution": {"run": {"spark_concurrency": 24}},
+        }
+    )
+
+    assert Lanes.configured(workspace) == Lanes(spark=24, warehouse=4)
+    assert Lanes.configured(None) == Lanes()
+
+
+@weaver_test()
+def test_run_concurrency_must_be_positive():
+    with pytest.raises(ConfigError, match=r"execution\.run\.warehouse_concurrency"):
+        parse_workspace(
+            {
+                "workspace": "Analytics",
+                "execution": {"run": {"warehouse_concurrency": 0}},
+            }
+        )
+
+
+@weaver_test()
+def test_run_concurrency_names_only_what_it_knows():
+    with pytest.raises(ConfigError, match="unknown keys: onelake_concurrency"):
+        parse_workspace(
+            {
+                "workspace": "Analytics",
+                "execution": {"run": {"onelake_concurrency": 2}},
+            }
         )
 
 
@@ -224,11 +266,11 @@ def test_an_absent_targets_key_and_an_empty_one_are_the_same_configuration():
                 "targets": {
                     "Lakehouse/Landing": {
                         "name": "L",
-                        "execution": {"workers": 2},
+                        "execution": {"build": {"warehouse_concurrency": 2}},
                     }
                 },
             },
-            "workers",
+            "execution",
         ),
     ],
     ids=["top level", "execution", "target declaration", "target execution"],
@@ -247,8 +289,19 @@ def test_an_unknown_key_is_refused_by_name(payload, named):
         ({"workspace": ""}, "workspace"),
         ({"workspace": "Analytics", "execution": 4}, "execution"),
         (
-            {"workspace": "Analytics", "execution": {"parallel_workers": "many"}},
+            {
+                "workspace": "Analytics",
+                "execution": {"build": {"spark_concurrency": "many"}},
+            },
+            "spark_concurrency",
+        ),
+        (
+            {"workspace": "Analytics", "execution": {"parallel_workers": 4}},
             "parallel_workers",
+        ),
+        (
+            {"workspace": "Analytics", "execution": {"build": {"lanes": 4}}},
+            "lanes",
         ),
         ({"workspace": "Analytics", "targets": ["Lakehouse/Landing"]}, "targets"),
         ({"workspace": "Analytics", "targets": {"Lakehouse/Landing": None}}, "targets"),
@@ -268,7 +321,9 @@ def test_an_unknown_key_is_refused_by_name(payload, named):
         "workspace is a mapping",
         "workspace is empty",
         "execution is a scalar",
-        "parallel_workers is text",
+        "a concurrency is text",
+        "execution names an unknown setting",
+        "build names an unknown capability",
         "targets is a list",
         "target value is empty",
         "target value is a number",
