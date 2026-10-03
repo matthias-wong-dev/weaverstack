@@ -308,7 +308,10 @@ def isolated_spark(spark):
 
     session = spark.newSession()
     defaults = dict(spark.sparkContext.getConf().getAll())
-    for key, value in spark.conf.getAll.items():
+    current = spark.conf.getAll
+    # A property from PySpark 3.4, a method before it.
+    current = current() if callable(current) else current
+    for key, value in dict(current).items():
         if defaults.get(key) == value:
             continue
         try:
