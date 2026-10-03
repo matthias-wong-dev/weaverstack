@@ -98,8 +98,8 @@ def _project(folder, form):
         model = definition / "model.tmdl"
         model.write_text(
             model.read_text(encoding="utf-8").replace(
-                "model Model\n",
-                "model Model\n\tannotation Weaver.AutoHideColumns = Amount\n\tannotation Weaver.AutoHideForeignKeys = true\n",
+                "\nref table Sales",
+                "\n\tannotation Weaver.AutoHideColumns = Amount\n\tannotation Weaver.AutoHideForeignKeys = true\n\nref table Sales",
                 1,
             ),
             encoding="utf-8",
@@ -107,7 +107,9 @@ def _project(folder, form):
         sales = definition / "tables/Sales.tmdl"
         sales.write_text(
             sales.read_text(encoding="utf-8").replace(
-                "column Id\n", "column Id\n\t\tannotation Weaver.Exclude = true\n", 1
+                "\n\tcolumn ProductId",
+                "\n\t\tannotation Weaver.Exclude = true\n\n\tcolumn ProductId",
+                1,
             ),
             encoding="utf-8",
         )
