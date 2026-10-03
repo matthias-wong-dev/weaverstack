@@ -352,6 +352,9 @@ def _names() -> dict[str, str]:
         "catalogue": estate.name("perf_load_weaver"),
         LAKEHOUSE: estate.name("perf_load_lakehouse"),
         WAREHOUSE: estate.name("perf_load_warehouse"),
+        # An item has a physical target of its own.
+        (FLOW_ITEM, LAKEHOUSE): estate.name("perf_flow_lakehouse"),
+        (FLOW_ITEM, WAREHOUSE): estate.name("perf_flow_warehouse"),
     }
 
 
@@ -454,22 +457,23 @@ class LoadBench:
         )
         if not result.succeeded:
             raise AssertionError(f"the benchmark catalogue was not built: {result}")
-        self._sql().execute_script(
-            f"if object_id(N'dbo.{CONTROL}') is null\n"
-            f"create table dbo.{CONTROL} (TableName varchar(32), Role varchar(8),"
-            " FirstId bigint, RowTotal bigint, Stride bigint, Revision int);"
-        )
-        self.spark(
-            f"spark.sql('''CREATE TABLE IF NOT EXISTS {self._control()} "
-            "(TableName STRING, Role STRING, FirstId BIGINT, RowTotal BIGINT,"
-            " Stride BIGINT, Revision INT) USING delta''')"
-        )
+        for item in (ITEM, FLOW_ITEM):
+            self._sql(item).execute_script(
+                f"if object_id(N'dbo.{CONTROL}') is null\n"
+                f"create table dbo.{CONTROL} (TableName varchar(32), Role varchar(8),"
+                " FirstId bigint, RowTotal bigint, Stride bigint, Revision int);"
+            )
+            self.spark(
+                f"spark.sql('''CREATE TABLE IF NOT EXISTS {self._control(item)} "
+                "(TableName STRING, Role STRING, FirstId BIGINT, RowTotal BIGINT,"
+                " Stride BIGINT, Revision INT) USING delta''')"
+            )
         built = weaver.build(
             str(source),
             items=[
-                f"{_kind(engine)}/{item}={_kind(engine)}/{self.names[engine]}"
+                f"{_kind(engine)}/{item}={_kind(engine)}/{self.names[key]}"
                 for engine in (LAKEHOUSE, WAREHOUSE)
-                for item in (ITEM, FLOW_ITEM)
+                for item, key in ((ITEM, engine), (FLOW_ITEM, (FLOW_ITEM, engine)))
             ],
             session=self.session,
             workspace=self.workspace_name,
@@ -481,7 +485,9 @@ class LoadBench:
 
     # --- the control table ---------------------------------------------------
 
-    def control(self, engine: str, table: str, *segments: Segment) -> None:
+    def control(
+        self, engine: str, table: str, *segments: Segment, item: str = ITEM
+    ) -> None:
         values = ", ".join(
             f"('{table}', '{s.role}', {s.first_id}, {s.rows}, {s.stride}, {s.revision})"
             for s in segments
@@ -490,11 +496,12 @@ class LoadBench:
             script = f"delete from dbo.{CONTROL} where TableName = '{table}';"
             if values:
                 script += f"\ninsert into dbo.{CONTROL} values {values};"
-            self._sql().execute_script(script)
+            self._sql(item).execute_script(script)
             return
-        body = f"spark.sql(\"DELETE FROM {self._control()} WHERE TableName = '{table}'\")\n"
+        control = self._control(item)
+        body = f"spark.sql(\"DELETE FROM {control} WHERE TableName = '{table}'\")\n"
         if values:
-            body += f'spark.sql("INSERT INTO {self._control()} VALUES {values}")\n'
+            body += f'spark.sql("INSERT INTO {control} VALUES {values}")\n'
         self.spark(body)
 
     # --- loading -------------------------------------------------------------
@@ -618,7 +625,7 @@ class LoadBench:
 
         target = self.target(engine, table, schema)
         if engine == WAREHOUSE:
-            sql = self._sql()
+            sql = self._sql(FLOW_ITEM if schema == FLOW_SCHEMA else ITEM)
             return {
                 name: sql.query(query.format(target=target))[0]["n"]
                 for name, query in checks.items()
@@ -636,7 +643,10 @@ class LoadBench:
     def target(self, engine: str, table: str, schema: str = SCHEMA) -> str:
         if engine == WAREHOUSE:
             return f"[{schema}].[{table}]"
-        return f"`{self.workspace_name}`.`{self.names[LAKEHOUSE]}`.`{schema}`.`{table}`"
+        lakehouse = self._physical(
+            LAKEHOUSE, FLOW_ITEM if schema == FLOW_SCHEMA else ITEM
+        )
+        return f"`{self.workspace_name}`.`{lakehouse}`.`{schema}`.`{table}`"
 
     def generated(self, engine: str, segments) -> str:
         """The rows ``segments`` generate, as a relation in ``engine``'s SQL."""
@@ -671,19 +681,23 @@ class LoadBench:
     def spark(self, body: str):
         return self.livy.run(body).payload
 
-    def _sql(self):
+    def _physical(self, engine: str, item: str) -> str:
+        return self.names[engine if item == ITEM else (item, engine)]
+
+    def _sql(self, item: str = ITEM):
         from weaver.targets import ItemRef, WarehouseTarget
         from weaver.workspaces import Workspace
 
         return self.session.sql_executor(
-            WarehouseTarget(ItemRef(self.names[WAREHOUSE])),
+            WarehouseTarget(ItemRef(self._physical(WAREHOUSE, item))),
             workspace=Workspace(
                 workspace=self.workspace_name, catalogue=self.catalogue
             ),
         )
 
-    def _control(self) -> str:
-        return f"`{self.workspace_name}`.`{self.names[LAKEHOUSE]}`.`dbo`.`{CONTROL}`"
+    def _control(self, item: str = ITEM) -> str:
+        lakehouse = self._physical(LAKEHOUSE, item)
+        return f"`{self.workspace_name}`.`{lakehouse}`.`dbo`.`{CONTROL}`"
 
     def _spark_counters(self) -> dict:
         # The scheduler's next job and stage ids, so a difference counts what
@@ -1020,7 +1034,9 @@ def run_flow(bench: LoadBench, engines, run: ScenarioRun, scenario: str) -> None
     for engine in engines:
         for name, upstream in FLOW.items():
             if upstream is None:
-                bench.control(engine, f"{FLOW_SCHEMA}.{name}", Segment(0, rows))
+                bench.control(
+                    engine, f"{FLOW_SCHEMA}.{name}", Segment(0, rows), item=FLOW_ITEM
+                )
     timing, nodes = bench.load_flow(scenario, engines, reload=True)
     run.timings[scenario] = timing
     if not timing.succeeded:
