@@ -99,7 +99,7 @@ def test_a_warehouse_mirror_binds_last_after_its_reconstruction_and_the_fork():
     plan, payloads, summary = mirror_mutation_plan(resolved, session=session)
 
     actions = _actions(plan)
-    bind = "mirror-bind-warehouse-Model_Dev"
+    bind = "mirror-bind"
     assert not any(bind in a.depends_on for a in actions.values())
     for action in actions:
         if action != bind and not action.startswith("wipe-warehouse-Weaver_Dev"):
@@ -240,11 +240,11 @@ def test_a_lakehouse_mirror_resolves_case_exact_sources_and_awaits_its_shortcuts
         "clear-files-lakehouse-Input_Dev",
         copy_id := "mirror-load-tree-lakehouse-Input_Dev",
     )
-    assert runs_before(plan, copy_id, "mirror-bind-lakehouse-Input_Dev")
+    assert runs_before(plan, copy_id, "mirror-bind")
     assert runs_before(
         plan,
         "mirror-await-tables-pointers-lakehouse-Input_Dev",
-        "mirror-bind-lakehouse-Input_Dev",
+        "mirror-bind",
     )
     assert plan.execution.spark_home_target_id == "lakehouse-Input_Dev"
     assert summary["Lakehouse/Input"]["files"] == 1
@@ -310,6 +310,20 @@ def test_a_shortcut_into_another_mirrored_item_reads_what_this_plan_builds(tmp_p
         "mirror-await-tables-pointers-lakehouse-Input_Dev",
         "mirror-recreated-lakehouse-Model_Dev",
     )
+    # Both items publish to shared catalogue tables in one step each, last.
+    publishing = [
+        a.id
+        for a in actions.values()
+        if a.kind in ("record_mirror", "bind_installation")
+    ]
+    assert publishing == ["mirror-record", "mirror-bind"]
+    for reconstruction in (
+        "mirror-recreated-lakehouse-Model_Dev",
+        "mirror-await-tables-pointers-lakehouse-Input_Dev",
+    ):
+        assert runs_before(plan, reconstruction, "mirror-record")
+    bound = payloads[actions["mirror-bind"].payload].decode()
+    assert "Input_Dev" in bound and "Model_Dev" in bound
 
 
 @weaver_test()
@@ -394,5 +408,5 @@ def test_a_wide_lakehouse_mirror_spreads_its_views_and_waits_across_actions(tmp_
     waits = [a for a in actions if a.startswith("mirror-await-tables-pointers-")]
     assert len(views) == 3 and len(waits) == 3
     for each in (*views, *waits):
-        assert runs_before(plan, each, "mirror-bind-lakehouse-Input_Dev")
+        assert runs_before(plan, each, "mirror-bind")
     assert not any(runs_before(plan, a, b) for a in views for b in views if a != b)

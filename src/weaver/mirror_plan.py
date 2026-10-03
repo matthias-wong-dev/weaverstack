@@ -7,9 +7,11 @@ rows. Execution then reads nothing it did not plan:
 .. code-block:: text
 
     wipe catalogue ─→ catalogue build ─→ fork ─────────────┐
-    wipe item ─→ reconstruct item ─────────────────────────┴→ record ─→ binding
+    wipe item A ─→ reconstruct item A ─────────────────────┤
+    wipe item B ─→ reconstruct item B ─────────────────────┴→ record ─→ binding
 
-A destination is bound to its mirror only after its own reconstruction and the
+Recording and binding write shared catalogue tables, so each is one action for
+the whole mirror. Items are bound only after every reconstruction and the
 catalogue fork have succeeded, so an incomplete mirror is never published.
 """
 
@@ -192,6 +194,7 @@ def mirror_mutation_plan(resolved, *, session) -> tuple[MutationPlan, dict, dict
     compiling.stage("fork catalogue state", catalogue, [fork])
 
     reconstructed: dict[str, tuple[str, ...]] = {}
+    published: list[str] = []
     summary = {}
     for each in resolved.items:
         destination = compiling.target(each.kind.lower(), each.destination)
@@ -228,13 +231,8 @@ def mirror_mutation_plan(resolved, *, session) -> tuple[MutationPlan, dict, dict
                 session=session,
             )
         reconstructed[str(each.item)] = tuple(a.id for a in actions)
-        _publish(
-            compiling,
-            resolved,
-            each,
-            catalogue,
-            after=(fork.id, *finishing(cleared), *(a.id for a in actions)),
-        )
+        published.extend((*finishing(cleared), *(a.id for a in actions)))
+    _publish(compiling, resolved, catalogue, after=(fork.id, *published))
 
     spark_home = next(
         (
@@ -781,28 +779,33 @@ def _lakehouse(
     }
 
 
-def _publish(compiling, resolved, each, catalogue, *, after) -> None:
-    """Record what is borrowed, then bind the item to its mirror, last."""
+def _publish(compiling, resolved, catalogue, *, after) -> None:
+    """Record what every item borrows, then bind every item to its mirror, last.
+
+    Both write shared catalogue tables, so each is one action for the whole
+    mirror, after every reconstruction and the fork have succeeded.
+    """
 
     from . import __version__
     from .catalogue.borrow import record_statements
     from .catalogue.render import InstallationScope, render_merge
     from .catalogue.tables import INSTALLATION
 
-    slug = f"{each.kind.lower()}-{each.destination}"
-    actions = []
-    recorded = record_statements(
-        each.relations,
-        source_workspace=resolved.workspace.workspace,
-        source_target=each.source_target,
-    )
-    previous = tuple(after)
-    if recorded:
-        path, digest = compiling.payload(
-            f"record-{slug}.sql", "\n".join(recorded).encode()
+    recorded = [
+        statement
+        for each in resolved.items
+        for statement in record_statements(
+            each.relations,
+            source_workspace=resolved.workspace.workspace,
+            source_target=each.source_target,
         )
+    ]
+    previous = tuple(dict.fromkeys(after))
+    actions = []
+    if recorded:
+        path, digest = compiling.payload("record.sql", "\n".join(recorded).encode())
         record = _action(
-            f"mirror-record-{slug}",
+            "mirror-record",
             "record_mirror",
             catalogue,
             executor="tsql",
@@ -813,34 +816,41 @@ def _publish(compiling, resolved, each, catalogue, *, after) -> None:
         )
         actions.append(record)
         previous = (record.id,)
-    item = each.item
-    row = dict(resolved.installations.get(item) or {})
-    row.update(
-        {
-            "item_type": item.item_type,
-            "item_name": item.item_name,
-            "target_name": each.destination,
-            "weaver_version": __version__,
-            "signature": str(row.get("signature") or ""),
-        }
-    )
-    statement = render_merge(
-        INSTALLATION, [row], scope=InstallationScope(item.item_type, item.item_name)
-    )
-    path, digest = compiling.payload(f"bind-{slug}.sql", statement.encode())
-    actions.append(
-        _action(
-            f"mirror-bind-{slug}",
-            "bind_installation",
-            catalogue,
-            executor="tsql",
-            payload=path,
-            digest=digest,
-            depends_on=previous,
-            resources=(f"warehouse:{catalogue.item_id}",),
+    merges = []
+    for each in resolved.items:
+        item = each.item
+        row = dict(resolved.installations.get(item) or {})
+        row.update(
+            {
+                "item_type": item.item_type,
+                "item_name": item.item_name,
+                "target_name": each.destination,
+                "weaver_version": __version__,
+                "signature": str(row.get("signature") or ""),
+            }
         )
-    )
-    compiling.stage(f"bind {item} to {each.target}", catalogue, actions)
+        merges.append(
+            render_merge(
+                INSTALLATION,
+                [row],
+                scope=InstallationScope(item.item_type, item.item_name),
+            )
+        )
+    if merges:
+        path, digest = compiling.payload("bind.sql", "\n".join(merges).encode())
+        actions.append(
+            _action(
+                "mirror-bind",
+                "bind_installation",
+                catalogue,
+                executor="tsql",
+                payload=path,
+                digest=digest,
+                depends_on=previous,
+                resources=(f"warehouse:{catalogue.item_id}",),
+            )
+        )
+    compiling.stage("bind the mirrored items", catalogue, actions)
 
 
 class StoredNames:
