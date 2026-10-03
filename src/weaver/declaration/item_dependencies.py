@@ -150,7 +150,17 @@ def resolve_item_dependencies(repository: WeaverRepository) -> WeaverRepository:
             ),
         )
     )
-    graph = _document_graph(native, logical_pairs, graph_edges)
+    graph = _document_graph(
+        {
+            **native,
+            **{
+                WeaverDocumentId.model_root(item): None
+                for item in repository.semantic_models
+            },
+        },
+        logical_pairs,
+        graph_edges,
+    )
     item_graph = _item_graph(repository, resolved)
     by_name = {str(item.identity): item.identity for item in repository.items}
     return replace(

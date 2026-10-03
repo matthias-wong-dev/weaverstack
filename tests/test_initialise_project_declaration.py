@@ -179,7 +179,9 @@ def test_generation_is_deterministic(tmp_path):
 
 @weaver_test()
 def test_a_project_with_neither_item_says_so():
-    with pytest.raises(CommandError, match="Lakehouse, a Warehouse, or both"):
+    with pytest.raises(
+        CommandError, match="Lakehouse, a Warehouse, or a SemanticModel"
+    ):
         ProjectRequest(workspace=WORKSPACE, catalogue="Catalogue", environment="Weaver")
 
 

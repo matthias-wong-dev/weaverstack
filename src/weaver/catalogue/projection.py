@@ -92,6 +92,15 @@ def project_item_catalogue(
 
     scope = InstallationScope(item.item_type, item.item_name)
     retained = tuple(sorted(set(retained), key=str))
+    if item in repository.semantic_models:
+        from .semantic import project_semantic_model
+
+        rows = (
+            project_semantic_model(item, repository.semantic_models[item])
+            if WeaverDocumentId.model_root(item) in retained
+            else {}
+        )
+        return CatalogueProjection(scope=scope, rows=rows)
     if any(identity.item != item for identity in retained):
         raise ValueError(
             f"item projection for {item} includes a document owned by another item"

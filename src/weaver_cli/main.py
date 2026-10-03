@@ -114,6 +114,8 @@ def _kind_requirements(values) -> set[str]:
     wanted: set[str] = set()
     for value in values or ():
         kind, _name = _kind_and_name(value)
+        if kind == "semanticmodel":
+            continue
         if kind.startswith("warehouse"):
             wanted.add(TDS)
         else:
@@ -149,7 +151,7 @@ def _requires_run(args) -> frozenset[str]:
 
 
 def _requires_build(args) -> frozenset[str]:
-    """Avoid Spark for Warehouse-only builds.
+    """Avoid Spark for Warehouse and SemanticModel builds.
 
     An unscoped build needs the superset because arguments do not reveal source
     or configured items.
@@ -999,6 +1001,7 @@ def _add_initialise_args(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument("--lakehouse", help="Lakehouse for Delta tables and files.")
     parser.add_argument("--warehouse", help="Warehouse for SQL tables and views.")
+    parser.add_argument("--semantic-model", help="SemanticModel for the project.")
     parser.add_argument(
         "--example",
         dest="example",
@@ -1952,6 +1955,7 @@ def _initialise_once(args: argparse.Namespace, *, session):
         workspace=args.workspace,
         lakehouse=args.lakehouse,
         warehouse=args.warehouse,
+        semantic_model=getattr(args, "semantic_model", None),
         example=bool(args.example),
         publish_environment=args.publish_environment,
         dry_run=args.dry_run,

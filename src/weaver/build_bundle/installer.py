@@ -283,6 +283,23 @@ class Installer:
             )
         )
 
+    def semantic_model(self, bound):
+        if bound.kind != "semanticmodel":
+            raise InstallError(f"{bound.display} is not a SemanticModel")
+        resolved = self.session.resolve_item(
+            bound.name, item_type="SemanticModel", workspace=self.workspace
+        )
+        if (
+            bound.workspace_id is not None
+            and resolved.workspace_id != bound.workspace_id
+        ):
+            raise InstallError(f"{bound.display} resolved in a different workspace")
+        if bound.item_id != bound.name and resolved.id != bound.item_id:
+            raise InstallError(
+                f"{bound.display} has a different item ID; regenerate the bundle"
+            )
+        return self.session.semantic_model(bound.name, workspace=self.workspace)
+
     def resolve_target(self, bound: BoundTarget) -> ResolvedTarget:
         # Resolve once so executors never derive paths or inherit a Lakehouse.
         item = ItemRef(bound.item_id)
@@ -296,7 +313,7 @@ class Installer:
     def _resolved(self, bound: BoundTarget, item: ItemRef, method: str):
         """Resolve a Lakehouse address; Warehouse actions use TDS instead."""
 
-        if bound.kind == WAREHOUSE_TARGET:
+        if bound.kind != "lakehouse":
             return None
         resolve = getattr(self.resolver, method, None)
         if resolve is None:
@@ -829,6 +846,7 @@ def _run_sequence(
                     store=installer.store,
                     target=target,
                     sql=installer.sql_for(target.bound),
+                    semantic_model=installer.semantic_model,
                     targets=resolved,
                     build_datetime=build_datetime,
                 )

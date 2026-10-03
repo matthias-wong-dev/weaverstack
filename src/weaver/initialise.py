@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .declaration.model import LAKEHOUSE, WAREHOUSE
+from .declaration.model import LAKEHOUSE, SEMANTIC_MODEL, WAREHOUSE
 from .errors import WeaverError
 from .onboarding import (
     WORKSPACE_CONFIG_FILE,
@@ -118,6 +118,7 @@ def initialise(
     environment: str = DEFAULT_ENVIRONMENT,
     lakehouse: str | None = None,
     warehouse: str | None = None,
+    semantic_model: str | None = None,
     example: bool = False,
     publish_environment: bool = False,
     install_weaver: bool | None = None,
@@ -149,6 +150,7 @@ def initialise(
         environment=environment,
         lakehouse=lakehouse,
         warehouse=warehouse,
+        semantic_model=semantic_model,
         example=example,
     )
 
@@ -396,6 +398,10 @@ def _requested(request: ProjectRequest) -> tuple[_Requested, ...]:
         wanted.append(_Requested(LAKEHOUSE, request.lakehouse, LAKEHOUSE_ITEM))
     if request.warehouse:
         wanted.append(_Requested(WAREHOUSE, request.warehouse, WAREHOUSE_ITEM))
+    if request.semantic_model:
+        wanted.append(
+            _Requested(SEMANTIC_MODEL, request.semantic_model, SEMANTIC_MODEL)
+        )
     wanted.append(_Requested(ENVIRONMENT_ROLE, request.environment, ENVIRONMENT))
     return tuple(wanted)
 
@@ -475,14 +481,31 @@ def _create_missing(
         )
         try:
             with session.step(f"Creating the {wanted.role}", wanted.name):
-                create(physical, wanted.name, client=client)
+                if wanted.item_type == SEMANTIC_MODEL:
+                    import yaml
+
+                    from .fabric.resources import create_semantic_model
+                    from .onboarding.project import semantic_addon
+                    from .semantic_models.compiler import compile_model
+                    from .semantic_models.definition import encode_definition
+
+                    definition = encode_definition(
+                        compile_model(
+                            wanted.name, item=yaml.safe_load(semantic_addon())
+                        )
+                    )
+                    create_semantic_model(
+                        physical, wanted.name, definition=definition, client=client
+                    )
+                else:
+                    create(physical, wanted.name, client=client)
         except WeaverError as exc:
             raise _creation_error(wanted.role, wanted.name, exc) from exc
         made.append(FabricItemOutcome(wanted.role, wanted.name, CREATED))
     return tuple(made)
 
 
-_ROLE_ORDER = (CATALOGUE_ROLE, ENVIRONMENT_ROLE, LAKEHOUSE, WAREHOUSE)
+_ROLE_ORDER = (CATALOGUE_ROLE, ENVIRONMENT_ROLE, LAKEHOUSE, WAREHOUSE, SEMANTIC_MODEL)
 
 
 def _in_role_order(resources) -> tuple[FabricItemOutcome, ...]:

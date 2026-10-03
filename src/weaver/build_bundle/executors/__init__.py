@@ -14,6 +14,7 @@ from .base import ActionExecutor, InstallationContext, ResolvedTarget, SkippedEx
 from .folder import FolderExecutor
 from .load_file import LoadFileExecutor
 from .runtime_state import RuntimeStateExecutor
+from .semantic import SemanticCatalogueExecutor, SemanticModelExecutor
 from .shortcut import ShortcutExecutor
 from .spark_sql import SparkSqlExecutor
 from .spark_sql_batch import SparkSqlBatchExecutor
@@ -24,6 +25,8 @@ from .tsql import TSqlBatchExecutor, TSqlExecutor
 
 def default_executors() -> dict[str, ActionExecutor]:
     return {
+        SemanticModelExecutor.name: SemanticModelExecutor(),
+        SemanticCatalogueExecutor.name: SemanticCatalogueExecutor(),
         SparkSqlExecutor.name: SparkSqlExecutor(),
         SparkSqlBatchExecutor.name: SparkSqlBatchExecutor(),
         SparkTableExecutor.name: SparkTableExecutor(),

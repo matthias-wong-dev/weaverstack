@@ -197,6 +197,7 @@ def _preflight(workspace: Workspace, bindings, *, session) -> None:
         workspace=workspace.workspace,
         control_item=workspace.catalogue_item,
         environment=workspace.environment,
+        client=session.resolver(workspace).client if session is not None else None,
     )
 
 

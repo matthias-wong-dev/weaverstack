@@ -56,6 +56,7 @@ class InstallationContext:
     targets: Mapping[str, ResolvedTarget] = field(default_factory=dict)
     #: One publication instant for every Registry row in this installation.
     build_datetime: str | None = None
+    semantic_model: Any = None
 
     def resolved(self, target_id: str) -> ResolvedTarget:
         found = self.targets.get(target_id)

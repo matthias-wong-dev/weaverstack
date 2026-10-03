@@ -13,7 +13,14 @@ from typing import Mapping
 from ..catalogue.claims import without_claims
 from ..catalogue.state import Catalogue
 from ..catalogue.tables import ROLE_SHORTCUT
-from ..declaration.model import LAKEHOUSE, WAREHOUSE, WeaverItemId, WeaverRepository
+from ..declaration.model import (
+    LAKEHOUSE,
+    SEMANTIC_MODEL,
+    WAREHOUSE,
+    WeaverDocumentId,
+    WeaverItemId,
+    WeaverRepository,
+)
 from ..errors import BuildError
 from ..etl import item_runtime_artefacts, load_schemas, runtime_artefacts
 from ..locations import Location
@@ -96,13 +103,16 @@ def generate_item_build_bundle(
     selected_ids = selected_documents | selected_shortcuts | selected_loads
     certifiable_ids = selected_ids | selected_validations
 
-    targets = tuple(
-        by_item[item].to_bound_target() for item in sorted(by_item, key=str)
-    )
-    target_by_item = {
-        item: by_item[item].to_bound_target() for item in sorted(by_item, key=str)
-    }
+    from .semantic import bind_semantic_target
+
     inventories = dict(target_inventories or {})
+    target_by_item = {
+        item: bind_semantic_target(
+            by_item[item].to_bound_target(), inventories.get(item)
+        )
+        for item in sorted(by_item, key=str)
+    }
+    targets = tuple(target_by_item.values())
     for item, target in target_by_item.items():
         inventory = inventories.get(item)
         if inventory is None:
@@ -155,7 +165,10 @@ def generate_item_build_bundle(
         source for source in installed_sources.values() if source.id not in declared_ids
     )
 
-    stages: list[PlannedStage] = []
+    from .catalogue_actions import render_catalogue_upgrade
+
+    upgrade = render_catalogue_upgrade(catalogue, catalogue_target=catalogue_target)
+    stages: list[PlannedStage] = [upgrade] if upgrade is not None else []
     omitted: list[OmittedNode] = []
 
     # Decertify everything rebuilt, including pointers refreshed in place.
@@ -262,6 +275,11 @@ def generate_item_build_bundle(
             catalogue_target=catalogue_target,
             # Compare publication against the catalogue after claim deletion.
             current=catalogue_after_deletions,
+            selected_models={
+                identity
+                for identity in selected_for_build
+                if identity.item in repository.semantic_models
+            },
         )
     )
 
@@ -357,6 +375,11 @@ def _selectable(
             identity
             for identity, source in repository.source_documents.items()
             if identity.item in by_item and not source.is_validation
+        }
+        | {
+            WeaverDocumentId.parse(str(item))
+            for item in repository.semantic_models
+            if item in by_item
         },
         {
             declaration.destination
@@ -468,6 +491,15 @@ def plan_item_build(
         shortcut_sources=shortcut_sources,
         mirrored=mirrored,
     )
+    if item.item_type == SEMANTIC_MODEL:
+        from .semantic import semantic_stage
+
+        stages = (
+            (semantic_stage(repository, item, target),)
+            if WeaverDocumentId.parse(str(item)) in selected_for_build
+            else ()
+        )
+        return PlannedItem(stages, (), frozenset())
     if item.item_type == LAKEHOUSE:
         return _plan_lakehouse_item(**arguments)
     if item.item_type == WAREHOUSE:

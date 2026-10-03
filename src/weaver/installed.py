@@ -36,6 +36,7 @@ from .declaration.model import (
     OBJECT_SHAPE,
     PHYSICAL_TARGET,
     SCHEMA_SHORTCUT,
+    SEMANTIC_MODEL,
     TABLE_SHORTCUT,
     TABLES,
     WAREHOUSE,
@@ -60,7 +61,11 @@ PYTHON_TABLE = "python_table"
 PYTHON_FOLDER = "python_folder"
 
 #: Item type determines the kind of its named physical target.
-_TARGET_KIND_FOR_ITEM = {LAKEHOUSE: LAKEHOUSE_TARGET, WAREHOUSE: WAREHOUSE_TARGET}
+_TARGET_KIND_FOR_ITEM = {
+    LAKEHOUSE: LAKEHOUSE_TARGET,
+    WAREHOUSE: WAREHOUSE_TARGET,
+    SEMANTIC_MODEL: "semanticmodel",
+}
 
 #: The catalogue uses lower case; declarations use title case.
 KIND_FOR_TEST_TYPE = {"test": TEST, "assumption": ASSUMPTION}

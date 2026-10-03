@@ -26,6 +26,24 @@ from ..workspaces import Workspace
 from .base import Session, WorkspaceScope
 
 
+class _RecordedSql:
+    def __init__(self, session, target, workspace):
+        self.session, self.target, self.workspace = session, target, workspace
+
+    def query(self, statement, parameters=None):
+        return self.session.query_tsql(
+            statement,
+            target=self.target,
+            workspace=self.workspace,
+            parameters=parameters,
+        )
+
+    def execute_script(self, statement):
+        return self.session.execute_tsql(
+            statement, target=self.target, workspace=self.workspace
+        )
+
+
 @dataclass
 class RecordedCall:
     kind: str
@@ -75,6 +93,9 @@ class TestSession(Session):
 
     def answer_python(self, value) -> None:
         self._python_answers.append(value)
+
+    def sql_executor(self, target, *, workspace=None):
+        return _RecordedSql(self, target, workspace)
 
     def answer_semantic_model(self, workspace: str, item: str, client) -> None:
         self._semantic_answers[(workspace, item)] = client

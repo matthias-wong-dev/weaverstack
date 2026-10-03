@@ -72,6 +72,10 @@ class WipeTarget:
     @classmethod
     def parse(cls, text: str) -> "WipeTarget":
         target = parse_physical_target(text, what="wipe target", error=CommandError)
+        if physical_kind(target) not in {LAKEHOUSE, WAREHOUSE}:
+            raise CommandError(
+                "SemanticModel wipe is not supported; name a Lakehouse or Warehouse"
+            )
         return cls(item_type=physical_kind(target), item=physical_item(target))
 
     @property

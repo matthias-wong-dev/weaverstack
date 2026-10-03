@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ..declaration.model import LAKEHOUSE, WAREHOUSE
+from ..declaration.model import LAKEHOUSE, SEMANTIC_MODEL, WAREHOUSE
 from ..errors import CommandError
 from ..targets import validate_name
 
@@ -34,28 +34,33 @@ class ProjectRequest:
     lakehouse: str | None = None
     warehouse: str | None = None
     example: bool = False
+    semantic_model: str | None = None
 
     def __post_init__(self) -> None:
         for field in ("workspace", "catalogue", "environment"):
             object.__setattr__(
                 self, field, validate_name(getattr(self, field), what=field)
             )
-        for field in ("lakehouse", "warehouse"):
+        for field in ("lakehouse", "warehouse", "semantic_model"):
             value = getattr(self, field)
             if value is not None:
                 object.__setattr__(self, field, validate_name(value, what=field))
         for kind, value in (
             ("Lakehouse", self.lakehouse),
             ("Warehouse", self.warehouse),
+            ("SemanticModel", self.semantic_model),
             ("Warehouse", self.catalogue),
             ("Environment", self.environment),
         ):
             if value is not None:
                 validate_fabric_name(value, kind)
-        if self.lakehouse is None and self.warehouse is None:
+        if (
+            self.lakehouse is None
+            and self.warehouse is None
+            and self.semantic_model is None
+        ):
             raise CommandError(
-                "Choose a Lakehouse, a Warehouse, or both. A project with "
-                "neither has nowhere to build into."
+                "Choose a Lakehouse, a Warehouse, or a SemanticModel for the project."
             )
 
     @property
@@ -71,6 +76,8 @@ class ProjectRequest:
             chosen.append(f"{LAKEHOUSE}/{self.lakehouse}")
         if self.warehouse:
             chosen.append(f"{WAREHOUSE}/{self.warehouse}")
+        if self.semantic_model:
+            chosen.append(f"{SEMANTIC_MODEL}/{self.semantic_model}")
         return tuple(chosen)
 
 
@@ -85,7 +92,19 @@ def project_files(request: ProjectRequest) -> dict[str, str]:
         files[f"{LAKEHOUSE}/{request.lakehouse}/Tables/{KEEP_FILE}"] = ""
     if request.warehouse and not request.example:
         files[f"{WAREHOUSE}/{request.warehouse}/{KEEP_FILE}"] = ""
+    if request.semantic_model:
+        files[f"{SEMANTIC_MODEL}/{request.semantic_model}/addon.yml"] = semantic_addon()
     return files
+
+
+def semantic_addon():
+    from importlib.resources import files
+
+    return (
+        files("weaver")
+        .joinpath("fragments/semantic-addon.yml")
+        .read_text(encoding="utf-8")
+    )
 
 
 def _workspace_config(request: ProjectRequest) -> str:
@@ -100,6 +119,10 @@ def _workspace_config(request: ProjectRequest) -> str:
         lines.append(f"  {LAKEHOUSE}/{request.lakehouse}: {_scalar(request.lakehouse)}")
     if request.warehouse:
         lines.append(f"  {WAREHOUSE}/{request.warehouse}: {_scalar(request.warehouse)}")
+    if request.semantic_model:
+        lines.append(
+            f"  {SEMANTIC_MODEL}/{request.semantic_model}: {_scalar(request.semantic_model)}"
+        )
     return "\n".join(lines) + "\n"
 
 

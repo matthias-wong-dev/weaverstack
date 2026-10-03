@@ -120,8 +120,12 @@ def _expression(
     ).rstrip(), index
 
 
-def _parse_file(path: Path, database: dict, references: list[str]) -> None:
-    lines = path.read_text(encoding="utf-8-sig").splitlines()
+def _parse_file(
+    path: Path, database: dict, references: list[str], *, text: str | None = None
+) -> None:
+    lines = (
+        path.read_text(encoding="utf-8-sig") if text is None else text
+    ).splitlines()
     model = database.setdefault("model", {})
     stack: list[tuple[int, str, dict]] = []
     descriptions: list[str] = []

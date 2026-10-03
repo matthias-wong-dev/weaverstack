@@ -1,0 +1,3 @@
+tables:
+  Example:
+    .dax: ROW("Value", 1)

@@ -19,7 +19,15 @@ CATALOGUE_SCHEMA = "_"
 
 #: Installed-object vocabulary used for runtime addressing. Files, stored
 #: procedures and shortcut schemas are managed objects subject to the lifecycle.
-OBJECT_TYPES = ("folder", "table", "view", "file", "stored_procedure", "schema")
+OBJECT_TYPES = (
+    "folder",
+    "table",
+    "view",
+    "file",
+    "stored_procedure",
+    "schema",
+    "semantic_model",
+)
 
 #: What an object is for, independent of its physical shape.
 ROLE_DATA = "data"
@@ -58,6 +66,7 @@ OBJECT_TYPE_VOCABULARY = {
     "file": "File",
     "stored_procedure": "Stored procedure",
     "schema": "Schema",
+    "semantic_model": "Semantic model",
 }
 
 OBJECT_ROLE_VOCABULARY = {
@@ -376,6 +385,10 @@ INSTALLATION = CatalogueTable(
             not_null=True,
             description="The Weaver version that last reconciled this installation.",
         ),
+        CatalogueColumn(
+            "workspace_id", description="The resolved Fabric workspace ID."
+        ),
+        CatalogueColumn("item_id", description="The resolved Fabric item ID."),
         _signature("the Item declaration"),
     ),
 )
@@ -763,6 +776,61 @@ SHORTCUT = CatalogueTable(
 )
 
 
+SEMANTIC_MODEL_DICTIONARY = CatalogueTable(
+    name="SemanticModelDictionary",
+    description="Native semantic model definition and compiler provenance.",
+    key=(*ITEM_SCOPE_COLUMNS, "schema_name", "object_name"),
+    columns=(
+        *_scope(),
+        *_object(),
+        CatalogueColumn(
+            "definition",
+            sql_type=WIDE_LIST_TYPE,
+            description="The deployed native TMSL database from definition readback.",
+        ),
+        CatalogueColumn(
+            "properties",
+            sql_type=WIDE_LIST_TYPE,
+            description="Native properties as JSON.",
+        ),
+        CatalogueColumn(
+            "provenance",
+            sql_type=WIDE_LIST_TYPE,
+            description="Property origins and derivation reasons as JSON.",
+        ),
+        _signature("the effective semantic model"),
+    ),
+)
+
+SEMANTIC_OBJECT_DICTIONARY = CatalogueTable(
+    name="SemanticObjectDictionary",
+    description="Model-scoped native semantic objects.",
+    key=(*ITEM_SCOPE_COLUMNS, "schema_name", "object_name", "semantic_path"),
+    columns=(
+        *_scope(),
+        *_object(),
+        CatalogueColumn(
+            "semantic_path",
+            not_null=True,
+            sql_type=LIST_TYPE,
+            description="The model-scoped object path with escaped native names.",
+        ),
+        CatalogueColumn("semantic_kind", description="The native object kind."),
+        CatalogueColumn(
+            "properties",
+            sql_type=WIDE_LIST_TYPE,
+            description="Native properties as JSON.",
+        ),
+        CatalogueColumn(
+            "provenance",
+            sql_type=WIDE_LIST_TYPE,
+            description="Property origins and derivation reasons as JSON.",
+        ),
+        _signature("the effective semantic model"),
+    ),
+)
+
+
 #: Dictionary reconciliation order, kept stable for payloads and reports.
 DICTIONARY_TABLES = (
     SCHEMA_DICTIONARY,
@@ -774,6 +842,8 @@ DICTIONARY_TABLES = (
     TEST_DICTIONARY,
     DEPENDENCY,
     SHORTCUT,
+    SEMANTIC_MODEL_DICTIONARY,
+    SEMANTIC_OBJECT_DICTIONARY,
 )
 
 #: Reconciliation order: descriptions, binding, then certification.

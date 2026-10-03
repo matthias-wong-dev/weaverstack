@@ -44,6 +44,8 @@ from .shortcut_sources import (
 )
 from .shortcuts import ResolvedShortcutSource
 from .targets import (
+    LAKEHOUSE_TARGET,
+    SEMANTIC_MODEL_TARGET,
     WAREHOUSE_TARGET,
     ItemBindings,
     WarehouseBinding,
@@ -645,8 +647,22 @@ def read_target_inventories(
                         WarehouseTarget.parse(target.item_id), workspace=workspace
                     )
                 inventories[binding.item] = read_warehouse_inventory(target, sql=sql)
-        else:
+        elif target.kind == SEMANTIC_MODEL_TARGET:
+            with session.substep(f"Resolve {target.display}"):
+                resolved = session.resolve_item(
+                    target.name, item_type="SemanticModel", workspace=workspace
+                )
+                inventories[binding.item] = TargetInventory(
+                    target.id,
+                    target.kind,
+                    target.name,
+                    workspace_id=resolved.workspace_id,
+                    item_id=resolved.id,
+                )
+        elif target.kind == LAKEHOUSE_TARGET:
             delta.append((binding.item, target))
+        else:
+            raise BuildError(f"Unsupported target kind {target.kind!r}")
 
     if delta:
         named = ", ".join(target.display for _item, target in delta)

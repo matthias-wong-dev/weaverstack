@@ -19,6 +19,7 @@ from typing import Iterable, Mapping, TypeVar
 
 from ..errors import DiscoveryError
 from ..locations import Location
+from ..semantic_models.source import SemanticContribution, read_semantic_contribution
 from ..sql_statements import sql_parse_cache
 from ..store import FilesystemStore, Store
 from .dependencies import PythonImport
@@ -37,6 +38,7 @@ from .model import (
     FILES,
     ITEM_TYPES,
     LAKEHOUSE,
+    SEMANTIC_MODEL,
     TABLES,
     WAREHOUSE,
     RepositoryShortcut,
@@ -173,6 +175,9 @@ class RepositoryPart:
     declared_files: Mapping[str, bytes] = field(default_factory=dict)
     #: Authored declaration paths, whose bytes stay in the store.
     store_files: tuple[str, ...] = ()
+    semantic_models: Mapping[WeaverItemId, SemanticContribution] = field(
+        default_factory=dict
+    )
 
 
 def merge_repository(*parts: RepositoryPart) -> RepositoryPart:
@@ -197,6 +202,10 @@ def merge_repository(*parts: RepositoryPart) -> RepositoryPart:
     return RepositoryPart(
         label="merged",
         items=tuple(sorted(items)),
+        semantic_models=_merge_keyed(
+            ((part.label, part.semantic_models) for part in parts),
+            what="semantic model",
+        ),
         documents=_merge_keyed(
             ((part.label, part.documents) for part in parts), what="declaration"
         ),
@@ -367,7 +376,7 @@ def _standard_parts(authored: RepositoryPart) -> tuple[RepositoryPart, ...]:
 
     parts: list[RepositoryPart] = []
     for item in sorted(authored.items):
-        if item == BUILTIN_ITEM:
+        if item == BUILTIN_ITEM or item.item_type == SEMANTIC_MODEL:
             continue
         files = dict(standard_fragment(item.item_type))
         if FOLDER_DOCUMENT in files and not has_deployable_source(
@@ -546,6 +555,8 @@ def _read_authored_repository(root: Location, store: Store) -> RepositoryPart:
         if len(parts) <= 2 or WeaverItemId(parts[0], parts[1]) not in item_ids:
             continue
         item = WeaverItemId(parts[0], parts[1])
+        if item.item_type == SEMANTIC_MODEL:
+            continue
         within = parts[2:]
         if within[0] == "schemas" and within == ["schemas"]:
             continue
@@ -593,6 +604,16 @@ def _read_authored_repository(root: Location, store: Store) -> RepositoryPart:
         if not is_directory:
             files.append(relative)
 
+    semantic_models = {
+        item: read_semantic_contribution(
+            item,
+            root=root,
+            store=store,
+            paths={p for p, directory in entries if not directory},
+        )
+        for item in sorted(item_ids)
+        if item.item_type == SEMANTIC_MODEL
+    }
     source_documents: dict[WeaverDocumentId, SourceDocument] = {}
     schema_documents: dict[WeaverSchemaId, SchemaSes] = {}
     programmables: dict[WeaverDocumentId, Programmable] = {}
@@ -606,6 +627,8 @@ def _read_authored_repository(root: Location, store: Store) -> RepositoryPart:
     for relative in sorted(files):
         parts = relative.split("/")
         item = WeaverItemId(parts[0], parts[1])
+        if item.item_type == SEMANTIC_MODEL:
+            continue
         within = parts[2:]
 
         if within[-1] == "__init__.py" and (len(within) == 1 or within[0] == "lib"):
@@ -791,7 +814,13 @@ def _read_authored_repository(root: Location, store: Store) -> RepositoryPart:
             relative: store.read(root.join(*relative.split("/")))
             for relative in sorted(support_files)
         },
-        store_files=tuple(files),
+        store_files=tuple(
+            sorted(
+                {p for p in files if not p.startswith(SEMANTIC_MODEL + "/")}
+                | {p for semantic in semantic_models.values() for p in semantic.sources}
+            )
+        ),
+        semantic_models=semantic_models,
     )
 
 
@@ -833,7 +862,7 @@ def _generated_content(authored: RepositoryPart) -> RepositoryPart:
 
     programmables: dict[WeaverDocumentId, Programmable] = {}
     for item in sorted(authored.items):
-        if item == BUILTIN_ITEM:
+        if item == BUILTIN_ITEM or item.item_type == SEMANTIC_MODEL:
             continue
         for programmable in item_generated_programmables(
             item=item, documents=_documents_of(authored, item)
@@ -894,7 +923,9 @@ def compose_repository(
     items = [
         replace(
             model,
-            signature=_item_signature(
+            signature=merged.semantic_models[model.identity].signature
+            if model.identity in merged.semantic_models
+            else _item_signature(
                 model,
                 source_documents=source_documents,
                 schema_documents=merged.schemas,
@@ -921,6 +952,7 @@ def compose_repository(
         logical_shortcuts=merged.logical_shortcuts,
         shortcuts=merged.shortcuts,
         generated_files=merged.declared_files,
+        semantic_models=merged.semantic_models,
     )
     return resolve_item_dependencies(repository)
 

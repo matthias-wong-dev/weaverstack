@@ -169,6 +169,23 @@ Definition updates and refresh submissions disable HTTP-response retries.
 Refresh waits for its request ID to reach terminal completion through the
 canonical Power BI endpoint.
 
+Semantic models share the ordinary repository, graph, Build bundle, Installer
+and catalogue owners. `SemanticModel/Name` is the model-root document identity;
+its native TMSL dictionary remains authoritative. Store source bytes and
+property provenance beside it. Compile the PBIP base, `SemanticModel/addon.yml`, item addon
+and `.dax` through `semantic_models.compiler`; preserve authored partitions.
+Unsupported directives and TMDL statements must fail at their source location.
+
+`initialise` alone creates semantic items. Build binds the existing typed item
+and freezes its workspace/item IDs in the bundle. The update action disables
+purging. A catalogue-stage executor reads the effective definition, checks the
+requested properties and inferred calculated columns, then publishes the two
+semantic dictionaries. Registry publication remains the final Build barrier.
+A failed update or readback leaves the model uncertified. Planning resolves the
+item without fetching its existing definition. There is no live partition
+comparison or retention step. The installed semantic Load/Test/Health path and
+`.source` remain later feature work.
+
 `doctor --semantic-model NAME` checks Power BI authentication, the model's
 TMSL definition and DAX access through REST. This mode starts no Spark session.
 The semantic check reads only; refresh belongs to the runtime load operation.

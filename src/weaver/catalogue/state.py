@@ -45,6 +45,8 @@ from .tables import (
     RUNTIME_ROLES,
     SCOPE_ITEM_NAME,
     SCOPE_ITEM_TYPE,
+    SEMANTIC_MODEL_DICTIONARY,
+    SEMANTIC_OBJECT_DICTIONARY,
     TEST_DICTIONARY,
     TEST_STATUS,
     VALIDATION_ROLES,
@@ -81,6 +83,7 @@ class Catalogue:
         writer: Any = None,
         session: Any = None,
         owns_session: bool = False,
+        schema_additions=(),
     ) -> None:
         self.rows = MappingProxyType(dict(rows))
         self.registered = (
@@ -94,6 +97,7 @@ class Catalogue:
         self.materialised = frozenset(
             materialised if materialised is not None else carried
         )
+        self.schema_additions = tuple(tuple(pair) for pair in schema_additions)
         self._load_history = load_history
         self._writer = writer
         self._session = session
@@ -341,6 +345,11 @@ class Catalogue:
                 )
             ],
             "materialised": sorted(self.materialised),
+            **(
+                {"schema_additions": list(self.schema_additions)}
+                if self.schema_additions
+                else {}
+            ),
         }
 
     @classmethod
@@ -365,6 +374,7 @@ class Catalogue:
         return cls(
             rows=MappingProxyType(rows),
             materialised=frozenset(mapping.get("materialised", ())),
+            schema_additions=mapping.get("schema_additions", ()),
         )
 
     # --- constructors ---------------------------------------------------------
@@ -395,6 +405,8 @@ class Catalogue:
                 for identity in repository.source_documents
                 if identity.item == item
             }
+            if item in repository.semantic_models:
+                declared.add(WeaverDocumentId.model_root(item))
             # Runtime artefacts are derived source declarations and target objects.
             declared.update(
                 artefact.identity
@@ -588,7 +600,14 @@ class InstalledMirror:
 #: Tables absent from older catalogues. Add a table only when it is introduced;
 #: misclassifying an existing table would hide damage during a scoped rebuild.
 INTRODUCED_TABLES = frozenset(
-    {TEST_DICTIONARY.name, BOOKMARK.name, LOAD_STATUS.name, TEST_STATUS.name}
+    {
+        TEST_DICTIONARY.name,
+        BOOKMARK.name,
+        LOAD_STATUS.name,
+        TEST_STATUS.name,
+        SEMANTIC_MODEL_DICTIONARY.name,
+        SEMANTIC_OBJECT_DICTIONARY.name,
+    }
 )
 
 #: Projected, borrowed and current state needed by a build. History is excluded
@@ -744,6 +763,7 @@ def read_catalogue_state(catalogue: Any, items) -> Catalogue:
     present: set[str] = set()
     missing: set[str] = set()
     incompatible: list[str] = []
+    additions = []
     for table in CHECKED_TABLES:
         columns = catalogue.columns_of(table)
         if columns is None:
@@ -762,6 +782,13 @@ def read_catalogue_state(catalogue: Any, items) -> Catalogue:
             for folded_name, public in required.items()
             if folded_name not in folded
         )
+        introduced = {"Workspace ID", "Item ID"} if table == INSTALLATION else set()
+        additions.extend(
+            (table.name, column) for column in absent_columns if column in introduced
+        )
+        absent_columns = [
+            column for column in absent_columns if column not in introduced
+        ]
         if absent_columns:
             incompatible.append(f"{table.name}.{absent_columns[0]}")
     if incompatible:
@@ -821,6 +848,7 @@ def read_catalogue_state(catalogue: Any, items) -> Catalogue:
         materialised=frozenset(
             table.name for table in READ_FOR_BUILD if table.name in present
         ),
+        schema_additions=additions,
     )
 
 
@@ -965,6 +993,7 @@ def reconcile_catalogue_state(
             rows=MappingProxyType(reconciled),
             registered=retained,
             materialised=state.materialised,
+            schema_additions=state.schema_additions,
         ),
         stale_claims=tuple(dict.fromkeys(stale_claims)),
         stale_objects=tuple(sorted(stale_labels)),
@@ -978,6 +1007,12 @@ def _row_identity(
 
     schema = str(row.get("schema_name") or "")
     name = str(row.get("object_name") or "")
+    if object_type == "semantic_model":
+        if schema or name:
+            raise BuildError(
+                f"{item}: a semantic model root has no schema or object name"
+            )
+        return WeaverDocumentId.model_root(item)
     if object_type == "schema":
         # A schema shortcut names the schema in both columns, because the Registry
         # keys on both (see `weaver.catalogue.projection._identity`). Reading it

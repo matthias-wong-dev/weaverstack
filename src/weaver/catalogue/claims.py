@@ -19,6 +19,8 @@ from .tables import (
     KEY_DICTIONARY,
     OBJECT_TYPES,
     REGISTRY,
+    SEMANTIC_MODEL_DICTIONARY,
+    SEMANTIC_OBJECT_DICTIONARY,
     TABLE_DICTIONARY,
     CatalogueTable,
 )
@@ -135,6 +137,11 @@ CATALOGUE_CLAIMS_BY_OBJECT_TYPE: Mapping[str, tuple[CatalogueClaimRule, ...]] = 
     "stored_procedure": (CatalogueClaimRule(REGISTRY),),
     # Schema shortcuts certify a namespace owned by their source item.
     "schema": (CatalogueClaimRule(REGISTRY),),
+    "semantic_model": (
+        CatalogueClaimRule(REGISTRY),
+        CatalogueClaimRule(SEMANTIC_MODEL_DICTIONARY),
+        CatalogueClaimRule(SEMANTIC_OBJECT_DICTIONARY),
+    ),
 }
 
 

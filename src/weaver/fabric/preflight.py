@@ -7,7 +7,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ..build_bundle.targets import LAKEHOUSE_TARGET, WAREHOUSE_TARGET
+from ..build_bundle.targets import (
+    LAKEHOUSE_TARGET,
+    SEMANTIC_MODEL_TARGET,
+    WAREHOUSE_TARGET,
+)
 from ..errors import BuildError
 from .resources import (
     ENVIRONMENT,
@@ -24,6 +28,7 @@ from .resources import (
 _ITEM_TYPE_FOR_BINDING = {
     LAKEHOUSE_TARGET: LAKEHOUSE,
     WAREHOUSE_TARGET: WAREHOUSE,
+    SEMANTIC_MODEL_TARGET: "SemanticModel",
 }
 
 
@@ -162,4 +167,9 @@ def _missing(required: RequiredItem, inventory) -> str:
             f"- {required} was not found; the workspace holds a "
             f"{', '.join(others)} of that name"
         )
-    return f"- {required} was not found"
+    suffix = (
+        "; create it with weaver initialise --semantic-model before Build"
+        if required.item_type == "SemanticModel"
+        else ""
+    )
+    return f"- {required} was not found{suffix}"
