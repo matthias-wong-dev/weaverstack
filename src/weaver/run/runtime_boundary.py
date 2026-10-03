@@ -50,6 +50,12 @@ class RunScope(Protocol):
     ) -> dict:
         """Run one deployed module and return its transport-neutral row."""
 
+    def dispatch_python_many(self, requests: list) -> list:
+        """Run several deployed modules at once, each in a Spark session of its own.
+
+        Returns each one's row, or the exception it raised, in request order.
+        """
+
     def dispatch_validation(self, installed, *, collect: bool) -> Any: ...
 
     def close(self) -> None: ...
@@ -74,6 +80,7 @@ class DirectRunScope:
         fault_tolerant: bool,
         reload: bool = False,
         ignore_stability_threshold: bool = False,
+        spark=None,
     ):
         from .dispatch import python_primitive
 
@@ -92,7 +99,31 @@ class DirectRunScope:
             workspace=self._workspace,
             catalogue=self._catalogue,
             node_identity=node.logical_id,
+            spark=spark,
         ).as_row()
+
+    def dispatch_python_many(self, requests: list) -> list:
+        from concurrent.futures import ThreadPoolExecutor
+
+        from .dispatch import isolated_spark
+
+        spark = self._session.spark(self._workspace)
+
+        def one(request: dict):
+            try:
+                return self.dispatch_python(
+                    request["node"],
+                    expected_class=request["expected_class"],
+                    fault_tolerant=request["fault_tolerant"],
+                    reload=request["reload"],
+                    ignore_stability_threshold=request["ignore_stability_threshold"],
+                    spark=isolated_spark(spark),
+                )
+            except Exception as exc:  # noqa: BLE001 - this request's outcome
+                return exc
+
+        with ThreadPoolExecutor(max_workers=max(1, len(requests))) as pool:
+            return list(pool.map(one, requests))
 
     def dispatch_validation(self, installed, *, collect: bool):
         from ..test_execution import run_installed_validation
@@ -174,28 +205,61 @@ class FabricRunScope:
 
         arguments = {
             "run_id": self.run_id,
-            "node_id": node.node_id,
-            "item": str(node.logical_id.item),
-            "target": node.physical_target.name,
-            "schema": node.primitive_object.schema,
-            "object": node.primitive_object.object,
-            "expected_class": expected_class,
-            "fault_tolerant": fault_tolerant,
-            "reload": reload,
-            "identity": str(node.logical_id) if node.logical_id else None,
+            **self._arguments(
+                node,
+                expected_class=expected_class,
+                fault_tolerant=fault_tolerant,
+                reload=reload,
+                ignore_stability_threshold=ignore_stability_threshold,
+            ),
         }
-        if ignore_stability_threshold:
-            # Named only when set, so an ordinary load still crosses to a
-            # published Weaver that predates the waiver. A requested waiver is
-            # always named, so an older runtime fails loudly rather than
-            # loading without it.
-            arguments["ignore_stability_threshold"] = True
         return self._submit(
             run_python_primitive,
             arguments,
             detail=node.node_id,
             timeout=NODE_STATEMENT_TIMEOUT,
         )
+
+    def dispatch_python_many(self, requests: list) -> list:
+        """One statement, so the modules run together on the far side."""
+
+        from ..fabric.livy import LivyStatementError
+        from .entry import run_python_primitives
+
+        crossing = [
+            self._arguments(
+                request["node"],
+                expected_class=request["expected_class"],
+                fault_tolerant=request["fault_tolerant"],
+                reload=request["reload"],
+                ignore_stability_threshold=request["ignore_stability_threshold"],
+            )
+            for request in requests
+        ]
+        try:
+            carried = self._submit(
+                run_python_primitives,
+                {"run_id": self.run_id, "requests": crossing},
+                detail=", ".join(one["node_id"] for one in crossing),
+                timeout=NODE_STATEMENT_TIMEOUT,
+            )
+        except Exception as exc:  # noqa: BLE001 - every node shares the statement
+            return [exc for _request in requests]
+        outcomes = []
+        for one in carried:
+            failure = one.get("failure")
+            if failure is None:
+                outcomes.append(one["row"])
+                continue
+            # As the statement would have raised it, had the node run alone.
+            outcomes.append(
+                LivyStatementError(
+                    f"{failure['ename']}: {failure['evalue']}\n{failure['traceback']}",
+                    ename=failure["ename"],
+                    evalue=failure["evalue"],
+                )
+            )
+        return outcomes
 
     def dispatch_validation(self, installed, *, collect: bool):
 
@@ -212,6 +276,36 @@ class FabricRunScope:
             timeout=NODE_STATEMENT_TIMEOUT,
         )
         return _carried(carried, installed)
+
+    @staticmethod
+    def _arguments(
+        node,
+        *,
+        expected_class: str,
+        fault_tolerant: bool,
+        reload: bool,
+        ignore_stability_threshold: bool,
+    ) -> dict:
+        """One node, flattened, without serialising the Runner model."""
+
+        arguments = {
+            "node_id": node.node_id,
+            "item": str(node.logical_id.item),
+            "target": node.physical_target.name,
+            "schema": node.primitive_object.schema,
+            "object": node.primitive_object.object,
+            "expected_class": expected_class,
+            "fault_tolerant": fault_tolerant,
+            "reload": reload,
+            "identity": str(node.logical_id) if node.logical_id else None,
+        }
+        if ignore_stability_threshold:
+            # Named only when set, so an ordinary load still crosses to a
+            # published Weaver that predates the waiver. A requested waiver is
+            # always named, so an older runtime fails loudly rather than
+            # loading without it.
+            arguments["ignore_stability_threshold"] = True
+        return arguments
 
     def close(self) -> None:
         """Release imports without changing the outcome of a finished run.
@@ -320,13 +414,18 @@ class LazyRunScope:
     """A lazy scope whose ``close()`` never opens it."""
 
     def __init__(self, open_scope) -> None:
+        import threading
+
         self._open = open_scope
         self._scope: RunScope | None = None
+        # Concurrent nodes may be the first to need it at the same moment.
+        self._lock = threading.Lock()
 
     def get(self) -> RunScope:
-        if self._scope is None:
-            self._scope = self._open()
-        return self._scope
+        with self._lock:
+            if self._scope is None:
+                self._scope = self._open()
+            return self._scope
 
     @property
     def opened(self) -> bool:

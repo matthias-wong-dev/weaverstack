@@ -35,6 +35,7 @@ from factories import (
     load_estate,
     load_estate_bindings,
 )
+from support.runs import together
 from support.weaver_test import weaver_test
 from support.workspaces import InventoryClient, given_workspace
 
@@ -132,9 +133,11 @@ def dispatched(monkeypatch):
             raise answer
         return answer
 
-    # The one seam a run crosses. `run_load` reads it from the package at call
-    # time, so patching the name here is what a controlled dispatch does.
+    # The seams a run crosses: one node, or Python nodes starting together.
+    # `run_load` reads them from the package at call time, so patching the
+    # names here is what a controlled dispatch does.
     monkeypatch.setattr(module, "dispatch_primitive", dispatch)
+    monkeypatch.setattr(module, "dispatch_python_many", together(dispatch))
     dispatch.answers = answers
     dispatch.calls = calls
     return dispatch

@@ -124,6 +124,8 @@ class Session(ABC):
         #: Closed reporting frames, in closing order. These record logical work;
         #: telemetry separately records physical operations.
         self.timings: list[ReportingFrame] = []
+        #: Serialises what concurrent Sub-steps add to the record and report.
+        self._concurrent_lock = threading.Lock()
         self.warnings: list[str] = []
         #: Warehouse flushers by write stream. Creating a Session must not start
         #: a worker or TDS connection.
@@ -624,6 +626,37 @@ class Session(ABC):
     @contextmanager
     def substep(self, name: str, detail: str | None = None) -> Iterator[ReportingFrame]:
         yield from self._framed(SUBSTEP, name, detail)
+
+    @contextmanager
+    def concurrent_substep(
+        self, name: str, detail: str | None = None
+    ) -> Iterator[ReportingFrame]:
+        """A Sub-step that runs beside others of the current Step.
+
+        It is reported and timed like any Sub-step but held off the frame stack,
+        which describes nesting, and the external work inside it is attributed
+        to it in whichever thread runs it.
+        """
+
+        from dataclasses import replace
+
+        frame = ReportingFrame(
+            kind=SUBSTEP, name=name, detail=detail, depth=len(self._frames)
+        )
+        context = replace(self.telemetry.capture_context(), substep=name)
+        error = None
+        try:
+            with self.telemetry.use_context(context):
+                yield frame
+        except BaseException as exc:
+            error = exc
+            raise
+        finally:
+            frame.elapsed = time.monotonic() - frame.started
+            frame.failed = frame.failed or error is not None
+            with self._concurrent_lock:
+                self.timings.append(frame)
+                self.present(frame, "failed" if frame.failed else "completed", error)
 
     def _framed(self, kind: str, name: str, detail: str | None):
         if kind == TASK:

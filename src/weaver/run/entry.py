@@ -24,6 +24,7 @@ def run_python_primitive(
     identity: str | None = None,
     session=None,
     workspace=None,
+    spark=None,
 ) -> dict:
 
     from ..declaration.model import WeaverItemId, parse_installed_identity
@@ -50,6 +51,7 @@ def run_python_primitive(
             # once, with the scope, and this is one node of the run that carried it.
             catalogue=scope_catalogue(run_id),
             node_identity=parse_installed_identity(identity) if identity else None,
+            spark=spark,
         )
     except Exception as exc:  # noqa: BLE001 - re-raised unless it is a refusal
         # Which failures carry a settled result is the runtime's judgement, not
@@ -60,6 +62,47 @@ def run_python_primitive(
             raise
         return envelope
     return loaded.as_row()
+
+
+def run_python_primitives(
+    *, run_id: str, requests: list, session=None, workspace=None
+) -> list:
+    """Run several Python primitives at once, each in a Spark session of its own.
+
+    Each one's row, or the failure it raised, crosses back as data, so one
+    node's failure does not stand in for the others.
+    """
+
+    import traceback
+    from concurrent.futures import ThreadPoolExecutor
+
+    from .dispatch import isolated_spark
+
+    session = _session(session, workspace)
+    spark = session.spark(workspace)
+
+    def one(arguments: dict) -> dict:
+        try:
+            return {
+                "row": run_python_primitive(
+                    run_id=run_id,
+                    session=session,
+                    workspace=workspace,
+                    spark=isolated_spark(spark),
+                    **arguments,
+                )
+            }
+        except Exception as exc:  # noqa: BLE001 - crosses as this node's failure
+            return {
+                "failure": {
+                    "ename": type(exc).__name__,
+                    "evalue": str(exc),
+                    "traceback": traceback.format_exc(),
+                }
+            }
+
+    with ThreadPoolExecutor(max_workers=max(1, len(requests))) as pool:
+        return list(pool.map(one, requests))
 
 
 def run_validation_primitive(
@@ -96,4 +139,8 @@ def _session(session, workspace):
     return session_for(workspace)
 
 
-__all__ = ["run_python_primitive", "run_validation_primitive"]
+__all__ = [
+    "run_python_primitive",
+    "run_python_primitives",
+    "run_validation_primitive",
+]

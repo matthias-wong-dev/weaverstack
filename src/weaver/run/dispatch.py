@@ -243,6 +243,81 @@ def _python(
     return LoadResult.from_row(row)
 
 
+def dispatch_python_many(
+    nodes,
+    *,
+    session=None,
+    resolved=(),
+    fault_tolerant: bool = False,
+    reload: bool = False,
+    ignore_stability_threshold: bool = False,
+    open_runtime=None,
+    **_unused,
+) -> list:
+    """Dispatch Python primitives together, each in a Spark session of its own.
+
+    Returns each node's result, or the exception it raised, in node order.
+    """
+
+    from ..runtime.load_refusal import decoded_refusal, refused
+    from ..runtime.load_result import LoadResult
+
+    requests = []
+    for node, one in zip(nodes, resolved):
+        table = node.primitive_kind == PYTHON_TABLE
+        requests.append(
+            {
+                "node": node,
+                "expected_class": getattr(one, "expected_class", None),
+                "fault_tolerant": fault_tolerant,
+                "reload": reload and table,
+                "ignore_stability_threshold": ignore_stability_threshold and table,
+            }
+        )
+    outcomes: list = [None] * len(requests)
+    runnable = []
+    for index, request in enumerate(requests):
+        if request["expected_class"] is None:
+            outcomes[index] = RunError(
+                f"Cannot run {request['node'].node_id}: its deployed module has no "
+                "expected class. Rebuild and reinstall the project."
+            )
+        else:
+            runnable.append(index)
+    if runnable:
+        rows = _scope(open_runtime, nodes[runnable[0]]).dispatch_python_many(
+            [requests[index] for index in runnable]
+        )
+        for index, row in zip(runnable, rows):
+            if isinstance(row, BaseException):
+                outcomes[index] = row
+            elif refused(row):
+                outcomes[index] = decoded_refusal(row)
+            else:
+                outcomes[index] = LoadResult.from_row(row)
+    return outcomes
+
+
+def isolated_spark(spark):
+    """A Spark session of its own, for one of several loads running at once.
+
+    It shares the application, its executors and its cache, and starts from
+    the parent's runtime settings, so what one load sets or names as a
+    temporary view stays its own.
+    """
+
+    session = spark.newSession()
+    defaults = dict(spark.sparkContext.getConf().getAll())
+    for key, value in spark.conf.getAll.items():
+        if defaults.get(key) == value:
+            continue
+        try:
+            session.conf.set(key, value)
+        except Exception:  # noqa: BLE001 - a static setting is shared already
+            pass
+    return session
+
+
 def python_primitive(
     *,
     node_id: str,
@@ -259,6 +334,7 @@ def python_primitive(
     node_identity=None,
     reload: bool = False,
     ignore_stability_threshold: bool = False,
+    spark=None,
 ):
     """Import and load a deployed Python primitive.
 
@@ -289,7 +365,9 @@ def python_primitive(
         context, within, expected=expected_class, node_id=node_id
     )
     cls = getattr(module, expected_class)
-    primitive = cls(session.spark(workspace), lakehouse=lakehouse)
+    primitive = cls(
+        spark if spark is not None else session.spark(workspace), lakehouse=lakehouse
+    )
     # The run's catalogue, and the identity the run already resolved. An object
     # this one constructs inherits the same catalogue and resolves its own
     # identity against it, so `Other__Thing(self)` needs no argument.
@@ -342,4 +420,10 @@ def can_refresh(session, workspace=None) -> bool:
     return callable(getattr(session.resolver(workspace), "refresh_sql_endpoint", None))
 
 
-__all__ = ["can_refresh", "dispatch_primitive", "python_primitive"]
+__all__ = [
+    "can_refresh",
+    "dispatch_primitive",
+    "dispatch_python_many",
+    "isolated_spark",
+    "python_primitive",
+]
