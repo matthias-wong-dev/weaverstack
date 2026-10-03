@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import posixpath
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Mapping
 
@@ -22,12 +22,16 @@ class SemanticContribution:
     sources: Mapping[str, bytes]
     provenance: Mapping[str, dict]
     properties: dict
+    source_references: Mapping[str, str] = field(default_factory=dict)
+    source_bindings: Mapping[str, dict] = field(default_factory=dict)
 
     @property
     def signature(self):
-        return content_signature(
-            {"compiler": 1, "definition": self.model, "properties": self.properties}
-        )
+        value = {"compiler": 1, "definition": self.model, "properties": self.properties}
+        if self.source_references:
+            value["source_references"] = dict(self.source_references)
+            value["source_bindings"] = dict(self.source_bindings)
+        return content_signature(value)
 
 
 def read_semantic_contribution(item, *, root, store, paths):
@@ -158,6 +162,7 @@ def read_semantic_contribution(item, *, root, store, paths):
     local = addon(item_path)
     if base is None and organisation is None and local is None:
         raise ConfigError(f"{item}: provide a PBIP or addon.yml")
+    source_references = {}
     try:
         model = compile_model(
             item.item_name,
@@ -167,7 +172,10 @@ def read_semantic_contribution(item, *, root, store, paths):
             provenance=provenance,
             organisation_source=org_path,
             item_source=item_path,
+            source_references=source_references,
         )
     except ConfigError as exc:
         raise ConfigError(f"{item} ({org_path}, {item_path}): {exc}") from exc
-    return SemanticContribution(model, sources, provenance, properties)
+    return SemanticContribution(
+        model, sources, provenance, properties, source_references
+    )

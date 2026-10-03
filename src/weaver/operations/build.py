@@ -296,6 +296,7 @@ def _run_build(
         session=session,
         workspace=workspace,
         shortcuts=repository.shortcuts,
+        repository=repository,
     )
     requested_bindings = requested_bindings or bindings
     if bundle_only:

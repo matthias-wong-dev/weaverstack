@@ -136,6 +136,28 @@ def resolve_item_dependencies(repository: WeaverRepository) -> WeaverRepository:
             )
             graph_edges.add((str(destination), str(consumer)))
 
+    from ..semantic_models.references import source_identity
+
+    for item, contribution in repository.semantic_models.items():
+        consumer = WeaverDocumentId.model_root(item)
+        for reference in contribution.source_references.values():
+            producer = source_identity(reference)
+            if producer not in native:
+                continue
+            _reject_validation_producer(
+                producer, native=native, consumer=consumer, written=reference
+            )
+            edges.append(
+                ItemDependency(
+                    consumer=consumer,
+                    producer=producer,
+                    reference=reference,
+                    resolution_kind="semantic_source",
+                    is_within_item=False,
+                )
+            )
+            graph_edges.add((str(producer), str(consumer)))
+
     unique = {
         (edge.consumer, edge.reference, edge.producer, edge.resolution_kind): edge
         for edge in edges

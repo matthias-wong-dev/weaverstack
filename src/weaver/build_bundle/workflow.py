@@ -84,11 +84,13 @@ class BuildState:
     target_inventories: Mapping[WeaverItemId, TargetInventory]
     #: Direct shortcut destinations, keyed by ``<owner>/<name>``.
     shortcut_sources: Mapping[str, ResolvedShortcutSource] = field(default_factory=dict)
+    semantic_sources: Mapping[str, dict] = field(default_factory=dict)
 
     def to_mapping(self) -> dict[str, object]:
         return {
             "format_version": 1,
             "catalogue": self.catalogue.to_mapping(),
+            "semantic_sources": dict(self.semantic_sources),
             "shortcut_sources": {
                 key: vars(source)
                 for key, source in sorted(self.shortcut_sources.items())
@@ -113,6 +115,7 @@ class BuildState:
             )
         return cls(
             catalogue=Catalogue.from_mapping(mapping["catalogue"]),
+            semantic_sources=mapping.get("semantic_sources", {}),
             target_inventories={
                 WeaverItemId.parse(entry["item"]): TargetInventory.from_mapping(
                     entry["inventory"]
@@ -137,6 +140,14 @@ def catalogue_items_for_build(
         for shortcut in repository.logical_shortcuts
         if shortcut.destination.item in bound and shortcut.source.item not in bound
     }
+    from ..semantic_models.references import source_identity
+
+    items.update(
+        source_identity(reference).item
+        for item, contribution in repository.semantic_models.items()
+        if item in bound
+        for reference in contribution.source_references.values()
+    )
     return tuple(sorted(items, key=str))
 
 
@@ -183,6 +194,7 @@ def read_build_state(
     workspace=None,
     sql_by_item=None,
     shortcuts=(),
+    repository=None,
 ) -> BuildState:
     """Read the catalogue and selected target state for build planning."""
 
@@ -212,10 +224,19 @@ def read_build_state(
                 resolver=session.resolver(workspace),
                 store=session.transport_store(workspace),
             )
+    semantic_sources = {}
+    if repository is not None:
+        from .semantic_sources import read_semantic_sources
+
+        with session.step("Read semantic sources"):
+            semantic_sources = read_semantic_sources(
+                repository, bindings, catalogue, session=session, workspace=workspace
+            )
     return BuildState(
         catalogue=catalogue,
         target_inventories=inventories,
         shortcut_sources=sources,
+        semantic_sources=semantic_sources,
     )
 
 
@@ -565,6 +586,7 @@ def build_item_repository_source(
             workspace=workspace,
             sql_by_item=sql_by_item,
             shortcuts=repository.shortcuts,
+            repository=repository,
         )
         return build_item_repository(
             repository,

@@ -282,6 +282,21 @@ class Session(ABC):
         reference = item if isinstance(item, (ItemRef, Item)) else ItemRef(item)
         return self.scope(workspace).semantic_model(reference)
 
+    def semantic_source(
+        self, item, *, item_type, schema, name, include_columns=True, workspace=None
+    ):
+        from .semantic_sources import semantic_source
+
+        return semantic_source(
+            self,
+            item,
+            item_type=item_type,
+            schema=schema,
+            name=name,
+            include_columns=include_columns,
+            workspace=workspace,
+        )
+
     # --- execution capabilities ---------------------------------------------
 
     def install_bundle(self, bundle, *, workspace: Workspace | None = None):

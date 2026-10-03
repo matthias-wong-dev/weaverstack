@@ -342,10 +342,15 @@ class _Planner:
             upstream_id = self._select(producer, visited, allowed_items=allowed_items)
             if crossed is None:
                 self.edges.add((upstream_id, node.node_id))
-            elif isinstance(crossed, OneLakeReadiness):
+            elif (
+                isinstance(crossed, OneLakeReadiness) or crossed == ONELAKE_PUBLICATION
+            ):
                 # OneLake publishes a Warehouse commit after the transaction, so
                 # the barrier replaces the direct edge, as the refresh does.
-                barrier = self._publication_node(self.nodes[upstream_id], crossed)
+                barrier = self._publication_node(
+                    self.nodes[upstream_id],
+                    None if crossed == ONELAKE_PUBLICATION else crossed,
+                )
                 self.edges.add((upstream_id, barrier.node_id))
                 self.edges.add((barrier.node_id, node.node_id))
             else:
@@ -415,7 +420,11 @@ class _Planner:
             physical_target=producer.physical_target,
             primitive_kind=ONELAKE_PUBLICATION,
             publication_of=identity,
-            publication_targets=tuple(dict.fromkeys((*readiness, crossed))),
+            publication_targets=tuple(
+                dict.fromkeys(
+                    (*readiness, *((crossed,) if crossed is not None else ()))
+                )
+            ),
             produced_by=producer.node_id,
         )
         self.nodes[node_id] = node
@@ -515,6 +524,13 @@ class _Planner:
                 if edge.through is None
                 else self._crossing(producer, consumer, edge.through)
             )
+            if edge.semantic_table is not None:
+                if producer.target.is_lakehouse and edge.source_access == "sql":
+                    crossing = producer.target
+                elif (
+                    producer.object_type == "table" and edge.source_mode == "directLake"
+                ):
+                    crossing = ONELAKE_PUBLICATION
             producers.append((producer, crossing))
         return tuple(producers)
 

@@ -20,6 +20,7 @@ _NAMED_COLLECTIONS = frozenset(
         "annotations",
         "relationships",
         "tablePermissions",
+        "expressions",
     }
 )
 
@@ -91,6 +92,9 @@ _SCHEMAS = {
         "defaultPowerBIDataSourceVersion": str,
         "discourageImplicitMeasures": bool,
         "dataAccessOptions": "dataAccessOptions",
+        "defaultMode": str,
+        "directLakeBehavior": str,
+        "expressions": ("expression",),
         "tables": ("table",),
         "relationships": ("relationship",),
         "roles": ("role",),
@@ -104,6 +108,7 @@ _SCHEMAS = {
         "partitions": ("partition",),
         "hierarchies": ("hierarchy",),
         ".dax": str,
+        ".source": str,
     },
     "column": {
         "type": str,
@@ -128,7 +133,14 @@ _SCHEMAS = {
         "isHidden": bool,
     },
     "partition": {"mode": str, "source": "source"},
-    "source": {"type": str, "expression": str},
+    "source": {
+        "type": str,
+        "expression": str,
+        "schemaName": str,
+        "entityName": str,
+        "expressionSource": str,
+    },
+    "expression": {"kind": str, "expression": str},
     "hierarchy": {"levels": ("level",), "isHidden": bool, "displayFolder": str},
     "level": {"ordinal": int, "column": str},
     "role": {
@@ -283,6 +295,7 @@ def compile_model(
     provenance: dict | None = None,
     organisation_source: str = "organisation addon",
     item_source: str = "item addon",
+    source_references: dict | None = None,
 ) -> dict:
     model = (
         copy.deepcopy(base)
@@ -319,4 +332,12 @@ def compile_model(
                 )
                 provenance[path] = {"source": origin, "reason": reason}
         model = _merge(model, {"model": patch})
+    for table in model["model"].get("tables", []):
+        if ".source" in table:
+            from .references import source_identity
+
+            reference = str(source_identity(table.pop(".source")))
+            if source_references is None:
+                raise ConfigError(".source requires Build source resolution")
+            source_references[table["name"]] = reference
     return model

@@ -6,6 +6,7 @@ import json
 
 from ..semantic_models.compiler import escape, leaf_properties
 from .tables import (
+    DEPENDENCY,
     REGISTRY,
     ROLE_DATA,
     SEMANTIC_MODEL_DICTIONARY,
@@ -72,6 +73,12 @@ def project_semantic_model(item, contribution, *, deployed=None):
                     "semantic_kind": kind,
                     "properties": json_text(node),
                     "provenance": json_text(local),
+                    "source_binding": (
+                        json_text(contribution.source_bindings[node["name"]])
+                        if kind == "table"
+                        and node["name"] in contribution.source_bindings
+                        else None
+                    ),
                 }
             )
         for key, value in node.items():
@@ -92,7 +99,29 @@ def project_semantic_model(item, contribution, *, deployed=None):
                 )
 
     visit(model["model"], "/model", "model")
+    from ..semantic_models.references import source_identity
+    from .claims import catalogue_columns
+
+    dependencies = []
+    for table, reference in sorted(contribution.source_references.items()):
+        producer = source_identity(reference)
+        schema, name = catalogue_columns(producer)
+        dependencies.append(
+            {
+                "item_type": item.item_type,
+                "item_name": item.item_name,
+                "referencing_schema_name": "",
+                "referencing_object_name": table,
+                "dependency_reference": str(producer),
+                "referenced_item_type": producer.item.item_type,
+                "referenced_item_name": producer.item.item_name,
+                "referenced_schema_name": schema,
+                "referenced_object_name": name,
+                "signature": contribution.signature,
+            }
+        )
     return {
+        DEPENDENCY.name: tuple(dependencies),
         REGISTRY.name: (
             {**common, "object_type": "semantic_model", "object_role": ROLE_DATA},
         ),

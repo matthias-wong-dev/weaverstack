@@ -656,7 +656,7 @@ DEPENDENCY = CatalogueTable(
     name="Dependency",
     description=(
         "Resolved dependency edges and their authored references, scoped to the "
-        "referencing item. Cross-item and cross-engine edges are Shortcuts."
+        "referencing item. Semantic source edges retain the consuming table."
     ),
     key=(
         SCOPE_ITEM_TYPE,
@@ -816,6 +816,11 @@ SEMANTIC_OBJECT_DICTIONARY = CatalogueTable(
             description="The model-scoped object path with escaped native names.",
         ),
         CatalogueColumn("semantic_kind", description="The native object kind."),
+        CatalogueColumn(
+            "source_binding",
+            sql_type=WIDE_LIST_TYPE,
+            description="Resolved logical source, physical identity and shape as JSON.",
+        ),
         CatalogueColumn(
             "properties",
             sql_type=WIDE_LIST_TYPE,

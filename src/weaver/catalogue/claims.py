@@ -81,10 +81,10 @@ def bookmark_row(identity: WeaverDocumentId, at=None) -> dict:
 @dataclass(frozen=True)
 class CatalogueClaimRule:
     table: CatalogueTable
-    predicate_columns: tuple[str, str] = ("schema_name", "object_name")
+    predicate_columns: tuple[str, ...] = ("schema_name", "object_name")
 
-    def values(self, identity) -> tuple[str, str]:
-        return catalogue_columns(identity)
+    def values(self, identity) -> tuple[str, ...]:
+        return catalogue_columns(identity)[: len(self.predicate_columns)]
 
     def owns(self, row: Mapping[str, object], identity: WeaverDocumentId) -> bool:
         expected = self.values(identity)
@@ -141,6 +141,7 @@ CATALOGUE_CLAIMS_BY_OBJECT_TYPE: Mapping[str, tuple[CatalogueClaimRule, ...]] = 
         CatalogueClaimRule(REGISTRY),
         CatalogueClaimRule(SEMANTIC_MODEL_DICTIONARY),
         CatalogueClaimRule(SEMANTIC_OBJECT_DICTIONARY),
+        CatalogueClaimRule(DEPENDENCY, predicate_columns=("referencing_schema_name",)),
     ),
 }
 

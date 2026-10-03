@@ -19,6 +19,7 @@ from weaver.catalogue.tables import (
     BOOKMARK,
     CATALOGUE_TABLES,
     CURRENT_STATE_TABLES,
+    DEPENDENCY,
     INSTALLATION,
     LOAD_STATISTIC,
     LOAD_STATUS,
@@ -26,6 +27,7 @@ from weaver.catalogue.tables import (
     PROJECTED_TABLES,
     REGISTRY,
     SEMANTIC_MODEL_DICTIONARY,
+    SEMANTIC_OBJECT_DICTIONARY,
 )
 from weaver.catalogue.tsql import literal
 from weaver.declaration.model import WeaverDocumentId, WeaverItemId
@@ -232,3 +234,55 @@ def test_public_build_catalogue_load_dax_and_unchanged_build(
     assert not {"livy", "onelake"} & {
         event.resource for event in context.session.telemetry.events()
     }
+
+
+@weaver_test(remote=True, resources={"rest", "tds"})
+def test_existing_warehouse_source_build_persists_lineage_and_loads_without_source(
+    semantic_build_context, tmp_path
+):
+    context = semantic_build_context
+    folder = tmp_path / "project" / str(ITEM)
+    folder.mkdir(parents=True)
+    (folder / "addon.yml").write_text(
+        "tables:\n  InstalledObjects:\n"
+        "    .source: Warehouse/_weaver/_.Registry\n"
+        "    columns:\n      LogicalItem:\n"
+        "        sourceColumn: Item name\n        dataType: string\n",
+        encoding="utf-8",
+    )
+    root = folder.parent.parent
+    selector = f"{ITEM}=SemanticModel/{context.target}"
+    built = weaver.build(root, items=selector, session=context.session)
+    assert built.succeeded, built.errors
+    (edge,) = read_table(context.connection, DEPENDENCY, scope=SCOPE)
+    assert edge["referencing_object_name"] == "InstalledObjects"
+    assert edge["dependency_reference"] == "Warehouse/_weaver/_.Registry"
+    assert (edge["referenced_schema_name"], edge["referenced_object_name"]) == (
+        "_",
+        "Registry",
+    )
+    objects = read_table(context.connection, SEMANTIC_OBJECT_DICTIONARY, scope=SCOPE)
+    table = next(
+        row
+        for row in objects
+        if row["semantic_path"] == "/model/tables/InstalledObjects"
+    )
+    source = json.loads(table["source_binding"])
+    assert source["mode"] == "directLake"
+    assert source["item_type"] == "Warehouse"
+    assert (
+        source["item_id"]
+        == context.session.resolve_item(
+            context.session.workspace.catalogue_item, item_type="Warehouse"
+        ).id
+    )
+    root.rename(root.with_name("source-not-present"))
+    loaded = weaver.load(str(ITEM), session=context.session)
+    assert loaded.succeeded, loaded.to_mapping()
+    assert [node.primitive_kind for node in loaded.nodes] == ["semantic_refresh"]
+    expected = context.connection.rows("SELECT COUNT_BIG(*) AS n FROM [_].[Registry]")[
+        0
+    ]["n"]
+    assert context.model.query_dax(
+        'EVALUATE ROW("N", COUNTROWS(InstalledObjects))'
+    ) == [{"[N]": expected}]

@@ -1042,14 +1042,20 @@ class ConsoleScope(WorkspaceScope):
     # --- SQL ----------------------------------------------------------------
 
     def sql_for(self, target: Any):
+        from ..sql import SqlEndpoint
+
         warehouse = (
             target
-            if isinstance(target, WarehouseTarget)
+            if isinstance(target, (WarehouseTarget, SqlEndpoint))
             else WarehouseTarget(
                 target if isinstance(target, ItemRef) else ItemRef(str(target))
             )
         )
-        name = warehouse.warehouse.name
+        name = (
+            warehouse.pool_key
+            if isinstance(warehouse, SqlEndpoint)
+            else warehouse.warehouse.name
+        )
         with self._lock:
             resource = self._sql.get(name)
             if resource is None:

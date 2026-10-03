@@ -11,7 +11,7 @@ from ..errors import ConfigError
 
 _NAME = r"(?:'(?:[^']|'')*'|[^\s=:.]+)"
 _OBJECT = re.compile(
-    rf"(database|model|table|column|measure|partition|relationship)"
+    rf"(database|model|table|column|measure|partition|relationship|expression)"
     rf"(?:\s+({_NAME}))?(?:\s*=\s*(.*))?\Z",
     re.IGNORECASE,
 )
@@ -19,6 +19,7 @@ _REFERENCE = re.compile(rf"({_NAME})\.({_NAME})\Z")
 _COLLECTIONS = {
     ("model", "table"): "tables",
     ("model", "relationship"): "relationships",
+    ("model", "expression"): "expressions",
     ("table", "column"): "columns",
     ("table", "measure"): "measures",
     ("table", "partition"): "partitions",
@@ -31,6 +32,8 @@ _PROPERTIES = {
         "sourceQueryCulture": str,
         "defaultPowerBIDataSourceVersion": str,
         "discourageImplicitMeasures": bool,
+        "defaultMode": str,
+        "directLakeBehavior": str,
     },
     "table": {"isHidden": bool, "lineageTag": str, "dataCategory": str},
     "column": {
@@ -44,6 +47,8 @@ _PROPERTIES = {
     },
     "measure": {"formatString": str, "displayFolder": str, "lineageTag": str},
     "partition": {"mode": str},
+    "entitySource": {"schemaName": str, "entityName": str, "expressionSource": str},
+    "expression": {"kind": str},
     "relationship": {
         "fromColumn": str,
         "toColumn": str,
@@ -184,17 +189,19 @@ def _parse_file(
                 descriptions.clear()
             if value is not None:
                 if kind == "partition":
-                    if value not in {"m", "calculated"}:
+                    if value not in {"m", "calculated", "entity"}:
                         raise ConfigError(
                             f"{location}: unsupported TMDL partition source {value!r}"
                         )
                     _put(node, "source", {"type": value}, location)
-                elif kind == "measure":
+                elif kind in {"measure", "expression"}:
                     if not value or value == "```":
                         value, index = _expression(
                             lines, index, indent + 4, fenced=value == "```"
                         )
                     _put(node, "expression", value, location)
+                    if kind == "expression":
+                        _put(node, "kind", "m", location)
                 else:
                     raise ConfigError(
                         f"{location}: unsupported TMDL expression on {kind}"
@@ -204,6 +211,13 @@ def _parse_file(
         if text == "dataAccessOptions" and parent_kind == "model":
             _put(parent, "dataAccessOptions", {}, location)
             stack.append((indent, "dataAccessOptions", parent["dataAccessOptions"]))
+            continue
+        if (
+            text == "source"
+            and parent_kind == "partition"
+            and parent.get("source", {}).get("type") == "entity"
+        ):
+            stack.append((indent, "entitySource", parent["source"]))
             continue
         if text.startswith("source =") and parent_kind == "partition":
             value = text.split("=", 1)[1].strip()

@@ -124,7 +124,7 @@ def test_semantic_targets_are_typed_through_configuration_and_build_bindings():
 @pytest.mark.parametrize(
     "path, content",
     [
-        ("addon.yml", "tables:\n  Example:\n    .source: Warehouse/Sales/Dim.Date\n"),
+        ("addon.yml", "tables:\n  Example:\n    .unknown: Warehouse/Sales/Dim.Date\n"),
         ("addon.yml", ".rules: []\n"),
         (
             "addon.yml",

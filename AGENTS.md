@@ -183,8 +183,27 @@ requested properties and inferred calculated columns, then publishes the two
 semantic dictionaries. Registry publication remains the final Build barrier.
 A failed update or readback leaves the model uncertified. Planning resolves the
 item without fetching its existing definition. There is no live partition
-comparison or retention step. `.source`, semantic DAX Tests and full semantic
-Health remain later feature work.
+comparison or retention step. Semantic DAX Tests and full semantic Health remain
+later feature work.
+
+Table `.source` names an existing logical Warehouse or Lakehouse Table/View.
+Session reads its typed physical identity, SQL endpoint and any missing column
+shape before Build planning. Selected sources can supply a declared schema;
+missing inferred shape requires explicit semantic columns or a prior source
+Build. New tables use Direct Lake on SQL. Authored SQL-navigation M partitions
+and Direct Lake entity partitions retain their storage mode and other properties
+when rebound. Unsupported M transformations fail with a source diagnostic.
+Microsoft's [Direct Lake limits](https://learn.microsoft.com/en-us/fabric/fundamentals/direct-lake-overview#considerations-and-limitations)
+apply, including single-source and composite-model constraints for Direct Lake
+on SQL. Views use the native DirectQuery fallback; Weaver retains `directLake`.
+
+`SemanticObjectDictionary.Source binding` retains source metadata. Each semantic
+table publishes its exact producer in `_.Dependency`; two consuming tables keep
+separate rows even when they share a producer. The installed DAG reads those rows
+and derives the single model-refresh node's upstream edges. Lakehouse SQL endpoint
+refresh and Warehouse OneLake publication use the existing Load barriers. Sources
+without `.source` add no inferred edges. Normal Load item/name selection still
+controls which producers run.
 
 Load reads the certified model root and its typed workspace/item IDs from the
 catalogue. The installed graph, load planner and Runner dispatch a built-in

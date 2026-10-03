@@ -68,6 +68,7 @@ PUBLIC_SCHEMA: dict[str, tuple[str, ...]] = {
         "Object name",
         "Semantic path",
         "Semantic kind",
+        "Source binding",
         "Properties",
         "Provenance",
         "Signature",

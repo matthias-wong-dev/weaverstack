@@ -42,7 +42,12 @@ class SemanticCatalogueExecutor:
         verify_deployed(spec["model"], model)
         item = WeaverItemId.parse(spec["item"])
         contribution = SemanticContribution(
-            spec["model"], {}, spec["provenance"], spec["properties"]
+            spec["model"],
+            {},
+            spec["provenance"],
+            spec["properties"],
+            spec.get("source_references", {}),
+            spec.get("source_bindings", {}),
         )
         if contribution.signature != spec["signature"]:
             raise InstallError(f"{item}: semantic payload signature does not match")

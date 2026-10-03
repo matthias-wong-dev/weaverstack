@@ -22,6 +22,7 @@ from .catalogue.tables import (
     ROLE_DATA,
     ROLE_TEST,
     SEMANTIC_MODEL_DICTIONARY,
+    SEMANTIC_OBJECT_DICTIONARY,
     SHORTCUT,
     TABLE_DICTIONARY,
     TEST_DICTIONARY,
@@ -215,6 +216,9 @@ class InstalledEdge:
     #: Shortcut destinations are materialised after their sources even though
     #: nothing declares that read.
     is_shortcut: bool = False
+    semantic_table: str | None = None
+    source_mode: str | None = None
+    source_access: str | None = None
 
 
 @dataclass(frozen=True)
@@ -786,6 +790,9 @@ def _shortcut_edges(shortcuts, nodes) -> tuple[InstalledEdge, ...]:
 class _DependencyRow:
     consumer: WeaverDocumentId
     reference: str
+    semantic_table: str | None = None
+    referenced: tuple[str, ...] = ()
+    source_binding: str | None = None
 
 
 def _dependency_rows(catalogue: Catalogue, nodes) -> tuple[_DependencyRow, ...]:
@@ -800,6 +807,38 @@ def _dependency_rows(catalogue: Catalogue, nodes) -> tuple[_DependencyRow, ...]:
         for row in tables.get(DEPENDENCY.name, ()):
             schema = str(row.get("referencing_schema_name") or "")
             name = str(row.get("referencing_object_name") or "")
+            if item.item_type == SEMANTIC_MODEL:
+                from .semantic_models.compiler import escape
+
+                consumer = WeaverDocumentId.model_root(item)
+                if str(consumer) not in nodes:
+                    continue
+                binding = next(
+                    (
+                        r.get("source_binding")
+                        for r in tables.get(SEMANTIC_OBJECT_DICTIONARY.name, ())
+                        if r.get("semantic_path") == f"/model/tables/{escape(name)}"
+                    ),
+                    None,
+                )
+                found.append(
+                    _DependencyRow(
+                        consumer=consumer,
+                        reference=str(row.get("dependency_reference") or ""),
+                        semantic_table=name,
+                        referenced=tuple(
+                            str(row.get(k) or "")
+                            for k in (
+                                "referenced_item_type",
+                                "referenced_item_name",
+                                "referenced_schema_name",
+                                "referenced_object_name",
+                            )
+                        ),
+                        source_binding=binding,
+                    )
+                )
+                continue
             consumer = stored_identity(item, schema, name)
             if str(consumer) not in nodes:
                 area, relational = stored_area(schema)
@@ -815,7 +854,14 @@ def _dependency_rows(catalogue: Catalogue, nodes) -> tuple[_DependencyRow, ...]:
                 )
             )
     return tuple(
-        sorted(dict.fromkeys(found), key=lambda row: (str(row.consumer), row.reference))
+        sorted(
+            dict.fromkeys(found),
+            key=lambda row: (
+                str(row.consumer),
+                row.semantic_table or "",
+                row.reference,
+            ),
+        )
     )
 
 
@@ -836,10 +882,14 @@ class _References:
         self.unresolved: dict[WeaverDocumentId, list[str]] = {}
 
     def resolve(self, rows) -> tuple[InstalledEdge, ...]:
-        edges: dict[tuple[str, str, str], InstalledEdge] = {}
+        edges: dict[tuple[str, str, str, str | None], InstalledEdge] = {}
         for row in rows:
+            source = {}
             try:
-                found = self._one(row.consumer, row.reference)
+                if row.semantic_table is not None:
+                    found, source = self._semantic(row)
+                else:
+                    found = self._one(row.consumer, row.reference)
             except CatalogueStateError as exc:
                 # Defer failure until an operation reaches this consumer so an
                 # unrelated target remains usable.
@@ -859,9 +909,48 @@ class _References:
                 downstream=row.consumer,
                 reference=row.reference,
                 through=None if through is None else through.destination,
+                semantic_table=row.semantic_table,
+                source_mode=source.get("mode"),
+                source_access=source.get("access"),
             )
-            edges.setdefault((str(producer), str(row.consumer), row.reference), edge)
+            edges.setdefault(
+                (str(producer), str(row.consumer), row.reference, row.semantic_table),
+                edge,
+            )
         return tuple(edges.values())
+
+    def _semantic(self, row):
+        import json
+
+        from .errors import WeaverError
+        from .semantic_models.references import source_identity
+
+        try:
+            producer = source_identity(row.reference)
+            source = json.loads(row.source_binding or "null")
+            schema, name = catalogue_columns(producer)
+            expected = (producer.item.item_type, producer.item.item_name, schema, name)
+            node = self._objects.get(producer)
+            if (
+                str(producer) != row.reference
+                or row.referenced != expected
+                or node is None
+                or node.object_type not in {"table", "view"}
+                or not isinstance(source, dict)
+                or source.get("reference") != row.reference
+                or source.get("object_type") != node.object_type
+                or source.get("item_type") != producer.item.item_type
+                or source.get("item_name") != node.target.name
+                or source.get("mode")
+                not in {"directLake", "import", "directQuery", "dual"}
+                or source.get("access") != "sql"
+            ):
+                raise ValueError("source identity or binding is missing or differs")
+        except (WeaverError, ValueError, TypeError) as exc:
+            raise CatalogueStateError(
+                f"{row.consumer} table {row.semantic_table!r}: invalid installed .source {row.reference!r}: {exc}. Build the model again."
+            ) from exc
+        return (producer, None), source
 
     def _one(self, consumer: WeaverDocumentId, reference: str):
         """Resolve shortcuts before native objects to preserve the crossing."""
