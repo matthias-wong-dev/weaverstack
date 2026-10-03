@@ -58,7 +58,7 @@ class CatalogueConnection:
         return self._query(statement)
 
     def row_sets(self, statements: list[str]) -> tuple:
-        """Each statement's rows, read in one round trip where the transport allows."""
+        """Each statement's rows, read together where the transport allows."""
 
         if self._query_sets is None:
             return tuple(self._query(statement) for statement in statements)

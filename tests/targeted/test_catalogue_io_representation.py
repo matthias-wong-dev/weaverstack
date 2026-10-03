@@ -135,20 +135,20 @@ def test_an_installed_read_does_not_read_the_history():
 
 
 class _Batched(_Connection):
-    """A connection that reads several statements in one round trip."""
+    """A connection that reads several statements together."""
 
     def __init__(self) -> None:
         super().__init__()
-        self.round_trips = 0
+        self.requests = 0
 
     def row_sets(self, statements):
-        self.round_trips += 1
+        self.requests += 1
         return [self.rows(statement) for statement in statements]
 
 
 @weaver_test()
-def test_an_installed_read_reads_every_table_in_one_round_trip():
-    """Each table read is a statement in one batch, not a round trip of its own."""
+def test_an_installed_read_asks_for_every_table_at_once():
+    """The transport reads them together rather than one after another."""
 
     from weaver.catalogue.state import read_installed_catalogue
 
@@ -156,7 +156,7 @@ def test_an_installed_read_reads_every_table_in_one_round_trip():
 
     read_installed_catalogue(connection)
 
-    assert connection.round_trips == 1
+    assert connection.requests == 1
     assert sorted(connection.read) == sorted(table.name for table in READABLE_TABLES)
 
 

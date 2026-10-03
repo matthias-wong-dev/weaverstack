@@ -513,14 +513,28 @@ class Session(ABC):
         target: Any,
         workspace: Workspace | None = None,
     ) -> tuple[tuple[Any, ...], ...]:
-        """Run several T-SQL queries in one round trip and return each one's rows."""
+        """Run several T-SQL queries at once and return each one's rows, in order.
+
+        A Warehouse runs the statements of one batch one after another, so they
+        go on separate connections instead.
+        """
 
         if not statements:
             return ()
+        from concurrent.futures import ThreadPoolExecutor
+
+        from ..sql.pool import DEFAULT_MAX_CONNECTIONS
+
         executor = self.sql_executor(target, workspace=workspace)
-        return executor.query_result_sets(
-            "\n".join(statement.rstrip().rstrip(";") + ";" for statement in statements)
-        )
+        context = self.telemetry.capture_context()
+
+        def query(statement: str):
+            with self.telemetry.use_context(context):
+                return tuple(executor.query(statement))
+
+        workers = min(len(statements), DEFAULT_MAX_CONNECTIONS)
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            return tuple(pool.map(query, statements))
 
     # --- asynchronous appends -------------------------------------------------
 

@@ -48,7 +48,7 @@ def read_table(
 
 
 def read_tables(catalogue: Any, tables: Sequence[CatalogueTable]) -> dict:
-    """Read whole tables in one round trip, by table name."""
+    """Read whole tables together, by table name."""
 
     statements = {table.name: table_query(catalogue, table) for table in tables}
     present = [table for table in tables if statements[table.name] is not None]
