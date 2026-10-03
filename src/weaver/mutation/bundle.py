@@ -53,12 +53,14 @@ VALID_EXECUTORS = frozenset(
         COPY_FILES_EXECUTOR,
         "semantic_model",
         "semantic_catalogue",
+        "semantic_wipe",
     }
 )
 #: Required payload extension by executor.
 _EXECUTOR_EXTENSION = {
     "semantic_model": ".semantic_model.json",
     "semantic_catalogue": ".semantic_catalogue.json",
+    "semantic_wipe": ".semantic-wipe.json",
     SPARK_SQL_EXECUTOR: ".spark.sql",
     SPARK_SQL_BATCH_EXECUTOR: ".spark-sql-batch.json",
     SPARK_TABLE_EXECUTOR: ".spark-table.json",
