@@ -189,12 +189,16 @@ class _Spark:
         if text.startswith("DESCRIBE DETAIL"):
             # A target holding rows unless a test empties it.
             return [_Row(numFiles=self.counts.get("files", 1))]
-        if "AS violations" in text:
-            # Whether discovery would find anything, which is exactly whether
-            # this test configured rejects for it to find.
+        if "AS staged" in text:
+            # Staging's count, and whether discovery would find anything, which
+            # is exactly whether this test configured rejects for it to find.
             measures = re.findall(r" AS (\w+)", text)
             return [
-                _Row({m: 0 for m in measures}, violations=self.counts.get("reject", 0))
+                _Row(
+                    {m: 0 for m in measures},
+                    staged=self.counts.get("staging", 0),
+                    violations=self.counts.get("reject", 0),
+                )
             ]
         if "GROUP BY `__weaver_operation`" in text:
             return [
@@ -561,7 +565,8 @@ def test_an_unkeyed_incremental_lakehouse_load_appends_with_generated_identity()
     assert result.rows_inserted == 2
     assert result.rows_updated == 0
     assert result.rows_deleted == 0
-    assert spark.counted == ["staging"]
+    # Staging is counted by the aggregate that checks it, not by a count.
+    assert spark.counted == []
     assert len(spark.mutations) == 1
     written = spark.mutations[0]
     assert written.startswith("INSERT INTO `lh`.`DWG`.`Customer`")
@@ -584,7 +589,7 @@ def test_an_unkeyed_incremental_lakehouse_load_rejects_duplicate_unique_keys():
     assert result.rows_deleted == 0
     assert result.rows_rejected == 1
     assert result.succeeded is False
-    assert spark.counted == ["staging", "reject", "clean"]
+    assert spark.counted == ["reject", "clean"]
     assert len(spark.mutations) == 1
     assert spark.mutations[0].startswith("INSERT INTO")
     submitted = "\n".join(spark.statements)
@@ -714,9 +719,9 @@ def test_all_three_counts_come_from_one_pass():
     spark, result = _load(BUSY)
 
     assert (result.rows_inserted, result.rows_updated, result.rows_deleted) == (1, 1, 2)
-    # Staging alone. The classification is not counted separately: the grouped
-    # pass is what materialises it.
-    assert spark.counted == ["staging"]
+    # Nothing. Staging is counted by the aggregate that checks it, and the
+    # classification by the grouped pass that materialises it.
+    assert spark.counted == []
     grouped = [
         one for one in spark.statements if "GROUP BY `__weaver_operation`" in one
     ]
@@ -1030,7 +1035,7 @@ def test_an_incremental_load_with_a_claim_settles_it_as_its_own_relation():
         "change",
         "delete",
     ]
-    assert spark.counted == ["staging", "delete"]
+    assert spark.counted == ["delete"]
     claim = next(
         one for one in spark.statements if one.startswith("SELECT t.`Customer")
     )
@@ -1387,6 +1392,7 @@ def test_staging_that_cannot_hold_a_reject_is_not_searched_for_one():
     assert result.rows_rejected == 0
     assert "reject" not in [frame.role for frame in spark.persisted]
     check = next(one for one in spark.statements if "AS violations" in one)
+    assert check.startswith("SELECT count(*) AS staged,")
     assert "`Email` IS NULL" in check
     assert "count(DISTINCT s.`Customer id`) AS duplicate_keys" in check
     assert "count(DISTINCT s.`Email`) AS duplicate_unique_0" in check

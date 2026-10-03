@@ -181,9 +181,9 @@ def _reconcile(
         names["target"],
         "staging",
     )
-    # Both the metric and the force that materialises staging for the phases after
-    # it, so the authored source is evaluated exactly once.
-    rows_read = staging.count()
+    # Both the metrics and the force that materialises staging for the phases
+    # after it, so the authored source is evaluated exactly once.
+    rows_read, may_reject = _measure_staging(spark, staging_view, contract)
     # Settled, so a failure from here on has something to leave behind. Recorded
     # as the raw proposal rather than as whatever supersedes it, because what
     # ``_Staging`` answers is what the source proposed.
@@ -197,7 +197,7 @@ def _reconcile(
     )
     signature = row_signature("s", signature_columns, types)
     rows_rejected = 0
-    if _may_reject(spark, staging_view, contract):
+    if may_reject:
         rejects, reject_view = _discover_rejects(
             spark, held, names["target"], staging_view, contract, columns, signature
         )
@@ -351,30 +351,34 @@ def _reconcile(
 # --- phases ------------------------------------------------------------------
 
 
-def _may_reject(spark, staging_view, contract: LoadContract) -> bool:
-    """Whether staging holds any row reject discovery could refuse.
+def _measure_staging(spark, staging_view, contract: LoadContract) -> tuple[int, bool]:
+    """Count staging, and say whether reject discovery could refuse any of it.
 
-    False exactly when discovery would find nothing: no row violates a key or
-    a not-null column, and no primary or unique key value is held twice. One
-    aggregate answers it, where discovery ranks and persists a relation.
+    Discovery could refuse nothing exactly when no row violates a key or a
+    not-null column and no primary or unique key value is held twice. One
+    aggregate answers both, where discovery ranks and persists a relation.
     """
 
-    measures = [f"count_if({violation_predicate(contract)}) AS violations"]
-    if contract.primary_key:
-        # Counted as duplicates only once no key is blank, when every key counts.
-        measures.append(
-            f"count(*) - count(DISTINCT {qualified('s', contract.primary_key)}) "
-            "AS duplicate_keys"
-        )
-    measures += [
-        f"count_if({participates(unique_key)}) - "
-        f"count(DISTINCT {qualified('s', unique_key)}) AS duplicate_unique_{index}"
-        for index, unique_key in enumerate(contract.unique_keys)
-    ]
+    measures = ["count(*) AS staged"]
+    if not contract.replaces_wholesale:
+        measures.append(f"count_if({violation_predicate(contract)}) AS violations")
+        if contract.primary_key:
+            # Counted as duplicates only once no key is blank, when every key
+            # counts.
+            measures.append(
+                f"count(*) - count(DISTINCT {qualified('s', contract.primary_key)}) "
+                "AS duplicate_keys"
+            )
+        measures += [
+            f"count_if({participates(unique_key)}) - "
+            f"count(DISTINCT {qualified('s', unique_key)}) AS duplicate_unique_{index}"
+            for index, unique_key in enumerate(contract.unique_keys)
+        ]
     found = spark.sql(
         f"SELECT {', '.join(measures)} FROM {staging_view} AS s"
     ).collect()[0]
-    return any(int(found[measure.rsplit(" AS ", 1)[1]] or 0) for measure in measures)
+    names = [measure.rsplit(" AS ", 1)[1] for measure in measures]
+    return int(found["staged"]), any(int(found[name] or 0) for name in names[1:])
 
 
 def _discover_rejects(
