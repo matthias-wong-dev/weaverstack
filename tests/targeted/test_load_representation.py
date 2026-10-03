@@ -164,13 +164,13 @@ def test_a_view_has_no_generated_load():
 #: A fingerprint of what each generator currently emits, beside the version that
 #: describes it. See the test below.
 GENERATED_FINGERPRINTS = {
-    "tsql": (17, "c2e627660b318b6662a9406253c1ea3924edd3d09b35f5f0dec8ab2ef4a82388"),
+    "tsql": (19, "f5b2983cc76565a5f3854018d6ecfbec26850b39f4cb1b343e1793642573eaba"),
     "tsql_append": (
-        17,
+        19,
         "4683fc8dfe3f29eee6ef91a4bc9ff9ad3a13301dd8bbaf6398e81ad89419a0a3",
     ),
     "tsql_append_validated": (
-        17,
+        19,
         "746faf122d1c67842e27c7766f68ea9c099a7801ff9a93258a6a3cb59e6e68eb",
     ),
     "spark": (9, "d0cdda197f8619dc2f679b7ef270154e439b76aaaf27f5001c79b489304a6acf"),
@@ -271,10 +271,38 @@ def test_a_breach_never_writes_whatever_fault_tolerant_says():
         .payload.decode()
     )
     breach = payload.index("if @weaver_error is not null")
-    insert = payload.index("insert into [Sales].[Customer] (")
+    insert = _existing_target_insert(payload)
 
     assert breach < insert
     assert "the target was not modified" in payload
+
+
+def _existing_target_insert(payload: str) -> int:
+    """The insert of a target that already holds rows, which every gate guards.
+
+    An empty target is written from staging in its own branch, ahead of it in
+    the text, where no row can be updated, deleted or held twice.
+    """
+
+    return payload.index(
+        "insert into [Sales].[Customer] (",
+        payload.index("create table [Sales].[Customer_Upsert]"),
+    )
+
+
+@weaver_test()
+def test_an_empty_target_is_written_from_staging_without_a_working_copy():
+    payload = (
+        _warehouse()
+        .create_load(item=WeaverItemId("Warehouse", "Reporting"))
+        .payload.decode()
+    )
+    branch = payload.index("if @weaver_target_rows = 0")
+    empty = payload[branch : payload.index("create table [Sales].[Customer_Upsert]")]
+
+    assert payload.index("select @weaver_target_rows = count(*)") < branch
+    assert "from [Sales].[Customer_Staging] as s;" in empty
+    assert "update c" not in empty
 
 
 @weaver_test()
@@ -915,7 +943,7 @@ def test_a_merge_conflict_stops_the_load_rather_than_refusing_rows():
     check = body.index("@weaver_merge_conflicts = count(*)")
 
     assert check < body.index("/*-- The target, once every gate has passed --*/")
-    assert check < body.index("insert into [Sales].[Customer] (")
+    assert check < _existing_target_insert(body)
     assert "throw 51022" in body
     assert "while" not in body.lower()
 
@@ -1135,7 +1163,7 @@ def test_the_thresholds_are_checked_before_the_first_write():
         .payload.decode()
     )
     gate = payload.index("@ignore_stability_threshold = 0 and")
-    insert = payload.index("insert into [Sales].[Customer] (")
+    insert = _existing_target_insert(payload)
 
     assert gate < insert
 
@@ -1215,3 +1243,29 @@ def test_a_breach_says_the_operation_the_count_the_size_and_the_limit():
     assert "+ '% of ' + cast(@weaver_target_rows as varchar(20))" in payload
     assert "', over the 5% threshold'" in payload
     assert "'; the target was not modified'" in payload
+
+
+@weaver_test()
+def test_a_warehouse_load_builds_reject_evidence_only_when_staging_may_hold_a_reject():
+    """The reject chain is the costliest statement a small load compiles.
+
+    One scan for a key violation or a twice-held key decides whether it runs, and
+    finding neither means the chain would refuse nothing.
+    """
+
+    source = WAREHOUSE_TABLE.replace(
+        "Primary key: Customer id",
+        "Primary key: Customer id\n\nUnique keys:\n  - Customer name",
+    )
+    script = (
+        _warehouse(source)
+        .create_load(item=WeaverItemId("Warehouse", "Reporting"))
+        .payload.decode("utf-8")
+    )
+
+    guard = script.index("if exists (select 1 from [Sales].[Customer_Staging] as s")
+    assert guard < script.index("create table [Sales].[Customer_Reject]")
+    checks = script[guard : script.index("create table [Sales].[Customer_Reject]")]
+    assert "group by [Customer id] having count(*) > 1" in checks
+    assert "[Customer name] is not null" in checks
+    assert "group by [Customer name] having count(*) > 1" in checks

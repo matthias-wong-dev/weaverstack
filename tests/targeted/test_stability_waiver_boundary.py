@@ -670,7 +670,10 @@ def test_every_refusal_returns_before_the_target_is_written():
     mutation, so what commits is the evidence the load settled and nothing else.
 
     An explicit reload empties the target before the load body, under its own
-    contract; the gates below are what these indexes measure.
+    contract; the gates below are what these indexes measure. An empty target
+    is written from staging in a branch of its own, which no stability gate
+    guards, so the reject refusal precedes both branches and the breach refusal
+    precedes the writes of the branch it guards.
     """
 
     payload = _generated_procedure()
@@ -679,13 +682,17 @@ def test_every_refusal_returns_before_the_target_is_written():
         for index in range(len(payload))
         if payload.startswith("set @weaver_is_refusal = cast(1 as bit);", index)
     ]
-    written = min(
-        payload.index("\n    update c\n"),
-        payload.index("\n    insert into [Sales].[Customer] ("),
+    empty = payload.index(
+        "insert into [Sales].[Customer] (", payload.index("if @weaver_target_rows = 0")
+    )
+    working = payload.index("create table [Sales].[Customer_Upsert]")
+    existing = min(
+        payload.index("update c\n", working),
+        payload.index("insert into [Sales].[Customer] (", working),
     )
 
     assert len(refusals) == 2
-    assert max(refusals) < written
+    assert min(refusals) < empty < max(refusals) < existing
 
 
 @weaver_test()

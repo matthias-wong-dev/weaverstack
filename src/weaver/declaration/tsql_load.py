@@ -369,6 +369,7 @@ def _primary_key_body(names: dict, contract: LoadContract, claims_deletes: bool)
         is_new_column=IS_NEW_COLUMN,
         rejection_reason=REJECTION_REASON,
         reason_width=REJECTION_REASON_WIDTH,
+        reject_candidates=_reject_candidates(names, contract),
         reject_discovery=_reject_discovery(names, contract),
         duplicate_key_count=_duplicate_key_count(names, contract),
         staging_purge=_staging_purge(names, contract),
@@ -656,6 +657,30 @@ def _reject_discovery(names: dict, contract: LoadContract) -> str:
     chain = ",\n".join(f"{name} as (\n{_indent(sql, 4)}\n)" for name, sql in ctes)
     union = "\nunion all\n".join(f"select * from {name}" for name in rejects)
     return f";with {chain}\ninsert into {names['reject']}\n{union};"
+
+
+def _reject_candidates(names: dict, contract: LoadContract) -> str:
+    """Whether staging holds any row reject discovery could refuse.
+
+    False exactly when discovery would find nothing: no row violates a key or
+    a not-null column, and no primary or unique key value is held twice.
+    """
+
+    staging = names["staging"]
+    keys = _bare_columns(contract.primary_key)
+    checks = [
+        f"exists (select 1 from {staging} as s where {_violation_predicate(contract)})",
+        f"exists (select 1 from {staging} group by {keys} having count(*) > 1)",
+    ]
+    for unique_key in contract.unique_keys:
+        participates = " and ".join(
+            f"{_quote(column)} is not null" for column in unique_key
+        )
+        checks.append(
+            f"exists (select 1 from {staging} where {participates}\n"
+            f"    group by {_bare_columns(unique_key)} having count(*) > 1)"
+        )
+    return "\n   or ".join(checks)
 
 
 def _reject_projection(reason: str) -> str:
