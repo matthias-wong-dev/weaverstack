@@ -454,9 +454,11 @@ def test_pbip_source_rebind_retains_authored_mode_and_properties(tmp_path, mode)
         )
 
 
+@pytest.mark.parametrize("newline", ["\n", "\r\n"], ids=["lf", "crlf"])
 @weaver_test()
 def test_direct_lake_pbip_rebind_keeps_partition_properties_and_unmapped_expression(
     tmp_path,
+    newline,
 ):
     from pathlib import Path
 
@@ -480,7 +482,11 @@ def test_direct_lake_pbip_rebind_keeps_partition_properties_and_unmapped_express
         untouched
         + '\nexpression \'Warehouse/Serving\' = Sql.Database("previous", "database")\n',
         encoding="utf-8",
+        newline=newline,
     )
+    untouched_bytes = expression_file.read_bytes().split(
+        b"expression 'Warehouse/Serving'", 1
+    )[0]
     (folder / "extension.tmdl").write_text("model Model\n", encoding="utf-8")
     with source_session() as session:
         observed = probe_model()
@@ -504,7 +510,7 @@ def test_direct_lake_pbip_rebind_keeps_partition_properties_and_unmapped_express
         )
         assert result.succeeded, result.errors
         parts = submitted_parts(session)
-        assert parts["definition/expressions.tmdl"].startswith(untouched.encode())
+        assert parts["definition/expressions.tmdl"].startswith(untouched_bytes)
         assert parts["definition/tables/Sales.tmdl"] == path.read_bytes()
         native = decode_model(session.semantic_model("Reporting_Dev").definition)[
             "model"

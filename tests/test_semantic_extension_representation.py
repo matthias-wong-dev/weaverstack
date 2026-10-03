@@ -67,6 +67,7 @@ def merge(parts=None, *fragments):
     )
 
 
+@pytest.mark.parametrize("newline", [b"\n", b"\r\n"], ids=["lf", "crlf"])
 @pytest.mark.parametrize(
     "claim",
     [
@@ -82,8 +83,14 @@ def merge(parts=None, *fragments):
     ],
 )
 @weaver_test()
-def test_native_extension_probe(claim):
-    before = base_parts()
+def test_native_extension_probe(claim, newline):
+    before = {
+        path: value.replace(b"\r\n", b"\n").replace(b"\n", newline)
+        if path.endswith(".tmdl")
+        else value
+        for path, value in base_parts().items()
+    }
+    original = dict(before)
     result = merge(before)
     after = result.parts
     sales = after["definition/tables/Sales.tmdl"]
@@ -94,7 +101,7 @@ def test_native_extension_probe(claim):
         assert b"/// Reporting sales." in sales
         assert b"\tisHidden: false" in sales
     elif claim == "column-property":
-        assert b"\tcolumn ProductId\n\t\tisHidden" in sales
+        assert b"\tcolumn ProductId" + newline + b"\t\tisHidden" + newline in sales
         assert result.requested["tables"][0]["columns"][0]["isHidden"] is True
     elif claim == "new-measure":
         assert b"measure 'Double Revenue' = [Revenue] * 2" in sales
@@ -135,7 +142,7 @@ def test_native_extension_probe(claim):
         assert {p: after[p] for p in before if p not in touched} == {
             p: v for p, v in before.items() if p not in touched
         }
-        assert before == base_parts()
+        assert before == original
 
 
 @pytest.mark.parametrize("reference", [True, False])
