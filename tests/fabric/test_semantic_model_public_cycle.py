@@ -176,13 +176,15 @@ def test_public_build_catalogue_load_dax_and_unchanged_build(
         )
     else:
         definition_folder = folder / "Probe.SemanticModel" / "definition"
-        (definition_folder / "perspectives.tmdl").write_text(
+        perspectives = definition_folder / "perspectives"
+        perspectives.mkdir()
+        (perspectives / "Reporting.tmdl").write_text(
             "perspective Reporting\n\tperspectiveTable Sales\n\t\tperspectiveColumn Id\n",
             encoding="utf-8",
         )
         model_path = definition_folder / "model.tmdl"
         model_path.write_text(
-            model_path.read_text(encoding="utf-8") + "\n\tref perspective Reporting\n",
+            model_path.read_text(encoding="utf-8") + "\nref perspective Reporting\n",
             encoding="utf-8",
         )
     root = folder.parent.parent
@@ -274,14 +276,6 @@ def test_public_build_catalogue_load_dax_and_unchanged_build(
     assert any(node.result.request_id in row["details"] for row in logs)
     assert not read_table(context.connection, BOOKMARK, scope=SCOPE)
     assert not read_table(context.connection, LOAD_STATISTIC, scope=SCOPE)
-    if addon:
-        assert context.model.query_dax('EVALUATE ROW("Year", MAX(Calendar[Year]))') == [
-            {"[Year]": 2026}
-        ]
-    if pbip:
-        assert context.model.query_dax('EVALUATE ROW("Revenue", [Revenue])') == [
-            {"[Revenue]": 20}
-        ]
     unchanged = weaver.build(root, items=selector, session=context.session)
     print(json.dumps(unchanged.to_mapping(), default=str))
     assert unchanged.succeeded, unchanged.errors
@@ -292,6 +286,28 @@ def test_public_build_catalogue_load_dax_and_unchanged_build(
     assert not {"livy", "onelake"} & {
         event.resource for event in context.session.telemetry.events()
     }
+    print(
+        json.dumps(
+            {
+                "lifecycle": {
+                    "pbip": pbip,
+                    "addon": addon,
+                    "load_status": loaded,
+                    "unchanged": unchanged.to_mapping(),
+                    "no_livy_or_onelake": True,
+                }
+            },
+            default=str,
+        )
+    )
+    if addon:
+        assert context.model.query_dax('EVALUATE ROW("Year", MAX(Calendar[Year]))') == [
+            {"[Year]": 2026}
+        ]
+    if pbip:
+        assert context.model.query_dax('EVALUATE ROW("Revenue", [Revenue])') == [
+            {"[Revenue]": 20}
+        ]
 
 
 @weaver_test(remote=True, resources={"rest", "tds"})
@@ -314,7 +330,7 @@ def test_existing_warehouse_source_build_persists_lineage_and_loads_without_sour
         parts = {
             "definition.pbism": parts["definition.pbism"],
             "definition/database.tmdl": parts["definition/database.tmdl"],
-            "definition/model.tmdl": b"model Model\n\tculture: en-US\n\tdefaultPowerBIDataSourceVersion: powerBI_V3\n\n\tref table InstalledObjects\n",
+            "definition/model.tmdl": b"model Model\n\tculture: en-US\n\tdefaultPowerBIDataSourceVersion: powerBI_V3\n\nref table InstalledObjects\n",
             "definition/expressions.tmdl": b'expression \'Warehouse/_weaver\' = Sql.Database("previous", "database")\n',
             "definition/tables/InstalledObjects.tmdl": b"/// Installed catalogue objects\ntable InstalledObjects\n\tcolumn LogicalItem\n\t\tdataType: string\n\t\tsourceColumn: Item name\n\n\tpartition InstalledObjects = entity\n\t\tmode: directLake\n\t\tsource\n\t\t\tentityName: Registry\n\t\t\tschemaName: _\n\t\t\texpressionSource: 'Warehouse/_weaver'\n",
         }
@@ -390,6 +406,22 @@ def test_existing_warehouse_source_build_persists_lineage_and_loads_without_sour
         and unchanged.installation_report.action_counts()["total"] == 0
     )
     assert read_table(context.connection, LOAD_STATUS, scope=SCOPE) == (status,)
+    assert not {"livy", "onelake"} & {
+        event.resource for event in context.session.telemetry.events()
+    }
+    print(
+        json.dumps(
+            {
+                "lifecycle": {
+                    "shared": shared,
+                    "load_status": status,
+                    "unchanged": unchanged.to_mapping(),
+                    "no_livy_or_onelake": True,
+                }
+            },
+            default=str,
+        )
+    )
     expected = context.connection.rows("SELECT COUNT_BIG(*) AS n FROM [_].[Registry]")[
         0
     ]["n"]
