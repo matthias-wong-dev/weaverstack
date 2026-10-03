@@ -298,7 +298,8 @@ def _creation_requirements(supported, *, target, logical_sources) -> tuple[str, 
 
     keys = []
     for declaration, source_target in supported:
-        if not declaration.is_schema and declaration.destination_identity is None:
+        # A runtime reference lands in ``_``, which the item's schemas create.
+        if not declaration.is_schema:
             keys.append(schema_key(target.id, declaration.schema))
         keys.append(dropped_key(declaration.destination))
         if not declaration.is_logical:

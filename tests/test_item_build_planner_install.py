@@ -361,6 +361,10 @@ def test_warehouse_runtime_procedures_wait_for_the_items_catalogue_surface(tmp_p
         store=FilesystemStore(),
     )
 
+    # The surface views land in ``_``, which must exist first.
+    assert runs_before(
+        bundle.plan, "schema-Warehouse--Reporting-_", "shortcuts-Warehouse--Reporting"
+    )
     for procedure in ("_--Load", "_--Test", "_--Load-Sales.Customer"):
         assert runs_before(
             bundle.plan,
