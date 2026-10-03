@@ -24,6 +24,7 @@ _KEYS = {
     "mirror",
     "execution",
     "targets",
+    "data_sources",
 }
 
 _RETIRED_KEYS = ("lakehouses", "warehouses")
@@ -66,6 +67,7 @@ def parse_workspace(payload: Any, base_dir: str | Path | None = None) -> Workspa
             mirror=payload.get("mirror"),
             execution=_execution(payload.get("execution"), where="execution"),
             targets=_targets(payload.get("targets")),
+            data_sources=payload.get("data_sources", {}),
         )
     except TypeError as exc:
         raise ConfigError(f"Workspace configuration is incomplete: {exc}") from exc
@@ -118,6 +120,7 @@ def resolve_workspace(
         if configured is not None
         else ExecutionSettings(),
         "targets": configured.targets if configured is not None else {},
+        "data_sources": configured.data_sources if configured is not None else {},
     }
     return Workspace(**common)
 

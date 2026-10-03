@@ -49,8 +49,8 @@ def test_semantic_repository_retains_sources_effective_model_and_property_origin
     assert str(identity) == str(item)
     assert parse_installed_identity(str(identity)) == identity
     semantic = repository.semantic_models[item]
-    assert semantic.model["model"]["culture"] == "en-GB"
-    assert semantic.model["model"]["discourageImplicitMeasures"] is True
+    assert semantic.requested["culture"] == "en-GB"
+    assert semantic.requested["discourageImplicitMeasures"] is True
     assert semantic.sources == before
     assert (
         semantic.provenance["/model/culture"]["source"]

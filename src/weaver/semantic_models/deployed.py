@@ -1,4 +1,4 @@
-"""Verify the deployed TMSL against the assembled incoming definition."""
+"""Verify requested edits against observed semantic metadata."""
 
 from ..errors import InstallError
 from .compiler import _NAMED_COLLECTIONS
@@ -40,8 +40,47 @@ def canonical_model(model):
     return normalise({k: v for k, v in model.items() if k not in {"name", "id"}})
 
 
-def verify_deployed(expected, actual):
-    """Require authored properties and engine-inferred calculated columns."""
+def verify_requested(requested, actual, *, owned=()):
+    from .compiler import _COMMON, _SCHEMAS, escape
+
+    if not isinstance(actual, dict) or not isinstance(actual.get("model"), dict):
+        raise InstallError("Semantic readback has no model object")
+
+    def structure(node, collections):
+        for key, nested in collections.items():
+            members = node.get(key, [])
+            if not isinstance(members, list):
+                raise InstallError(f"Semantic readback has invalid {key}")
+            names = set()
+            for member in members:
+                if (
+                    not isinstance(member, dict)
+                    or not isinstance(member.get("name"), str)
+                    or not member["name"]
+                ):
+                    raise InstallError(f"Semantic readback has an unnamed {key} object")
+                name = member["name"].casefold()
+                if name in names:
+                    raise InstallError(
+                        f"Semantic readback has duplicate {key} object {name!r}"
+                    )
+                names.add(name)
+                structure(member, nested)
+
+    structure(
+        actual["model"],
+        {
+            "tables": {"columns": {}, "measures": {}, "partitions": {}},
+            "relationships": {},
+            "expressions": {},
+        },
+    )
+    defaults = {
+        "isHidden": False,
+        "isKey": False,
+        "isNullable": True,
+        "discourageImplicitMeasures": False,
+    }
 
     def contains(wanted, found, path):
         if isinstance(wanted, dict):
@@ -51,60 +90,96 @@ def verify_deployed(expected, actual):
                 p.get("source", {}).get("type") == "calculated"
                 for p in wanted.get("partitions", [])
             )
-            for key in _NAMED_COLLECTIONS.intersection(wanted.keys() | found.keys()):
-                if key == "columns" and calculated:
-                    continue
-                expected_names = {child["name"] for child in wanted.get(key, [])}
-                found_names = {child["name"] for child in found.get(key, [])}
-                if expected_names != found_names:
-                    raise InstallError(f"Semantic readback differs at {path}/{key}")
-            for key in found.keys() - wanted.keys():
-                if key in _NAMED_COLLECTIONS:
-                    continue
-                if (
-                    "/relationships/" in path
-                    and key in _RELATIONSHIP_DEFAULTS
-                    and found[key] == _RELATIONSHIP_DEFAULTS[key]
-                ):
-                    continue
-                raise InstallError(
-                    f"Semantic readback retains removed property {path}/{key}"
+            complete = any(
+                path == owner or path.startswith(owner + "/") for owner in owned
+            )
+            if complete:
+                kind = (
+                    "model"
+                    if path == "/model"
+                    else {
+                        "tables": "table",
+                        "columns": "column",
+                        "measures": "measure",
+                        "partitions": "partition",
+                        "relationships": "relationship",
+                        "expressions": "expression",
+                        "roles": "role",
+                        "annotations": "annotation",
+                        "tablePermissions": "tablePermission",
+                        "hierarchies": "hierarchy",
+                        "levels": "level",
+                    }.get(path.rsplit("/", 2)[-2], "")
                 )
+                writable = set(_COMMON) | set(_SCHEMAS.get(kind, {}))
+                for key in (
+                    found.keys() - wanted.keys()
+                ) & writable - _NAMED_COLLECTIONS:
+                    native_default = defaults.get(key)
+                    if kind == "relationship":
+                        native_default = _RELATIONSHIP_DEFAULTS.get(key)
+                    elif key == "type" and kind == "column":
+                        native_default = "data"
+                    elif key == "summarizeBy":
+                        native_default = "default"
+                    if found[key] != native_default and found[key] not in (
+                        None,
+                        "",
+                        [],
+                        {},
+                    ):
+                        raise InstallError(
+                            f"Semantic readback retains removed property {path}/{key}"
+                        )
+                for key in _NAMED_COLLECTIONS.intersection(
+                    wanted.keys() | found.keys()
+                ):
+                    if key == "columns" and calculated:
+                        continue
+                    expected_names = {v["name"].casefold() for v in wanted.get(key, [])}
+                    actual_names = {v["name"].casefold() for v in found.get(key, [])}
+                    if expected_names != actual_names:
+                        raise InstallError(f"Semantic readback differs at {path}/{key}")
             for key, value in wanted.items():
                 default = (
                     _RELATIONSHIP_DEFAULTS.get(key)
                     if "/relationships/" in path
-                    else None
+                    else defaults.get(key)
                 )
-                contains(value, found.get(key, default), f"{path}/{key}")
+                received = found.get(key, default)
+                if (
+                    key == "name"
+                    and isinstance(received, str)
+                    and isinstance(value, str)
+                ):
+                    received, value = received.casefold(), value.casefold()
+                contains(value, received, f"{path}/{escape(key)}")
+            if calculated and not found.get("columns"):
+                raise InstallError(
+                    f"Semantic readback has no inferred column schema at {path}"
+                )
         elif isinstance(wanted, list):
+            if wanted == [] and found is None:
+                return
             if not isinstance(found, list):
-                if wanted == [] and found is None:
-                    return
                 raise InstallError(f"Semantic readback differs at {path}")
             if path.rsplit("/", 1)[-1] in _NAMED_COLLECTIONS:
                 indexed = {
-                    v["name"]: v for v in found if isinstance(v, dict) and "name" in v
+                    v["name"].casefold(): v
+                    for v in found
+                    if isinstance(v, dict) and isinstance(v.get("name"), str)
                 }
+                if wanted == [] and found:
+                    raise InstallError(f"Semantic readback differs at {path}")
                 for value in wanted:
                     contains(
-                        value, indexed.get(value["name"]), f"{path}/{value['name']}"
+                        value,
+                        indexed.get(value["name"].casefold()),
+                        f"{path}/{escape(value['name'])}",
                     )
             elif wanted != found:
                 raise InstallError(f"Semantic readback differs at {path}")
         elif wanted != found:
             raise InstallError(f"Semantic readback differs at {path}")
 
-    contains(canonical_model(expected), canonical_model(actual), "")
-    for table in actual["model"].get("tables", []):
-        if any(
-            p.get("source", {}).get("type") == "calculated"
-            for p in table.get("partitions", [])
-        ):
-            columns = table.get("columns", [])
-            if not columns or any(
-                not c.get("name") or not c.get("dataType") for c in columns
-            ):
-                raise InstallError(
-                    f"Semantic readback has no inferred column schema for {table['name']!r}"
-                )
+    contains(canonical_model({"model": requested}), canonical_model(actual), "")

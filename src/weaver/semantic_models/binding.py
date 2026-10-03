@@ -5,7 +5,10 @@ import re
 from dataclasses import replace
 
 from ..errors import BuildError
-from .compiler import escape, leaf_properties
+from .compiler import _NAMED_COLLECTIONS, _merge, escape, leaf_properties
+from .fragments import source_context, source_table
+from .patching import _patch_object
+from .tmdl import PackageEditor
 
 
 def m_string(value):
@@ -165,25 +168,49 @@ def _bind_partition(model, table, source):
     return "directLake"
 
 
+def _changes(before, after, key=""):
+    if isinstance(before, dict) and isinstance(after, dict):
+        return {
+            k: _changes(before.get(k), v, k)
+            for k, v in after.items()
+            if k not in before or before[k] != v
+        }
+    if (
+        key in _NAMED_COLLECTIONS
+        and isinstance(before, list)
+        and isinstance(after, list)
+    ):
+        old = {v["name"].casefold(): v for v in before}
+        return [
+            {**_changes(old.get(v["name"].casefold()), v), "name": v["name"]}
+            for v in after
+            if old.get(v["name"].casefold()) != v
+        ]
+    return copy.deepcopy(after)
+
+
 def bind_semantic_sources(repository, observed, selected):
     contributions = dict(repository.semantic_models)
     for item, contribution in repository.semantic_models.items():
         if item not in selected or not contribution.source_references:
             continue
-        model = copy.deepcopy(contribution.model)
+        editor = PackageEditor(contribution.parts)
+        requested = copy.deepcopy(contribution.requested)
+        owned = set(contribution.owned)
         provenance = copy.deepcopy(contribution.provenance)
-        bindings = {}
-        for table in model["model"].get("tables", []):
-            reference = contribution.source_references.get(table["name"])
-            if reference is None:
-                continue
+        bindings = dict(contribution.source_bindings)
+        for table_name, reference in contribution.source_references.items():
+            table = source_table(editor.parts, table_name)
+            before_table = copy.deepcopy(table)
+            context = source_context(editor.parts, table)
+            before_context = copy.deepcopy(context)
             if reference not in observed:
                 raise BuildError(
                     f".source {reference}: source metadata was not read before Build planning"
                 )
             source = copy.deepcopy(observed[reference])
             before = leaf_properties({"model": {"tables": [table]}})
-            mode = _bind_partition(model["model"], table, source)
+            mode = _bind_partition(context, table, source)
             if not table.get("columns"):
                 table["columns"] = [
                     {
@@ -201,6 +228,12 @@ def bind_semantic_sources(repository, observed, selected):
                 note = source.get("column_notes", {}).get(column.get("sourceColumn"))
                 if note:
                     column.setdefault("description", note)
+            patch = _changes(before_context, context)
+            change = _changes(before_table, table)
+            if change:
+                patch["tables"] = [{**change, "name": table["name"]}]
+            _patch_object(editor, (), "model", patch, owned)
+            requested = _merge(requested, patch)
             source["mode"] = mode
             source["access"] = "sql"
             bindings[table["name"]] = source
@@ -215,6 +248,11 @@ def bind_semantic_sources(repository, observed, selected):
                         "reference": reference,
                     }
         contributions[item] = replace(
-            contribution, model=model, provenance=provenance, source_bindings=bindings
+            contribution,
+            parts=editor.parts,
+            requested=requested,
+            owned=tuple(sorted(owned)),
+            provenance=provenance,
+            source_bindings=bindings,
         )
     return replace(repository, semantic_models=contributions)

@@ -137,9 +137,24 @@ class SemanticModelClient:
                     for message in body.get("messages", [])
                     if isinstance(message, dict) and message.get("type") == "Error"
                 )
+                service_error = body.get("serviceExceptionJson")
+                if service_error:
+                    messages = "; ".join(filter(None, (messages, str(service_error))))
+                hint = ""
+                if any(
+                    word in messages.casefold()
+                    for word in (
+                        "premium_aswl_error",
+                        "gateway",
+                        "credential",
+                        "not bound",
+                    )
+                ):
+                    hint = " Check the model's connection and gateway in Fabric settings; ask the connection owner to configure credentials or grant access."
                 raise SemanticRefreshError(
                     f"Semantic model refresh {request_id} ended with status {status!r}"
-                    + (f": {messages}" if messages else ""),
+                    + (f": {messages}" if messages else "")
+                    + hint,
                     request_id=request_id,
                     body=body,
                 )

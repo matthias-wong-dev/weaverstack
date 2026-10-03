@@ -486,14 +486,16 @@ def _create_missing(
 
                     from .fabric.resources import create_semantic_model
                     from .onboarding.project import semantic_addon
-                    from .semantic_models.compiler import compile_model
-                    from .semantic_models.definition import encode_definition
+                    from .semantic_models.definition import encode_parts
+                    from .semantic_models.patching import apply_addons
+                    from .semantic_models.source import SemanticContribution
 
-                    definition = encode_definition(
-                        compile_model(
-                            wanted.name, item=yaml.safe_load(semantic_addon())
-                        )
+                    seed = apply_addons(
+                        SemanticContribution({}, {}, {}),
+                        wanted.name,
+                        ((yaml.safe_load(semantic_addon()), "initialise addon"),),
                     )
+                    definition = encode_parts(seed.parts)
                     create_semantic_model(
                         physical, wanted.name, definition=definition, client=client
                     )

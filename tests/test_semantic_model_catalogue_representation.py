@@ -6,6 +6,7 @@ from support.weaver_test import weaver_test
 
 from weaver.build_bundle.catalogue_actions import desired_catalogue
 from weaver.build_bundle.targets import parse_build_item
+from weaver.catalogue.semantic import project_semantic_model
 from weaver.catalogue.state import Catalogue
 from weaver.declaration.model import WeaverDocumentId, WeaverItemId
 from weaver.declaration.repository import parse_item_repository
@@ -45,7 +46,35 @@ def test_semantic_catalogue_roundtrips_model_root_and_projects_native_children(
         workspace_id="workspace-id",
         item_id="model-id",
     )
-    catalogue = desired_catalogue(repository, {root}, {item: target})
+    desired = desired_catalogue(repository, {root}, {item: target})
+    assert SEMANTIC_MODEL.name not in desired.rows[item]
+    observed = {
+        "model": {
+            "culture": "en-US",
+            "tables": [
+                {
+                    "name": "Calendar",
+                    "partitions": [
+                        {
+                            "name": "Calendar",
+                            "source": {
+                                "type": "calculated",
+                                "expression": 'ROW("Year", 2026)',
+                            },
+                        }
+                    ],
+                    "columns": [
+                        {"name": "Year", "dataType": "int64", "sourceColumn": "[Year]"}
+                    ],
+                    "measures": [{"name": "Answer", "expression": "1"}],
+                }
+            ],
+        }
+    }
+    projection = project_semantic_model(
+        item, repository.semantic_models[item], deployed=observed
+    )
+    catalogue = Catalogue({**desired.rows, item: {**desired.rows[item], **projection}})
     restored = Catalogue.from_mapping(catalogue.to_mapping())
     assert restored.registered[root].object_type == "semantic_model"
     assert restored.dag().node(root).target.kind == "semanticmodel"
@@ -53,10 +82,7 @@ def test_semantic_catalogue_roundtrips_model_root_and_projects_native_children(
     rows = restored.rows[item]
     assert rows["Installation"][0]["workspace_id"] == "workspace-id"
     assert rows["Installation"][0]["item_id"] == "model-id"
-    assert (
-        json.loads(rows[SEMANTIC_MODEL.name][0]["definition"])
-        == repository.semantic_models[item].model
-    )
+    assert json.loads(rows[SEMANTIC_MODEL.name][0]["definition"]) == observed
     (measure,) = rows[SEMANTIC_MODEL_MEASURE.name]
     assert measure["table_name"] == "Calendar"
     assert measure["measure_name"] == "Answer"

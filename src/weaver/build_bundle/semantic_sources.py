@@ -3,6 +3,7 @@
 from ..catalogue.claims import catalogue_columns
 from ..declaration.metadata import TABLE, VIEW
 from ..errors import BuildError
+from ..semantic_models.fragments import source_table
 from ..semantic_models.references import source_identity
 from ..targets import physical_item
 
@@ -10,9 +11,12 @@ from ..targets import physical_item
 def read_semantic_sources(repository, bindings, catalogue, *, session, workspace):
     wanted = {}
     for item, contribution in repository.semantic_models.items():
-        if item not in bindings.by_item:
+        if item not in bindings.by_item or not contribution.source_references:
             continue
-        tables = {t["name"]: t for t in contribution.model["model"].get("tables", [])}
+        tables = {
+            name: source_table(contribution.parts, name)
+            for name in contribution.source_references
+        }
         for table, reference in contribution.source_references.items():
             wanted[reference] = wanted.get(reference, False) or not tables[table].get(
                 "columns"

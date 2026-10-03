@@ -33,10 +33,14 @@ CLI sign-in and does not open a browser.
 
 ## Semantic model Build
 
-A semantic item lives under `SemanticModel/<logical-name>/`. It can contain a
-PBIP project and `addon.yml`, or just `addon.yml`. `SemanticModel/addon.yml`
-applies first across the project; item properties override it. Named native collections merge by
-name, and ordinary lists replace the previous list.
+A semantic item lives under `SemanticModel/<logical-name>/`. A normal PBIP
+works without an addon. Build deploys its TMDL definition parts and preserves
+untouched source bytes, including constructs Weaver does not edit.
+
+`addon.yml` applies surgical edits to a staged TMDL package. An addon-only model
+starts from an empty TMDL package and uses the same compiler.
+`SemanticModel/addon.yml` applies first; the item addon overrides it. Named native
+collections merge by name, and ordinary lists replace the previous list.
 
 For a new addon-only model in an existing workspace:
 
@@ -76,19 +80,58 @@ result = weaver.build("./reporting", items="SemanticModel/Reporting")
 assert result.succeeded, result.errors
 ```
 
-Build preserves source files and untouched authored partitions during assembly.
-It does not fetch or reconcile the existing target definition before deployment.
-It reads back
-the deployed native definition, including inferred calculated columns, before
-publishing certification to the shared Warehouse catalogue. An unchanged second
-Build has no installation actions. Failed updates or readback checks leave the
-selected model uncertified. Semantic-only deployment uses REST and catalogue
-TDS; it does not use Spark.
+Build sends the effective TMDL package to Fabric. After deployment it reads
+TMSL back from Fabric, verifies requested edits and publishes the observed model
+to the five semantic catalogue tables. Failed updates or readback checks leave
+the selected model uncertified. An unchanged effective package plans zero actions.
 
-This slice accepts native overlays and calculated `.dax` content. Unsupported
-TMDL statements and addon keys produce source-located errors. `.source`, rules,
-relationship shorthand, standalone DAX tests, and installed semantic
-Load/Test/Health execution are not implemented in this slice.
+### Shared data sources
+
+A PBIP can use one shared M expression per logical data source. Table queries
+navigate from that expression. Build changes the shared expression's physical
+source while preserving the table queries:
+
+```bash
+weaver build ./reporting --item SemanticModel/Reporting \
+  --data-source DataSource1=Warehouse/Serving_Dev
+```
+
+Expressions named `Warehouse/Serving` or `Lakehouse/Curated` resolve through the
+workspace's logical targets automatically. Generic names use explicit mappings.
+`data_sources` in workspace config supplies defaults; repeatable `--data-source`
+options override them. SQL sources use the resolved SQL endpoint. Native
+`Lakehouse.Contents` expressions use workspace and Lakehouse IDs. Ordinary
+expressions with no mapping remain unchanged.
+
+For addon-authored tables, `.source: Warehouse/Serving/Cake.Sales` owns the table's
+source fragment. Observable managed sources publish table-level dependencies
+for installed Load ordering.
+
+### Load and connections
+
+```bash
+weaver load SemanticModel/Reporting --workspace Analytics --catalogue Warehouse/Catalogue
+```
+
+Load uses the installed catalogue, so it needs no source checkout. It refreshes
+the model and records request ID, outcome and timing in LoadStatus and Log.
+Changed Build permits required clearing of processed semantic data and leaves
+LoadStatus Pending. It does not delete Warehouse or Lakehouse source data.
+Unchanged Build preserves LoadStatus. Semantic-only Build and Load use REST/TDS
+and start no Spark session.
+
+Source mapping changes the definition. Build and Load leave runtime connection
+bindings and credentials to Fabric settings. Refresh errors retain the service
+error and identify connection-owner action where applicable. A standalone
+`semantic-model bind` command is planned for existing approved connections;
+it is not implemented here. Shared connections and gateways remain outside
+semantic-item ownership.
+
+Live qualification uses a service principal. Delegated-user Azure CLI/browser
+access remains a separate user check. Rules, relationship shorthand, semantic
+DAX Test/TestStatus/Health and broader addon editing remain follow-up work.
+Unsupported requested addon keys fail with source diagnostics; untouched native
+TMDL passes through to Fabric.
 
 ## Documentation
 

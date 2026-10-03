@@ -15,7 +15,7 @@ from weaver.fabric.environment_definition import (
     EnvironmentDefinition,
 )
 from weaver.locations import Location
-from weaver.semantic_models.definition import decode_model
+from weaver.semantic_models.definition import decode_parts
 from weaver.sessions import TestSession
 from weaver_cli.main import build_parser
 
@@ -58,11 +58,9 @@ def test_initialise_creates_semantic_model_and_reuses_without_overwriting(
     method, path, request = client.writes[0]
     assert method == "POST" and path.endswith("/semanticModels")
     assert request["retry_transient"] is False
+    parts = decode_parts(request["payload"]["definition"])
     assert (
-        decode_model(request["payload"]["definition"])["model"][
-            "defaultPowerBIDataSourceVersion"
-        ]
-        == "powerBI_V3"
+        b"defaultPowerBIDataSourceVersion: powerBI_V3" in parts["definition/model.tmdl"]
     )
     workspace = load_workspace(tmp_path / "workspace-config.yml")
     assert (
@@ -71,6 +69,12 @@ def test_initialise_creates_semantic_model_and_reuses_without_overwriting(
     )
     repository = parse_item_repository(Location(tmp_path.as_posix()))
     assert WeaverItemId.parse("SemanticModel/Reporting") in repository.semantic_models
+    assert (
+        parts
+        == repository.semantic_models[
+            WeaverItemId.parse("SemanticModel/Reporting")
+        ].parts
+    )
     client.items.append(("SemanticModel", "Reporting"))
     second = weaver.initialise(tmp_path, **arguments)
     assert all(r.status == "existing" for r in second.resources)

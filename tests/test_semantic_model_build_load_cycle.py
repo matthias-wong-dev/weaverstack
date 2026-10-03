@@ -109,14 +109,16 @@ def test_public_build_load_fixed_point_and_changed_definition_cycle(tmp_path, pb
         addon = root / str(ITEM) / "addon.yml"
         addon.write_text(addon.read_text().replace("2026", "2027"), encoding="utf-8")
         changed = parse_item_repository(Location(root.as_posix()))
-        definition.definition = encode_definition(engine_model(changed))
+        definition.definition = encode_definition(engine_model(changed, year=2027))
         session.calls.clear()
         third = weaver.build(root, items=selector, session=session)
         assert third.succeeded and third.selection.selected_for_build == (ROOT,)
         writes = [s for s in session.tsql if "MERGE" in s or "DELETE FROM" in s]
         assert any("[_].[LoadStatus]" in s and "Pending" in s for s in writes)
         assert not any("[_].[Bookmark]" in s for s in writes)
-        rebuilt = installed_state(changed, bindings, engine_model(changed), inventories)
+        rebuilt = installed_state(
+            changed, bindings, engine_model(changed, year=2027), inventories
+        )
         answer_installed(session, rebuilt.catalogue.rows)
         shutil.rmtree(root)
         reloaded = weaver.load(str(ITEM), session=session)

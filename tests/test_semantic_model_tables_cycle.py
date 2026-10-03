@@ -3,6 +3,7 @@
 import json
 from dataclasses import replace
 
+from support.semantic_models import probe_model
 from support.weaver_test import weaver_test
 from test_semantic_model_build_cycle import ITEM, ROOT, prepared
 
@@ -12,6 +13,7 @@ from weaver.catalogue.claims import (
     claim_rules_for_object_type,
     without_claims,
 )
+from weaver.catalogue.semantic import project_semantic_model
 from weaver.catalogue.state import Catalogue
 from weaver.catalogue.tables import CATALOGUE_TABLES
 from weaver.declaration.repository import parse_item_repository
@@ -36,7 +38,22 @@ def test_typed_semantic_rows_keep_descriptions_native_metadata_and_claim_ownersh
         workspace_id="workspace-id",
         item_id="model-id",
     )
-    projected = desired_catalogue(repository, {ROOT}, {ITEM: target})
+    desired = desired_catalogue(repository, {ROOT}, {ITEM: target})
+    assert "SemanticModel" not in desired.rows[ITEM]
+    observed = probe_model()
+    observed["model"]["description"] = "Sales model"
+    sales = next(t for t in observed["model"]["tables"] if t["name"] == "Sales")
+    sales["description"] = "Sales transactions"
+    next(c for c in sales["columns"] if c["name"] == "ProductId")["description"] = (
+        "Product identity"
+    )
+    next(m for m in sales["measures"] if m["name"] == "Revenue")["description"] = (
+        "Total revenue"
+    )
+    projection = project_semantic_model(
+        ITEM, repository.semantic_models[ITEM], deployed=observed
+    )
+    projected = Catalogue({**desired.rows, ITEM: {**desired.rows[ITEM], **projection}})
     catalogue = Catalogue.from_mapping(projected.to_mapping())
     rows = catalogue.rows[ITEM]
     semantic_tables = {
@@ -50,10 +67,7 @@ def test_typed_semantic_rows_keep_descriptions_native_metadata_and_claim_ownersh
         t.name for t in CATALOGUE_TABLES if t.name.startswith("Semantic")
     } == semantic_tables
     assert rows["SemanticModel"][0]["description"] == "Sales model"
-    assert (
-        json.loads(rows["SemanticModel"][0]["definition"])
-        == repository.semantic_models[ITEM].model
-    )
+    assert json.loads(rows["SemanticModel"][0]["definition"]) == observed
     sales = next(r for r in rows["SemanticModelTable"] if r["table_name"] == "Sales")
     assert sales["description"] == "Sales transactions"
     measure = next(
@@ -76,6 +90,7 @@ def test_typed_semantic_rows_keep_descriptions_native_metadata_and_claim_ownersh
     assert relationship["from_cardinality"] == "many"
     assert relationship["to_cardinality"] == "one"
     assert relationship["cross_filtering_behavior"] == "oneDirection"
+    assert relationship["is_active"] is True
     for name in semantic_tables:
         for row in rows[name]:
             assert row["signature"] == repository.semantic_models[ITEM].signature

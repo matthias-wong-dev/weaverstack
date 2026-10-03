@@ -1,6 +1,6 @@
 """Semantic definitions use Build selection, installation and certification."""
 
-import copy
+import json
 import shutil
 from pathlib import Path
 
@@ -26,7 +26,7 @@ from weaver.declaration.model import WeaverDocumentId, WeaverItemId
 from weaver.declaration.repository import parse_item_repository
 from weaver.fabric.resolution import FabricResolver
 from weaver.locations import Location
-from weaver.semantic_models.definition import decode_model, encode_definition
+from weaver.semantic_models.definition import decode_parts, encode_definition
 from weaver.sessions import TestSession
 from weaver.store import FilesystemStore
 from weaver.targets import ItemRef
@@ -113,17 +113,46 @@ def bundle_for(tmp_path, repository, bindings, state, name):
     )
 
 
-def engine_model(repository):
-    model = copy.deepcopy(repository.semantic_models[ITEM].model)
-    table = next(t for t in model["model"]["tables"] if t["name"] == "Calendar")
-    table["columns"] = [
-        {
-            "name": "Year",
-            "type": "calculatedTableColumn",
-            "dataType": "int64",
-            "sourceColumn": "[Year]",
+def engine_model(repository, *, year=2026):
+    # Fixed boundary response; the PBIP base was recorded from Fabric. This helper
+    # does not parse the submitted TMDL or certify its platform validity.
+    fixture = Path(__file__).parent / "fixtures/semantic_model/observed-probe.json"
+    has_pbip = any(
+        p.endswith(".pbip") for p in repository.semantic_models[ITEM].sources
+    )
+    model = (
+        json.loads(fixture.read_text())
+        if has_pbip
+        else {
+            "compatibilityLevel": 1606,
+            "model": {
+                "culture": "en-US",
+                "defaultPowerBIDataSourceVersion": "powerBI_V3",
+            },
         }
-    ]
+    )
+    model["model"].setdefault("tables", []).append(
+        {
+            "name": "Calendar",
+            "partitions": [
+                {
+                    "name": "Calendar",
+                    "source": {
+                        "type": "calculated",
+                        "expression": f'ROW("Year", {year})',
+                    },
+                }
+            ],
+            "columns": [
+                {
+                    "name": "Year",
+                    "type": "calculatedTableColumn",
+                    "dataType": "int64",
+                    "sourceColumn": "[Year]",
+                }
+            ],
+        }
+    )
     return model
 
 
@@ -168,10 +197,9 @@ def test_build_deploys_and_certifies_readback_without_touching_source(tmp_path, 
     assert report.succeeded, report.to_mapping()
     assert [c[0] for c in semantic.calls] == ["update_definition", "get_definition"]
     submitted = semantic.calls[0][1]
-    assert submitted["allow_purge_data"] is False
+    assert submitted["allow_purge_data"] is True
     assert (
-        decode_model(submitted["definition"])["model"]
-        == repository.semantic_models[ITEM].model["model"]
+        decode_parts(submitted["definition"]) == repository.semantic_models[ITEM].parts
     )
     writes = session.tsql
     definition_write = next(
@@ -225,9 +253,11 @@ def test_failed_deployment_or_readback_cannot_certify_changed_model(tmp_path, fa
     if failure == "update":
         semantic.failure = RuntimeError("update failed")
     elif failure == "missing_columns":
-        semantic.definition = encode_definition(changed.semantic_models[ITEM].model)
+        missing = engine_model(changed, year=2027)
+        del missing["model"]["tables"][0]["columns"]
+        semantic.definition = encode_definition(missing)
     elif failure in {"stale_measure", "stale_table"}:
-        stale = engine_model(changed)
+        stale = engine_model(changed, year=2027)
         if failure == "stale_measure":
             stale["model"]["tables"][0]["measures"] = [
                 {"name": "Removed", "expression": "1"}
@@ -275,12 +305,7 @@ def test_policy_change_selects_only_effectively_changed_models(tmp_path, policy)
         item: binding.to_bound_target() for item, binding in bindings.by_item.items()
     }
     for item in (ITEM, other):
-        deployed = copy.deepcopy(repository.semantic_models[item].model)
-        next(
-            table
-            for table in deployed["model"]["tables"]
-            if table["name"] == "Calendar"
-        )["columns"] = [{"name": "Year", "dataType": "int64"}]
+        deployed = engine_model(repository)
         inventories[item] = TargetInventory(
             targets[item].id,
             "semanticmodel",
@@ -488,7 +513,7 @@ def test_public_build_bootstraps_catalogue_and_reaches_fixed_point(tmp_path, pbi
     addon = root / str(ITEM) / "addon.yml"
     addon.write_text(addon.read_text().replace("2026", "2027"), encoding="utf-8")
     changed = parse_item_repository(Location(root.as_posix()))
-    semantic.definition = encode_definition(engine_model(changed))
+    semantic.definition = encode_definition(engine_model(changed, year=2027))
     semantic.calls.clear()
     third = weaver.build(
         root, items=str(ITEM) + "=SemanticModel/Reporting_Dev", session=session
