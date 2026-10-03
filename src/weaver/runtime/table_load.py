@@ -317,12 +317,19 @@ def _reconcile(
             raise LoadError(f"{contract.qualified}: {breach}", result=refused)
         return refused
 
-    # Nothing is submitted for a phase that decided on no rows: a zero-row merge
+    # Nothing is submitted when the load decided on no rows: a zero-row merge
     # is a Delta commit and a scan for work that does not exist.
-    if deleted:
-        _apply_deletes(spark, names, delete_view, contract)
-    if inserted or updated:
-        _apply_changes(spark, names, change_view, contract, columns)
+    if inserted or updated or deleted:
+        _apply_changes(
+            spark,
+            names,
+            change_view,
+            contract,
+            columns,
+            # An incremental load's deletes are a claim beside the classification;
+            # a full load's are rows of it.
+            claimed=deleting if contract.incremental else None,
+        )
 
     result = LoadResult(
         succeeded=True,
@@ -665,18 +672,26 @@ def _settled_changes(
 
 
 def _incremental_changes(names, contract: LoadContract, columns) -> str:
-    """Classify writes without treating absence from an incremental window as deletion."""
+    """Classify writes without treating absence from an incremental window as deletion.
+
+    Only target rows whose key is proposed can match, so the target is narrowed
+    to those first. The proposal is the small side there, and Spark broadcasts
+    it rather than shuffling the target.
+    """
 
     stored = delta_signature_name()
-    missing = f"t.`{contract.primary_key[0]}` IS NULL"
+    key = contract.primary_key
+    missing = f"t.`{key[0]}` IS NULL"
     return (
         f"SELECT\n"
         f"  CASE WHEN {missing} THEN '{INSERT_OP}' ELSE '{UPDATE_OP}' END "
         f"AS `{OPERATION_COLUMN}`,\n"
         f"  {qualified('q', columns)}, q.`{stored}`\n"
         f"FROM weaver_proposed AS q\n"
-        f"LEFT JOIN {names['target']} AS t "
-        f"ON {key_join('q', 't', contract.primary_key)}\n"
+        f"LEFT JOIN (\n"
+        f"    SELECT {qualified('t', key)}, t.`{stored}` FROM {names['target']} AS t\n"
+        f"    LEFT SEMI JOIN weaver_proposed AS p ON {key_join('p', 't', key)}\n"
+        f") AS t ON {key_join('q', 't', key)}\n"
         f"WHERE {missing} OR q.`{stored}` <> t.`{stored}`"
     )
 
@@ -773,8 +788,14 @@ def _conflict_branch(
     )
 
 
-def _apply_changes(spark, names, change_view, contract: LoadContract, columns) -> None:
-    """Apply inserts and updates in one Delta merge."""
+def _apply_changes(
+    spark, names, change_view, contract: LoadContract, columns, *, claimed=None
+) -> None:
+    """Apply every insert, update and delete in one Delta merge, so one commit.
+
+    ``claimed`` holds the keys an incremental load deletes. They are disjoint
+    from the classified rows, which carry the rest.
+    """
 
     audit = delta_audit_names()
     stored = delta_signature_name()
@@ -789,11 +810,21 @@ def _apply_changes(spark, names, change_view, contract: LoadContract, columns) -
         f"t.`{audit[1]}` = current_timestamp()",
         f"t.`{audit[2]}` = {live_delete_literal()}",
     ]
+    source = f"SELECT * FROM {change_view}"
+    if claimed is not None:
+        keys_only = ", ".join(
+            f"d.`{column}`" if column in contract.primary_key else f"NULL AS `{column}`"
+            for column in written
+        )
+        source += (
+            f"\nUNION ALL\nSELECT '{DELETE_OP}' AS `{OPERATION_COLUMN}`, {keys_only} "
+            f"FROM {claimed} AS d"
+        )
     spark.sql(
         f"MERGE INTO {names['target']} AS t\n"
-        f"USING (SELECT * FROM {change_view} "
-        f"WHERE `{OPERATION_COLUMN}` <> '{DELETE_OP}') AS chg\n"
+        f"USING ({source}) AS chg\n"
         f"   ON {key_join('chg', 't', contract.primary_key)}\n"
+        f"WHEN MATCHED AND chg.`{OPERATION_COLUMN}` = '{DELETE_OP}' THEN DELETE\n"
         f"WHEN MATCHED AND chg.`{OPERATION_COLUMN}` = '{UPDATE_OP}' "
         f"THEN UPDATE SET {', '.join(sets)}\n"
         f"WHEN NOT MATCHED AND chg.`{OPERATION_COLUMN}` = '{INSERT_OP}' "
@@ -836,13 +867,6 @@ def _claimed_deletes(spark, held, names, staging_view, contract: LoadContract, d
         f"WHERE {key_join('s', 't', contract.primary_key)})",
         names["target"],
         "delete",
-    )
-
-
-def _apply_deletes(spark, names, delete_view, contract) -> None:
-    spark.sql(
-        f"MERGE INTO {names['target']} AS t USING {delete_view} AS d "
-        f"ON {key_join('d', 't', contract.primary_key)} WHEN MATCHED THEN DELETE"
     )
 
 
