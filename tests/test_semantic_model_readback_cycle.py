@@ -26,6 +26,7 @@ def test_role_members_must_be_empty_before_build_can_certify_removal(tmp_path):
     )
     repository = parse_item_repository(Location(root.as_posix()))
     deployed = engine_model(repository)
+    deployed["model"]["roles"] = [{"name": "Reader", "modelPermission": "read"}]
     deployed["model"]["roles"][0]["members"] = [
         {"memberName": "reader@example.invalid", "identityProvider": "AzureAD"}
     ]
@@ -99,6 +100,15 @@ def test_multiline_text_equivalence_allows_build_certification(tmp_path, field):
     addon.write_text(yaml.safe_dump(definition), encoding="utf-8")
     repository = parse_item_repository(Location(root.as_posix()))
     deployed = engine_model(repository)
+    deployed["model"]["tables"][0]["description"] = text
+    deployed["model"]["annotations"] = [{"name": "Note", "value": text}]
+    deployed["model"]["roles"] = [
+        {
+            "name": "Reader",
+            "modelPermission": "read",
+            "tablePermissions": [{"name": "Calendar", "filterExpression": text}],
+        }
+    ]
     owner = {
         "description": deployed["model"]["tables"][0],
         "value": deployed["model"]["annotations"][0],

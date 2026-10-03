@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 from ..semantic_models.compiler import escape, leaf_properties
+from ..semantic_models.deployed import _RELATIONSHIP_DEFAULTS
 from .tables import (
     DEPENDENCY,
     REGISTRY,
@@ -32,7 +33,19 @@ def _text(value):
 
 
 def project_semantic_model(item, contribution, *, deployed=None):
-    model = contribution.model if deployed is None else deployed
+    from ..semantic_models.lineage import dependency_references, observed_bindings
+
+    model = {"model": {}} if deployed is None else deployed
+    bindings = dict(contribution.source_bindings)
+    if deployed is not None and contribution.expression_sources:
+        bindings = {
+            **observed_bindings(deployed, contribution.expression_sources),
+            **{
+                name: value
+                for name, value in contribution.source_bindings.items()
+                if name in contribution.source_references
+            },
+        }
     common = {
         "item_type": item.item_type,
         "item_name": item.item_name,
@@ -69,8 +82,8 @@ def project_semantic_model(item, contribution, *, deployed=None):
                 **metadata(table, path),
                 "table_name": name,
                 "description": _text(table.get("description")),
-                "source_binding": json_text(contribution.source_bindings[name])
-                if name in contribution.source_bindings
+                "source_binding": json_text(bindings[name])
+                if name in bindings
                 else None,
             }
         )
@@ -107,7 +120,7 @@ def project_semantic_model(item, contribution, *, deployed=None):
                 ),
                 "relationship_name": relationship["name"],
                 **{
-                    stored: relationship.get(native)
+                    stored: relationship.get(native, _RELATIONSHIP_DEFAULTS.get(native))
                     for stored, native in (
                         ("from_table", "fromTable"),
                         ("from_column", "fromColumn"),
@@ -126,7 +139,9 @@ def project_semantic_model(item, contribution, *, deployed=None):
     from .claims import catalogue_columns
 
     dependencies = []
-    for table, reference in sorted(contribution.source_references.items()):
+    for table, reference in dependency_references(
+        contribution.source_references, bindings
+    ):
         producer = source_identity(reference)
         schema, name = catalogue_columns(producer)
         dependencies.append(
@@ -143,7 +158,7 @@ def project_semantic_model(item, contribution, *, deployed=None):
                 "signature": contribution.signature,
             }
         )
-    return {
+    projected = {
         DEPENDENCY.name: tuple(dependencies),
         REGISTRY.name: (
             {**common, "object_type": "semantic_model", "object_role": ROLE_DATA},
@@ -169,3 +184,8 @@ def project_semantic_model(item, contribution, *, deployed=None):
             )
         },
     }
+    return (
+        projected
+        if deployed is not None
+        else {key: projected[key] for key in (DEPENDENCY.name, REGISTRY.name)}
+    )

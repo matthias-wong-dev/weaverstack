@@ -307,17 +307,11 @@ def provision_external(client: FabricClient, host_workspace) -> list[str]:
 
 
 def create_semantic_model(workspace, name, *, client):
-    from weaver.semantic_models.definition import encode_definition
-    from weaver.semantic_models.tmdl import import_pbip
+    from support.semantic_models import fixture_parts
 
-    fixture = (
-        Path(__file__).parents[1]
-        / "fixtures"
-        / "semantic_model"
-        / "Probe"
-        / "Probe.pbip"
-    )
-    definition = encode_definition(import_pbip(fixture))
+    from weaver.semantic_models.definition import encode_parts
+
+    definition = encode_parts(fixture_parts())
     response = client.request(
         "POST",
         f"workspaces/{workspace.id}/semanticModels",

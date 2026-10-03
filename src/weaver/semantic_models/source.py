@@ -5,30 +5,45 @@ from __future__ import annotations
 import json
 import posixpath
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Mapping
 
 import yaml
 
 from ..declaration.metadata import _UniqueKeyLoader
 from ..errors import ConfigError, MetadataError
-from .compiler import compile_model, content_signature, leaf_properties
-from .tmdl import _parse_file
+from .compiler import content_signature
 
 
 @dataclass(frozen=True)
 class SemanticContribution:
-    model: dict
+    parts: Mapping[str, bytes]
     sources: Mapping[str, bytes]
     provenance: Mapping[str, dict]
-    properties: dict
+    requested: dict = field(default_factory=dict)
+    owned: tuple[str, ...] = ()
     source_references: Mapping[str, str] = field(default_factory=dict)
     source_bindings: Mapping[str, dict] = field(default_factory=dict)
+    expression_sources: Mapping[str, dict] = field(default_factory=dict)
+
+    @property
+    def dependencies(self):
+        from .lineage import dependency_references
+
+        return dependency_references(self.source_references, self.source_bindings)
+
+    @property
+    def properties(self):
+        return json.loads(self.parts["definition.pbism"].decode("utf-8-sig"))
 
     @property
     def signature(self):
-        value = {"compiler": 1, "definition": self.model, "properties": self.properties}
-        if self.source_references:
+        import hashlib
+
+        value = {
+            "compiler": 2,
+            "parts": {p: hashlib.sha256(b).hexdigest() for p, b in self.parts.items()},
+        }
+        if self.source_references or self.source_bindings:
             value["source_references"] = dict(self.source_references)
             value["source_bindings"] = dict(self.source_bindings)
         return content_signature(value)
@@ -92,7 +107,7 @@ def read_semantic_contribution(item, *, root, store, paths):
     )
     if len(pbips) > 1:
         raise ConfigError(f"{item}: expected exactly one PBIP base")
-    base = None
+    parts = {}
     provenance = {}
     properties = {"version": "4.2", "settings": {}}
     if pbips:
@@ -134,19 +149,10 @@ def read_semantic_contribution(item, *, root, store, paths):
             not p.endswith(".tmdl") for p in definition_paths
         ):
             raise ConfigError(f"{model_path}: expected a supported TMDL definition")
-        base = {"model": {}}
-        references = []
+        parts["definition.pbism"] = sources[model_path + "/definition.pbism"]
         for path in definition_paths:
-            before = leaf_properties(base)
-            _parse_file(Path(path), base, references, text=read(path))
-            for key, value in leaf_properties(base).items():
-                if key not in before or before[key] != value:
-                    provenance[key] = {"source": path, "reason": "PBIP"}
-        names = {t["name"] for t in base["model"].get("tables", [])}
-        if len(set(references)) != len(references) or any(
-            n not in names for n in references
-        ):
-            raise ConfigError(f"{pbip}: duplicate or unresolved TMDL table reference")
+            read(path)
+            parts[path[len(model_path) + 1 :]] = sources[path]
         other_models = [
             p
             for p in available
@@ -160,22 +166,18 @@ def read_semantic_contribution(item, *, root, store, paths):
     item_path = prefix + "addon.yml"
     organisation = addon(org_path)
     local = addon(item_path)
-    if base is None and organisation is None and local is None:
+    if not parts and organisation is None and local is None:
         raise ConfigError(f"{item}: provide a PBIP or addon.yml")
-    source_references = {}
-    try:
-        model = compile_model(
-            item.item_name,
-            base=base,
-            organisation=organisation,
-            item=local,
-            provenance=provenance,
-            organisation_source=org_path,
-            item_source=item_path,
-            source_references=source_references,
-        )
-    except ConfigError as exc:
-        raise ConfigError(f"{item} ({org_path}, {item_path}): {exc}") from exc
-    return SemanticContribution(
-        model, sources, provenance, properties, source_references
-    )
+    contribution = SemanticContribution(parts, sources, provenance)
+    if organisation is not None or local is not None:
+        from .patching import apply_addons
+
+        try:
+            contribution = apply_addons(
+                contribution,
+                item.item_name,
+                ((organisation, org_path), (local, item_path)),
+            )
+        except ConfigError as exc:
+            raise ConfigError(f"{item} ({org_path}, {item_path}): {exc}") from exc
+    return contribution

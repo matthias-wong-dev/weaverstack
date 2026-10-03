@@ -7,7 +7,7 @@ from fabric import provision_estate
 from support.weaver_test import weaver_test
 
 from weaver.fabric.resources import SEMANTIC_MODEL, WorkspaceItem
-from weaver.semantic_models.definition import decode_model
+from weaver.semantic_models.definition import decode_parts
 
 
 @pytest.mark.parametrize("exists", [False, True])
@@ -45,9 +45,12 @@ def test_fixed_semantic_model_creation_is_confined_to_the_provisioner(exists):
         assert (method, path) == ("POST", "workspaces/workspace-id/semanticModels")
         assert options["retry_transient"] is False
         assert options["payload"]["displayName"] == "Reporting"
-        model = decode_model(options["payload"]["definition"])
-        assert model["model"]["defaultPowerBIDataSourceVersion"] == "powerBI_V3"
-        assert {table["name"] for table in model["model"]["tables"]} == {
-            "Product",
-            "Sales",
+        parts = decode_parts(options["payload"]["definition"])
+        assert (
+            b"defaultPowerBIDataSourceVersion: powerBI_V3"
+            in parts["definition/model.tmdl"]
+        )
+        assert {path for path in parts if path.startswith("definition/tables/")} == {
+            "definition/tables/Product.tmdl",
+            "definition/tables/Sales.tmdl",
         }

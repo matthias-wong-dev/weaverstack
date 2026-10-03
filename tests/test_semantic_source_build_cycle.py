@@ -5,8 +5,9 @@ import json
 import shutil
 
 import pytest
+from support.semantic_models import probe_model, source_model
 from support.weaver_test import weaver_test
-from support.workspaces import InventoryClient
+from support.workspaces import InventoryClient, _identifier
 from test_semantic_model_build_cycle import ITEM, DefinitionClient, answer_catalogue
 from test_semantic_model_load_cycle import COMPLETED, REQUEST_ID, answer_installed
 
@@ -22,7 +23,11 @@ from weaver.declaration.model import WeaverItemId
 from weaver.declaration.repository import parse_item_repository
 from weaver.fabric.resolution import FabricResolver
 from weaver.locations import Location
-from weaver.semantic_models.definition import decode_model
+from weaver.semantic_models.definition import (
+    decode_model,
+    decode_parts,
+    encode_definition,
+)
 from weaver.sessions import TestSession
 from weaver.store import FilesystemStore
 from weaver.workspaces import Workspace
@@ -39,10 +44,18 @@ class SourceInventory(InventoryClient):
 
 
 class SubmittedDefinition(DefinitionClient):
-    def update_definition(self, definition, **options):
-        super().update_definition(definition, **options)
-        self.definition = definition
-        return {"status": "Succeeded"}
+    def __init__(self, model=None):
+        super().__init__()
+        self.definition = encode_definition(source_model() if model is None else model)
+
+
+def submitted_parts(session):
+    (submitted,) = [
+        value
+        for method, value in session.semantic_model("Reporting_Dev").calls
+        if method == "update_definition"
+    ]
+    return decode_parts(submitted["definition"])
 
 
 class SourceSession(TestSession):
@@ -129,7 +142,9 @@ def source_session(storage=None, *, workspace=None, source_name="Serving_Dev"):
         store=FilesystemStore(),
     )
     session.answer_semantic_model(
-        workspace.workspace, "Reporting_Dev", SubmittedDefinition()
+        workspace.workspace,
+        "Reporting_Dev",
+        SubmittedDefinition(source_model(source_name)),
     )
     return session
 
@@ -191,6 +206,16 @@ def test_public_build_binds_sources_and_publishes_object_dependencies(
             root, items=f"{ITEM}=SemanticModel/Reporting_Dev", session=session
         )
         assert result.succeeded, result.errors
+        parts = submitted_parts(session)
+        assert all(
+            f"definition/tables/{name}.tmdl" in parts
+            for name in ("Sales", "SalesAgain", "Summary")
+        )
+        assert b"mode: directLake" in parts["definition/tables/Sales.tmdl"]
+        assert (
+            _identifier("Warehouse", "Serving_Dev").encode()
+            in parts["definition/expressions.tmdl"]
+        )
         tables = {
             table["name"]: table
             for table in decode_model(
@@ -390,8 +415,21 @@ def test_pbip_source_rebind_retains_authored_mode_and_properties(tmp_path, mode)
         encoding="utf-8",
     )
     parsed = parse_item_repository(Location(root.as_posix()))
-    authored = copy.deepcopy(parsed.semantic_models[ITEM].model)
+    authored = probe_model()
+    prior_sales = next(t for t in authored["model"]["tables"] if t["name"] == "Sales")
+    prior_sales["partitions"][0]["mode"] = mode
+    prior_sales["partitions"][0]["source"]["expression"] = expression
     with source_session() as session:
+        observed = copy.deepcopy(authored)
+        observed_sales = next(
+            t for t in observed["model"]["tables"] if t["name"] == "Sales"
+        )
+        database = _identifier("Warehouse", "Serving_Dev")
+        observed_sales["partitions"][0]["source"]["expression"] = (
+            f'let Source = Sql.Database("serving.datawarehouse.fabric.microsoft.com", "{database}"), Sales = Source{{[Schema="Cake",Item="Sales"]}}[Data] in Sales'
+        )
+        observed_sales["columns"][0]["description"] = "Sales key"
+        session.semantic_model("Reporting_Dev").definition = encode_definition(observed)
         answer_catalogue(session, source_catalogue(), read_bindings())
         result = weaver.build(
             root, items=f"{ITEM}=SemanticModel/Reporting_Dev", session=session
@@ -399,6 +437,13 @@ def test_pbip_source_rebind_retains_authored_mode_and_properties(tmp_path, mode)
         assert result.succeeded, result.errors
         deployed = decode_model(session.semantic_model("Reporting_Dev").definition)
         sales = next(t for t in deployed["model"]["tables"] if t["name"] == "Sales")
+        parts = submitted_parts(session)
+        assert f"mode: {mode}".encode() in parts["definition/tables/Sales.tmdl"]
+        assert database.encode() in parts["definition/tables/Sales.tmdl"]
+        assert (
+            parts["definition/relationships.tmdl"]
+            == parsed.semantic_models[ITEM].parts["definition/relationships.tmdl"]
+        )
         prior = next(t for t in authored["model"]["tables"] if t["name"] == "Sales")
         assert sales["partitions"][0]["mode"] == mode
         physical = session.resolve_item("Serving_Dev", item_type="Warehouse")
@@ -445,11 +490,36 @@ def test_direct_lake_pbip_rebind_keeps_partition_properties_and_shared_expressio
         encoding="utf-8",
     )
     with source_session() as session:
+        observed = probe_model()
+        sales = next(t for t in observed["model"]["tables"] if t["name"] == "Sales")
+        source_observed = source_model(relations={"Sales": "Sales"})["model"]
+        partition = source_observed["tables"][0]["partitions"][0]
+        partition.update(name="Authored", description="Keep partition")
+        sales["partitions"] = [partition]
+        sales["columns"][0]["description"] = "Sales key"
+        expression = source_observed["expressions"][0]
+        expression["expression"] = (
+            expression["expression"][:-1] + ", [CreateNavigationProperties=false])"
+        )
+        observed["model"]["expressions"] = [
+            {
+                "name": "DatabaseQuery",
+                "kind": "m",
+                "expression": 'Sql.Database("previous", "database", [CreateNavigationProperties=false])',
+            },
+            expression,
+        ]
+        session.semantic_model("Reporting_Dev").definition = encode_definition(observed)
         answer_catalogue(session, source_catalogue(), read_bindings())
         result = weaver.build(
             root, items=f"{ITEM}=SemanticModel/Reporting_Dev", session=session
         )
         assert result.succeeded, result.errors
+        parts = submitted_parts(session)
+        assert parts["definition/expressions.tmdl"].startswith(
+            expression_file.read_bytes()
+        )
+        assert b"description: Keep partition" in parts["definition/tables/Sales.tmdl"]
         native = decode_model(session.semantic_model("Reporting_Dev").definition)[
             "model"
         ]
@@ -498,6 +568,13 @@ def test_selected_declared_source_shape_orders_public_build(
     semantic = WeaverDocumentId.model_root(ITEM)
     assert str(identity) in repository.dependency_graph.ancestors(str(semantic))
     with source_session() as session:
+        session.semantic_model("Reporting_Dev").definition = encode_definition(
+            source_model(
+                relations={"Sales": "Sales"},
+                descriptions={"Sales": "Sales facts."},
+                notes=False,
+            )
+        )
         result = weaver.build(
             root,
             items=[
@@ -714,7 +791,18 @@ def test_lakehouse_source_keeps_tables_identity_and_plans_sql_readiness(
         resolver=FabricResolver(workspace, client=inventory),
         store=FilesystemStore(),
     ) as session:
-        session.answer_semantic_model("Demo", "Reporting_Dev", SubmittedDefinition())
+        session.answer_semantic_model(
+            "Demo",
+            "Reporting_Dev",
+            SubmittedDefinition(
+                source_model(
+                    relations={"Customer": "Customer"},
+                    descriptions={},
+                    notes=False,
+                    lakehouse=True,
+                )
+            ),
+        )
         bindings = effective_item_bindings(
             ItemBindings(
                 (
@@ -822,6 +910,9 @@ def test_native_tables_without_source_create_no_inferred_item_edges(
         "model:\n  description: Authored model\n", encoding="utf-8"
     )
     with source_session() as session:
+        observed = probe_model()
+        observed["model"]["description"] = "Authored model"
+        session.semantic_model("Reporting_Dev").definition = encode_definition(observed)
         answer_catalogue(session, source_catalogue(), read_bindings())
         published = capture_publication(monkeypatch, session)
         result = weaver.build(

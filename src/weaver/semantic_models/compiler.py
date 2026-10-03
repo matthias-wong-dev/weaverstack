@@ -1,4 +1,4 @@
-"""Compile semantic-model bases and addons into native TMSL dictionaries."""
+"""Validate and combine the native properties in explicit addon patches."""
 
 from __future__ import annotations
 
@@ -284,60 +284,3 @@ def content_signature(value):
             separators=(",", ":"),
         ).encode("utf-8")
     ).hexdigest()
-
-
-def compile_model(
-    name: str,
-    *,
-    base: dict | None = None,
-    organisation: dict | None = None,
-    item: dict | None = None,
-    provenance: dict | None = None,
-    organisation_source: str = "organisation addon",
-    item_source: str = "item addon",
-    source_references: dict | None = None,
-) -> dict:
-    model = (
-        copy.deepcopy(base)
-        if base is not None
-        else {
-            "name": name,
-            "compatibilityLevel": 1606,
-            "model": {
-                "culture": "en-US",
-                "defaultPowerBIDataSourceVersion": "powerBI_V3",
-            },
-        }
-    )
-    model = _normalise(model)
-    _validate(model, "database", "base")
-    if provenance is not None:
-        for path in leaf_properties(model):
-            provenance.setdefault(path, {"source": "empty model", "reason": "seed"})
-    for addon, origin in ((organisation, organisation_source), (item, item_source)):
-        if addon is None:
-            continue
-        patch = _addon_patch(addon)
-        dax_tables = {t["name"] for t in patch.get("tables", []) if ".dax" in t}
-        _expand_dax(patch, model["model"])
-        if provenance is not None:
-            for path in leaf_properties({"model": patch}):
-                reason = (
-                    ".dax"
-                    if any(
-                        path.startswith(f"/model/tables/{escape(name)}/partitions/")
-                        for name in dax_tables
-                    )
-                    else "overlay"
-                )
-                provenance[path] = {"source": origin, "reason": reason}
-        model = _merge(model, {"model": patch})
-    for table in model["model"].get("tables", []):
-        if ".source" in table:
-            from .references import source_identity
-
-            reference = str(source_identity(table.pop(".source")))
-            if source_references is None:
-                raise ConfigError(".source requires Build source resolution")
-            source_references[table["name"]] = reference
-    return model

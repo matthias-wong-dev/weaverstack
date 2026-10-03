@@ -140,7 +140,7 @@ def resolve_item_dependencies(repository: WeaverRepository) -> WeaverRepository:
 
     for item, contribution in repository.semantic_models.items():
         consumer = WeaverDocumentId.model_root(item)
-        for reference in contribution.source_references.values():
+        for _table, reference in contribution.dependencies:
             producer = source_identity(reference)
             if producer not in native:
                 continue

@@ -438,6 +438,13 @@ def build_parser() -> argparse.ArgumentParser:
         help=argparse.SUPPRESS,
     )
     build.add_argument(
+        "--data-source",
+        dest="data_sources",
+        action="append",
+        metavar="EXPRESSION=KIND/NAME",
+        help="Substitute a shared M source expression with a Warehouse or Lakehouse.",
+    )
+    build.add_argument(
         "--bundle-only",
         action="store_true",
         help="Create a deployment bundle without installing it.",
@@ -1820,6 +1827,7 @@ def _build_once(args: argparse.Namespace) -> int:
             result = weaver.build(
                 args.source,
                 items=args.items,
+                data_sources=args.data_sources,
                 bundle_only=args.bundle_only,
                 bundle_path=args.bundle_path,
                 session=opened,

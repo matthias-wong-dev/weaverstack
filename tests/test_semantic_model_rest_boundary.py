@@ -274,6 +274,32 @@ def test_refresh_reports_terminal_or_invalid_status_without_replay(monkeypatch, 
     assert [call[0] for call in power_bi.calls] == ["POST", "GET"]
 
 
+@weaver_test()
+def test_refresh_connection_failure_preserves_service_evidence_and_names_the_owner_action():
+    from weaver.fabric.semantic_model import SemanticModelClient, SemanticRefreshError
+
+    request_id = "11111111-2222-3333-4444-555555555555"
+    body = {
+        "status": "Failed",
+        "serviceExceptionJson": '{"errorCode":"Premium_ASWL_Error","errorDescription":"Default connection has no explicit credentials"}',
+    }
+    power_bi = Client(
+        response({}, 202, {"x-ms-request-id": request_id}), response(body)
+    )
+    fabric = Client()
+    model = SemanticModelClient(
+        "workspace-id", "model-id", fabric=fabric, power_bi=power_bi
+    )
+    with pytest.raises(SemanticRefreshError) as rejected:
+        model.refresh(timeout=10)
+    message = str(rejected.value)
+    assert "Premium_ASWL_Error" in message
+    assert "connection owner" in message and "grant access" in message
+    assert "Fabric settings" in message
+    assert [call[0] for call in power_bi.calls] == ["POST", "GET"]
+    assert not fabric.calls
+
+
 @pytest.mark.parametrize(
     "request_id", [None, "bad/id", " 11111111-2222-3333-4444-555555555555"]
 )

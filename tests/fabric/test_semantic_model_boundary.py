@@ -1,6 +1,5 @@
 """Fixed-item semantic definition, refresh and DAX through the desktop Session."""
 
-import copy
 import hashlib
 import json
 import time
@@ -11,8 +10,9 @@ from support.weaver_test import weaver_test
 
 from weaver.fabric.client import FabricError
 from weaver.operations.doctor import doctor
-from weaver.semantic_models.definition import decode_model, encode_definition
-from weaver.semantic_models.tmdl import import_pbip
+from weaver.semantic_models.definition import decode_model, encode_parts
+from weaver.semantic_models.patching import apply_addons
+from weaver.semantic_models.source import SemanticContribution
 
 FIXTURE = Path(__file__).parents[1] / "fixtures" / "semantic_model" / "Probe"
 
@@ -71,12 +71,17 @@ def restored_semantic_model(fixed_semantic_model, tmp_path):
 def test_pbip_definition_mutation_refresh_and_dax_round_trip(restored_semantic_model):
     model = restored_semantic_model
     source_hashes = _source_hashes()
-    imported = import_pbip(FIXTURE / "Probe.pbip")
-    model.update_definition(
-        encode_definition(imported), allow_purge_data=True, timeout=300
+    folder = FIXTURE / "Probe.SemanticModel"
+    parts = {"definition.pbism": (folder / "definition.pbism").read_bytes()}
+    parts.update(
+        {
+            p.relative_to(folder).as_posix(): p.read_bytes()
+            for p in (folder / "definition").rglob("*.tmdl")
+        }
     )
+    model.update_definition(encode_parts(parts), allow_purge_data=True, timeout=300)
     deployed = decode_model(model.get_definition())
-    assert deployed["compatibilityLevel"] == imported["compatibilityLevel"]
+    assert deployed["compatibilityLevel"] == 1606
     tables = {table["name"]: table for table in deployed["model"]["tables"]}
     assert set(tables) == {"Sales", "Product"}
     assert tables["Sales"]["measures"][0]["expression"] == "SUM(Sales[Amount])"
@@ -101,23 +106,22 @@ def test_pbip_definition_mutation_refresh_and_dax_round_trip(restored_semantic_m
         'EVALUATE ROW("FilteredRevenue", CALCULATE([Revenue], Product[ProductId] = 10), "ReverseFilterProducts", CALCULATE(COUNTROWS(Product), Sales[Id] = 1))'
     ) == [{"[FilteredRevenue]": 12.5, "[ReverseFilterProducts]": 2}]
 
-    mutated = copy.deepcopy(imported)
-    mutated["model"]["discourageImplicitMeasures"] = True
-    mutated["model"]["tables"].append(
-        {
-            "name": "_Measure",
-            "partitions": [
+    mutated = apply_addons(
+        SemanticContribution(parts, {}, {}),
+        "Probe",
+        [
+            (
                 {
-                    "name": "_Measure",
-                    "source": {
-                        "type": "calculated",
-                        "expression": "INFO.VIEW.MEASURES()",
-                    },
-                }
-            ],
-        }
+                    "model": {"discourageImplicitMeasures": True},
+                    "tables": {"_Measure": {".dax": "INFO.VIEW.MEASURES()"}},
+                },
+                "addon.yml",
+            )
+        ],
     )
-    model.update_definition(encode_definition(mutated), timeout=300)
+    model.update_definition(
+        encode_parts(mutated.parts), allow_purge_data=True, timeout=300
+    )
     deployed = decode_model(model.get_definition())
     assert deployed["model"]["discourageImplicitMeasures"] is True
     measure_table = next(

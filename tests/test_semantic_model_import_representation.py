@@ -1,18 +1,41 @@
+"""Opaque TMDL preparation and independent recorded TMSL metadata."""
+
+import json
+import shutil
 from pathlib import Path
 
 import pytest
 from support.weaver_test import weaver_test
 
-from weaver.errors import ConfigError
+from weaver.declaration.model import WeaverItemId
+from weaver.declaration.repository import parse_item_repository
+from weaver.locations import Location
 
 FIXTURE = Path(__file__).parent / "fixtures" / "semantic_model" / "Probe"
+ITEM = WeaverItemId.parse("SemanticModel/Reporting")
+
+
+def prepare(tmp_path, text=None):
+    folder = tmp_path / str(ITEM)
+    shutil.copytree(FIXTURE, folder)
+    path = folder / "Probe.SemanticModel/definition/model.tmdl"
+    if text is not None:
+        path.write_bytes(text.encode())
+    before = {p: p.read_bytes() for p in folder.rglob("*") if p.is_file()}
+    contribution = parse_item_repository(Location(tmp_path.as_posix())).semantic_models[
+        ITEM
+    ]
+    assert {p: p.read_bytes() for p in before} == before
+    return contribution.parts["definition/model.tmdl"], contribution
 
 
 @weaver_test()
-def test_pbip_import_preserves_the_representative_model_as_tmsl():
-    from weaver.semantic_models.tmdl import import_pbip
+def test_recorded_tmsl_readback_retains_the_representative_pbip_metadata():
+    from weaver.semantic_models.deployed import canonical_model
 
-    actual = import_pbip(FIXTURE / "Probe.pbip")
+    actual = canonical_model(
+        json.loads((FIXTURE.parent / "observed-probe.json").read_text())
+    )
 
     assert actual["compatibilityLevel"] == 1606
     model = actual["model"]
@@ -23,30 +46,33 @@ def test_pbip_import_preserves_the_representative_model_as_tmsl():
         "legacyRedirects": True,
         "returnErrorValuesAsNull": True,
     }
-    assert [table["name"] for table in model["tables"]] == ["Sales", "Product"]
-    sales, product = model["tables"]
+    assert [table["name"] for table in model["tables"]] == ["Product", "Sales"]
+    product, sales = model["tables"]
     assert sales["description"] == "Sales entered for the importer boundary."
-    assert sales["columns"] == [
-        {
-            "name": "Id",
-            "dataType": "int64",
-            "sourceColumn": "Id",
-            "summarizeBy": "none",
-        },
-        {
-            "name": "ProductId",
-            "dataType": "int64",
-            "sourceColumn": "ProductId",
-            "summarizeBy": "none",
-        },
-        {
-            "name": "Amount",
-            "dataType": "decimal",
-            "sourceColumn": "Amount",
-            "formatString": "$#,##0.00",
-            "summarizeBy": "sum",
-        },
-    ]
+    assert sales["columns"] == sorted(
+        [
+            {
+                "name": "Id",
+                "dataType": "int64",
+                "sourceColumn": "Id",
+                "summarizeBy": "none",
+            },
+            {
+                "name": "ProductId",
+                "dataType": "int64",
+                "sourceColumn": "ProductId",
+                "summarizeBy": "none",
+            },
+            {
+                "name": "Amount",
+                "dataType": "decimal",
+                "sourceColumn": "Amount",
+                "formatString": "$#,##0.00",
+                "summarizeBy": "sum",
+            },
+        ],
+        key=lambda column: column["name"],
+    )
     assert product["columns"][0]["isKey"] is True
     assert product["columns"][1]["sourceColumn"] == "ProductName"
     assert sales["measures"] == [
@@ -64,10 +90,6 @@ def test_pbip_import_preserves_the_representative_model_as_tmsl():
             "fromColumn": "ProductId",
             "toTable": "Product",
             "toColumn": "ProductId",
-            "fromCardinality": "many",
-            "toCardinality": "one",
-            "crossFilteringBehavior": "oneDirection",
-            "isActive": True,
         }
     ]
     assert sales["partitions"] == [
@@ -84,94 +106,65 @@ def test_pbip_import_preserves_the_representative_model_as_tmsl():
 
 @weaver_test()
 def test_tmdl_preserves_fenced_expression_whitespace(tmp_path):
-    from weaver.semantic_models.tmdl import import_model_folder
-
-    definition = tmp_path / "definition"
-    definition.mkdir()
-    (definition / "model.tmdl").write_text(
-        "model Model\n"
-        "table Sales\n"
-        "\tmeasure Revenue = ```\n"
-        "\t\t\tVAR x = 1  \n"
-        "\t\t\tRETURN x\n"
-        "\t\t\t\n"
-        "\t\t\t```\n"
-        "\t\tformatString: #,##0\n"
-    )
-    model = import_model_folder(tmp_path)["model"]
-    measure = model["tables"][0]["measures"][0]
-    assert measure["expression"] == "VAR x = 1  \nRETURN x\n"
-    assert measure["formatString"] == "#,##0"
+    text = "model Model\ntable Sales\n\tmeasure Revenue = ```\n\t\t\tVAR x = 1  \n\t\t\tRETURN x\n\t\t\t\n\t\t\t```\n\t\tformatString: #,##0\n"
+    actual, _ = prepare(tmp_path, text)
+    assert actual == text.encode()
 
 
 @pytest.mark.parametrize("property_name", ["inventedProperty", ".weaverDirective"])
 @weaver_test()
-def test_tmdl_refuses_unsupported_properties_instead_of_dropping_them(
+def test_unknown_tmdl_properties_are_not_interpreted_as_addon_directives(
     tmp_path, property_name
 ):
-    from weaver.semantic_models.tmdl import import_model_folder
-
-    definition = tmp_path / "definition"
-    definition.mkdir()
-    (definition / "model.tmdl").write_text(f"model Model\n\t{property_name}: true\n")
-    with pytest.raises(ConfigError, match="unsupported TMDL property"):
-        import_model_folder(tmp_path)
+    text = f"model Model\n\t{property_name}: true\n"
+    actual, contribution = prepare(tmp_path, text)
+    assert actual == text.encode()
+    assert contribution.requested == {}
 
 
 @weaver_test()
-def test_pbip_import_leaves_every_authored_file_unchanged():
-    from weaver.semantic_models.tmdl import import_pbip
-
-    paths = [path for path in FIXTURE.rglob("*") if path.is_file()]
-    before = {path: path.read_bytes() for path in paths}
-    import_pbip(FIXTURE / "Probe.pbip")
-    assert {path: path.read_bytes() for path in paths} == before
+def test_pbip_preparation_leaves_every_authored_file_unchanged(tmp_path):
+    _, contribution = prepare(tmp_path)
+    model = FIXTURE / "Probe.SemanticModel"
+    expected = {
+        p.relative_to(model).as_posix(): p.read_bytes()
+        for p in model.rglob("*")
+        if p.is_file()
+    }
+    assert contribution.parts == expected
 
 
 @weaver_test()
 def test_tmdl_keeps_tabs_inside_an_opaque_dax_string(tmp_path):
-    from weaver.semantic_models.tmdl import import_model_folder
-
-    definition = tmp_path / "definition"
-    definition.mkdir()
     expression = '"before\tafter"'
-    (definition / "model.tmdl").write_text(
-        f"model Model\ntable Sales\n\tmeasure Label = {expression}\n"
-    )
-    model = import_model_folder(tmp_path)["model"]
-    assert model["tables"][0]["measures"][0]["expression"] == expression
+    text = f"model Model\ntable Sales\n\tmeasure Label = {expression}\n"
+    actual, _ = prepare(tmp_path, text)
+    assert actual == text.encode()
 
 
 @pytest.mark.parametrize(
     "child", ["column Label\n        dataType: string", "isHidden: true"]
 )
 @weaver_test()
-def test_tmdl_rejects_child_bearing_table_references(tmp_path, child):
-    from weaver.semantic_models.tmdl import import_model_folder
-
-    definition = tmp_path / "definition"
-    definition.mkdir()
-    (definition / "model.tmdl").write_text(
-        f"model Model\ntable Product\ntable Sales\nref table Product\n    {child}\n"
-    )
-    with pytest.raises(ConfigError, match="child-bearing TMDL table reference"):
-        import_model_folder(tmp_path)
+def test_child_bearing_table_references_remain_opaque_without_an_edit(tmp_path, child):
+    text = f"model Model\ntable Product\ntable Sales\nref table Product\n    {child}\n"
+    actual, _ = prepare(tmp_path, text)
+    assert actual == text.encode()
 
 
 @pytest.mark.parametrize("prefix", ["\t\t\t", "            "])
 @weaver_test()
 def test_tmdl_preserves_retained_leading_tabs_in_fenced_m_strings(tmp_path, prefix):
-    from weaver.semantic_models.tmdl import import_model_folder
-
-    definition = tmp_path / "definition"
-    definition.mkdir()
     expression = (
         'let\n    Source = "start\n\tinside the string\n\t\nend"\nin\n    Source'
     )
     body = "\n".join(prefix + line for line in expression.split("\n"))
-    (definition / "model.tmdl").write_text(
-        "model Model\ntable Sales\n\tpartition Sales = m\n"
-        "\t\tsource = ```\n" + body + "\n" + prefix + "```\n"
+    text = (
+        "model Model\ntable Sales\n\tpartition Sales = m\n\t\tsource = ```\n"
+        + body
+        + "\n"
+        + prefix
+        + "```\n"
     )
-    model = import_model_folder(tmp_path)["model"]
-    assert model["tables"][0]["partitions"][0]["source"]["expression"] == expression
+    actual, _ = prepare(tmp_path, text)
+    assert actual == text.encode()

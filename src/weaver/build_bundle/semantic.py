@@ -4,6 +4,7 @@ from ..catalogue.semantic import json_text
 from ..catalogue.state import Catalogue
 from ..catalogue.tables import SEMANTIC_TABLES
 from ..declaration.model import WeaverDocumentId
+from ..semantic_models.definition import encode_parts
 from ..semantic_models.references import source_identity
 from .dependencies import endpoint_object_key, object_key
 from .models import BuildBatch, InstallAction
@@ -33,15 +34,18 @@ def semantic_stage(repository, item, target, *, catalogue_target=None):
     content = (
         json_text(
             {
-                "model": contribution.model,
+                "definition": encode_parts(contribution.parts),
+                "requested": contribution.requested,
+                "owned": contribution.owned,
                 "properties": contribution.properties,
                 "provenance": dict(contribution.provenance),
                 "source_references": dict(contribution.source_references),
                 "source_bindings": dict(contribution.source_bindings),
+                "expression_sources": dict(contribution.expression_sources),
                 "signature": contribution.signature,
                 "target_id": target.id,
                 "item": str(item),
-                "allow_purge_data": False,
+                "allow_purge_data": True,
             }
         )
         + "\n"
@@ -55,8 +59,7 @@ def semantic_stage(repository, item, target, *, catalogue_target=None):
         payload_sha256=sha256_hex(content),
     )
     sources = tuple(
-        source_identity(reference)
-        for reference in contribution.source_references.values()
+        source_identity(reference) for _table, reference in contribution.dependencies
     )
     requirements = (
         (object_key(item),)

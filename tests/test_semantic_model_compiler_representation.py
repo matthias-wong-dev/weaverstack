@@ -1,62 +1,89 @@
-"""Both semantic bases compile through the same native TMSL overlay path."""
+"""Both semantic bases use the same supported TMDL patch compiler."""
 
 import copy
-import json
 from pathlib import Path
 
 import pytest
 from support.weaver_test import weaver_test
 
-from weaver.semantic_models.tmdl import import_pbip
+from weaver.errors import ConfigError
+from weaver.semantic_models.compiler import _addon_patch, _merge, _normalise
+from weaver.semantic_models.patching import apply_addons
+from weaver.semantic_models.source import SemanticContribution
 
-FIXTURE = Path(__file__).parent / "fixtures" / "semantic_model" / "Probe" / "Probe.pbip"
+FIXTURE = Path(__file__).parent / "fixtures/semantic_model/Probe/Probe.SemanticModel"
+
+
+def base_parts():
+    return {
+        p.relative_to(FIXTURE).as_posix(): p.read_bytes()
+        for p in FIXTURE.rglob("*")
+        if p.is_file()
+    }
+
+
+def compile_parts(*, base=None, organisation=None, item=None):
+    return apply_addons(
+        SemanticContribution(base or {}, {}, {}),
+        "Reporting",
+        ((organisation, "organisation addon"), (item, "item addon")),
+    )
 
 
 @pytest.mark.parametrize("pbip", [False, True])
 @weaver_test()
 def test_both_bases_apply_organisation_then_item_policy_and_calculated_tables(pbip):
-    from weaver.semantic_models.compiler import compile_model
-
-    base = import_pbip(FIXTURE) if pbip else None
+    base = base_parts() if pbip else None
     organisation = {
         "model": {"culture": "en-AU", "discourageImplicitMeasures": True},
         "tables": {"_Measure": {".dax": "INFO.VIEW.MEASURES()"}},
     }
     item = {"model": {"culture": "en-GB"}, "tables": {"_Measure": {"isHidden": True}}}
     original = copy.deepcopy((base, organisation, item))
-    model = compile_model("Reporting", base=base, organisation=organisation, item=item)
-    assert json.loads(json.dumps(model)) == model
-    assert "tables" not in model
-    assert model["model"]["culture"] == "en-GB"
-    assert model["model"]["discourageImplicitMeasures"] is True
-    assert model["model"]["defaultPowerBIDataSourceVersion"] == "powerBI_V3"
-    tables = {table["name"]: table for table in model["model"]["tables"]}
-    assert tables["_Measure"] == {
-        "name": "_Measure",
-        "isHidden": True,
-        "partitions": [
-            {
-                "name": "_Measure",
-                "source": {"type": "calculated", "expression": "INFO.VIEW.MEASURES()"},
-            }
-        ],
-    }
+    result = compile_parts(base=base, organisation=organisation, item=item)
+    assert result.requested["culture"] == "en-GB"
+    assert result.requested["discourageImplicitMeasures"] is True
+    assert b"culture: en-GB" in result.parts["definition/model.tmdl"]
+    assert (
+        b"defaultPowerBIDataSourceVersion: powerBI_V3"
+        in result.parts["definition/model.tmdl"]
+    )
+    assert result.requested["tables"] == [
+        {
+            "name": "_Measure",
+            "isHidden": True,
+            "partitions": [
+                {
+                    "name": "_Measure",
+                    "source": {
+                        "type": "calculated",
+                        "expression": "INFO.VIEW.MEASURES()",
+                    },
+                }
+            ],
+        }
+    ]
+    assert b"isHidden: true" in result.parts["definition/tables/_Measure.tmdl"]
     if pbip:
-        assert model["compatibilityLevel"] == base["compatibilityLevel"]
-        assert tables["Sales"] == next(
-            table for table in base["model"]["tables"] if table["name"] == "Sales"
+        assert (
+            result.parts["definition/database.tmdl"] == base["definition/database.tmdl"]
+        )
+        assert (
+            result.parts["definition/tables/Sales.tmdl"]
+            == base["definition/tables/Sales.tmdl"]
         )
     else:
-        assert model["name"] == "Reporting" and model["compatibilityLevel"] == 1606
-        assert set(tables) == {"_Measure"}
+        assert b"database 'Reporting'" in result.parts["definition/database.tmdl"]
+        assert b"compatibilityLevel: 1606" in result.parts["definition/database.tmdl"]
+        assert {p for p in result.parts if p.startswith("definition/tables/")} == {
+            "definition/tables/_Measure.tmdl"
+        }
     assert (base, organisation, item) == original
 
 
 @weaver_test()
 def test_nested_named_objects_merge_without_losing_authored_siblings():
-    from weaver.semantic_models.compiler import compile_model
-
-    base = import_pbip(FIXTURE)
+    base = base_parts()
     organisation = {
         "tables": {
             "Sales": {
@@ -70,72 +97,63 @@ def test_nested_named_objects_merge_without_losing_authored_siblings():
     }
     item = {
         "tables": {
-            "Sales": {
-                "measures": [{"name": "Revenue", "formatString": "0.000"}],
-            }
+            "Sales": {"measures": [{"name": "Revenue", "formatString": "0.000"}]}
         }
     }
-    model = compile_model("Reporting", base=base, organisation=organisation, item=item)
-    sales = next(
-        table for table in model["model"]["tables"] if table["name"] == "Sales"
+    result = compile_parts(base=base, organisation=organisation, item=item)
+    sales = result.parts["definition/tables/Sales.tmdl"].decode()
+    assert "measure Revenue = SUM(Sales[Amount])" in sales
+    assert "displayFolder: Finance" in sales and "formatString: 0.000" in sales
+    assert "measure 'Units'" in sales and "COUNTROWS(Sales)" in sales
+    assert (
+        "column Id" in sales
+        and "column ProductId" in sales
+        and "column Amount" in sales
     )
-    measures = {measure["name"]: measure for measure in sales["measures"]}
-    assert set(measures) == {"Revenue", "Units"}
-    assert measures["Revenue"]["expression"] == "SUM(Sales[Amount])"
-    assert measures["Revenue"]["displayFolder"] == "Finance"
-    assert measures["Revenue"]["formatString"] == "0.000"
-    columns = {column["name"]: column for column in sales["columns"]}
-    assert set(columns) == {"Id", "ProductId", "Amount"}
-    assert columns["Amount"]["dataType"] == "decimal"
-    assert columns["Amount"]["formatString"] == "0.00"
+    assert "dataType: decimal" in sales and "formatString: 0.00" in sales
+    assert (
+        result.parts["definition/tables/Product.tmdl"]
+        == base["definition/tables/Product.tmdl"]
+    )
 
 
 @weaver_test()
-def test_native_named_collections_merge_by_identity_and_other_lists_replace():
-    from weaver.semantic_models.compiler import compile_model
-
+def test_known_patch_named_collections_merge_by_identity_and_other_lists_replace():
     base = {
-        "compatibilityLevel": 1606,
-        "model": {
-            "tables": [
-                {
-                    "name": "Sales",
-                    "partitions": [
-                        {
-                            "name": "Historical",
-                            "mode": "import",
-                            "source": {"type": "m", "expression": "old"},
-                        },
-                        {
-                            "name": "Recent",
-                            "mode": "import",
-                            "source": {"type": "m", "expression": "current"},
-                        },
-                    ],
-                    "hierarchies": [
-                        {
-                            "name": "Dates",
-                            "levels": [
-                                {"name": "Year", "ordinal": 0, "column": "Year"}
-                            ],
-                        }
-                    ],
-                }
-            ],
-            "roles": [
-                {
-                    "name": "Reader",
-                    "modelPermission": "read",
-                    "members": [{"memberName": "previous"}],
-                }
-            ],
-            "annotations": [{"name": "Owner", "value": "Finance"}],
-        },
+        "tables": [
+            {
+                "name": "Sales",
+                "partitions": [
+                    {
+                        "name": "Historical",
+                        "mode": "import",
+                        "source": {"type": "m", "expression": "old"},
+                    },
+                    {
+                        "name": "Recent",
+                        "mode": "import",
+                        "source": {"type": "m", "expression": "current"},
+                    },
+                ],
+                "hierarchies": [
+                    {
+                        "name": "Dates",
+                        "levels": [{"name": "Year", "ordinal": 0, "column": "Year"}],
+                    }
+                ],
+            }
+        ],
+        "roles": [
+            {
+                "name": "Reader",
+                "modelPermission": "read",
+                "members": [{"memberName": "previous"}],
+            }
+        ],
+        "annotations": [{"name": "Owner", "value": "Finance"}],
     }
-    result = compile_model(
-        "Reporting",
-        base=base,
-        item={
+    patch = _addon_patch(
+        {
             "model": {
                 "tables": {
                     "Sales": {
@@ -150,10 +168,11 @@ def test_native_named_collections_merge_by_identity_and_other_lists_replace():
                 "roles": {"Reader": {"members": [{"memberName": "replacement"}]}},
                 "annotations": {"Domain": {"value": "Sales"}},
             }
-        },
-    )["model"]
+        }
+    )
+    result = _merge(_normalise(base), patch)
     sales = result["tables"][0]
-    assert sales["partitions"][0] == base["model"]["tables"][0]["partitions"][0]
+    assert sales["partitions"][0] == base["tables"][0]["partitions"][0]
     assert sales["partitions"][1] == {
         "name": "Recent",
         "mode": "import",
@@ -189,24 +208,18 @@ def test_native_named_collections_merge_by_identity_and_other_lists_replace():
 )
 @weaver_test()
 def test_named_collections_reject_ambiguous_or_invalid_identities(tables):
-    from weaver.errors import ConfigError
-    from weaver.semantic_models.compiler import compile_model
-
     with pytest.raises(ConfigError, match="tables"):
-        compile_model("Reporting", item={"tables": tables})
+        compile_parts(item={"tables": tables})
 
 
 @pytest.mark.parametrize(
-    "addon, location",
+    "addon,location",
     [
         ({".rules": {}}, ".rules"),
         ({"measures": {"Answer": {"expression": "1"}}}, "measures"),
         ({"model": {"typo": True}}, "typo"),
         ({"model": {"culture": {"unexpected": 1}}}, "culture"),
-        (
-            {"tables": {"Sales": {".source": "Warehouse/Serving/Sales.Order"}}},
-            ".source",
-        ),
+        ({"tables": {"Sales": {".source": "SemanticModel/Reporting"}}}, ".source"),
         ({"tables": {"Sales": {"measures": {"A": {".switch": []}}}}}, ".switch"),
         ({"tables": {"Sales": {".dax": 1}}}, ".dax"),
         (
@@ -218,22 +231,14 @@ def test_named_collections_reject_ambiguous_or_invalid_identities(tables):
 )
 @weaver_test()
 def test_unsupported_or_malformed_addons_fail_at_the_authored_property(addon, location):
-    from weaver.errors import ConfigError
-    from weaver.semantic_models.compiler import compile_model
-
     with pytest.raises(ConfigError) as failure:
-        compile_model("Reporting", item=addon)
+        compile_parts(item=addon)
     assert location in str(failure.value)
 
 
 @weaver_test()
 def test_dax_refuses_to_replace_an_existing_source_partition():
-    from weaver.errors import ConfigError
-    from weaver.semantic_models.compiler import compile_model
-
     with pytest.raises(ConfigError, match="Sales.*partitions"):
-        compile_model(
-            "Reporting",
-            base=import_pbip(FIXTURE),
-            item={"tables": {"Sales": {".dax": 'ROW("A", 1)'}}},
+        compile_parts(
+            base=base_parts(), item={"tables": {"Sales": {".dax": 'ROW("A", 1)'}}}
         )

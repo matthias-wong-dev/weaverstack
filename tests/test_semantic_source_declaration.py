@@ -31,7 +31,7 @@ def test_source_directives_are_separate_from_native_properties(tmp_path):
         "Customer": "Lakehouse/Curated/Tables/Cake.Customer",
         "OtherCustomer": "Lakehouse/Curated/Tables/Cake.Customer",
     }
-    assert contribution.model["model"]["tables"] == [
+    assert contribution.requested["tables"] == [
         {"name": "Sales", "description": "Sales facts"},
         {"name": "Customer"},
         {"name": "OtherCustomer"},

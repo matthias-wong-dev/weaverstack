@@ -173,15 +173,18 @@ Semantic models share the ordinary repository, graph, format-5 MutationPlan,
 MutationExecutor and catalogue owners. The shared codec validates their targets
 and payloads. `Session.execute_mutation` binds `Session.semantic_model` through
 MutationBindings and the physical drivers. A semantic-only Build starts no Spark.
-`SemanticModel/Name` is the model-root document identity;
-its native TMSL dictionary remains authoritative. Store source bytes and
-property provenance beside it. Compile the PBIP base, `SemanticModel/addon.yml`, item addon
-and `.dax` through `semantic_models.compiler`; preserve authored partitions.
-Unsupported directives and TMDL statements must fail at their source location.
+`SemanticModel/Name` is the model-root document identity. Desired state is a
+TMDL definition-part package; observed state is Fabric-returned TMSL. Store source
+bytes, requested edits and provenance beside the package. `semantic_models.source`
+selects the PBIP or empty base; `patching` applies organisation then item addons.
+The source-span editor changes requested fragments and preserves unknown native
+content. Generated objects use `render`. Unsupported requested addon keys fail
+with source diagnostics. Ordinary PBIP deployment requires no full TMDL parser.
+Package paths/bytes and resolved source metadata determine the desired signature.
 
 `initialise` alone creates semantic items. Build binds the existing typed item
-and freezes its workspace/item IDs in the bundle. The update action disables
-purging. Declared success edges require deployment before effective-definition
+and freezes its workspace/item IDs in the bundle. Definition updates permit
+required clearing of processed semantic data; source data is outside that action. Declared success edges require deployment before effective-definition
 readback and all five semantic catalogue projections before Registry publication. The readback
 checks requested properties and inferred calculated columns. Publication also
 requires the shared physical completion gate. Failed or uncertain deployment
@@ -215,8 +218,16 @@ table publishes its exact producer in `_.Dependency`; two consuming tables keep
 separate rows even when they share a producer. The installed DAG reads those rows
 and derives the single model-refresh node's upstream edges. Lakehouse SQL endpoint
 refresh and Warehouse OneLake publication use the existing Load barriers. Sources
-without `.source` add no inferred edges. Normal Load item/name selection still
-controls which producers run.
+with simple shared-M navigation can also publish observable managed edges.
+Unknown navigation contributes no guessed relation. Normal Load item/name
+selection still controls which producers run.
+
+Shared M environment mappings run after addons. Explicit `data_sources` values
+from the API/CLI override workspace config; logical `Warehouse/Name` and
+`Lakehouse/Name` expressions can resolve from workspace targets. Only selected
+expressions are rewritten. SQL expressions resolve SQL endpoints; native
+`Lakehouse.Contents` expressions resolve item/workspace IDs. Session owns both
+lookups. Source substitution does not bind runtime connections.
 
 Load reads the certified model root and its typed workspace/item IDs from the
 catalogue. The installed graph, load planner and Runner dispatch a built-in
@@ -225,6 +236,17 @@ service timing and outcome belong to the normal Log and LoadStatus record.
 Semantic refresh has no row counts or bookmarks. A changed Build invalidates
 LoadStatus; an unchanged Build preserves it. Semantic-only Load uses REST/TDS
 and needs neither source files nor a deployed runtime module.
+
+Connection binding is a separate planned operation. `semantic-model bind`
+will resolve installed model IDs and bind explicit source references to existing
+approved connection IDs through Session. Its plan must expose ambiguous matches
+and required permissions before any write. The operation may use an existing
+cloud, gateway or SSO connection; credential creation/rotation and gateway
+administration stay outside Weaver. An optional Build binding phase will share
+that operation and report its result separately from definition deployment.
+Non-interactive execution must never prompt or bind implicitly. Semantic wipe
+owns no shared connection or gateway. Binding, automatic bind offers and
+binding preservation are not implemented in this branch.
 
 `doctor --semantic-model NAME` checks Power BI authentication, the model's
 TMSL definition and DAX access through REST. This mode starts no Spark session.

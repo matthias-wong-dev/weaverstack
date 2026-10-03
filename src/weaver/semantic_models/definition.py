@@ -1,4 +1,4 @@
-"""TMSL payloads for Fabric SemanticModel definitions."""
+"""Fabric definition transport for desired TMDL and observed TMSL."""
 
 from __future__ import annotations
 
@@ -28,6 +28,48 @@ def encode_definition(model: dict, *, properties: dict | None = None) -> dict:
             for path, value in (("model.bim", model), ("definition.pbism", properties))
         ],
     }
+
+
+def encode_parts(parts):
+    return {
+        "format": "TMDL",
+        "parts": [
+            {
+                "path": path,
+                "payloadType": "InlineBase64",
+                "payload": base64.b64encode(content).decode("ascii"),
+            }
+            for path, content in sorted(parts.items())
+        ],
+    }
+
+
+def decode_parts(definition):
+    try:
+        if definition["format"] != "TMDL":
+            raise ValueError("expected TMDL format")
+        parts = {}
+        for part in definition["parts"]:
+            path = part["path"]
+            if (
+                not isinstance(path, str)
+                or path != path.strip()
+                or "\\" in path
+                or any(p in {"", ".", ".."} for p in path.split("/"))
+                or path in parts
+                or part["payloadType"] != "InlineBase64"
+            ):
+                raise ValueError("invalid or duplicate definition part")
+            parts[path] = base64.b64decode(part["payload"], validate=True)
+        if "definition.pbism" not in parts or not any(
+            p.startswith("definition/") and p.endswith(".tmdl") for p in parts
+        ):
+            raise ValueError("expected definition.pbism and TMDL parts")
+        if "model.bim" in parts:
+            raise ValueError("TMDL and TMSL parts cannot be combined")
+        return parts
+    except (KeyError, TypeError, ValueError, AttributeError, binascii.Error) as exc:
+        raise ConfigError(f"Invalid semantic TMDL definition: {exc}") from exc
 
 
 def decode_model(definition: dict) -> dict:
