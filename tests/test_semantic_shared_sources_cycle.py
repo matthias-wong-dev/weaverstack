@@ -6,7 +6,7 @@ from pathlib import Path
 from support.weaver_test import weaver_test
 from support.workspaces import _identifier
 from test_semantic_source_build_cycle import source_session
-from test_semantic_tmdl_package import pbip_project
+from test_semantic_tmdl_package_representation import pbip_project
 
 import weaver
 from weaver.semantic_models.definition import decode_parts
