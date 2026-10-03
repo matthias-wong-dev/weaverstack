@@ -23,7 +23,13 @@ from pathlib import Path
 
 import pytest
 from support.load_performance import (
+    FLOW_ROWS,
+    FLOW_ROWS_ENV,
+    HUGE_ROWS,
+    HUGE_ROWS_ENV,
     LAKEHOUSE,
+    LARGE_ROWS,
+    LARGE_ROWS_ENV,
     WAREHOUSE,
     LoadBench,
     ScenarioRun,
@@ -32,6 +38,7 @@ from support.load_performance import (
     run_huge,
     run_large,
     run_small,
+    scale,
     write_load_estate,
 )
 from support.weaver_test import register_session, weaver_test
@@ -73,7 +80,12 @@ def context(bench):
         " 'runtime': spark.conf.get('spark.fabric.runtime.version', None) or"
         " spark.conf.get('spark.synapse.runtime.version', None)})\n"
     )
-    return {"revision": revision, **spark}
+    scales = {
+        "large_rows": scale(LARGE_ROWS_ENV, LARGE_ROWS),
+        "huge_rows": scale(HUGE_ROWS_ENV, HUGE_ROWS),
+        "flow_rows": scale(FLOW_ROWS_ENV, FLOW_ROWS),
+    }
+    return {"revision": revision, **scales, **spark}
 
 
 @pytest.fixture(scope="module", params=ENGINES)
