@@ -1,6 +1,7 @@
 """Build, Wipe and Mirror of the representative estates finish within their ceilings.
 
-The ceilings were qualified on an F64 capacity with the default concurrency.
+The ceilings qualify an F64 trial capacity at the Build concurrency in
+``qualified_execution``, which the runs use instead of the defaults.
 
 Opt in with ``--performance``. Each estate run empties the performance items,
 builds the estate, builds it again unchanged, mirrors it and wipes it, timing
@@ -13,8 +14,16 @@ performance items, so they run one after another.
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
-from support.fabric_performance import LAKEHOUSE, WAREHOUSE, record, run_estate
+from support.fabric_performance import (
+    LAKEHOUSE,
+    WAREHOUSE,
+    qualified_execution,
+    record,
+    run_estate,
+)
 from support.weaver_test import register_session, weaver_test
 
 ESTATES = (
@@ -25,15 +34,30 @@ ESTATES = (
 )
 
 
+@pytest.fixture(scope="module")
+def qualified_sessions(fabric_workspace, livy_session):
+    """Sessions at the qualified concurrency.
+
+    Lakehouse work borrows the suite's one Livy session, as ``weaver_session``
+    does, so qualification starts no session of its own.
+    """
+
+    from weaver.sessions import ConsoleSession
+
+    workspace = replace(fabric_workspace, execution=qualified_execution())
+    with (
+        ConsoleSession(workspace=workspace, progress=False) as warehouse,
+        ConsoleSession(workspace=workspace, livy=livy_session) as lakehouse,
+    ):
+        yield {WAREHOUSE: warehouse, LAKEHOUSE: lakehouse}
+
+
 @pytest.fixture(
     scope="module", params=ESTATES, ids=lambda estate: f"{estate[0]}-{estate[1]}"
 )
-def estate(request, fabric_workspace):
+def estate(request, fabric_workspace, qualified_sessions):
     engine, declarations = request.param
-    session = request.getfixturevalue(
-        "warehouse_session" if engine == WAREHOUSE else "weaver_session"
-    )
-    register_session(session)
+    session = register_session(qualified_sessions[engine])
     run = run_estate(
         engine,
         declarations,

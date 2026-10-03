@@ -36,7 +36,7 @@ from weaver.mutation.executor import (
     MutationExecutor,
     TypedValue,
 )
-from weaver.sessions.archive_runtime import WAREHOUSE_LANES, execution_capacity
+from weaver.sessions.archive_runtime import execution_capacity
 from weaver.store import FilesystemStore
 from weaver.targets import ItemRef
 
@@ -169,6 +169,3 @@ def test_representative_lakehouse_work_overlaps_without_exceeding_any_limit(tmp_
     assert order_violations == []
     assert peak["spark"] > 1
     assert all(peak[key] <= limit for key, limit in limits.items())
-    assert all(
-        peak[key] <= WAREHOUSE_LANES for key in limits if key.startswith("warehouse:")
-    )

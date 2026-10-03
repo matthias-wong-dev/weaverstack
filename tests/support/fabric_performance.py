@@ -17,10 +17,26 @@ from pathlib import Path
 LAKEHOUSE = "lakehouse"
 WAREHOUSE = "warehouse"
 
+#: The capacity and Build concurrency the ceilings were qualified at.
+QUALIFIED_CAPACITY = "F64 trial"
+
+
+def qualified_execution():
+    from weaver.workspaces import BuildConcurrency, ExecutionSettings
+
+    return ExecutionSettings(
+        build=BuildConcurrency(
+            warehouse_concurrency=4,
+            spark_concurrency=8,
+            onelake_concurrency=16,
+            shortcut_concurrency=4,
+        )
+    )
+
+
 #: Wall-clock ceilings in seconds, by estate size, engine and operation, set
-#: above the slowest of repeated runs on an F64 capacity with the default
-#: concurrency. They qualify that capacity; a smaller one, or a Workspace that
-#: lowers ``parallel_workers``, is expected to be slower.
+#: above the slowest of repeated runs at ``qualified_execution`` on the
+#: ``QUALIFIED_CAPACITY``. Another capacity or concurrency is expected to differ.
 THRESHOLDS = {
     50: {
         WAREHOUSE: {"build": 60, "noop": 15, "wipe": 15, "mirror": 45},

@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 
 def main(argv) -> int:
-    from support.fabric_performance import run_estate
+    from support.fabric_performance import qualified_execution, run_estate
 
     from weaver.fabric.auth import desktop_credential, use_credential
     from weaver.sessions import ConsoleSession
@@ -27,7 +27,11 @@ def main(argv) -> int:
     options = {} if operations is None else {"operations": operations}
     environment = os.environ.get("WEAVER_FABRIC_ENVIRONMENT", "weaver")
     with ConsoleSession(
-        workspace=Workspace(workspace=workspace, environment=environment),
+        workspace=Workspace(
+            workspace=workspace,
+            environment=environment,
+            execution=qualified_execution(),
+        ),
         progress=False,
     ) as session:
         run = run_estate(
