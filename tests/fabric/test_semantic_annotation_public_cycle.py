@@ -16,7 +16,9 @@ from test_semantic_model_public_cycle import (
 
 import weaver
 from weaver.catalogue.reader import read_table
+from weaver.catalogue.render import InstallationScope
 from weaver.catalogue.tables import (
+    COLUMN_DICTIONARY,
     DEPENDENCY,
     LOAD_STATUS,
     LOG,
@@ -135,6 +137,29 @@ def test_public_annotation_build_readback_load_and_fixed_point(
     project = folder.parent.parent
     before = {p: p.read_bytes() for p in project.rglob("*") if p.is_file()}
     selection = f"{ITEM}=SemanticModel/{context.target}"
+    source_description = None
+    source_column_notes = {}
+    if form == "source-extension":
+        source_scope = InstallationScope("Warehouse", "_weaver")
+        source_predicate = "[Schema name] = N'_' AND [Object name] = N'TableDictionary'"
+        (source_row,) = read_table(
+            context.connection,
+            TABLE_DICTIONARY,
+            scope=source_scope,
+            predicate=source_predicate,
+        )
+        source_description = source_row["description"]
+        source_column_notes = {
+            row["column_name"]: row["description"]
+            for row in read_table(
+                context.connection,
+                COLUMN_DICTIONARY,
+                scope=source_scope,
+                predicate=source_predicate,
+            )
+            if row["description"]
+        }
+        assert source_description and source_column_notes
     built = weaver.build(project, items=selection, session=context.session)
     assert built.succeeded, built.errors
     actual = decode_model(context.model.get_definition())["model"]
@@ -171,8 +196,14 @@ def test_public_annotation_build_readback_load_and_fixed_point(
             columns = {c["name"]: c for c in tables[name]["columns"]}
             assert columns["Schema name"]["isHidden"] is True
             assert columns["Item name"]["isHidden"] is True
-            assert tables[name]["description"] == TABLE_DICTIONARY.description
-            assert any(c.get("description") for c in columns.values())
+            assert tables[name]["description"] == source_description
+            propagated = {
+                key: note for key, note in source_column_notes.items() if key in columns
+            }
+            assert propagated
+            assert {
+                key: columns[key].get("description") for key in propagated
+            } == propagated
             assert any(
                 a["name"] == "Weaver.Source" for a in tables[name]["annotations"]
             )
