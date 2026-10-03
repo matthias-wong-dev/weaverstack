@@ -439,6 +439,20 @@ def test_every_phase_is_persisted_and_read_by_name():
 
 
 @weaver_test()
+def test_staging_is_repartitioned_so_it_reports_no_source_ordering():
+    """Fabric's Spark 4.1 cannot discover rejects over a cached ordered relation.
+
+    The engine claim is ``tests/fabric/test_ordered_source_load_primitive.py``.
+    """
+
+    spark, _result = _load(BUSY)
+
+    staging = spark.persisted[0]
+    assert staging.role == "staging"
+    assert staging.text.startswith("SELECT /*+ REPARTITION */ ")
+
+
+@weaver_test()
 def test_a_clean_load_still_clears_an_earlier_runs_evidence():
     """Stale evidence would read as evidence about the run that just succeeded.
 
