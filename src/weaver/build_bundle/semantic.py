@@ -2,15 +2,13 @@
 
 from ..catalogue.semantic import json_text
 from ..catalogue.state import Catalogue
-from ..catalogue.tables import SEMANTIC_MODEL_DICTIONARY, SEMANTIC_OBJECT_DICTIONARY
+from ..catalogue.tables import SEMANTIC_TABLES
 from ..declaration.model import WeaverDocumentId
 from ..semantic_models.references import source_identity
 from .dependencies import endpoint_object_key, object_key
 from .models import BuildBatch, InstallAction
 from .payloads import sha256_hex
 from .stages import BUILD, CATALOGUE, PlannedStage
-
-SEMANTIC_TABLES = (SEMANTIC_MODEL_DICTIONARY, SEMANTIC_OBJECT_DICTIONARY)
 
 
 def bind_semantic_target(target, inventory):

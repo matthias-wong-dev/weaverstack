@@ -51,8 +51,11 @@ def test_projected_catalogue_tables_have_the_declared_order():
         "TestDictionary",
         "Dependency",
         "Shortcut",
-        "SemanticModelDictionary",
-        "SemanticObjectDictionary",
+        "SemanticModel",
+        "SemanticModelTable",
+        "SemanticModelMeasure",
+        "SemanticModelRelationship",
+        "SemanticModelColumn",
         "Installation",
         "Registry",
     ]

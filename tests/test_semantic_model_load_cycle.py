@@ -54,7 +54,7 @@ def installed_rows():
                     "signature": "compiled-definition",
                 },
             ),
-            "SemanticModelDictionary": (
+            "SemanticModel": (
                 {
                     **identity,
                     "signature": "compiled-definition",
@@ -166,9 +166,7 @@ def test_public_load_refreshes_installed_model_and_records_terminal_evidence(
 
 
 @weaver_test()
-@pytest.mark.parametrize(
-    "missing", ["Installation", "Registry", "SemanticModelDictionary"]
-)
+@pytest.mark.parametrize("missing", ["Installation", "Registry", "SemanticModel"])
 def test_public_load_refuses_an_uninstalled_or_uncertified_model(monkeypatch, missing):
     from weaver.errors import WeaverError
 

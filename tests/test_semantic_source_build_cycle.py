@@ -209,6 +209,9 @@ def test_public_build_binds_sources_and_publishes_object_dependencies(
         }
         rows = published()[ITEM]
         deps = rows["Dependency"]
+        semantic_tables = {r["table_name"]: r for r in rows["SemanticModelTable"]}
+        assert all(edge["referencing_object_name"] in semantic_tables for edge in deps)
+        assert semantic_tables["Sales"]["description"] == "Sales description"
         assert {
             (
                 row["referencing_schema_name"],
@@ -227,21 +230,14 @@ def test_public_build_binds_sources_and_publishes_object_dependencies(
             (row["referenced_item_type"], row["referenced_item_name"]) for row in deps
         } == {("Warehouse", "Serving")}
         source = session.resolve_item("Serving_Dev", item_type="Warehouse")
-        objects = {
-            row["semantic_path"]: row for row in rows["SemanticObjectDictionary"]
-        }
-        metadata = json.loads(objects["/model/tables/Sales"]["source_binding"])
+        objects = {row["table_name"]: row for row in rows["SemanticModelTable"]}
+        metadata = json.loads(objects["Sales"]["source_binding"])
         assert metadata["reference"] == "Warehouse/Serving/Cake.Sales"
         assert metadata["object_type"] == "table"
         assert metadata["item_type"] == "Warehouse"
         assert metadata["item_id"] == source.id
         assert metadata["workspace_id"] == source.workspace_id
-        assert (
-            json.loads(objects["/model/tables/Summary"]["source_binding"])[
-                "object_type"
-            ]
-            == "view"
-        )
+        assert json.loads(objects["Summary"]["source_binding"])["object_type"] == "view"
         assert not session.python and not session.spark_sql
 
 
@@ -607,8 +603,8 @@ def test_environment_rebinding_and_unchanged_public_build_use_source_signatures(
                 json.loads(
                     next(
                         r["source_binding"]
-                        for r in rows[ITEM]["SemanticObjectDictionary"]
-                        if r["semantic_path"] == "/model/tables/Sales"
+                        for r in rows[ITEM]["SemanticModelTable"]
+                        if r["table_name"] == "Sales"
                     )
                 )
             )
@@ -742,8 +738,8 @@ def test_lakehouse_source_keeps_tables_identity_and_plans_sql_readiness(
         binding = json.loads(
             next(
                 r["source_binding"]
-                for r in rows[ITEM]["SemanticObjectDictionary"]
-                if r["semantic_path"] == "/model/tables/Customer"
+                for r in rows[ITEM]["SemanticModelTable"]
+                if r["table_name"] == "Customer"
             )
         )
         assert binding["item_type"] == "Lakehouse"

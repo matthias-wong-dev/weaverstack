@@ -9,25 +9,12 @@ from .tables import (
     DEPENDENCY,
     REGISTRY,
     ROLE_DATA,
-    SEMANTIC_MODEL_DICTIONARY,
-    SEMANTIC_OBJECT_DICTIONARY,
+    SEMANTIC_MODEL,
+    SEMANTIC_MODEL_COLUMN,
+    SEMANTIC_MODEL_MEASURE,
+    SEMANTIC_MODEL_RELATIONSHIP,
+    SEMANTIC_MODEL_TABLE,
 )
-
-_COLLECTION_KINDS = {
-    "tables": "table",
-    "columns": "column",
-    "measures": "measure",
-    "partitions": "partition",
-    "relationships": "relationship",
-    "roles": "role",
-    "tablePermissions": "tablePermission",
-    "hierarchies": "hierarchy",
-    "levels": "level",
-    "annotations": "annotation",
-    "calculationItems": "calculationItem",
-    "perspectives": "perspective",
-    "cultures": "culture",
-}
 
 
 def json_text(value):
@@ -38,6 +25,10 @@ def json_text(value):
         allow_nan=False,
         separators=(",", ":"),
     )
+
+
+def _text(value):
+    return "\n".join(value) if isinstance(value, list) else value
 
 
 def project_semantic_model(item, contribution, *, deployed=None):
@@ -55,50 +46,82 @@ def project_semantic_model(item, contribution, *, deployed=None):
         )
         for p in leaf_properties(model)
     }
-    objects = []
 
-    def visit(node, path, kind):
-        if not isinstance(node, dict):
-            return
-        if kind is not None:
-            local = {
-                p[len(path) + 1 :]: origin
-                for p, origin in provenance.items()
-                if p.startswith(path + "/")
-            }
-            objects.append(
+    def metadata(node, path):
+        return {
+            **common,
+            "properties": json_text(node),
+            "provenance": json_text(
                 {
-                    **common,
-                    "semantic_path": path,
-                    "semantic_kind": kind,
-                    "properties": json_text(node),
-                    "provenance": json_text(local),
-                    "source_binding": (
-                        json_text(contribution.source_bindings[node["name"]])
-                        if kind == "table"
-                        and node["name"] in contribution.source_bindings
-                        else None
-                    ),
+                    p[len(path) + 1 :]: origin
+                    for p, origin in provenance.items()
+                    if p.startswith(path + "/")
+                }
+            ),
+        }
+
+    tables, columns, measures, relationships = [], [], [], []
+    for table in model["model"].get("tables", ()):
+        name = table["name"]
+        path = f"/model/tables/{escape(name)}"
+        tables.append(
+            {
+                **metadata(table, path),
+                "table_name": name,
+                "description": _text(table.get("description")),
+                "source_binding": json_text(contribution.source_bindings[name])
+                if name in contribution.source_bindings
+                else None,
+            }
+        )
+        for column in table.get("columns", ()):
+            columns.append(
+                {
+                    **metadata(column, f"{path}/columns/{escape(column['name'])}"),
+                    "table_name": name,
+                    "column_name": column["name"],
+                    "description": _text(column.get("description")),
+                    "data_type": column.get("dataType"),
+                    "column_type": column.get("type"),
+                    "source_column": column.get("sourceColumn"),
+                    "expression": _text(column.get("expression")),
                 }
             )
-        for key, value in node.items():
-            child_path = f"{path}/{escape(key)}"
-            if isinstance(value, list) and key in _COLLECTION_KINDS:
-                for child in value:
-                    if isinstance(child, dict) and isinstance(child.get("name"), str):
-                        visit(
-                            child,
-                            f"{child_path}/{escape(child['name'])}",
-                            _COLLECTION_KINDS[key],
-                        )
-            elif isinstance(value, dict):
-                visit(
-                    value,
-                    child_path,
-                    "calculationGroup" if key == "calculationGroup" else None,
-                )
+        for measure in table.get("measures", ()):
+            measures.append(
+                {
+                    **metadata(measure, f"{path}/measures/{escape(measure['name'])}"),
+                    "table_name": name,
+                    "measure_name": measure["name"],
+                    "description": _text(measure.get("description")),
+                    "expression": _text(measure.get("expression")),
+                    "format_string": measure.get("formatString"),
+                }
+            )
+    for relationship in model["model"].get("relationships", ()):
+        relationships.append(
+            {
+                **metadata(
+                    relationship,
+                    f"/model/relationships/{escape(relationship['name'])}",
+                ),
+                "relationship_name": relationship["name"],
+                **{
+                    stored: relationship.get(native)
+                    for stored, native in (
+                        ("from_table", "fromTable"),
+                        ("from_column", "fromColumn"),
+                        ("to_table", "toTable"),
+                        ("to_column", "toColumn"),
+                        ("from_cardinality", "fromCardinality"),
+                        ("to_cardinality", "toCardinality"),
+                        ("cross_filtering_behavior", "crossFilteringBehavior"),
+                        ("is_active", "isActive"),
+                    )
+                },
+            }
+        )
 
-    visit(model["model"], "/model", "model")
     from ..semantic_models.references import source_identity
     from .claims import catalogue_columns
 
@@ -125,15 +148,24 @@ def project_semantic_model(item, contribution, *, deployed=None):
         REGISTRY.name: (
             {**common, "object_type": "semantic_model", "object_role": ROLE_DATA},
         ),
-        SEMANTIC_MODEL_DICTIONARY.name: (
+        SEMANTIC_MODEL.name: (
             {
                 **common,
+                "description": _text(model["model"].get("description")),
                 "definition": json_text(model),
                 "properties": json_text(contribution.properties),
                 "provenance": json_text(provenance),
             },
         ),
-        SEMANTIC_OBJECT_DICTIONARY.name: tuple(
-            sorted(objects, key=lambda r: r["semantic_path"])
-        ),
+        **{
+            table.name: tuple(
+                sorted(rows, key=lambda row: tuple(row[k] for k in table.key))
+            )
+            for table, rows in (
+                (SEMANTIC_MODEL_TABLE, tables),
+                (SEMANTIC_MODEL_COLUMN, columns),
+                (SEMANTIC_MODEL_MEASURE, measures),
+                (SEMANTIC_MODEL_RELATIONSHIP, relationships),
+            )
+        },
     }

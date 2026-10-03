@@ -26,8 +26,11 @@ from weaver.catalogue.tables import (
     LOG,
     PROJECTED_TABLES,
     REGISTRY,
-    SEMANTIC_MODEL_DICTIONARY,
-    SEMANTIC_OBJECT_DICTIONARY,
+    SEMANTIC_MODEL,
+    SEMANTIC_MODEL_COLUMN,
+    SEMANTIC_MODEL_MEASURE,
+    SEMANTIC_MODEL_RELATIONSHIP,
+    SEMANTIC_MODEL_TABLE,
 )
 from weaver.catalogue.tsql import literal
 from weaver.declaration.model import WeaverDocumentId, WeaverItemId
@@ -161,7 +164,10 @@ def test_public_build_catalogue_load_dax_and_unchanged_build(
     if pbip:
         shutil.copytree(PBIP, folder, dirs_exist_ok=True)
     (folder / "addon.yml").write_text(
-        'tables:\n  Calendar:\n    .dax: ROW("Year", 2026)\n', encoding="utf-8"
+        "model:\n  description: Refresh acceptance model\n"
+        "tables:\n  Calendar:\n    description: Calendar years\n"
+        '    .dax: ROW("Year", 2026)\n',
+        encoding="utf-8",
     )
     root = folder.parent.parent
     selector = f"{ITEM}=SemanticModel/{context.target}"
@@ -174,11 +180,36 @@ def test_public_build_catalogue_load_dax_and_unchanged_build(
         context.model.workspace_id,
         context.model.model_id,
     )
-    (definition,) = read_table(
-        context.connection, SEMANTIC_MODEL_DICTIONARY, scope=SCOPE
-    )
+    (definition,) = read_table(context.connection, SEMANTIC_MODEL, scope=SCOPE)
     (registered,) = read_table(context.connection, REGISTRY, scope=SCOPE)
     assert registered["signature"] == definition["signature"]
+    assert definition["description"] == "Refresh acceptance model"
+    semantic_tables = read_table(context.connection, SEMANTIC_MODEL_TABLE, scope=SCOPE)
+    assert (
+        next(row for row in semantic_tables if row["table_name"] == "Calendar")[
+            "description"
+        ]
+        == "Calendar years"
+    )
+    semantic_columns = read_table(
+        context.connection, SEMANTIC_MODEL_COLUMN, scope=SCOPE
+    )
+    assert any(
+        row["table_name"] == "Calendar" and row["column_name"] == "Year"
+        for row in semantic_columns
+    )
+    measures = read_table(context.connection, SEMANTIC_MODEL_MEASURE, scope=SCOPE)
+    relationships = read_table(
+        context.connection, SEMANTIC_MODEL_RELATIONSHIP, scope=SCOPE
+    )
+    if pbip:
+        assert any(row["measure_name"] == "Revenue" for row in measures)
+        assert any(
+            row["from_table"] == "Sales" and row["to_table"] == "Product"
+            for row in relationships
+        )
+    else:
+        assert not measures and not relationships
     tables = {
         table["name"]: table
         for table in json.loads(definition["definition"])["model"]["tables"]
@@ -228,9 +259,7 @@ def test_public_build_catalogue_load_dax_and_unchanged_build(
     assert not unchanged.selection.selected_for_build
     assert unchanged.installation_report.action_counts()["total"] == 0
     assert read_table(context.connection, LOAD_STATUS, scope=SCOPE) == (loaded,)
-    assert read_table(context.connection, SEMANTIC_MODEL_DICTIONARY, scope=SCOPE) == (
-        definition,
-    )
+    assert read_table(context.connection, SEMANTIC_MODEL, scope=SCOPE) == (definition,)
     assert not {"livy", "onelake"} & {
         event.resource for event in context.session.telemetry.events()
     }
@@ -244,7 +273,7 @@ def test_existing_warehouse_source_build_persists_lineage_and_loads_without_sour
     folder = tmp_path / "project" / str(ITEM)
     folder.mkdir(parents=True)
     (folder / "addon.yml").write_text(
-        "tables:\n  InstalledObjects:\n"
+        "tables:\n  InstalledObjects:\n    description: Installed catalogue objects\n"
         "    .source: Warehouse/_weaver/_.Registry\n"
         "    columns:\n      LogicalItem:\n"
         "        sourceColumn: Item name\n        dataType: string\n",
@@ -261,12 +290,8 @@ def test_existing_warehouse_source_build_persists_lineage_and_loads_without_sour
         "_",
         "Registry",
     )
-    objects = read_table(context.connection, SEMANTIC_OBJECT_DICTIONARY, scope=SCOPE)
-    table = next(
-        row
-        for row in objects
-        if row["semantic_path"] == "/model/tables/InstalledObjects"
-    )
+    objects = read_table(context.connection, SEMANTIC_MODEL_TABLE, scope=SCOPE)
+    table = next(row for row in objects if row["table_name"] == "InstalledObjects")
     source = json.loads(table["source_binding"])
     assert source["mode"] == "directLake"
     assert source["item_type"] == "Warehouse"
@@ -276,8 +301,32 @@ def test_existing_warehouse_source_build_persists_lineage_and_loads_without_sour
             context.session.workspace.catalogue_item, item_type="Warehouse"
         ).id
     )
-    root.rename(root.with_name("source-not-present"))
-    loaded = weaver.load(str(ITEM), session=context.session)
+    joined = context.connection.rows(
+        "SELECT t.[Table name] AS semantic_table, t.[Description] AS description, "
+        "d.[Dependency reference] AS producer FROM [_].[Dependency] d "
+        "JOIN [_].[SemanticModelTable] t ON t.[Item type] = d.[Item type] "
+        "AND t.[Item name] = d.[Item name] "
+        "AND t.[Table name] = d.[Referencing object name] "
+        f"WHERE d.[Item type] = {literal(ITEM.item_type)} "
+        f"AND d.[Item name] = {literal(ITEM.item_name)}"
+    )
+    assert joined == [
+        {
+            "semantic_table": "InstalledObjects",
+            "description": "Installed catalogue objects",
+            "producer": "Warehouse/_weaver/_.Registry",
+        }
+    ]
+    (pending,) = read_table(context.connection, LOAD_STATUS, scope=SCOPE)
+    assert pending["result"] == "pending"
+    print(json.dumps({"build": built.to_mapping(), "lineage": joined}, default=str))
+    away = root.with_name("source-not-present")
+    root.rename(away)
+    try:
+        loaded = weaver.load(str(ITEM), session=context.session)
+    finally:
+        away.rename(root)
+    print(json.dumps({"load": loaded.to_mapping()}, default=str))
     assert loaded.succeeded, loaded.to_mapping()
     assert [node.primitive_kind for node in loaded.nodes] == ["semantic_refresh"]
     expected = context.connection.rows("SELECT COUNT_BIG(*) AS n FROM [_].[Registry]")[
@@ -286,3 +335,23 @@ def test_existing_warehouse_source_build_persists_lineage_and_loads_without_sour
     assert context.model.query_dax(
         'EVALUATE ROW("N", COUNTROWS(InstalledObjects))'
     ) == [{"[N]": expected}]
+    (status,) = read_table(context.connection, LOAD_STATUS, scope=SCOPE)
+    assert (
+        status["result"] == "succeeded" and status["workflow_id"] == loaded.workflow_id
+    )
+    unchanged = weaver.build(root, items=selector, session=context.session)
+    assert (
+        unchanged.succeeded
+        and unchanged.installation_report.action_counts()["total"] == 0
+    )
+    assert read_table(context.connection, LOAD_STATUS, scope=SCOPE) == (status,)
+    print(
+        json.dumps(
+            {
+                "dax_rows": expected,
+                "load_status": status,
+                "unchanged": unchanged.to_mapping(),
+            },
+            default=str,
+        )
+    )

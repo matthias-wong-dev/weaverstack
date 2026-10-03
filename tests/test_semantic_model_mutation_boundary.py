@@ -190,7 +190,7 @@ def test_shared_executor_blocks_certification_without_stopping_independent_model
         )
         assert not any("MERGE" in s and "[_].[Registry]" in s for s in session.tsql)
         assert not any(
-            "MERGE" in s and "[_].[SemanticModelDictionary]" in s for s in session.tsql
+            "MERGE" in s and "[_].[SemanticModel]" in s for s in session.tsql
         )
         assert not any(
             "Succeeded" in s and "[_].[LoadStatus]" in s for s in session.tsql

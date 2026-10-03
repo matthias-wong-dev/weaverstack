@@ -175,19 +175,15 @@ def test_build_deploys_and_certifies_readback_without_touching_source(tmp_path, 
     )
     writes = session.tsql
     definition_write = next(
-        i
-        for i, s in enumerate(writes)
-        if "MERGE" in s and "SemanticModelDictionary" in s
+        i for i, s in enumerate(writes) if "MERGE" in s and "[_].[SemanticModel]" in s
     )
     child_write = next(
-        i
-        for i, s in enumerate(writes)
-        if "MERGE" in s and "SemanticObjectDictionary" in s
+        i for i, s in enumerate(writes) if "MERGE" in s and "SemanticModelColumn" in s
     )
     certify = next(i for i, s in enumerate(writes) if "MERGE" in s and "Registry" in s)
     assert definition_write < certify and child_write < certify
     assert "calculatedTableColumn" in writes[definition_write]
-    assert "/model/tables/Calendar/columns/Year" in writes[child_write]
+    assert "Calendar" in writes[child_write] and "Year" in writes[child_write]
     assert not session.spark_sql
     assert before == {
         p.relative_to(root): p.read_bytes() for p in root.rglob("*") if p.is_file()
@@ -248,7 +244,7 @@ def test_failed_deployment_or_readback_cannot_certify_changed_model(tmp_path, fa
         "MERGE" in statement and "Registry" in statement for statement in session.tsql
     )
     assert not any(
-        "MERGE" in statement and "SemanticModelDictionary" in statement
+        "MERGE" in statement and "SemanticModel" in statement
         for statement in session.tsql
     )
 
