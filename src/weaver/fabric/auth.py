@@ -16,6 +16,7 @@ from ..errors import ConfigError
 FABRIC_SCOPE = "https://api.fabric.microsoft.com/.default"
 STORAGE_SCOPE = "https://storage.azure.com/.default"
 SQL_SCOPE = "https://database.windows.net/.default"
+POWER_BI_SCOPE = "https://analysis.windows.net/powerbi/api/.default"
 
 # Honoured by azure-identity >= 1.23.
 CREDENTIAL_ENV = "AZURE_TOKEN_CREDENTIALS"

@@ -267,6 +267,12 @@ class Session(ABC):
         reference = item if isinstance(item, ItemRef) else ItemRef(item)
         return self.scope(workspace).resolve_item(reference, item_type=item_type)
 
+    def semantic_model(
+        self, item: ItemRef | str, *, workspace: Workspace | None = None
+    ):
+        reference = item if isinstance(item, ItemRef) else ItemRef(item)
+        return self.scope(workspace).semantic_model(reference)
+
     # --- execution capabilities ---------------------------------------------
 
     def install_bundle(self, bundle, *, workspace: Workspace | None = None):
@@ -756,6 +762,7 @@ class WorkspaceScope:
         self._resolver = resolver
         self._store = store
         self._resources: list[Resource] = []
+        self._semantic_models: dict[str, Any] = {}
         #: Candidate Lakehouses for Livy attachment, not execution destinations.
         self._offered_spark_homes: set[str] = set()
         #: An exact attachment a frozen bundle requires. It outranks every offer.
@@ -868,6 +875,37 @@ class WorkspaceScope:
         if getattr(resolver, "cache_hits", 0) > before:
             self.telemetry.count("resolve.item.cache_hits")
         return resolved
+
+    def semantic_model(self, item: ItemRef):
+        from ..fabric.semantic_model import SemanticModelClient
+
+        with self._lock:
+            if item.name not in self._semantic_models:
+                power_bi = self._power_bi_client()
+                resolved = self.resolve_item(item, item_type="SemanticModel")
+                self._semantic_models[item.name] = SemanticModelClient(
+                    resolved.workspace_id,
+                    resolved.id,
+                    fabric=self.resolver.client,
+                    power_bi=power_bi,
+                )
+            return self._semantic_models[item.name]
+
+    def _power_bi_client(self):
+        from ..fabric.auth import POWER_BI_SCOPE, TokenProvider
+        from ..fabric.client import FabricClient
+        from ..fabric.semantic_model import POWER_BI_API
+
+        source = getattr(self.resolver.client, "_token_source", None)
+        if not isinstance(source, TokenProvider):
+            raise CommandError(
+                "This Session cannot share its Fabric credential with Power BI."
+            )
+        return FabricClient(
+            api_base_url=POWER_BI_API,
+            token=TokenProvider(POWER_BI_SCOPE, source._credential()),
+            telemetry=self.telemetry,
+        )
 
     # --- resources ----------------------------------------------------------
 

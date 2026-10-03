@@ -85,7 +85,10 @@ Check Microsoft Fabric connectivity.
 Name a workspace to probe its items: TDS for a Warehouse; OneLake and Livy for
 a Lakehouse. Project configuration is not read.
 
-Checking a Lakehouse starts a Fabric Spark session and can take a minute.\
+Checking a Lakehouse starts a Fabric Spark session and can take a minute.
+
+Use --semantic-model NAME to check only Power BI authentication, model definition
+and DAX access through REST.\
 """
 
 
@@ -238,6 +241,8 @@ def _requires_doctor(args) -> frozenset[str]:
         requirements,
     )
 
+    if getattr(args, "semantic_model", None) is not None:
+        return requirements(AUTH, RESOLVER)
     return requirements(AUTH, RESOLVER, ONELAKE, LIVY, TDS)
 
 
@@ -374,6 +379,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     doctor.add_argument("--json", action="store_true", help="Emit the result as JSON.")
     doctor.add_argument("--workspace", required=True, help="Fabric workspace to check.")
+    doctor.add_argument(
+        "--semantic-model",
+        metavar="NAME",
+        help="Check this semantic model's authentication, definition and DAX access only.",
+    )
     add_non_interactive(doctor)
     doctor.set_defaults(handler=handle_doctor, requires=_requires_doctor)
 
@@ -1957,10 +1967,16 @@ def handle_doctor(args: argparse.Namespace) -> int:
 
     from .doctor import render
 
+    named = (
+        {"semantic_model": args.semantic_model}
+        if args.semantic_model is not None
+        else {}
+    )
     _prefer_desktop_credential(args)
     report = doctor(
         workspace=args.workspace,
         session=_session(args),
+        **named,
     )
     if args.json:
         print(json.dumps(report.to_mapping(), indent=2))

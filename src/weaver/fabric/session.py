@@ -10,7 +10,14 @@ from ..targets import ItemRef
 from ..workspaces import Workspace
 from .onelake import abfss_root
 from .resolution import FabricResolver
-from .resources import LAKEHOUSE, WAREHOUSE, Item, WorkspaceItem, find_item
+from .resources import (
+    LAKEHOUSE,
+    SEMANTIC_MODEL,
+    WAREHOUSE,
+    Item,
+    WorkspaceItem,
+    find_item,
+)
 
 
 def _value(record: Any, name: str) -> Any:
@@ -71,13 +78,13 @@ class FabricSessionResolver(FabricResolver):
         return Location(f"abfss://{self.workspace.id}@onelake.dfs.fabric.microsoft.com")
 
     def resolve(self, item: ItemRef, *, item_type: str) -> Item:
-        if item_type == WAREHOUSE:
+        if item_type in {WAREHOUSE, SEMANTIC_MODEL}:
             key = f"{item.name}:{item_type}"
             if key not in self._items:
                 self._items[key] = find_item(
                     self.workspace,
                     item.name,
-                    item_type=WAREHOUSE,
+                    item_type=item_type,
                     client=self.client,
                 )
             return self._items[key]

@@ -12,6 +12,7 @@ from .client import FabricClient, FabricError
 
 LAKEHOUSE = "Lakehouse"
 WAREHOUSE = "Warehouse"
+SEMANTIC_MODEL = "SemanticModel"
 ENVIRONMENT = "Environment"
 NOTEBOOK = "Notebook"
 SQL_ENDPOINT = "SQLEndpoint"

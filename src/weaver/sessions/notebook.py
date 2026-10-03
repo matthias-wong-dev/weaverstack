@@ -329,6 +329,21 @@ class NotebookScope(WorkspaceScope):
                 self.track(resource)
         return resource.get()
 
+    def _power_bi_client(self):
+        from ..fabric.auth import TokenProvider
+        from ..fabric.client import FabricClient
+        from ..fabric.semantic_model import POWER_BI_API
+
+        fabric = self.resolver.client
+        if isinstance(getattr(fabric, "_token_source", None), TokenProvider):
+            return super()._power_bi_client()
+        # The notebook's Fabric client already uses the native pbi audience.
+        return FabricClient(
+            api_base_url=POWER_BI_API,
+            token=lambda: fabric.token,
+            telemetry=self.telemetry,
+        )
+
     def _acquire_sql(self, warehouse):
         from ..fabric.sql import fabric_sql_executor
         from .sql import SessionSqlExecutor

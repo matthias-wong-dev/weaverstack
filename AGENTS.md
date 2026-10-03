@@ -162,6 +162,17 @@ keeps the second in `~/.weaver/authentication-record.json`. An unencrypted cache
 is never asked for. The Fabric suite installs the same `desktop_credential()`
 chain, so a sign-in performed by `weaver doctor` runs it.
 
+`Session.semantic_model()` resolves a typed SemanticModel and owns its Fabric
+and Power BI clients. The desktop clients share one credential with separate
+API audiences; a notebook obtains its native Power BI token through Session.
+Definition updates and refresh submissions disable HTTP-response retries.
+Refresh waits for its request ID to reach terminal completion through the
+canonical Power BI endpoint.
+
+`doctor --semantic-model NAME` checks Power BI authentication, the model's
+TMSL definition and DAX access through REST. This mode starts no Spark session.
+The semantic check reads only; refresh belongs to the runtime load operation.
+
 ### Fabric is the reference
 
 Weaver is Fabric-first. The behaviour that must be right is the behaviour inside

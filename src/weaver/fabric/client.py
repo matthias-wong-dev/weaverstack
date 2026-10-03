@@ -91,7 +91,20 @@ def retry_delay(response, attempt: int) -> float:
     return CONNECTION_BACKOFF * attempt
 
 
-def send(method: str, url: str, **kwargs):
+def _remaining(deadline: float) -> float:
+    from requests.exceptions import Timeout
+
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise Timeout("REST operation deadline expired")
+    return remaining
+
+
+def _backoff(delay: float, deadline: float | None) -> None:
+    time.sleep(delay if deadline is None else min(delay, _remaining(deadline)))
+
+
+def send(method: str, url: str, *, deadline: float | None = None, **kwargs):
     """One HTTP request, retried while the failure is safe to repeat.
 
     A read can always be repeated. Anything else only when the connection was
@@ -103,13 +116,21 @@ def send(method: str, url: str, **kwargs):
     import requests
 
     for attempt in range(1, CONNECTION_ATTEMPTS + 1):
+        options = kwargs
+        if deadline is not None:
+            remaining = _remaining(deadline)
+            timeout = kwargs.get("timeout")
+            options = {
+                **kwargs,
+                "timeout": remaining if timeout is None else min(timeout, remaining),
+            }
         try:
-            return requests.request(method, url, **kwargs)
+            return requests.request(method, url, **options)
         except requests.exceptions.RequestException as exc:
             repeatable = method in READ_METHODS or never_sent(exc)
             if not repeatable or attempt == CONNECTION_ATTEMPTS:
                 raise
-            time.sleep(CONNECTION_BACKOFF * attempt)
+            _backoff(CONNECTION_BACKOFF * attempt, deadline)
 
 
 def send_until_answered(
@@ -118,6 +139,7 @@ def send_until_answered(
     *,
     expected: tuple[int, ...],
     retry_transient: bool = True,
+    deadline: float | None = None,
     **kwargs,
 ):
     """:func:`send`, also repeating a transient refusal while attempts remain.
@@ -126,14 +148,14 @@ def send_until_answered(
     """
 
     for attempt in range(1, CONNECTION_ATTEMPTS + 1):
-        response = send(method, url, **kwargs)
+        response = send(method, url, deadline=deadline, **kwargs)
         if (
             retry_transient
             and response.status_code not in expected
             and response.status_code in TRANSIENT_STATUSES
             and attempt < CONNECTION_ATTEMPTS
         ):
-            time.sleep(retry_delay(response, attempt))
+            _backoff(retry_delay(response, attempt), deadline)
             continue
         return response
 
@@ -173,8 +195,11 @@ class FabricClient:
         *,
         payload: Any = None,
         expected: tuple[int, ...] = (200, 201, 202),
+        retry_transient: bool = True,
+        timeout: float | None = None,
+        deadline: float | None = None,
     ):
-        """One Fabric call, repeated while Fabric answers "not now"."""
+        """Issue one REST request with bounded transport retries."""
 
         import requests
 
@@ -194,12 +219,14 @@ class FabricClient:
                     method,
                     url,
                     expected=expected,
+                    retry_transient=retry_transient,
+                    deadline=deadline,
                     headers={
                         "Authorization": f"Bearer {self.token}",
                         "Content-Type": "application/json",
                     },
                     data=json.dumps(payload) if payload is not None else None,
-                    timeout=self.timeout,
+                    timeout=self.timeout if timeout is None else timeout,
                 )
             except requests.exceptions.RequestException as exc:
                 raise FabricError(

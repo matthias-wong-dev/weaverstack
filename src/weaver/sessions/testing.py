@@ -62,6 +62,7 @@ class TestSession(Session):
         self._spark_answers: dict[str, Any] = {}
         self._tsql_answers: dict[str, Any] = {}
         self._python_answers: list[Any] = []
+        self._semantic_answers: dict[tuple[str, str], Any] = {}
         self._default_rows: list[dict] = []
 
     # --- what a test configures ---------------------------------------------
@@ -74,6 +75,20 @@ class TestSession(Session):
 
     def answer_python(self, value) -> None:
         self._python_answers.append(value)
+
+    def answer_semantic_model(self, workspace: str, item: str, client) -> None:
+        self._semantic_answers[(workspace, item)] = client
+
+    def semantic_model(self, item, *, workspace=None):
+        name = getattr(item, "name", item)
+        configured = self.workspace_or_default(workspace)
+        self._record("semantic_model", name, configured)
+        key = (str(configured.workspace), name)
+        if key not in self._semantic_answers:
+            raise CommandError(
+                "No semantic model client is configured. Call answer_semantic_model() first."
+            )
+        return self._semantic_answers[key]
 
     # --- what a test reads ---------------------------------------------------
 
