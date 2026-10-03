@@ -63,9 +63,13 @@ class SemanticModelClient:
         self.item_path = f"workspaces/{workspace_id}/semanticModels/{model_id}"
         self.dataset_path = f"groups/{workspace_id}/datasets/{model_id}"
 
-    def get_definition(self, *, timeout: float = 900) -> dict:
+    def get_definition(self, *, format: str = "TMSL", timeout: float = 900) -> dict:
+        if format not in {"TMSL", "TMDL"}:
+            raise ConfigError("Semantic definition format must be TMSL or TMDL")
         response = self.fabric.request(
-            "POST", f"{self.item_path}/getDefinition?format=TMSL", expected=(200, 202)
+            "POST",
+            f"{self.item_path}/getDefinition?format={format}",
+            expected=(200, 202),
         )
         if response.status_code == 202:
             self.fabric.wait_for_operation(response, timeout=timeout)
@@ -76,6 +80,11 @@ class SemanticModelClient:
         else:
             body = response.json()
         return body["definition"]
+
+    def get_connections(self) -> list[dict]:
+        return self.fabric.paged(
+            f"workspaces/{self.workspace_id}/items/{self.model_id}/connections"
+        )
 
     def update_definition(
         self, definition: dict, *, allow_purge_data: bool = False, timeout: float = 900

@@ -4,7 +4,8 @@ Each target's authorised destructive scope is frozen here; its children are
 enumerated when the action runs. A Warehouse is one dynamic-SQL action. A
 Lakehouse area detaches its shortcuts, waits for OneLake to release them, and
 is then swept. Targets are independent, so they overlap. A catalogue being
-removed, or the claims being unbound, follows every other target.
+removed, or the claims being unbound, follows every other target. Semantic
+certification is removed before its model is reset.
 """
 
 from __future__ import annotations
@@ -35,10 +36,12 @@ WIPE_WAREHOUSE = "wipe_warehouse"
 UNBIND_CLAIMS = "unbind_catalogue_claims"
 
 
-def wipe_mutation_plan(plan, *, unbind_statements=()) -> tuple[MutationPlan, dict]:
+def wipe_mutation_plan(
+    plan, *, unbind_statements=(), before_reset_statements=(), semantic_wipes=None
+) -> tuple[MutationPlan, dict]:
     """The plan's physical wipe as a sealed MutationPlan and its payloads."""
 
-    from .operations.wipe import LAKEHOUSE, REMOVE, UNBIND
+    from .operations.wipe import LAKEHOUSE, REMOVE, SEMANTIC_MODEL, UNBIND
 
     workspace = str(plan.workspace.workspace)
     payloads: dict[str, bytes] = {}
@@ -46,21 +49,59 @@ def wipe_mutation_plan(plan, *, unbind_statements=()) -> tuple[MutationPlan, dic
     sequences: list[MutationSequence] = []
     completed: list[str] = []
     catalogue_id = None
+    semantic_wipes = semantic_wipes or {}
 
     def bound(target) -> BoundTarget:
-        kind = "lakehouse" if target.item_type == LAKEHOUSE else "warehouse"
+        kind = (
+            "semanticmodel"
+            if target.item_type == SEMANTIC_MODEL
+            else "lakehouse"
+            if target.item_type == LAKEHOUSE
+            else "warehouse"
+        )
+        semantic = semantic_wipes.get(str(target), {})
         made = BoundTarget(
             id=f"{kind}-{target.physical_name}",
             kind=kind,
-            item_id=target.physical_name,
+            item_id=semantic.get("model_id", target.physical_name),
             item_name=target.physical_name,
             workspace_name=workspace,
+            workspace_id=semantic.get("workspace_id"),
         )
         if all(each.id != made.id for each in targets):
             targets.append(made)
         return made
 
-    for number, target in enumerate(plan.targets, start=1):
+    before_reset = ()
+    if before_reset_statements:
+        from .operations.wipe import WipeTarget
+
+        catalogue = bound(WipeTarget.parse(plan.catalogue))
+        catalogue_id = catalogue.id
+        content = json.dumps(list(before_reset_statements)).encode()
+        path = "payload/001-decertify/semantic.tsql-batch.json"
+        payloads[path] = content
+        action = _action(
+            "decertify-semantic-models",
+            "decertify_semantic_models",
+            catalogue,
+            executor="tsql_batch",
+            payload=path,
+            payload_sha256=sha256_hex(content),
+            depends_on=(),
+            resources=(f"warehouse:{catalogue.item_id}",),
+        )
+        before_reset = (action.id,)
+        completed.extend(before_reset)
+        sequences.append(
+            MutationSequence(
+                1,
+                "remove semantic certification",
+                (MutationBatch("decertify", catalogue.id, (action,)),),
+            )
+        )
+
+    for number, target in enumerate(plan.targets, start=len(sequences) + 1):
         physical = bound(target)
         last = plan.catalogue_action == REMOVE and plan.is_catalogue(target)
         if last:
@@ -68,7 +109,12 @@ def wipe_mutation_plan(plan, *, unbind_statements=()) -> tuple[MutationPlan, dic
         actions, written = target_wipe_actions(
             physical,
             payload_dir=f"payload/{number:03d}-wipe",
-            depends_on=tuple(completed) if last else (),
+            depends_on=tuple(completed)
+            if last
+            else before_reset
+            if target.item_type == SEMANTIC_MODEL
+            else (),
+            semantic_wipe=semantic_wipes.get(str(target)),
         )
         payloads.update(written)
         completed.extend(finishing(actions))
@@ -128,11 +174,32 @@ def wipe_mutation_plan(plan, *, unbind_statements=()) -> tuple[MutationPlan, dic
 _DETACHES = frozenset({DETACH_FILE_SHORTCUTS, DETACH_TABLE_SHORTCUTS})
 
 
-def target_wipe_actions(physical: BoundTarget, *, payload_dir: str, depends_on=()):
+def target_wipe_actions(
+    physical: BoundTarget, *, payload_dir: str, depends_on=(), semantic_wipe=None
+):
     """The actions that empty one physical target, and their payloads."""
 
     if physical.kind == "lakehouse":
         return _lakehouse_actions(physical, tuple(depends_on)), {}
+    if physical.kind == "semanticmodel":
+        from .errors import CommandError
+
+        if semantic_wipe is None:
+            raise CommandError("SemanticModel wipe requires a prepared native reset")
+        content = json.dumps({**semantic_wipe, "target_id": physical.id}).encode()
+        path = f"{payload_dir}/{physical.id}.semantic-wipe.json"
+        action = _action(
+            f"wipe-{physical.id}",
+            "wipe_semantic_model",
+            physical,
+            executor="semantic_wipe",
+            payload=path,
+            payload_sha256=sha256_hex(content),
+            depends_on=depends_on,
+            resources=(f"semantic-model:{physical.item_id}",),
+            scope="",
+        )
+        return (action,), {path: content}
     from .sql import generate_warehouse_wipe_sql
 
     script = generate_warehouse_wipe_sql().encode("utf-8")
