@@ -71,15 +71,20 @@ def arrange():
     )
 
 
+#: Caches the engine keeps for itself: Delta's snapshots, and the CTE results
+#: Fabric's ``spark.sql.optimizer.cte.cache.enabled`` retains after a query.
+ENGINE_CACHES = ("Delta Table State", "In-memory table cte")
+
+
 def persistent_rdds():
-    """Persisted RDDs by id, without Delta's own snapshot cache."""
+    """Persisted RDDs by id, without the engine's own caches."""
 
     rdds = spark.sparkContext._jsc.getPersistentRDDs()
     named = {int(key): str(rdds[key].name()) for key in rdds.keys()}
     return {
         key: name
         for key, name in named.items()
-        if not name.startswith("Delta Table State")
+        if not name.startswith(ENGINE_CACHES)
     }
 
 
