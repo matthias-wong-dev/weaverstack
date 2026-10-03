@@ -520,9 +520,10 @@ class Runner:
                 if failed is not None:
                     record(failed)
                     continue
+                alone = occupied.get(lane, 0) == 0
                 occupied[lane] = occupied.get(lane, 0) + 1
                 if lane == ("spark",) and dispatch_many is not None:
-                    together.setdefault(lane, []).append((node, resolved))
+                    together.setdefault(lane, []).append((node, resolved, alone))
                     continue
                 future = pool.submit(
                     self._dispatched,
@@ -534,12 +535,25 @@ class Runner:
                 )
                 running[future] = (lane, 1)
             for lane, group in together.items():
-                future = pool.submit(
-                    self._dispatched_together,
-                    group,
-                    dispatch_many=dispatch_many,
-                    session=session,
-                )
+                if len(group) == 1 and group[0][2]:
+                    # Nothing else is running on this host's Spark, so the node
+                    # needs no session of its own.
+                    node, resolved, _alone = group[0]
+                    future = pool.submit(
+                        self._dispatched,
+                        node,
+                        dispatch=dispatch,
+                        session=session,
+                        resolved=resolved,
+                        concurrent=True,
+                    )
+                else:
+                    future = pool.submit(
+                        self._dispatched_together,
+                        [(node, resolved) for node, resolved, _alone in group],
+                        dispatch_many=dispatch_many,
+                        session=session,
+                    )
                 running[future] = (lane, len(group))
 
         workers = lanes.spark + lanes.warehouse + lanes.other

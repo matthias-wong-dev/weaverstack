@@ -307,18 +307,21 @@ def isolated_spark(spark):
     """
 
     session = spark.newSession()
-    defaults = dict(spark.sparkContext.getConf().getAll())
-    current = spark.conf.getAll
-    # A property from PySpark 3.4, a method before it.
-    current = current() if callable(current) else current
-    for key, value in dict(current).items():
-        if defaults.get(key) == value:
+    fresh = _settings(session)
+    for key, value in _settings(spark).items():
+        if fresh.get(key) == value:
             continue
         try:
             session.conf.set(key, value)
         except Exception:  # noqa: BLE001 - a static setting is shared already
             pass
     return session
+
+
+def _settings(spark) -> dict:
+    current = spark.conf.getAll
+    # A property from PySpark 3.4, a method before it.
+    return dict(current() if callable(current) else current)
 
 
 def python_primitive(

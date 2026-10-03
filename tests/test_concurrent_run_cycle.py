@@ -129,7 +129,7 @@ def test_a_lane_holds_no_more_than_its_limit():
 
     assert gate.batches[0] == ("a", "b")
     assert all(len(batch) <= 2 for batch in gate.batches)
-    assert sorted(name for batch in gate.batches for name in batch) == list("abcde")
+    assert sorted(gate.started) == list("abcde")
 
 
 @weaver_test()
@@ -229,3 +229,17 @@ def test_the_report_keeps_the_graph_order_whatever_finished_first():
     result = run(made, gate, on_node=release_after_b)
 
     assert [one.node_id for one in result.nodes] == ["a", "b"]
+
+
+@weaver_test()
+def test_a_python_load_that_starts_alone_is_dispatched_alone():
+    """Nothing shares the host's Spark with it, so it needs no session of its own."""
+
+    gate = Gate()
+    made = runner(nodes=[node("a"), node("b")], edges=[("a", "b")])
+
+    result = run(made, gate)
+
+    assert gate.batches == []
+    assert gate.started == ["a", "b"]
+    assert set(statuses(result).values()) == {SUCCEEDED}
