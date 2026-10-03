@@ -205,9 +205,17 @@ Build planning. Observable table navigation joins managed source declarations
 or installed catalogue identities. Semantic deployment requires successful
 selected source Table/View actions and, for Lakehouse SQL sources, the existing
 SQL endpoint refresh completion. Authored partitions, storage modes, columns and
-descriptions remain unchanged by shared-expression substitution. Column generation
-and catalogue-description propagation belong to the separate Weaver.Source
-annotation feature. The former YAML .source and .dax directives are removed.
+descriptions remain unchanged by shared-expression substitution. `annotation.py`
+is the public registry for executable Weaver annotations in PBIP and both extension
+layers. It owns exact names, scopes, grammars and handlers. Source annotations join
+the existing Session metadata and source-binding owners; inferred columns inherit
+available catalogue descriptions. Same-managed-target environment overrides run
+before generation. Generated columns receive hiding policies after inference.
+Measure-table and switch handlers write known native fragments, including dynamic
+format-string definitions. Exclusion uses span removal and explicit observed-absence
+expectations. Payloads carry those expectations through the shared executor before
+catalogue certification. Keep ordinary annotations and surviving Weaver annotations;
+unknown Weaver names fail. The former YAML .source and .dax directives are removed.
 Microsoft's [Direct Lake limits](https://learn.microsoft.com/en-us/fabric/fundamentals/direct-lake-overview#considerations-and-limitations)
 apply, including single-source and composite-model constraints for Direct Lake
 on SQL. Views use the native DirectQuery fallback; Weaver retains `directLake`.

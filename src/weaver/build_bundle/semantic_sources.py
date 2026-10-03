@@ -2,6 +2,7 @@
 
 from ..catalogue.claims import catalogue_columns
 from ..declaration.metadata import TABLE, VIEW
+from ..declaration.model import WeaverItemId
 from ..errors import BuildError
 from ..semantic_models.fragments import source_table
 from ..semantic_models.references import source_identity
@@ -10,6 +11,7 @@ from ..targets import physical_item
 
 def read_semantic_sources(repository, bindings, catalogue, *, session, workspace):
     wanted = {}
+    mappings = {}
     for item, contribution in repository.semantic_models.items():
         if item not in bindings.by_item or not contribution.source_references:
             continue
@@ -18,6 +20,9 @@ def read_semantic_sources(repository, bindings, catalogue, *, session, workspace
             for name in contribution.source_references
         }
         for table, reference in contribution.source_references.items():
+            logical = str(source_identity(reference).item)
+            if mapping := contribution.expression_sources.get(logical):
+                mappings[reference] = WeaverItemId.parse(mapping["target"])
             wanted[reference] = wanted.get(reference, False) or not tables[table].get(
                 "columns"
             )
@@ -40,7 +45,10 @@ def read_semantic_sources(repository, bindings, catalogue, *, session, workspace
             target_name = bound.target.item.name
         elif len(installed) == 1 and installed[0].get("target_name"):
             target_name = installed[0]["target_name"]
-            if identity.item in workspace.configured_items:
+            if (
+                reference not in mappings
+                and identity.item in workspace.configured_items
+            ):
                 configured = physical_item(workspace.target_for(identity.item)).name
                 if configured != target_name:
                     raise BuildError(
@@ -50,6 +58,15 @@ def read_semantic_sources(repository, bindings, catalogue, *, session, workspace
             raise BuildError(
                 f"Semantic source {reference}: no installed target. Build {identity.item} first."
             )
+        if reference in mappings:
+            target = mappings[reference]
+            if (
+                target.item_type != identity.item.item_type
+                or target.item_name != target_name
+            ):
+                raise BuildError(
+                    f"Semantic source {reference}: mapped target {target} is not the managed target {identity.item.item_type}/{target_name}. Build the source into that target first."
+                )
         schema, name = catalogue_columns(identity)
         source_tables = catalogue.rows.get(identity.item, {})
         description = next(

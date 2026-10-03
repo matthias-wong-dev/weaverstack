@@ -37,6 +37,7 @@ def semantic_stage(repository, item, target, *, catalogue_target=None):
                 "definition": encode_parts(contribution.parts),
                 "requested": contribution.requested,
                 "owned": contribution.owned,
+                "absent": contribution.absent,
                 "properties": contribution.properties,
                 "provenance": dict(contribution.provenance),
                 "source_references": dict(contribution.source_references),

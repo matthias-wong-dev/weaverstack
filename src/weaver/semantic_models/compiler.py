@@ -88,12 +88,14 @@ _SCHEMAS = {
         "isNullable": bool,
     },
     "measure": {
+        "formatStringDefinition": "formatStringDefinition",
         "expression": str,
         "formatString": str,
         "displayFolder": str,
         "lineageTag": str,
         "isHidden": bool,
     },
+    "formatStringDefinition": {"expression": str},
     "partition": {"mode": str, "source": "source"},
     "source": {
         "type": str,

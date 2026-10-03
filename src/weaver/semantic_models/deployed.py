@@ -40,7 +40,7 @@ def canonical_model(model):
     return normalise({k: v for k, v in model.items() if k not in {"name", "id"}})
 
 
-def verify_requested(requested, actual, *, owned=()):
+def verify_requested(requested, actual, *, owned=(), absent=()):
     from .compiler import _COMMON, _SCHEMAS, escape
 
     if not isinstance(actual, dict) or not isinstance(actual.get("model"), dict):
@@ -75,6 +75,22 @@ def verify_requested(requested, actual, *, owned=()):
             "expressions": {},
         },
     )
+    for path in absent:
+        node = actual["model"]
+        for kind, name in path:
+            collection = {"table": "tables", "column": "columns"}[kind]
+            node = next(
+                (
+                    member
+                    for member in node.get(collection, [])
+                    if member["name"].casefold() == name.casefold()
+                ),
+                None,
+            )
+            if node is None:
+                break
+        else:
+            raise InstallError(f"Semantic readback retains excluded object {path!r}")
     defaults = {
         "isHidden": False,
         "isKey": False,

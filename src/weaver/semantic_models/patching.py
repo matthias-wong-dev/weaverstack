@@ -32,6 +32,8 @@ def _patch_object(editor, path, kind, patch, owned):
         child = schema.get(key)
         if kind == "partition" and key == "source":
             editor.source(path, value)
+        elif key == "formatStringDefinition":
+            editor.expression(path, key, value["expression"])
         elif key == {
             "measure": "expression",
             "column": "expression",

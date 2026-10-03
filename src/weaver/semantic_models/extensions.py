@@ -127,7 +127,9 @@ class ExtensionEditor:
         return found[0] if found else None
 
     def _add(self, document, node):
-        if node.parent is None or node.parent.kind == "model":
+        if node.parent is None or (
+            node.parent.kind == "model" and node.kind != "annotation"
+        ):
             filename = _filename(node)
             previous = self.package.parts.get(filename, b"")
             newline = "\r\n" if b"\r\n" in previous else "\n"
