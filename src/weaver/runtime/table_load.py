@@ -174,10 +174,16 @@ def _reconcile(
         _keep_evidence(spark, names, kept, **relations)
 
     source = _register(spark, held, staging_frame, names["target"], "source")
+    # The repartition drops any ordering the source reports, such as a range's
+    # or a sort's. Fabric's Spark 4.1 fails to canonicalise a cached relation
+    # that has one once an inlined CTE references it twice, as reject discovery
+    # does (SPARK-59009). Without it, Fabric also fails to write evidence from
+    # staging cached over a ``createDataFrame`` source ("Heavy batch should
+    # consist of arrow vectors").
     staging, staging_view = _hold(
         spark,
         held,
-        f"SELECT {qualified('s', columns)} FROM {source} AS s",
+        f"SELECT /*+ REPARTITION */ {qualified('s', columns)} FROM {source} AS s",
         names["target"],
         "staging",
     )
