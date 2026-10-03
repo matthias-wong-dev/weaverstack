@@ -255,6 +255,10 @@ def test_failed_deployment_or_readback_cannot_certify_changed_model(tmp_path, fa
 @weaver_test()
 @pytest.mark.parametrize("policy", ["item", "organisation"])
 def test_policy_change_selects_only_effectively_changed_models(tmp_path, policy):
+    from uuid import NAMESPACE_URL, uuid5
+
+    from weaver.build_bundle.semantic import bind_semantic_target
+
     root = project(tmp_path, False)
     other = WeaverItemId.parse("SemanticModel/Other")
     other_root = WeaverDocumentId.model_root(other)
@@ -284,7 +288,10 @@ def test_policy_change_selects_only_effectively_changed_models(tmp_path, policy)
             targets[item].id,
             "semanticmodel",
             targets[item].name,
+            workspace_id="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+            item_id=str(uuid5(NAMESPACE_URL, str(item))),
         )
+        targets[item] = bind_semantic_target(targets[item], inventories[item])
         rows[item] = project_semantic_model(
             item, repository.semantic_models[item], deployed=deployed
         )

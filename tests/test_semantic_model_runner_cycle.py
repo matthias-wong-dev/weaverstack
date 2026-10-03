@@ -139,3 +139,56 @@ def test_changed_dictionary_signature_requires_build_before_load(monkeypatch):
         with pytest.raises(LoadError, match="Build"):
             weaver.load(str(ITEM), session=session)
         assert not client.calls
+
+
+@weaver_test()
+def test_semantic_nodes_preserve_catalogue_dependency_edges_between_producers():
+    warehouse = WeaverItemId.parse("Warehouse/Sales")
+    owner = {"item_type": warehouse.item_type, "item_name": warehouse.item_name}
+    registry = []
+    for name in ("Orders", "Summary"):
+        registry.extend(
+            (
+                {
+                    **owner,
+                    "schema_name": "Tables/Sales",
+                    "object_name": name,
+                    "object_type": "table",
+                    "object_role": "data",
+                    "signature": "table",
+                },
+                {
+                    **owner,
+                    "schema_name": "_",
+                    "object_name": f"Load Sales.{name}",
+                    "object_type": "stored_procedure",
+                    "object_role": "load",
+                    "signature": "loader",
+                },
+            )
+        )
+    rows = installed_rows()
+    rows[warehouse] = {
+        "Installation": ({**owner, "target_name": "Sales_WH"},),
+        "Registry": tuple(registry),
+        "Dependency": (
+            {
+                **owner,
+                "referencing_schema_name": "Tables/Sales",
+                "referencing_object_name": "Summary",
+                "dependency_reference": "Sales.Orders",
+            },
+        ),
+    }
+    installed = Catalogue(rows).dag()
+    (edge,) = installed.edges
+    assert (str(edge.upstream), str(edge.downstream)) == (
+        "Warehouse/Sales/Sales.Orders",
+        "Warehouse/Sales/Sales.Summary",
+    )
+    assert ROOT not in (edge.upstream, edge.downstream)
+    planned = load_dag(installed, items=(ITEM, warehouse))
+    nodes = {node.logical_id: node.node_id for node in planned.nodes}
+    assert planned.edges == ((nodes[edge.upstream], nodes[edge.downstream]),)
+    assert len(planned.nodes) == 3
+    assert ROOT in nodes

@@ -947,7 +947,12 @@ def reconcile_catalogue_state(
                     continue
                 schema_name, object_name = catalogue_columns(identity)
                 expected = state.effective_physical_type(identity)
-                if not inventory.has_object(schema_name, object_name, expected):
+                rebound = expected == "semantic_model" and not _same_semantic_binding(
+                    tables.get(INSTALLATION.name, ()), inventory
+                )
+                if rebound or not inventory.has_object(
+                    schema_name, object_name, expected
+                ):
                     stale[identity] = document
         # Reconciliation removes disproved declaration claims. Current runtime
         # state is not a claim and must survive into build planning, where the
@@ -997,6 +1002,16 @@ def reconcile_catalogue_state(
         ),
         stale_claims=tuple(dict.fromkeys(stale_claims)),
         stale_objects=tuple(sorted(stale_labels)),
+    )
+
+
+def _same_semantic_binding(rows, inventory) -> bool:
+    if len(rows) != 1:
+        return False
+    binding = rows[0]
+    return all(
+        binding.get(key) and binding[key] == getattr(inventory, key, None)
+        for key in ("workspace_id", "item_id")
     )
 
 

@@ -1,0 +1,121 @@
+"""Post-update certification verifies requested semantic values and removals."""
+
+import pytest
+from support.weaver_test import weaver_test
+from test_semantic_model_build_cycle import (
+    ITEM,
+    bundle_for,
+    engine_model,
+    prepared,
+)
+
+from weaver.build_bundle import Installer
+from weaver.declaration.repository import parse_item_repository
+from weaver.locations import Location
+from weaver.semantic_models.definition import encode_definition
+
+
+@weaver_test()
+def test_role_members_must_be_empty_before_build_can_certify_removal(tmp_path):
+    root, _, bindings, session, state = prepared(tmp_path)
+    addon = root / str(ITEM) / "addon.yml"
+    addon.write_text(
+        addon.read_text()
+        + "roles:\n  Reader:\n    modelPermission: read\n    members: []\n",
+        encoding="utf-8",
+    )
+    repository = parse_item_repository(Location(root.as_posix()))
+    deployed = engine_model(repository)
+    deployed["model"]["roles"][0]["members"] = [
+        {"memberName": "reader@example.invalid", "identityProvider": "AzureAD"}
+    ]
+    session.semantic_model("Reporting_Dev").definition = encode_definition(deployed)
+    bundle = bundle_for(tmp_path, repository, bindings, state, "remove-members")
+    session.calls.clear()
+    report = Installer(session).install(bundle)
+    assert not report.succeeded
+    assert any(
+        "members" in (action.error_message or "") for action in report.action_results()
+    )
+    assert not any(
+        "MERGE" in statement
+        and (
+            "[_].[Registry]" in statement
+            or "[_].[SemanticModelDictionary]" in statement
+        )
+        for statement in session.tsql
+    )
+
+
+@pytest.mark.parametrize(
+    "owner,property_name,stale_value",
+    [
+        ("model", "discourageImplicitMeasures", True),
+        ("table", "isHidden", True),
+        ("table", "description", "Removed description"),
+    ],
+)
+@weaver_test()
+def test_removed_writable_property_prevents_certification(
+    tmp_path, owner, property_name, stale_value
+):
+    _, repository, bindings, session, state = prepared(tmp_path)
+    deployed = engine_model(repository)
+    properties = (
+        deployed["model"] if owner == "model" else deployed["model"]["tables"][0]
+    )
+    assert property_name not in properties
+    properties[property_name] = stale_value
+    session.semantic_model("Reporting_Dev").definition = encode_definition(deployed)
+    bundle = bundle_for(tmp_path, repository, bindings, state, "remove-property")
+    report = Installer(session).install(bundle)
+    assert not report.succeeded
+    assert any(
+        property_name in (action.error_message or "")
+        for action in report.action_results()
+    )
+    assert not any(
+        "MERGE" in statement
+        and (
+            "[_].[Registry]" in statement
+            or "[_].[SemanticModelDictionary]" in statement
+        )
+        for statement in session.tsql
+    )
+
+
+@pytest.mark.parametrize("field", ["description", "value", "filterExpression"])
+@weaver_test()
+def test_multiline_text_equivalence_allows_build_certification(tmp_path, field):
+    import yaml
+
+    root, _, bindings, session, state = prepared(tmp_path)
+    lines = ["Calendar[Year] > 2020", "  && Calendar[Year] < 2030"]
+    text = "\n".join(lines)
+    addon = root / str(ITEM) / "addon.yml"
+    definition = yaml.safe_load(addon.read_text())
+    definition["tables"]["Calendar"]["description"] = text
+    definition["annotations"] = {"Note": {"value": text}}
+    definition["roles"] = {
+        "Reader": {
+            "modelPermission": "read",
+            "tablePermissions": {"Calendar": {"filterExpression": text}},
+        }
+    }
+    addon.write_text(yaml.safe_dump(definition), encoding="utf-8")
+    repository = parse_item_repository(Location(root.as_posix()))
+    deployed = engine_model(repository)
+    owner = {
+        "description": deployed["model"]["tables"][0],
+        "value": deployed["model"]["annotations"][0],
+        "filterExpression": deployed["model"]["roles"][0]["tablePermissions"][0],
+    }[field]
+    owner[field] = lines
+    session.semantic_model("Reporting_Dev").definition = encode_definition(deployed)
+    bundle = bundle_for(tmp_path, repository, bindings, state, "text-equivalence")
+    report = Installer(session).install(bundle)
+    assert report.succeeded, report.to_mapping()
+    assert any(
+        "MERGE" in statement and "[_].[SemanticModelDictionary]" in statement
+        for statement in session.tsql
+    )

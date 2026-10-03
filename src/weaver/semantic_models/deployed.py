@@ -1,6 +1,7 @@
 """Verify the deployed TMSL against the assembled incoming definition."""
 
 from ..errors import InstallError
+from .compiler import _NAMED_COLLECTIONS
 
 # TMSL omits these default-valued relationship properties on readback.
 _RELATIONSHIP_DEFAULTS = {
@@ -16,11 +17,21 @@ def canonical_model(model):
         if isinstance(value, dict):
             return {k: normalise(v, k) for k, v in value.items()}
         if isinstance(value, list):
-            if key == "expression" and all(isinstance(v, str) for v in value):
+            if key in {
+                "expression",
+                "description",
+                "filterExpression",
+                "value",
+            } and all(isinstance(v, str) for v in value):
                 return "\n".join(value)
             values = [normalise(v) for v in value]
-            if values and all(
-                isinstance(v, dict) and isinstance(v.get("name"), str) for v in values
+            if (
+                key in _NAMED_COLLECTIONS
+                and values
+                and all(
+                    isinstance(v, dict) and isinstance(v.get("name"), str)
+                    for v in values
+                )
             ):
                 return sorted(values, key=lambda v: v["name"])
             return values
@@ -32,18 +43,6 @@ def canonical_model(model):
 def verify_deployed(expected, actual):
     """Require authored properties and engine-inferred calculated columns."""
 
-    named_collections = {
-        "tables",
-        "columns",
-        "measures",
-        "partitions",
-        "hierarchies",
-        "levels",
-        "relationships",
-        "roles",
-        "tablePermissions",
-    }
-
     def contains(wanted, found, path):
         if isinstance(wanted, dict):
             if not isinstance(found, dict):
@@ -52,13 +51,25 @@ def verify_deployed(expected, actual):
                 p.get("source", {}).get("type") == "calculated"
                 for p in wanted.get("partitions", [])
             )
-            for key in named_collections.intersection(wanted.keys() | found.keys()):
+            for key in _NAMED_COLLECTIONS.intersection(wanted.keys() | found.keys()):
                 if key == "columns" and calculated:
                     continue
                 expected_names = {child["name"] for child in wanted.get(key, [])}
                 found_names = {child["name"] for child in found.get(key, [])}
                 if expected_names != found_names:
                     raise InstallError(f"Semantic readback differs at {path}/{key}")
+            for key in found.keys() - wanted.keys():
+                if key in _NAMED_COLLECTIONS:
+                    continue
+                if (
+                    "/relationships/" in path
+                    and key in _RELATIONSHIP_DEFAULTS
+                    and found[key] == _RELATIONSHIP_DEFAULTS[key]
+                ):
+                    continue
+                raise InstallError(
+                    f"Semantic readback retains removed property {path}/{key}"
+                )
             for key, value in wanted.items():
                 default = (
                     _RELATIONSHIP_DEFAULTS.get(key)
@@ -71,7 +82,7 @@ def verify_deployed(expected, actual):
                 if wanted == [] and found is None:
                     return
                 raise InstallError(f"Semantic readback differs at {path}")
-            if all(isinstance(v, dict) and "name" in v for v in wanted):
+            if path.rsplit("/", 1)[-1] in _NAMED_COLLECTIONS:
                 indexed = {
                     v["name"]: v for v in found if isinstance(v, dict) and "name" in v
                 }
