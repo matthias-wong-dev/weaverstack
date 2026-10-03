@@ -28,7 +28,9 @@ THRESHOLDS = {
     },
     1_000: {
         WAREHOUSE: {"build": 420, "noop": 30, "wipe": 60, "mirror": 105},
-        LAKEHOUSE: {"build": 420, "noop": 45, "wipe": 60, "mirror": 270},
+        # The Build completes once its endpoint refreshes are current, about
+        # 140s after publication.
+        LAKEHOUSE: {"build": 540, "noop": 45, "wipe": 60, "mirror": 270},
     },
 }
 
