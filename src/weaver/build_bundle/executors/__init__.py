@@ -21,6 +21,7 @@ from .semantic import (
     SemanticModelExecutor,
     SemanticReadbackExecutor,
 )
+from .semantic_wipe import SemanticWipeExecutor
 from .shortcut import ShortcutExecutor, ShortcutReadinessExecutor
 from .spark_sql import SparkSqlExecutor
 from .spark_sql_batch import SparkSqlBatchExecutor
@@ -34,6 +35,7 @@ def default_executors() -> dict[str, ActionExecutor]:
         SemanticModelExecutor.name: SemanticModelExecutor(),
         SemanticCatalogueExecutor.name: SemanticCatalogueExecutor(),
         SemanticReadbackExecutor.name: SemanticReadbackExecutor(),
+        SemanticWipeExecutor.name: SemanticWipeExecutor(),
         SparkSqlExecutor.name: SparkSqlExecutor(),
         SparkSqlBatchExecutor.name: SparkSqlBatchExecutor(),
         SparkTableExecutor.name: SparkTableExecutor(),

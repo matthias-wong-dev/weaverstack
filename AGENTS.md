@@ -707,6 +707,16 @@ configuration has `targets:`, every recorded installation must be bound there to
 the same physical item, or the wipe refuses and asks for named targets. Named
 targets are emptied exactly as named.
 
+A SemanticModel wipe retains the Fabric item and replaces its native definition.
+A semantic-only selection keeps the catalogue and unbinds the selected model's
+claims. Registry certification and current runtime state are removed before the
+REST reset; dictionary claims are removed after verified readback. It uses no Spark.
+`--preserve-data-source` is frozen in WipePlan. It retains one Automatic SQL /
+Direct Lake source through a hidden `__WeaverSource` table with one partition and
+no columns or measures, plus the deployed native shared expressions. Unsupported
+source or connection forms are refused before any selected target is changed.
+Semantic wipe never owns source data, shared connections or gateways.
+
 A mirror plans before it acts too. `check_mirror` proves the source and refuses
 unsafe destinations, then `mirror_mutation_plan` reads what the mirror needs,
 source code definitions, case-exact source paths and the deployed load tree,

@@ -75,8 +75,13 @@ Empty physical Fabric items and the catalogue that records them.
 Naming targets selects exactly those physical items. Naming none selects the
 estate recorded in the catalogue.
 
-A resolved catalogue is emptied last. Pass --unbind to keep it and remove its
-claims for the emptied targets.\
+A resolved catalogue is emptied last for Warehouse and Lakehouse selections.
+Pass --unbind to keep it and remove its claims for the emptied targets.
+
+SemanticModel-only selections keep the catalogue and remove their own claims.
+Semantic wipe retains the Fabric item. --preserve-data-source keeps one Automatic
+SQL / Direct Lake source in a hidden columnless table. Unsupported source and
+connection forms are refused before mutation.\
 """
 
 DOCTOR_DESCRIPTION = """\
@@ -635,7 +640,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     wipe = subcommands.add_parser(
         "wipe",
-        help="Empty a physical Lakehouse or Warehouse, and its catalogue.",
+        help="Empty physical Lakehouses, Warehouses or semantic models.",
         description=WIPE_DESCRIPTION,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -644,7 +649,7 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="*",
         metavar="TARGET",
         help=(
-            "Physical items to empty, as Lakehouse/Name or Warehouse/Name. "
+            "Physical items to empty: Lakehouse/Name, Warehouse/Name or SemanticModel/Name. "
             "Naming none empties the estate the catalogue records."
         ),
     )
@@ -656,6 +661,11 @@ def build_parser() -> argparse.ArgumentParser:
             "Keep the catalogue and remove its claims for the named targets. "
             "Requires a catalogue and at least one target."
         ),
+    )
+    wipe.add_argument(
+        "--preserve-data-source",
+        action="store_true",
+        help="Retain one Automatic SQL / Direct Lake source in a hidden columnless table.",
     )
     wipe.add_argument(
         "--dry-run", action="store_true", help="Show the estate this would empty."
@@ -1740,6 +1750,7 @@ def handle_wipe(args: argparse.Namespace) -> int:
         plan = weaver.plan_wipe(
             args.targets,
             unbind=args.unbind,
+            preserve_data_source=args.preserve_data_source,
             session=opened,
             **_command_context(workspace),
         )
