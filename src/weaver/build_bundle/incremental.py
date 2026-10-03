@@ -204,7 +204,7 @@ def declared_signatures(
     for identity in selected:
         declaration = shortcuts.get(identity)
         artefact = installed.get(identity)
-        if identity.shape == MODEL_SHAPE:
+        if isinstance(identity, WeaverDocumentId) and identity.shape == MODEL_SHAPE:
             signatures[identity] = repository.semantic_models[identity.item].signature
         elif declaration is not None:
             signatures[identity] = declaration.signature
