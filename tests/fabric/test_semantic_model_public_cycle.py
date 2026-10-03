@@ -169,11 +169,11 @@ def test_public_build_catalogue_load_dax_and_unchanged_build(
         shutil.copytree(PBIP, folder, dirs_exist_ok=True)
     if extension:
         (folder.parent / "extension.tmdl").write_text(
-            "model Model\n\tculture: en-AU\n\tdiscourageImplicitMeasures\n",
+            "/// Organisation model policy\nmodel Model\n\tdiscourageImplicitMeasures\n",
             encoding="utf-8",
         )
         (folder / "extension.tmdl").write_text(
-            '/// Refresh acceptance model\nmodel Model\n\tculture: en-GB\n\n/// Calendar years\ntable Calendar\n\tpartition Calendar = calculated\n\t\tsource = ROW("Year", 2026)\n',
+            '/// Refresh acceptance model\nmodel Model\n\n/// Calendar years\ntable Calendar\n\tpartition Calendar = calculated\n\t\tsource = ROW("Year", 2026)\n',
             encoding="utf-8",
         )
         if pbip:
@@ -219,7 +219,7 @@ def test_public_build_catalogue_load_dax_and_unchanged_build(
     if extension:
         assert definition["description"] == "Refresh acceptance model"
         observed = json.loads(definition["definition"])["model"]
-        assert observed["culture"] == "en-GB"
+        assert observed["culture"] == "en-US"
         assert observed["discourageImplicitMeasures"] is True
         if pbip:
             sales = next(t for t in observed["tables"] if t["name"] == "Sales")
