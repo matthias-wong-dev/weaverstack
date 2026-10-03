@@ -323,6 +323,25 @@ SUPPORTED_ANNOTATIONS = {
 }
 
 
+def _quote_annotation_names(contribution):
+    parts = dict(contribution.parts)
+    for path, data in parts.items():
+        if not path.startswith("definition/") or not path.endswith(".tmdl"):
+            continue
+        document = Document(path, data)
+        lines = list(document.lines)
+        for node in document.spans:
+            if node.kind != "annotation" or node.name not in SUPPORTED_ANNOTATIONS:
+                continue
+            line = lines[node.header]
+            match = re.match(r"\s*annotation\s+(?P<name>'(?:[^']|'')*'|[^\s=]+)", line)
+            if match and not match["name"].startswith("'"):
+                start, end = match.span("name")
+                lines[node.header] = line[:start] + quote_name(node.name) + line[end:]
+        parts[path] = "".join(lines).encode("utf-8")
+    return replace(contribution, parts=parts)
+
+
 def apply_annotations(contribution):
     contribution = exclude_paths(contribution, contribution.absent)
     for path, data in contribution.parts.items():
@@ -358,4 +377,4 @@ def apply_annotations(contribution):
                 contribution = replace(
                     contribution, requested=_merge(contribution.requested, expected)
                 )
-    return contribution
+    return _quote_annotation_names(contribution)

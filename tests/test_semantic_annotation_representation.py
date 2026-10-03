@@ -35,7 +35,8 @@ def test_auto_hide_columns_sets_matching_native_column_properties(tmp_path, scop
     assert "isHidden" not in columns["ProductId"]
     assert b"isHidden" in semantic.parts["definition/tables/Sales.tmdl"]
     assert any(
-        b"annotation Weaver.AutoHideColumns" in data for data in semantic.parts.values()
+        b"annotation 'Weaver.AutoHideColumns'" in data
+        for data in semantic.parts.values()
     )
     assert (root / str(ITEM) / "extension.tmdl").read_bytes() == before
 
@@ -113,7 +114,7 @@ def test_measure_table_generates_native_info_partition_and_preserves_visibility(
     data = semantic.parts["definition/tables/Metric.tmdl"]
     assert (
         b"INFO.VIEW.MEASURES()" in data
-        and b"annotation Weaver.MeasureTable = true" in data
+        and b"annotation 'Weaver.MeasureTable' = true" in data
     )
 
 
@@ -142,7 +143,7 @@ def test_switch_generates_value_and_dynamic_format_for_qualified_measures(tmp_pa
         b"formatStringDefinition =" in semantic.parts["definition/tables/Metric.tmdl"]
     )
     assert (
-        b"annotation Weaver.Switch" in semantic.parts["definition/tables/Metric.tmdl"]
+        b"annotation 'Weaver.Switch'" in semantic.parts["definition/tables/Metric.tmdl"]
     )
 
 
