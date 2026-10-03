@@ -170,9 +170,26 @@ def detach_shortcuts(
 
 
 def released(store: Store, locations) -> bool:
-    """Whether OneLake has released every removed shortcut's path."""
+    """Whether OneLake has released every removed shortcut's path.
 
-    return not any(store.exists(location) for location in locations)
+    A path OneLake is still releasing can answer 403 for a while, so a refusal
+    reads as not yet released.
+    """
+
+    for location in locations:
+        try:
+            if store.exists(location):
+                return False
+        except Exception as exc:  # notebookutils raises a bare Py4J error
+            if not _forbidden(exc):
+                raise
+            return False
+    return True
+
+
+def _forbidden(exc: BaseException) -> bool:
+    text = str(exc)
+    return "Forbidden" in text or "AccessDenied" in text or "returned 403" in text
 
 
 def _await_release(store: Store, detached: DetachedShortcuts) -> None:

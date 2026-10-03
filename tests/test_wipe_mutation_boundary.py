@@ -46,11 +46,18 @@ class _Shortcuts:
 class _Recording(FilesystemStore):
     """A local store recording deletions; ``lingering`` paths answer for a while."""
 
-    def __init__(self, events, lingering=()):
+    def __init__(self, events, lingering=(), forbidden=()):
         self.events = events
         self.lingering = {path: 2 for path in lingering}
+        self.forbidden = {path: 2 for path in forbidden}
 
     def exists(self, location):
+        for path, remaining in self.forbidden.items():
+            if location.value.endswith(path) and remaining:
+                self.forbidden[path] -= 1
+                raise RuntimeError(
+                    'java.nio.file.AccessDeniedException: Operation failed: "Forbidden"'
+                )
         for path, remaining in self.lingering.items():
             if location.value.endswith(path) and remaining:
                 self.lingering[path] -= 1
@@ -75,8 +82,8 @@ def estate(tmp_path, monkeypatch):
     )
     events: list[str] = []
 
-    def build(*, lingering=(), failing=False):
-        store = _Recording(events, lingering)
+    def build(*, lingering=(), forbidden=(), failing=False):
+        store = _Recording(events, lingering, forbidden)
         lakehouse = ItemRef(LAKEHOUSE)
         for area, root in (
             ("Files", resolver.files_root(lakehouse)),
@@ -150,6 +157,20 @@ def test_shortcuts_are_detached_and_released_before_their_area_is_swept(estate):
     assert not store.exists(resolver.files_root(lakehouse) / "Sales")
     assert not store.exists(resolver.tables_root(lakehouse) / "Sales")
     assert store.exists(resolver.tables_root(lakehouse) / "dbo")
+
+
+@weaver_test()
+def test_a_path_still_being_released_may_refuse_access_before_it_goes(estate):
+    """OneLake answered 403 for a removed shortcut's path during its release."""
+
+    _workspace, build = estate
+    session, _store, events = build(forbidden=("Tables/Sales/Portable",))
+
+    public_wipe(plan=_plan(session, f"Lakehouse/{LAKEHOUSE}"), session=session)
+
+    assert events.index("detach Tables/Sales/Portable") < events.index(
+        "delete Tables/Sales"
+    )
 
 
 @weaver_test()
