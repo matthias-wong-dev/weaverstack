@@ -328,6 +328,24 @@ def test_every_dispatch_names_the_run_whose_scope_it_belongs_to():
 
 
 @weaver_test()
+def test_a_node_is_not_cut_short_by_the_default_statement_deadline():
+    """A load takes as long as its data does. Opening a scope is quick."""
+
+    from weaver.fabric.livy import DEFAULT_STATEMENT_TIMEOUT
+    from weaver.run.runtime_boundary import NODE_STATEMENT_TIMEOUT
+
+    session = _Recording(answer=_row())
+    scope = open_runtime_scope(session, workspace=_fabric())
+
+    _dispatch(scope)
+
+    timeouts = {program.name: program.timeout for program in session.submitted}
+    assert timeouts["open_scope"] is None
+    assert timeouts["run_python_primitive"] == NODE_STATEMENT_TIMEOUT
+    assert NODE_STATEMENT_TIMEOUT > DEFAULT_STATEMENT_TIMEOUT
+
+
+@weaver_test()
 def test_the_submitted_program_builds_its_session_around_the_interpreters_spark():
     """The construction every other crossing performs. A Session built inside
     the call would have to go looking for an active Spark session rather than

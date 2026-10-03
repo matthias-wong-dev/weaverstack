@@ -11,6 +11,10 @@ from typing import Any, Protocol
 
 from ..sessions.program import RemoteProgram
 
+#: How long a node's statement may run. A load takes as long as its data does,
+#: so the deadline only ends a wait that can no longer be answered.
+NODE_STATEMENT_TIMEOUT = 24 * 3600.0
+
 #: Livy states and resource wording that mean the interpreter released the scope.
 _INTERPRETER_GONE = ("dead", "killed", "shutting_down", "error", "not usable")
 
@@ -186,7 +190,12 @@ class FabricRunScope:
             # always named, so an older runtime fails loudly rather than
             # loading without it.
             arguments["ignore_stability_threshold"] = True
-        return self._submit(run_python_primitive, arguments, detail=node.node_id)
+        return self._submit(
+            run_python_primitive,
+            arguments,
+            detail=node.node_id,
+            timeout=NODE_STATEMENT_TIMEOUT,
+        )
 
     def dispatch_validation(self, installed, *, collect: bool):
 
@@ -200,6 +209,7 @@ class FabricRunScope:
                 "collect": collect,
             },
             detail=str(getattr(installed, "logical", "")) or None,
+            timeout=NODE_STATEMENT_TIMEOUT,
         )
         return _carried(carried, installed)
 
@@ -236,7 +246,9 @@ class FabricRunScope:
 
     # --- the crossing --------------------------------------------------------
 
-    def _submit(self, here, arguments: dict, *, addressed=True, detail=None):
+    def _submit(
+        self, here, arguments: dict, *, addressed=True, detail=None, timeout=None
+    ):
         """Submit the exact function used locally.
 
         ``addressed`` adds a Workspace and Session only for estate operations.
@@ -274,7 +286,9 @@ class FabricRunScope:
             f"emit({name}({passed}))\n"
         )
         return self._session.execute_python(
-            RemoteProgram(name=name, call=call, source=source, detail=detail),
+            RemoteProgram(
+                name=name, call=call, source=source, detail=detail, timeout=timeout
+            ),
             workspace=workspace,
         )
 
