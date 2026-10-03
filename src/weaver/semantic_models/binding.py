@@ -8,6 +8,7 @@ from ..errors import BuildError
 from .compiler import _NAMED_COLLECTIONS, _merge, escape, leaf_properties
 from .fragments import source_context, source_table
 from .patching import _patch_object
+from .references import source_identity
 from .tmdl import PackageEditor
 
 
@@ -136,19 +137,24 @@ def _bind_partition(model, table, source):
                 + m_string(source[key])
                 + expression["expression"][end:]
             )
-    expression_name = f"WeaverSource/{table['name']}"
+    expression_name = str(source_identity(source["reference"]).item)
     expressions = model.setdefault("expressions", [])
-    if any(e["name"].casefold() == expression_name.casefold() for e in expressions):
-        raise BuildError(
-            f"tables/{table['name']}/source: expression {expression_name!r} already exists"
-        )
+    existing = next(
+        (e for e in expressions if e["name"].casefold() == expression_name.casefold()),
+        None,
+    )
+    if existing is not None:
+        expression_name = existing["name"]
     expression = expression or {
         "name": expression_name,
         "kind": "m",
         "expression": f"Sql.Database({m_string(source['server'])}, {m_string(source['database'])})",
     }
     expression["name"] = expression_name
-    expressions.append(expression)
+    if existing is None:
+        expressions.append(expression)
+    else:
+        existing.update(expression)
     partition = (
         partitions[0]
         if partitions
@@ -190,6 +196,8 @@ def _changes(before, after, key=""):
 
 
 def bind_semantic_sources(repository, observed, selected):
+    from .annotation import apply_annotations
+
     contributions = dict(repository.semantic_models)
     for item, contribution in repository.semantic_models.items():
         if item not in selected or not contribution.source_references:
@@ -244,15 +252,17 @@ def bind_semantic_sources(repository, observed, selected):
                 if path not in before or before[path] != value:
                     provenance[path] = {
                         **origin,
-                        "reason": ".source",
+                        "reason": "Weaver.Source",
                         "reference": reference,
                     }
-        contributions[item] = replace(
-            contribution,
-            parts=editor.parts,
-            requested=requested,
-            owned=tuple(sorted(owned)),
-            provenance=provenance,
-            source_bindings=bindings,
+        contributions[item] = apply_annotations(
+            replace(
+                contribution,
+                parts=editor.parts,
+                requested=requested,
+                owned=tuple(sorted(owned)),
+                provenance=provenance,
+                source_bindings=bindings,
+            )
         )
     return replace(repository, semantic_models=contributions)

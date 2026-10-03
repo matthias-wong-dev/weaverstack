@@ -85,6 +85,8 @@ def requested_object(document, node, kind=None):
             if endpoint:
                 result[key.replace("Column", "Table")] = object_name(endpoint[1])
                 result[key] = object_name(endpoint[2])
+        elif key == "formatStringDefinition":
+            result[key] = {"expression": expression_text(document, child)}
         elif isinstance(expected, str):
             result[key] = requested_object(document, child, expected)
         elif isinstance(expected, type):

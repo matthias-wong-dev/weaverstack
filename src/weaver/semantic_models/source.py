@@ -18,6 +18,7 @@ class SemanticContribution:
     provenance: Mapping[str, dict]
     requested: dict = field(default_factory=dict)
     owned: tuple[str, ...] = ()
+    absent: tuple[tuple[tuple[str, str], ...], ...] = ()
     source_references: Mapping[str, str] = field(default_factory=dict)
     source_bindings: Mapping[str, dict] = field(default_factory=dict)
     expression_sources: Mapping[str, dict] = field(default_factory=dict)
@@ -42,6 +43,8 @@ class SemanticContribution:
             "compiler": 2,
             "parts": {p: hashlib.sha256(b).hexdigest() for p, b in self.parts.items()},
         }
+        if self.absent:
+            value["absent"] = self.absent
         if self.source_references or self.source_bindings:
             value["source_references"] = dict(self.source_references)
             value["source_bindings"] = dict(self.source_bindings)
@@ -171,4 +174,6 @@ def read_semantic_contribution(item, *, root, store, paths):
         from .extensions import apply_extensions
 
         contribution = apply_extensions(contribution, item.item_name, extensions)
-    return contribution
+    from .annotation import apply_annotations
+
+    return apply_annotations(contribution)

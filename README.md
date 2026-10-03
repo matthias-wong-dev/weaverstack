@@ -114,6 +114,74 @@ and consuming-table dependencies for installed Load ordering. Unknown M
 navigation remains unknown. Source mapping preserves authored columns,
 descriptions, partitions and storage modes.
 
+### Weaver annotations
+
+`Weaver.*` annotations opt a PBIP into native transformations. They can also live
+in either `extension.tmdl` layer. Weaver merges the layers before executing the
+annotations. Ordinary annotations pass through; an unknown `Weaver.*` name is
+an error. Executed annotations remain on surviving objects.
+
+The public registry is
+[`semantic_models/annotation.py`](src/weaver/semantic_models/annotation.py):
+
+- `Weaver.Source` on a table names `Warehouse/<item>/<schema>.<object>` or
+  `Lakehouse/<item>/Tables/<schema>.<object>`. It generates SQL-source partitions,
+  infers compatible columns when none are authored and copies available table and
+  column descriptions from the catalogue. Authored descriptions take precedence.
+  Consuming tables share one M expression for a logical source. Workspace and CLI
+  source overrides must resolve to the selected or installed managed target;
+  build the source into its new target before changing that binding.
+- `Weaver.MeasureTable = true` on a table generates its
+  `INFO.VIEW.MEASURES()` calculated partition. Native `isHidden` controls visibility.
+  Use a bare table or the existing generated recipe; authored partitions are
+  reported as a conflict.
+- `Weaver.Switch` on a measure lists `Table[Measure]` references, one per line.
+  A unique unqualified reference is accepted. The generated value and dynamic
+  format expressions select through the measure table's `[Name]` column. Static
+  formats and context-independent dynamic formats are supported. Ambiguous names,
+  duplicate selector labels, switch-to-switch references and measure-context
+  dependent format expressions fail with diagnostics.
+- `Weaver.AutoHideColumns` on a model or table sets `isHidden` for matching
+  columns. Its value is one or more glob patterns, one per line; `*` and `?`
+  have normal case-sensitive glob semantics.
+- `Weaver.AutoHideForeignKeys` on a model takes `true` or `false`. It hides
+  actual many-side relationship columns. Column names do not determine keys.
+- `Weaver.Exclude` on a table or column takes `true` or `false`. It removes the
+  object and verifies its absence in TMSL readback. References elsewhere must
+  remain valid; Weaver does not rewrite DAX or remove unrelated model objects.
+
+For example, an extension can generate a source table and metadata selector while
+keeping measures in native DAX:
+
+```tmdl
+model Model
+    annotation Weaver.AutoHideColumns = "*SK"
+
+table Sales
+    annotation Weaver.Source = Warehouse/Serving/Cake.Sales
+
+    measure Revenue = SUM(Sales[Amount])
+        formatString: #,##0.00
+
+    measure Units = SUM(Sales[Quantity])
+        formatString: #,##0
+
+table Metric
+    annotation Weaver.MeasureTable = true
+
+    measure Value
+        annotation Weaver.Switch = ```
+            Sales[Revenue]
+            Sales[Units]
+            ```
+```
+
+Generated source tables default to Direct Lake through their typed SQL endpoint.
+Supported authored M and entity partitions retain their storage mode. Transformed
+M and calculated-source takeovers fail before deployment. Source-generated columns
+receive hiding policies after inference; exclusions remain removed. This
+compilation uses the ordinary Build, catalogue and installed dependency graph.
+
 ### Without a catalogue
 
 A workspace with no catalogue still builds and refreshes semantic models:
@@ -172,8 +240,9 @@ for table in definition.model.tables:
 Each edit changes only the TMDL lines it addresses.
 
 The former `addon.yml`, `.dax` and `.source` authoring syntax is removed.
-`Weaver.*` annotation transformations, semantic wipe and DAX Test/TestStatus/Health
-are separate follow-ups. Native TMDL expresses relationships and calculated tables.
+Semantic wipe and DAX Test/TestStatus/Health are separate follow-ups. Native TMDL
+expresses relationships and calculated tables. Polling and relationship shorthand
+are outside the annotation registry.
 Delegated-user Azure CLI/browser access remains a separate user validation.
 
 ## Documentation

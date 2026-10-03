@@ -8,6 +8,7 @@ from ..errors import ConfigError, IdentityError
 from .binding import m_string
 from .compiler import _merge
 from .fragments import expression_text
+from .references import source_identity
 from .tmdl import Document, PackageEditor
 
 
@@ -72,7 +73,12 @@ def configure_sources(repository, mappings, bindings, workspace):
     for item, contribution in models.items():
         if item not in bindings.by_item:
             continue
-        names = expression_names(contribution.parts)
+        existing = expression_names(contribution.parts)
+        generated = {
+            str(source_identity(ref).item)
+            for ref in contribution.source_references.values()
+        }
+        names = existing | generated
         selected = {}
         for name in sorted(names):
             try:
@@ -96,11 +102,15 @@ def configure_sources(repository, mappings, bindings, workspace):
                     target = (
                         f"{logical.item_type}/{workspace.targets[logical].physical}"
                     )
+                elif name in generated and name not in existing:
+                    continue
                 else:
                     target = str(logical)
             else:
                 continue
             selected[name] = {"target": target}
+            if name not in existing:
+                selected[name]["generated"] = True
         matched.update(selected)
         models[item] = replace(contribution, expression_sources=selected)
     if missing := set(explicit) - matched:
@@ -121,9 +131,14 @@ def read_expression_sources(repository, bindings, *, session, workspace):
             locations = PackageEditor(contribution.parts).locations(
                 (("expression", name),)
             )
-            document, node = next((d, n) for d, n in locations if n.value is not None)
-            sql = target.item_type == "Warehouse" or "Sql.Database" in m_code(
-                expression_text(document, node)
+            authored = next(((d, n) for d, n in locations if n.value is not None), None)
+            sql = (
+                source.get("generated", False)
+                or target.item_type == "Warehouse"
+                or (
+                    authored is not None
+                    and "Sql.Database" in m_code(expression_text(*authored))
+                )
             )
             if sql:
                 observed = session.semantic_source(
@@ -196,6 +211,8 @@ def bind_expression_sources(repository, sources):
         editor = PackageEditor(contribution.parts)
         requested = contribution.requested
         for name, source in observed.items():
+            if source.get("generated"):
+                continue
             if source["connector"] == "sql":
                 expression = f"Sql.Database({m_string(source['server'])}, {m_string(source['database'])})"
             else:

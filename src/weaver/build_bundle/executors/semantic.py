@@ -58,7 +58,9 @@ class SemanticCatalogueExecutor:
         model = decode_model(context.semantic_model(target).get_definition())
         from ...semantic_models.deployed import verify_requested
 
-        verify_requested(spec["requested"], model, owned=spec["owned"])
+        verify_requested(
+            spec["requested"], model, owned=spec["owned"], absent=spec.get("absent", ())
+        )
         item = WeaverItemId.parse(spec["item"])
         contribution = SemanticContribution(
             parts=decode_parts(spec["definition"]),
@@ -66,6 +68,9 @@ class SemanticCatalogueExecutor:
             provenance=spec["provenance"],
             requested=spec["requested"],
             owned=tuple(spec["owned"]),
+            absent=tuple(
+                tuple(tuple(pair) for pair in path) for path in spec.get("absent", ())
+            ),
             source_references=spec.get("source_references", {}),
             source_bindings=spec.get("source_bindings", {}),
             expression_sources=spec.get("expression_sources", {}),
