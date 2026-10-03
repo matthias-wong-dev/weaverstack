@@ -382,10 +382,24 @@ class LoadTiming:
     crossings: dict = field(default_factory=dict)
     spark: dict = field(default_factory=dict)
     error: str | None = None
+    #: How long the authored source alone takes to produce its rows in the same
+    #: engine, measured just before the load. What is left is Weaver's.
+    source_seconds: float | None = None
+
+    @property
+    def overhead(self) -> float | None:
+        if self.source_seconds is None:
+            return None
+        return self.seconds - self.source_seconds
 
     def describe(self) -> str:
+        split = (
+            ""
+            if self.source_seconds is None
+            else f" (source {self.source_seconds:.1f}s, Weaver {self.overhead:.1f}s)"
+        )
         lines = [
-            f"{self.scenario} {self.engine} {self.table}: {self.seconds:.1f}s "
+            f"{self.scenario} {self.engine} {self.table}: {self.seconds:.1f}s{split} "
             + ("ok" if self.succeeded else "FAILED")
         ]
         if self.error:
@@ -408,6 +422,9 @@ class LoadTiming:
             "engine": self.engine,
             "table": self.table,
             "seconds": round(self.seconds, 2),
+            "source_seconds": None
+            if self.source_seconds is None
+            else round(self.source_seconds, 2),
             "succeeded": self.succeeded,
             "counts": self.counts,
             "steps": self.steps,
@@ -506,9 +523,15 @@ class LoadBench:
 
     # --- loading -------------------------------------------------------------
 
-    def load(self, scenario: str, engine: str, table: str, **policy) -> LoadTiming:
-        """Time one ``weaver.load`` of one Table and keep its evidence."""
+    def load(
+        self, scenario: str, engine: str, table: str, *, source=True, **policy
+    ) -> LoadTiming:
+        """Time one ``weaver.load`` of one Table and keep its evidence.
 
+        ``source`` first times the Table's authored source on its own.
+        """
+
+        source_seconds = self.time_source(engine, table) if source else None
         selector = (
             f"Tables/{SCHEMA}.{table}" if engine == LAKEHOUSE else f"{SCHEMA}.{table}"
         )
@@ -526,7 +549,50 @@ class LoadBench:
             )
             if result is not None and hasattr(result, "rows_read"):
                 timing.counts = {name: getattr(result, name) for name in COUNTS}
+        timing.source_seconds = source_seconds
         return timing
+
+    def time_source(self, engine: str, table: str) -> float:
+        """Seconds the Table's authored source takes to produce every row and claim.
+
+        In the Warehouse that is what a load's staging statement does with it,
+        materialising the query; in Spark every column is computed and dropped.
+        """
+
+        if engine == WAREHOUSE:
+            body = _tsql_table(table).split("*/", 1)[1]
+            rows, claims = (one.strip() for one in body.split(";")[:2])
+            script = (
+                "drop table if exists dbo.WeaverLoadBenchSource;\n"
+                f"select * into dbo.WeaverLoadBenchSource from ({rows}) as q;\n"
+                "drop table dbo.WeaverLoadBenchSource;\n"
+                f"select * into dbo.WeaverLoadBenchSource from ({claims}) as q;\n"
+                "drop table dbo.WeaverLoadBenchSource;"
+            )
+            started = time.perf_counter()
+            self._sql().execute_script(script)
+            return time.perf_counter() - started
+        source = _python_table(table).replace("from weaver import Table\n", "")
+        lakehouse = self.names[LAKEHOUSE]
+        return self.spark(
+            "import time as _time\n"
+            f"_namespace = {{}}\n"
+            "class _Lakehouse:\n"
+            "    @staticmethod\n"
+            "    def qualify(schema, name):\n"
+            f"        return f'`{self.workspace_name}`.`{lakehouse}`.`{{schema}}`.`{{name}}`'\n"
+            "class Table:\n"
+            "    def __init__(self):\n"
+            "        self.spark = spark\n"
+            "        self.lakehouse = _Lakehouse()\n"
+            "_namespace['Table'] = Table\n"
+            f"exec({source!r}, _namespace)\n"
+            f"_rows, _claims = _namespace['{SCHEMA}__{table}']().read()\n"
+            "_started = _time.perf_counter()\n"
+            "_rows.write.format('noop').mode('overwrite').save()\n"
+            "_claims.write.format('noop').mode('overwrite').save()\n"
+            "emit(_time.perf_counter() - _started)\n"
+        )
 
     def load_flow(self, scenario: str, engines, **policy) -> tuple:
         """Time one ``weaver.load`` of every flow item of ``engines``.
@@ -824,7 +890,7 @@ def run_small(bench: LoadBench, engine: str, run: ScenarioRun) -> None:
 
     table = "Small"
     bench.control(engine, table)
-    bench.load("reset", engine, table, reload=True)
+    bench.load("reset", engine, table, source=False, reload=True)
 
     tiny = Segment(0, 5)
     bench.control(engine, table, tiny)
@@ -840,7 +906,13 @@ def run_small(bench: LoadBench, engine: str, run: ScenarioRun) -> None:
 
     proposed = Segment(0, 5_000)
     bench.control(engine, table, proposed)
-    _expect(run, "C", bench.load("C setup", engine, table), read=5_000, inserted=4_995)
+    _expect(
+        run,
+        "C",
+        bench.load("C setup", engine, table, source=False),
+        read=5_000,
+        inserted=4_995,
+    )
     before = _state(bench, engine, table)
     timing = run.timings["C"] = bench.load("C", engine, table)
     _expect(run, "C", timing, read=5_000)
@@ -854,7 +926,7 @@ def run_large(bench: LoadBench, engine: str, run: ScenarioRun) -> None:
     table = "Large"
     rows = scale(LARGE_ROWS_ENV, LARGE_ROWS)
     bench.control(engine, table)
-    bench.load("reset", engine, table, reload=True)
+    bench.load("reset", engine, table, source=False, reload=True)
     everything = Segment(0, rows)
     bench.control(engine, table, everything)
     timing = run.timings["D"] = bench.load("D", engine, table)
@@ -897,9 +969,11 @@ def run_huge(bench: LoadBench, engine: str, run: ScenarioRun) -> None:
     )
     if seen != {"rows": rows, "revised": 0, "beyond": 0}:
         bench.control(engine, table)
-        bench.load("reset", engine, table, reload=True)
+        bench.load("reset", engine, table, source=False, reload=True)
         bench.control(engine, table, base)
-        timing = run.timings["E seed"] = bench.load("E seed", engine, table)
+        timing = run.timings["E seed"] = bench.load(
+            "E seed", engine, table, source=False
+        )
         _expect(run, "E seed", timing, read=rows, inserted=rows)
         if run.findings.get("E seed"):
             run.findings["E"].append("the target could not be seeded")

@@ -5,7 +5,9 @@ Opt in with ``--performance``. Each engine runs, in order, a tiny initial load
 initial load (D), and a small change to a very large target with the change
 that undoes it (E). Build and every reset are setup, outside the timings. Each
 scenario's result is verified against the rows its segments generate, so a
-timing is only reported for a load that did exactly what it should.
+timing is only reported for a load that did exactly what it should. Each
+scenario's authored source is also timed on its own, so what remains of the
+load's time is Weaver's.
 
 Estate throughput is a separate claim: one ``weaver.load`` reloads independent
 branches (A feeds B, C feeds D, E alone) of each engine, and of both together.
