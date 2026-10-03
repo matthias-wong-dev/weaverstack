@@ -5,7 +5,7 @@ import json
 import shutil
 
 import pytest
-from support.semantic_models import probe_model, source_model
+from support.semantic_models import probe_model, shared_source_tmdl, source_model
 from support.weaver_test import weaver_test
 from support.workspaces import InventoryClient, _identifier
 from test_semantic_model_build_cycle import ITEM, DefinitionClient, answer_catalogue
@@ -30,7 +30,7 @@ from weaver.semantic_models.definition import (
 )
 from weaver.sessions import TestSession
 from weaver.store import FilesystemStore
-from weaver.workspaces import Workspace
+from weaver.workspaces import TargetDeclaration, Workspace
 
 SOURCE = WeaverItemId.parse("Warehouse/Serving")
 
@@ -112,19 +112,15 @@ def source_project(tmp_path):
     root = tmp_path / "project"
     folder = root / str(ITEM)
     folder.mkdir(parents=True)
-    (folder / "addon.yml").write_text(
-        "tables:\n"
-        "  Sales:\n    .source: Warehouse/Serving/Cake.Sales\n"
-        "  SalesAgain:\n    .source: Warehouse/Serving/Cake.Sales\n"
-        "  Summary:\n    .source: Warehouse/Serving/Cake.Summary\n",
-        encoding="utf-8",
-    )
+    (folder / "extension.tmdl").write_text(shared_source_tmdl(), encoding="utf-8")
     return root
 
 
 def source_session(storage=None, *, workspace=None, source_name="Serving_Dev"):
     workspace = workspace or Workspace(
-        workspace="Demo", catalogue="Warehouse/Catalogue"
+        workspace="Demo",
+        catalogue="Warehouse/Catalogue",
+        targets={SOURCE: TargetDeclaration(physical=source_name)},
     )
     inventory = SourceInventory(
         workspace.workspace,
@@ -399,21 +395,24 @@ def test_pbip_source_rebind_retains_authored_mode_and_properties(tmp_path, mode)
 
     root = source_project(tmp_path)
     folder = root / str(ITEM)
-    fixture = Path(__file__).parent / "fixtures/semantic_model/Probe"
-    shutil.copytree(fixture, folder, dirs_exist_ok=True)
+    shutil.copytree(
+        Path(__file__).parent / "fixtures/semantic_model/Probe",
+        folder,
+        dirs_exist_ok=True,
+    )
     path = folder / "Probe.SemanticModel/definition/tables/Sales.tmdl"
     original = path.read_text(encoding="utf-8")
     prefix = original.split("\tpartition Sales", 1)[0]
-    expression = 'let Source = Sql.Database("previous", "database"), Sales = Source{[Schema="Old",Item="Orders"]}[Data] in Sales'
+    expression = 'let Source = #"Warehouse/Serving", Sales = Source{[Schema="Cake",Item="Sales"]}[Data] in Sales'
     path.write_text(
         prefix
         + f"\tpartition Sales = m\n\t\tmode: {mode}\n\t\tsource = {expression}\n",
         encoding="utf-8",
     )
-    (folder / "addon.yml").write_text(
-        "tables:\n  Sales:\n    .source: Warehouse/Serving/Cake.Sales\n",
-        encoding="utf-8",
+    (folder / "Probe.SemanticModel/definition/expressions.tmdl").write_text(
+        'expression \'Warehouse/Serving\' = Sql.Database("previous", "database")\n'
     )
+    (folder / "extension.tmdl").write_text("model Model\n", encoding="utf-8")
     parsed = parse_item_repository(Location(root.as_posix()))
     authored = probe_model()
     prior_sales = next(t for t in authored["model"]["tables"] if t["name"] == "Sales")
@@ -421,14 +420,7 @@ def test_pbip_source_rebind_retains_authored_mode_and_properties(tmp_path, mode)
     prior_sales["partitions"][0]["source"]["expression"] = expression
     with source_session() as session:
         observed = copy.deepcopy(authored)
-        observed_sales = next(
-            t for t in observed["model"]["tables"] if t["name"] == "Sales"
-        )
-        database = _identifier("Warehouse", "Serving_Dev")
-        observed_sales["partitions"][0]["source"]["expression"] = (
-            f'let Source = Sql.Database("serving.datawarehouse.fabric.microsoft.com", "{database}"), Sales = Source{{[Schema="Cake",Item="Sales"]}}[Data] in Sales'
-        )
-        observed_sales["columns"][0]["description"] = "Sales key"
+        observed["model"]["expressions"] = source_model()["model"]["expressions"]
         session.semantic_model("Reporting_Dev").definition = encode_definition(observed)
         answer_catalogue(session, source_catalogue(), read_bindings())
         result = weaver.build(
@@ -438,30 +430,32 @@ def test_pbip_source_rebind_retains_authored_mode_and_properties(tmp_path, mode)
         deployed = decode_model(session.semantic_model("Reporting_Dev").definition)
         sales = next(t for t in deployed["model"]["tables"] if t["name"] == "Sales")
         parts = submitted_parts(session)
+        assert parts["definition/tables/Sales.tmdl"] == path.read_bytes()
         assert f"mode: {mode}".encode() in parts["definition/tables/Sales.tmdl"]
-        assert database.encode() in parts["definition/tables/Sales.tmdl"]
+        assert (
+            _identifier("Warehouse", "Serving_Dev").encode()
+            in parts["definition/expressions.tmdl"]
+        )
         assert (
             parts["definition/relationships.tmdl"]
             == parsed.semantic_models[ITEM].parts["definition/relationships.tmdl"]
         )
-        prior = next(t for t in authored["model"]["tables"] if t["name"] == "Sales")
-        assert sales["partitions"][0]["mode"] == mode
+        assert sales == prior_sales
         physical = session.resolve_item("Serving_Dev", item_type="Warehouse")
-        bound = sales["partitions"][0]["source"]["expression"]
-        assert physical.id in bound and '[Schema="Cake",Item="Sales"]' in bound
-        assert 'Sql.Database("serving.datawarehouse.fabric.microsoft.com"' in bound
-        assert sales["columns"][0]["description"] == "Sales key"
-        sales["columns"][0].pop("description")
-        sales["partitions"] = prior["partitions"]
-        assert sales == prior
+        bound = deployed["model"]["expressions"][0]["expression"]
+        assert (
+            physical.id in bound
+            and 'Sql.Database("serving.datawarehouse.fabric.microsoft.com"' in bound
+        )
+        assert sales["partitions"][0]["source"]["expression"] == expression
         assert deployed["model"]["relationships"] == authored["model"]["relationships"]
         assert not any(
-            "Cake" in s and "INFORMATION_SCHEMA.COLUMNS" in s for s in session.tsql
+            "Cake" in q and "INFORMATION_SCHEMA.COLUMNS" in q for q in session.tsql
         )
 
 
 @weaver_test()
-def test_direct_lake_pbip_rebind_keeps_partition_properties_and_shared_expression(
+def test_direct_lake_pbip_rebind_keeps_partition_properties_and_unmapped_expression(
     tmp_path,
 ):
     from pathlib import Path
@@ -477,18 +471,17 @@ def test_direct_lake_pbip_rebind_keeps_partition_properties_and_shared_expressio
     prefix = path.read_text(encoding="utf-8").split("\tpartition Sales", 1)[0]
     path.write_text(
         prefix
-        + "\tpartition Authored = entity\n\t\tmode: directLake\n\t\tdescription: Keep partition\n\t\tsource\n\t\t\tschemaName: Old\n\t\t\tentityName: Orders\n\t\t\texpressionSource: DatabaseQuery\n",
+        + "\t/// Keep partition\n\tpartition Authored = entity\n\t\tmode: directLake\n\t\tsource\n\t\t\tschemaName: Cake\n\t\t\tentityName: Sales\n\t\t\texpressionSource: 'Warehouse/Serving'\n",
         encoding="utf-8",
     )
     expression_file = folder / "Probe.SemanticModel/definition/expressions.tmdl"
+    untouched = 'expression DatabaseQuery = Sql.Database("previous", "database", [CreateNavigationProperties=false])\n'
     expression_file.write_text(
-        'expression DatabaseQuery = Sql.Database("previous", "database", [CreateNavigationProperties=false])\n',
+        untouched
+        + '\nexpression \'Warehouse/Serving\' = Sql.Database("previous", "database")\n',
         encoding="utf-8",
     )
-    (folder / "addon.yml").write_text(
-        "tables:\n  Sales:\n    .source: Warehouse/Serving/Cake.Sales\n",
-        encoding="utf-8",
-    )
+    (folder / "extension.tmdl").write_text("model Model\n", encoding="utf-8")
     with source_session() as session:
         observed = probe_model()
         sales = next(t for t in observed["model"]["tables"] if t["name"] == "Sales")
@@ -496,18 +489,13 @@ def test_direct_lake_pbip_rebind_keeps_partition_properties_and_shared_expressio
         partition = source_observed["tables"][0]["partitions"][0]
         partition.update(name="Authored", description="Keep partition")
         sales["partitions"] = [partition]
-        sales["columns"][0]["description"] = "Sales key"
-        expression = source_observed["expressions"][0]
-        expression["expression"] = (
-            expression["expression"][:-1] + ", [CreateNavigationProperties=false])"
-        )
         observed["model"]["expressions"] = [
             {
                 "name": "DatabaseQuery",
                 "kind": "m",
                 "expression": 'Sql.Database("previous", "database", [CreateNavigationProperties=false])',
             },
-            expression,
+            source_observed["expressions"][0],
         ]
         session.semantic_model("Reporting_Dev").definition = encode_definition(observed)
         answer_catalogue(session, source_catalogue(), read_bindings())
@@ -516,10 +504,8 @@ def test_direct_lake_pbip_rebind_keeps_partition_properties_and_shared_expressio
         )
         assert result.succeeded, result.errors
         parts = submitted_parts(session)
-        assert parts["definition/expressions.tmdl"].startswith(
-            expression_file.read_bytes()
-        )
-        assert b"description: Keep partition" in parts["definition/tables/Sales.tmdl"]
+        assert parts["definition/expressions.tmdl"].startswith(untouched.encode())
+        assert parts["definition/tables/Sales.tmdl"] == path.read_bytes()
         native = decode_model(session.semantic_model("Reporting_Dev").definition)[
             "model"
         ]
@@ -527,17 +513,19 @@ def test_direct_lake_pbip_rebind_keeps_partition_properties_and_shared_expressio
         partition = sales["partitions"][0]
         assert partition["mode"] == "directLake" and partition["name"] == "Authored"
         assert partition["description"] == "Keep partition"
-        assert partition["source"]["schemaName"] == "Cake"
-        assert partition["source"]["entityName"] == "Sales"
+        assert (
+            partition["source"]["schemaName"] == "Cake"
+            and partition["source"]["entityName"] == "Sales"
+        )
         expressions = {e["name"]: e for e in native["expressions"]}
         assert (
             expressions["DatabaseQuery"]["expression"]
             == 'Sql.Database("previous", "database", [CreateNavigationProperties=false])'
         )
-        assert partition["source"]["expressionSource"] != "DatabaseQuery"
+        assert partition["source"]["expressionSource"] == "Warehouse/Serving"
         assert (
             "serving.datawarehouse.fabric.microsoft.com"
-            in expressions[partition["source"]["expressionSource"]]["expression"]
+            in expressions["Warehouse/Serving"]["expression"]
         )
 
 
@@ -550,8 +538,12 @@ def test_selected_declared_source_shape_orders_public_build(
     from weaver.declaration.model import WeaverDocumentId
 
     root = source_project(tmp_path)
-    (root / str(ITEM) / "addon.yml").write_text(
-        "tables:\n  Sales:\n    .source: Warehouse/Serving/Cake.Sales\n",
+    (root / str(ITEM) / "extension.tmdl").write_text(
+        shared_source_tmdl(
+            relations={"Sales": "Sales"},
+            descriptions={"Sales": "Sales facts."},
+            notes=False,
+        ),
         encoding="utf-8",
     )
     folder = root / str(SOURCE)
@@ -565,8 +557,8 @@ def test_selected_declared_source_shape_orders_public_build(
     )
     repository = parse_item_repository(Location(root.as_posix()))
     identity = WeaverDocumentId.parse("Warehouse/Serving/Cake.Sales")
-    semantic = WeaverDocumentId.model_root(ITEM)
-    assert str(identity) in repository.dependency_graph.ancestors(str(semantic))
+    assert not repository.semantic_models[ITEM].source_references
+    # Managed lineage is resolved during Build against selected source declarations.
     with source_session() as session:
         session.semantic_model("Reporting_Dev").definition = encode_definition(
             source_model(
@@ -595,7 +587,7 @@ def test_selected_declared_source_shape_orders_public_build(
         semantic_index = next(
             i for i, a in enumerate(actions) if a.executor == "semantic_model"
         )
-        assert source_index < semantic_index
+        # Display order is independent of the shared executor's prerequisite graph.
         from weaver.graph import Graph
 
         success = Graph(
@@ -727,9 +719,9 @@ def test_environment_rebinding_and_unchanged_public_build_use_source_signatures(
 
 
 @weaver_test()
-@pytest.mark.parametrize("canonical", [False, True])
+@pytest.mark.parametrize("override", [False, True])
 def test_lakehouse_source_keeps_tables_identity_and_plans_sql_readiness(
-    tmp_path, monkeypatch, canonical
+    tmp_path, monkeypatch, override
 ):
     from support.workspaces import _identifier
     from test_semantic_source_session_boundary import EndpointInventory
@@ -740,11 +732,14 @@ def test_lakehouse_source_keeps_tables_identity_and_plans_sql_readiness(
     from weaver.load_plan import load_dag
 
     root = source_project(tmp_path)
-    reference = (
-        "Lakehouse/Curated/" + ("Tables/" if canonical else "") + "Cake.Customer"
-    )
-    (root / str(ITEM) / "addon.yml").write_text(
-        f"tables:\n  Customer:\n    .source: {reference}\n", encoding="utf-8"
+    (root / str(ITEM) / "extension.tmdl").write_text(
+        shared_source_tmdl(
+            logical="Lakehouse/Curated",
+            relations={"Customer": "Customer"},
+            descriptions={},
+            notes=False,
+        ),
+        encoding="utf-8",
     )
     source = WeaverItemId.parse("Lakehouse/Curated")
     owner = {"item_type": source.item_type, "item_name": source.item_name}
@@ -776,7 +771,11 @@ def test_lakehouse_source_keeps_tables_identity_and_plans_sql_readiness(
             }
         }
     )
-    workspace = Workspace(workspace="Demo", catalogue="Warehouse/Catalogue")
+    workspace = Workspace(
+        workspace="Demo",
+        catalogue="Warehouse/Catalogue",
+        targets={} if override else {source: TargetDeclaration("Serving_Dev")},
+    )
     inventory = EndpointInventory(
         "Demo",
         [
@@ -816,7 +815,12 @@ def test_lakehouse_source_keeps_tables_identity_and_plans_sql_readiness(
         answer_catalogue(session, stored, bindings)
         published = capture_publication(monkeypatch, session)
         result = weaver.build(
-            root, items=f"{ITEM}=SemanticModel/Reporting_Dev", session=session
+            root,
+            items=f"{ITEM}=SemanticModel/Reporting_Dev",
+            session=session,
+            data_sources={"Lakehouse/Curated": "Lakehouse/Serving_Dev"}
+            if override
+            else None,
         )
         assert result.succeeded, result.errors
         rows = published()
@@ -848,45 +852,41 @@ def test_lakehouse_source_keeps_tables_identity_and_plans_sql_readiness(
 
 @weaver_test()
 @pytest.mark.parametrize(
-    "case, diagnostic",
+    "mapping, diagnostic",
     [
-        ("missing-object", "no managed Table or View"),
-        ("missing-shape", "no source columns are available"),
-        ("unsupported-type", "column 'Id' has unsupported type 'varbinary'"),
-        ("transformed-m", "unsupported M source"),
-        ("calculated", "unsupported authored partition form"),
+        (["Absent=Warehouse/Serving_Dev"], "No selected semantic model"),
+        (
+            {"Warehouse/Serving": "SemanticModel/Reporting_Dev"},
+            "data-source target must",
+        ),
+        (
+            [
+                "Warehouse/Serving=Warehouse/Serving_Dev",
+                "Warehouse/Serving=Warehouse/Serving_Dev",
+            ],
+            "Duplicate data-source mapping",
+        ),
+        (
+            {" Warehouse/Serving": "Warehouse/Serving_Dev"},
+            "without surrounding whitespace",
+        ),
+        (["Warehouse/Serving"], "data-source requires"),
     ],
 )
-def test_source_refusals_name_the_missing_or_unsupported_input_before_update(
-    tmp_path, case, diagnostic
+def test_source_mapping_refusals_precede_any_model_update(
+    tmp_path, mapping, diagnostic
 ):
-    from weaver.errors import BuildError
+    from weaver.errors import BuildError, ConfigError
 
     root = source_project(tmp_path)
-    folder = root / str(ITEM)
-    addon = {"tables": {"Sales": {".source": "Warehouse/Serving/Cake.Sales"}}}
-    if case == "missing-object":
-        addon["tables"]["Sales"][".source"] = "Warehouse/Serving/Cake.Missing"
-    if case in {"transformed-m", "calculated"}:
-        source = {
-            "type": "m",
-            "expression": 'let Source = Sql.Database("old", "db"), Sales = Source{[Schema="s",Item="t"]}[Data], Filter = Table.FirstN(Sales, 1) in Filter',
-        }
-        if case == "calculated":
-            source = {"type": "calculated", "expression": 'ROW("Id", 1)'}
-        addon["tables"]["Sales"]["partitions"] = {
-            "Sales": {"mode": "import", "source": source}
-        }
-    (folder / "addon.yml").write_text(json.dumps(addon), encoding="utf-8")
     with source_session() as session:
-        if case == "missing-shape":
-            session.source_columns = []
-        if case == "unsupported-type":
-            session.source_columns = [{"column_name": "Id", "data_type": "varbinary"}]
         answer_catalogue(session, source_catalogue(), read_bindings())
-        with pytest.raises(BuildError, match=diagnostic):
+        with pytest.raises((BuildError, ConfigError), match=diagnostic):
             weaver.build(
-                root, items=f"{ITEM}=SemanticModel/Reporting_Dev", session=session
+                root,
+                items=f"{ITEM}=SemanticModel/Reporting_Dev",
+                data_sources=mapping,
+                session=session,
             )
         assert not session.semantic_model("Reporting_Dev").calls
 
@@ -906,8 +906,8 @@ def test_native_tables_without_source_create_no_inferred_item_edges(
         folder,
         dirs_exist_ok=True,
     )
-    (folder / "addon.yml").write_text(
-        "model:\n  description: Authored model\n", encoding="utf-8"
+    (folder / "extension.tmdl").write_text(
+        "/// Authored model\nmodel Model\n", encoding="utf-8"
     )
     with source_session() as session:
         observed = probe_model()

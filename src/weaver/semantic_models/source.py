@@ -7,10 +7,7 @@ import posixpath
 from dataclasses import dataclass, field
 from typing import Mapping
 
-import yaml
-
-from ..declaration.metadata import _UniqueKeyLoader
-from ..errors import ConfigError, MetadataError
+from ..errors import ConfigError
 from .compiler import content_signature
 
 
@@ -55,7 +52,7 @@ def read_semantic_contribution(item, *, root, store, paths):
     sources = {}
 
     def read(path):
-        if path not in available and path != "SemanticModel/addon.yml":
+        if path not in available and path != "SemanticModel/extension.tmdl":
             raise ConfigError(f"{path}: referenced semantic source is missing")
         sources[path] = store.read(root.join(*path.split("/")))
         return sources[path].decode("utf-8-sig")
@@ -72,16 +69,11 @@ def read_semantic_contribution(item, *, root, store, paths):
             raise ConfigError(f"{path}: PBIP reference must stay inside {item}")
         return path
 
-    def addon(path):
-        if path not in paths:
-            return None
-        try:
-            value = yaml.load(read(path), Loader=_UniqueKeyLoader)
-        except (yaml.YAMLError, MetadataError) as exc:
-            raise ConfigError(f"{path}: invalid addon YAML: {exc}") from exc
-        if not isinstance(value, dict):
-            raise ConfigError(f"{path}: addon must be a mapping")
-        return value
+    for legacy in ("SemanticModel/addon.yml", prefix + "addon.yml"):
+        if legacy in paths:
+            raise ConfigError(
+                f"{legacy}: addon.yml is no longer supported; use extension.tmdl"
+            )
 
     unsupported = sorted(
         p
@@ -160,24 +152,21 @@ def read_semantic_contribution(item, *, root, store, paths):
         ]
         if other_models:
             raise ConfigError(f"{other_models[0]}: unreferenced semantic model")
-    elif any(p.endswith((".tmdl", ".bim", ".pbism")) for p in available):
+    elif any(
+        p.endswith((".tmdl", ".bim", ".pbism")) and p != prefix + "extension.tmdl"
+        for p in available
+    ):
         raise ConfigError(f"{item}: semantic base files require a PBIP reference")
-    org_path = "SemanticModel/addon.yml"
-    item_path = prefix + "addon.yml"
-    organisation = addon(org_path)
-    local = addon(item_path)
-    if not parts and organisation is None and local is None:
-        raise ConfigError(f"{item}: provide a PBIP or addon.yml")
+    extensions = []
+    for path in ("SemanticModel/extension.tmdl", prefix + "extension.tmdl"):
+        if path in paths:
+            read(path)
+            extensions.append((sources[path], path))
+    if not parts and not extensions:
+        raise ConfigError(f"{item}: provide a PBIP or extension.tmdl")
     contribution = SemanticContribution(parts, sources, provenance)
-    if organisation is not None or local is not None:
-        from .patching import apply_addons
+    if extensions:
+        from .extensions import apply_extensions
 
-        try:
-            contribution = apply_addons(
-                contribution,
-                item.item_name,
-                ((organisation, org_path), (local, item_path)),
-            )
-        except ConfigError as exc:
-            raise ConfigError(f"{item} ({org_path}, {item_path}): {exc}") from exc
+        contribution = apply_extensions(contribution, item.item_name, extensions)
     return contribution

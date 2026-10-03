@@ -353,8 +353,9 @@ def test_catalogue_from_repository_has_all_artefacts(tmp_path):
     full_estate(tmp_path / "repo")
     semantic = tmp_path / "repo/SemanticModel/Reporting"
     semantic.mkdir(parents=True)
-    (semantic / "addon.yml").write_text(
-        'tables:\n  Example:\n    .dax: ROW("Value", 1)\n', encoding="utf-8"
+    (semantic / "extension.tmdl").write_text(
+        'table Example\n\tpartition Example = calculated\n\t\tsource = ROW("Value", 1)\n',
+        encoding="utf-8",
     )
     repository = parse_item_repository(Location((tmp_path / "repo").as_posix()))
     catalogue = Catalogue.from_repository(repository)

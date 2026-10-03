@@ -30,8 +30,8 @@ def test_semantic_catalogue_roundtrips_model_root_and_projects_native_children(
 
     folder = tmp_path / "SemanticModel" / "Reporting"
     folder.mkdir(parents=True)
-    (folder / "addon.yml").write_text(
-        'tables:\n  Calendar:\n    .dax: ROW("Year", 2026)\n    measures:\n      Answer:\n        expression: "1"\n',
+    (folder / "extension.tmdl").write_text(
+        'table Calendar\n\tpartition Calendar = calculated\n\t\tsource = ROW("Year", 2026)\n\n\tmeasure Answer = 1\n',
         encoding="utf-8",
     )
     repository = parse_item_repository(Location(tmp_path.as_posix()))
@@ -89,7 +89,7 @@ def test_semantic_catalogue_roundtrips_model_root_and_projects_native_children(
     assert json.loads(measure["properties"])["expression"] == "1"
     assert (
         json.loads(measure["provenance"])["expression"]["source"]
-        == "SemanticModel/Reporting/addon.yml"
+        == "SemanticModel/Reporting/extension.tmdl"
     )
     pruned = without_claims(
         restored,

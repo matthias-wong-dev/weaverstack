@@ -18,10 +18,9 @@ from weaver.semantic_models.definition import encode_definition
 @weaver_test()
 def test_role_members_must_be_empty_before_build_can_certify_removal(tmp_path):
     root, _, bindings, session, state = prepared(tmp_path)
-    addon = root / str(ITEM) / "addon.yml"
+    addon = root / str(ITEM) / "extension.tmdl"
     addon.write_text(
-        addon.read_text()
-        + "roles:\n  Reader:\n    modelPermission: read\n    members: []\n",
+        addon.read_text() + "\nrole Reader\n\tmodelPermission: read\n",
         encoding="utf-8",
     )
     repository = parse_item_repository(Location(root.as_posix()))
@@ -82,25 +81,24 @@ def test_removed_writable_property_prevents_certification(
 @pytest.mark.parametrize("field", ["description", "value", "filterExpression"])
 @weaver_test()
 def test_multiline_text_equivalence_allows_build_certification(tmp_path, field):
-    import yaml
-
     root, _, bindings, session, state = prepared(tmp_path)
     lines = ["Calendar[Year] > 2020", "  && Calendar[Year] < 2030"]
     text = "\n".join(lines)
-    addon = root / str(ITEM) / "addon.yml"
-    definition = yaml.safe_load(addon.read_text())
-    definition["tables"]["Calendar"]["description"] = text
-    definition["annotations"] = {"Note": {"value": text}}
-    definition["roles"] = {
-        "Reader": {
-            "modelPermission": "read",
-            "tablePermissions": {"Calendar": {"filterExpression": text}},
-        }
-    }
-    addon.write_text(yaml.safe_dump(definition), encoding="utf-8")
+    description_lines = ["Calendar[Year] > 2020", "&& Calendar[Year] < 2030"]
+    extension = root / str(ITEM) / "extension.tmdl"
+    extension.write_text(
+        extension.read_text().replace(
+            "table Calendar",
+            "/// Calendar[Year] > 2020\n/// && Calendar[Year] < 2030\ntable Calendar",
+            1,
+        )
+        + "\nannotation Note = ```\n\tCalendar[Year] > 2020\n\t  && Calendar[Year] < 2030\n\t```\n"
+        + "\nrole Reader\n\tmodelPermission: read\n\ttablePermission Calendar = ```\n\t\tCalendar[Year] > 2020\n\t\t  && Calendar[Year] < 2030\n\t\t```\n",
+        encoding="utf-8",
+    )
     repository = parse_item_repository(Location(root.as_posix()))
     deployed = engine_model(repository)
-    deployed["model"]["tables"][0]["description"] = text
+    deployed["model"]["tables"][0]["description"] = "\n".join(description_lines)
     deployed["model"]["annotations"] = [{"name": "Note", "value": text}]
     deployed["model"]["roles"] = [
         {
@@ -114,7 +112,7 @@ def test_multiline_text_equivalence_allows_build_certification(tmp_path, field):
         "value": deployed["model"]["annotations"][0],
         "filterExpression": deployed["model"]["roles"][0]["tablePermissions"][0],
     }[field]
-    owner[field] = lines
+    owner[field] = description_lines if field == "description" else lines
     session.semantic_model("Reporting_Dev").definition = encode_definition(deployed)
     bundle = bundle_for(tmp_path, repository, bindings, state, "text-equivalence")
     report = execute_bundle(bundle, session)

@@ -1,6 +1,6 @@
 """Merge partial native declarations by editing their addressed TMDL spans."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from urllib.parse import quote
 
 from ..errors import ConfigError
@@ -71,8 +71,10 @@ def _validate(document):
         if identity in seen:
             _error(document, node, f"duplicate declaration {node.text!r}")
         seen.add(identity)
-        if not node.kind and any(c.isspace() for c in node.name):
-            _error(document, node, "malformed property declaration")
+        if not node.kind and (
+            node.name.startswith(".") or any(c.isspace() for c in node.name)
+        ):
+            _error(document, node, "malformed native property declaration")
         assignment = node.text.partition("=")
         if assignment[1] and assignment[2].strip() == "```":
             if document.lines[node.expression_end - 1].strip() != "```":
@@ -270,4 +272,26 @@ def merge_extensions(parts, fragments):
             provenance[path] = {"source": origin, "reason": "extension"}
     return ExtendedPackage(
         editor.package.parts, requested, provenance, tuple(sorted(editor.owned))
+    )
+
+
+def apply_extensions(contribution, name, fragments):
+    from .render import empty_parts
+
+    result = merge_extensions(contribution.parts or empty_parts(name), fragments)
+    owned = set(contribution.owned) | set(result.owned)
+    requested = contribution.requested
+    if not contribution.parts:
+        owned.add("/model")
+        requested = {
+            "culture": "en-US",
+            "defaultPowerBIDataSourceVersion": "powerBI_V3",
+            **requested,
+        }
+    return replace(
+        contribution,
+        parts=result.parts,
+        requested=_merge(requested, result.requested),
+        provenance={**contribution.provenance, **result.provenance},
+        owned=tuple(sorted(owned)),
     )

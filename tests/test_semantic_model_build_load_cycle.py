@@ -106,7 +106,7 @@ def test_public_build_load_fixed_point_and_changed_definition_cycle(tmp_path, pb
             for s in session.tsql
         )
 
-        addon = root / str(ITEM) / "addon.yml"
+        addon = root / str(ITEM) / "extension.tmdl"
         addon.write_text(addon.read_text().replace("2026", "2027"), encoding="utf-8")
         changed = parse_item_repository(Location(root.as_posix()))
         definition.definition = encode_definition(engine_model(changed, year=2027))

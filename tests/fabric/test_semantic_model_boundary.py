@@ -11,7 +11,7 @@ from support.weaver_test import weaver_test
 from weaver.fabric.client import FabricError
 from weaver.operations.doctor import doctor
 from weaver.semantic_models.definition import decode_model, encode_parts
-from weaver.semantic_models.patching import apply_addons
+from weaver.semantic_models.extensions import apply_extensions
 from weaver.semantic_models.source import SemanticContribution
 
 FIXTURE = Path(__file__).parents[1] / "fixtures" / "semantic_model" / "Probe"
@@ -106,16 +106,13 @@ def test_pbip_definition_mutation_refresh_and_dax_round_trip(restored_semantic_m
         'EVALUATE ROW("FilteredRevenue", CALCULATE([Revenue], Product[ProductId] = 10), "ReverseFilterProducts", CALCULATE(COUNTROWS(Product), Sales[Id] = 1))'
     ) == [{"[FilteredRevenue]": 12.5, "[ReverseFilterProducts]": 2}]
 
-    mutated = apply_addons(
+    mutated = apply_extensions(
         SemanticContribution(parts, {}, {}),
         "Probe",
         [
             (
-                {
-                    "model": {"discourageImplicitMeasures": True},
-                    "tables": {"_Measure": {".dax": "INFO.VIEW.MEASURES()"}},
-                },
-                "addon.yml",
+                b"model Model\n\tdiscourageImplicitMeasures\n\ntable _Measure\n\tpartition _Measure = calculated\n\t\tsource = INFO.VIEW.MEASURES()\n",
+                "extension.tmdl",
             )
         ],
     )

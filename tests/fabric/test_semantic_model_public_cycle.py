@@ -155,25 +155,35 @@ def semantic_build_context(
 
 @weaver_test(remote=True, resources={"rest", "tds"})
 @pytest.mark.parametrize(
-    "pbip, addon",
+    "pbip, extension",
     [(False, True), (True, True), (True, False)],
-    ids=["addon-only", "pbip-addon", "anywhere-pbip"],
+    ids=["extension-only", "pbip-extension", "anywhere-pbip"],
 )
 def test_public_build_catalogue_load_dax_and_unchanged_build(
-    semantic_build_context, tmp_path, pbip, addon
+    semantic_build_context, tmp_path, pbip, extension
 ):
     context = semantic_build_context
     folder = tmp_path / "project" / str(ITEM)
     folder.mkdir(parents=True)
     if pbip:
         shutil.copytree(PBIP, folder, dirs_exist_ok=True)
-    if addon:
-        (folder / "addon.yml").write_text(
-            "model:\n  description: Refresh acceptance model\n"
-            "tables:\n  Calendar:\n    description: Calendar years\n"
-            '    .dax: ROW("Year", 2026)\n',
+    if extension:
+        (folder.parent / "extension.tmdl").write_text(
+            "model Model\n\tculture: en-AU\n\tdiscourageImplicitMeasures\n",
             encoding="utf-8",
         )
+        (folder / "extension.tmdl").write_text(
+            '/// Refresh acceptance model\nmodel Model\n\tculture: en-GB\n\n/// Calendar years\ntable Calendar\n\tpartition Calendar = calculated\n\t\tsource = ROW("Year", 2026)\n',
+            encoding="utf-8",
+        )
+        if pbip:
+            extension_path = folder / "extension.tmdl"
+            extension_path.write_text(
+                extension_path.read_text(encoding="utf-8")
+                + "\nref table Sales\n\tcolumn ProductId\n\t\tisHidden\n\n\tmeasure RevenueDouble = [Revenue] * 2\n\t\tformatString: 0.00\n"
+                + "\nperspective Reporting\n\tperspectiveTable Sales\n\t\tperspectiveColumn Id\n",
+                encoding="utf-8",
+            )
     else:
         definition_folder = folder / "Probe.SemanticModel" / "definition"
         perspectives = definition_folder / "perspectives"
@@ -188,6 +198,11 @@ def test_public_build_catalogue_load_dax_and_unchanged_build(
             encoding="utf-8",
         )
     root = folder.parent.parent
+    original_sources = {
+        p.relative_to(root).as_posix(): p.read_bytes()
+        for p in root.rglob("*")
+        if p.is_file()
+    }
     selector = f"{ITEM}=SemanticModel/{context.target}"
     built = weaver.build(root, items=selector, session=context.session)
     print(json.dumps(built.to_mapping(), default=str))
@@ -201,15 +216,32 @@ def test_public_build_catalogue_load_dax_and_unchanged_build(
     (definition,) = read_table(context.connection, SEMANTIC_MODEL, scope=SCOPE)
     (registered,) = read_table(context.connection, REGISTRY, scope=SCOPE)
     assert registered["signature"] == definition["signature"]
-    if addon:
+    if extension:
         assert definition["description"] == "Refresh acceptance model"
+        observed = json.loads(definition["definition"])["model"]
+        assert observed["culture"] == "en-GB"
+        assert observed["discourageImplicitMeasures"] is True
+        if pbip:
+            sales = next(t for t in observed["tables"] if t["name"] == "Sales")
+            assert (
+                next(c for c in sales["columns"] if c["name"] == "ProductId")[
+                    "isHidden"
+                ]
+                is True
+            )
+            doubled = next(m for m in sales["measures"] if m["name"] == "RevenueDouble")
+            assert (
+                doubled["expression"] == "[Revenue] * 2"
+                and doubled["formatString"] == "0.00"
+            )
+            assert any(p["name"] == "Reporting" for p in observed["perspectives"])
     else:
         assert (
             json.loads(definition["definition"])["model"]["perspectives"][0]["name"]
             == "Reporting"
         )
     semantic_tables = read_table(context.connection, SEMANTIC_MODEL_TABLE, scope=SCOPE)
-    if addon:
+    if extension:
         assert (
             next(row for row in semantic_tables if row["table_name"] == "Calendar")[
                 "description"
@@ -220,7 +252,7 @@ def test_public_build_catalogue_load_dax_and_unchanged_build(
         context.connection, SEMANTIC_MODEL_COLUMN, scope=SCOPE
     )
     assert semantic_columns
-    if addon:
+    if extension:
         assert any(
             row["table_name"] == "Calendar" and row["column_name"] == "Year"
             for row in semantic_columns
@@ -242,9 +274,10 @@ def test_public_build_catalogue_load_dax_and_unchanged_build(
         for table in json.loads(definition["definition"])["model"]["tables"]
     }
     assert set(tables) == (
-        ({"Sales", "Product"} if pbip else set()) | ({"Calendar"} if addon else set())
+        ({"Sales", "Product"} if pbip else set())
+        | ({"Calendar"} if extension else set())
     )
-    if addon:
+    if extension:
         assert {column["name"] for column in tables["Calendar"]["columns"]} == {"Year"}
     if pbip:
         assert tables["Sales"]["partitions"][0]["mode"] == "import"
@@ -283,6 +316,11 @@ def test_public_build_catalogue_load_dax_and_unchanged_build(
     assert unchanged.installation_report.action_counts()["total"] == 0
     assert read_table(context.connection, LOAD_STATUS, scope=SCOPE) == (loaded,)
     assert read_table(context.connection, SEMANTIC_MODEL, scope=SCOPE) == (definition,)
+    assert {
+        p.relative_to(root).as_posix(): p.read_bytes()
+        for p in root.rglob("*")
+        if p.is_file()
+    } == original_sources
     assert not {"livy", "onelake"} & {
         event.resource for event in context.session.telemetry.events()
     }
@@ -291,7 +329,7 @@ def test_public_build_catalogue_load_dax_and_unchanged_build(
             {
                 "lifecycle": {
                     "pbip": pbip,
-                    "addon": addon,
+                    "extension": extension,
                     "load_status": loaded,
                     "unchanged": unchanged.to_mapping(),
                     "no_livy_or_onelake": True,
@@ -300,7 +338,7 @@ def test_public_build_catalogue_load_dax_and_unchanged_build(
             default=str,
         )
     )
-    if addon:
+    if extension:
         assert context.model.query_dax('EVALUATE ROW("Year", MAX(Calendar[Year]))') == [
             {"[Year]": 2026}
         ]
@@ -312,7 +350,7 @@ def test_public_build_catalogue_load_dax_and_unchanged_build(
 
 @weaver_test(remote=True, resources={"rest", "tds"})
 @pytest.mark.parametrize(
-    "shared", [False, True], ids=["addon-source", "shared-expression"]
+    "shared", [False, True], ids=["extension-source", "shared-expression"]
 )
 def test_existing_warehouse_source_build_persists_lineage_and_loads_without_source(
     semantic_build_context, tmp_path, shared
@@ -339,14 +377,16 @@ def test_existing_warehouse_source_build_persists_lineage_and_loads_without_sour
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(content)
     else:
-        (folder / "addon.yml").write_text(
-            "tables:\n  InstalledObjects:\n    description: Installed catalogue objects\n"
-            "    .source: Warehouse/_weaver/_.Registry\n"
-            "    columns:\n      LogicalItem:\n"
-            "        sourceColumn: Item name\n        dataType: string\n",
+        (folder / "extension.tmdl").write_text(
+            "expression 'Warehouse/_weaver' = Sql.Database(\"previous\", \"database\")\n\n/// Installed catalogue objects\ntable InstalledObjects\n\tcolumn LogicalItem\n\t\tsourceColumn: Item name\n\t\tdataType: string\n\tpartition InstalledObjects = entity\n\t\tmode: directLake\n\t\tsource\n\t\t\tschemaName: _\n\t\t\tentityName: Registry\n\t\t\texpressionSource: 'Warehouse/_weaver'\n",
             encoding="utf-8",
         )
     root = folder.parent.parent
+    original_sources = {
+        p.relative_to(root).as_posix(): p.read_bytes()
+        for p in root.rglob("*")
+        if p.is_file()
+    }
     selector = f"{ITEM}=SemanticModel/{context.target}"
     built = weaver.build(root, items=selector, session=context.session)
     assert built.succeeded, built.errors
@@ -406,6 +446,11 @@ def test_existing_warehouse_source_build_persists_lineage_and_loads_without_sour
         and unchanged.installation_report.action_counts()["total"] == 0
     )
     assert read_table(context.connection, LOAD_STATUS, scope=SCOPE) == (status,)
+    assert {
+        p.relative_to(root).as_posix(): p.read_bytes()
+        for p in root.rglob("*")
+        if p.is_file()
+    } == original_sources
     assert not {"livy", "onelake"} & {
         event.resource for event in context.session.telemetry.events()
     }

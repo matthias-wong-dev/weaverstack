@@ -1,0 +1,3 @@
+table Example
+	partition Example = calculated
+		source = ROW("Value", 1)
