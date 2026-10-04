@@ -214,9 +214,9 @@ def _reconcile(
     # The repartition drops any ordering the source reports, such as a range's
     # or a sort's. Fabric's Spark 4.1 fails to canonicalise a cached relation
     # that has one once an inlined CTE references it twice, as reject discovery
-    # does (SPARK-59009). Without it, Fabric also fails to write evidence from
-    # staging cached over a ``createDataFrame`` source ("Heavy batch should
-    # consist of arrow vectors").
+    # does (SPARK-59009). Without it, Fabric also fails writes that read the
+    # cached staging directly, such as the evidence tables and a full replace,
+    # whatever the source ("Heavy batch should consist of arrow vectors").
     staging, staging_view = _hold(
         spark,
         held,
