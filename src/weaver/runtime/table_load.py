@@ -55,6 +55,42 @@ def _exact_case(spark):
             spark.conf.set(_CASE_SENSITIVE, previous)
 
 
+# --- Fabric Spark 4.1 workarounds ---------------------------------------------
+#
+# Each changes only how a relation is planned or cached, so a load gives the
+# same result whether or not Fabric still has the defect. Remove one once the
+# runtime no longer has its defect: without it,
+# tests/fabric/test_fabric_staging_defects_primitive.py must still pass.
+
+
+def _fabric_staging_shuffle(frame) -> str:
+    """The hint staging is cached with: a shuffle when its plan reports an ordering.
+
+    SPARK-59009: a cached relation whose plan reports an ordering, as staging
+    from ``spark.range`` or a sort does, fails once an inlined CTE references it
+    more than once, as reject discovery does. Remove once Fabric's runtime has
+    the Apache Spark fix.
+
+    The ordering is the one the cached relation would carry. PySpark exposes it
+    only through the JVM plan, so a plan that cannot be read counts as ordered:
+    not knowing costs a shuffle, never a load.
+    """
+
+    try:
+        ordering = frame._jdf.queryExecution().optimizedPlan().outputOrdering()
+        ordered = not ordering.isEmpty()
+    except Exception:  # noqa: BLE001 - see above
+        ordered = True
+    return "/*+ REPARTITION */ " if ordered else ""
+
+
+#: Fabric fails a CREATE TABLE AS SELECT that reads cached staging directly
+#: ("Heavy batch should consist of arrow vectors"), whatever the source, and a
+#: shuffle between them avoids it. The evidence tables and a full replace write
+#: this way. Remove once that write succeeds on Fabric.
+_FABRIC_WRITE_SHUFFLE = "/*+ REPARTITION */ "
+
+
 #: Weaver-owned columns carried only by working relations.
 RANK_COLUMN = "__weaver_rank"
 WORKING_SIGNATURE_COLUMN = "__weaver_signature"
@@ -174,18 +210,10 @@ def _reconcile(
         _keep_evidence(spark, names, kept, **relations)
 
     source = _register(spark, held, staging_frame, names["target"], "source")
-    # The repartition drops any ordering the source reports, such as a range's
-    # or a sort's. Fabric's Spark 4.1 fails to canonicalise a cached relation
-    # that has one once an inlined CTE references it twice, as reject discovery
-    # does (SPARK-59009). Without it, Fabric also fails writes that read the
-    # cached staging directly, such as the evidence tables and a full replace,
-    # whatever the source ("Heavy batch should consist of arrow vectors").
+    projection = f"{qualified('s', columns)} FROM {source} AS s"
+    shuffle = _fabric_staging_shuffle(spark.sql(f"SELECT {projection}"))
     staging, staging_view = _hold(
-        spark,
-        held,
-        f"SELECT /*+ REPARTITION */ {qualified('s', columns)} FROM {source} AS s",
-        names["target"],
-        "staging",
+        spark, held, f"SELECT {shuffle}{projection}", names["target"], "staging"
     )
     # Both the metrics and the force that materialises staging for the phases
     # after it, so the authored source is evaluated exactly once.
@@ -966,7 +994,7 @@ def _full_replace(spark, names, staging_view, columns, rows_read: int) -> LoadRe
     with _exact_case(spark):
         spark.sql(
             f"CREATE TABLE {names['staging']} USING delta {COLUMN_MAPPING} AS "
-            f"SELECT {named} FROM {staging_view}"
+            f"SELECT {_FABRIC_WRITE_SHUFFLE}{named} FROM {staging_view}"
         )
     rows_deleted = _count(spark, names["target"])
     spark.sql(f"DELETE FROM {names['target']}")
@@ -1073,7 +1101,7 @@ def _keep_evidence(spark, names, kept: set, **relations) -> None:
         with _exact_case(spark):
             spark.sql(
                 f"CREATE TABLE {names[role]} USING delta {COLUMN_MAPPING} AS "
-                f"SELECT * FROM {view}"
+                f"SELECT {_FABRIC_WRITE_SHUFFLE}* FROM {view}"
             )
         # Recorded after the write, so being in ``kept`` means the table is
         # there. A write that failed leaves the role to be attempted again.

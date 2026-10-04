@@ -1,17 +1,17 @@
-"""A Delta keyed load whose staging frame reports an output ordering.
+"""Delta loads that meet Fabric Spark 4.1's staging defects, and load anyway.
 
-``spark.range`` and ``orderBy`` give a frame an ordering that Spark carries
-through an aliasing projection. Fabric's Spark 4.1 cannot canonicalise a cached
-relation with an ordering once an inlined CTE references it twice
-(SPARK-59009), which is what reject discovery does over staging. Fabric also
-fails writes that read cached staging directly, such as the evidence a rejected
-row leaves, whatever the source. The load must still settle every phase, and
-give back everything it held.
+The claim behind the workarounds in ``weaver.runtime.table_load``. Remove a
+workaround once Fabric fixes its defect, and this test must still pass.
+
+- SPARK-59009. ``spark.range`` and ``orderBy`` give staging an ordering, and
+  reject discovery's CTE chain references cached staging more than once.
+- A CREATE TABLE AS SELECT that reads cached staging directly fails ("Heavy
+  batch should consist of arrow vectors"), whatever the source: the evidence a
+  rejected row leaves, and a full replace.
 
 The frames are what a Table's ``read()`` returns; nothing else about the
-object matters here. One submission: a range-sourced load, a sorted range with a
-rejected row that changes, inserts and deletes, then a Delta table with a
-rejected row. ``full_integration``, as the other real Spark reconciliation is.
+object matters here. One submission. ``full_integration``, as the other real
+Spark reconciliation is.
 """
 
 from __future__ import annotations
@@ -19,8 +19,9 @@ from __future__ import annotations
 from support.weaver_test import weaver_test
 
 #: Owned by this body and dropped when it ends.
-SCHEMA = "OrderedSource"
-OBJECT = "Order"
+SCHEMA = "FabricStaging"
+KEYED = "Order"
+WHOLE = "OrderSnapshot"
 
 HEADER = """Table ID: {schema}.{object}
 
@@ -32,6 +33,17 @@ Primary key: Order id
 
 Not null:
   - Revision
+
+Schema:
+  Order id: bigint
+  Revision: int
+"""
+
+WHOLE_HEADER = """Table ID: {schema}.{object}
+
+Description: Orders, replaced on every load.
+
+Lineage: The pytest suite writes it.
 
 Schema:
   Order id: bigint
@@ -52,24 +64,37 @@ from weaver.runtime.load_contract import LoadContract
 from weaver.runtime.table_load import load_table
 
 destination = lakehouse_for(resolver, target)
-contract = LoadContract.from_document(
-    parse_document(HEADER.format(schema=SCHEMA, object=OBJECT), language=PYTHON)
-)
+
+
+def contract(header, name):
+    return LoadContract.from_document(
+        parse_document(header.format(schema=SCHEMA, object=name), language=PYTHON)
+    )
+
+
+keyed = contract(HEADER, KEYED)
+whole = contract(WHOLE_HEADER, WHOLE)
 WORKING = ("_Staging", "_Reject", "_Delete")
 
 
-def qualified(suffix=""):
-    return destination.qualify(SCHEMA, OBJECT + suffix)
+def qualified(name):
+    return destination.qualify(SCHEMA, name)
 
 
 def arrange():
     spark.sql(destination.destination.create_schema_statement(SCHEMA))
-    for suffix in (*WORKING, "Source", ""):
-        spark.sql(f"DROP TABLE IF EXISTS {qualified(suffix)}")
+    names = [name + suffix for name in (KEYED, WHOLE) for suffix in ("", *WORKING)]
+    for name in (*names, "Source"):
+        spark.sql(f"DROP TABLE IF EXISTS {qualified(name)}")
     audit = ", ".join(f"`{name}` timestamp NOT NULL" for name in delta_audit_names())
     spark.sql(
-        f"CREATE TABLE {qualified()} (`Order id` bigint, `Revision` int, {audit}, "
-        f"`{delta_signature_name()}` string NOT NULL) USING delta {COLUMN_MAPPING}"
+        f"CREATE TABLE {qualified(KEYED)} (`Order id` bigint, `Revision` int, "
+        f"{audit}, `{delta_signature_name()}` string NOT NULL) "
+        f"USING delta {COLUMN_MAPPING}"
+    )
+    spark.sql(
+        f"CREATE TABLE {qualified(WHOLE)} (`Order id` bigint, `Revision` int, "
+        f"{audit}) USING delta {COLUMN_MAPPING}"
     )
     spark.sql(
         f"CREATE TABLE {qualified('Source')} (`Order id` bigint, `Revision` int) "
@@ -106,15 +131,25 @@ def held_views():
     )
 
 
-def run(frame, fault_tolerant):
-    """One load, and whatever it left held in Spark afterwards."""
+def evidence(name):
+    tables = {
+        row["tableName"].lower()
+        for row in spark.sql(
+            "SHOW TABLES IN " + destination.destination.qualified_schema(SCHEMA)
+        ).collect()
+    }
+    return sorted(suffix for suffix in WORKING if (name + suffix).lower() in tables)
+
+
+def run(load_contract, name, frame, fault_tolerant=False):
+    """One load, what it left in the table, and whatever it left held in Spark."""
 
     before = persistent_rdds()
     try:
         outcome = {
             "result": load_table(
                 spark,
-                contract=contract,
+                contract=load_contract,
                 lakehouse=destination,
                 staging_frame=frame,
                 fault_tolerant=fault_tolerant,
@@ -125,14 +160,14 @@ def run(frame, fault_tolerant):
     after = persistent_rdds()
     outcome["leaked_rdds"] = sorted(after[key] for key in after.keys() - before.keys())
     outcome["held_views"] = held_views()
+    outcome["contents"] = [
+        [row["id"], row["Revision"]]
+        for row in spark.sql(
+            f"SELECT `Order id` AS id, Revision FROM {qualified(name)} ORDER BY id"
+        ).collect()
+    ]
+    outcome["evidence"] = evidence(name)
     return outcome
-
-
-def contents():
-    rows = spark.sql(
-        f"SELECT `Order id` AS id, Revision FROM {qualified()} ORDER BY id"
-    ).collect()
-    return [[row["id"], row["Revision"]] for row in rows]
 
 
 seen = {}
@@ -140,13 +175,15 @@ try:
     arrange()
 
     seen["range"] = run(
+        keyed,
+        KEYED,
         spark.range(0, 5).selectExpr("id AS `Order id`", "0 AS Revision"),
-        fault_tolerant=False,
     )
-    seen["range_contents"] = contents()
 
     # 0 and 1 leave, 2 to 4 change, 5 arrives, and 6 is rejected for its null.
     seen["sorted"] = run(
+        keyed,
+        KEYED,
         spark.range(2, 7)
         .selectExpr(
             "id AS `Order id`", "CASE WHEN id = 6 THEN NULL ELSE 1 END AS Revision"
@@ -154,11 +191,15 @@ try:
         .orderBy(F.desc("Order id")),
         fault_tolerant=True,
     )
-    seen["sorted_contents"] = contents()
 
     # 2 to 5 change, 7 arrives, and 8 is rejected for its null.
-    seen["delta"] = run(spark.table(qualified("Source")), fault_tolerant=True)
-    seen["delta_contents"] = contents()
+    seen["delta"] = run(keyed, KEYED, spark.table(qualified("Source")), True)
+
+    seen["replace"] = run(
+        whole,
+        WHOLE,
+        spark.createDataFrame([(1, 1), (2, 1)], "`Order id` bigint, Revision int"),
+    )
 finally:
     spark.sql(
         "DROP SCHEMA IF EXISTS "
@@ -171,7 +212,7 @@ emit(seen)
 
 
 @weaver_test(integration=True)
-def test_a_delta_load_settles_a_staging_frame_that_reports_an_ordering(
+def test_staging_loads_past_fabric_spark_defects(
     livy_session, fabric_workspace, fabric_target_lakehouse
 ):
     preamble = (
@@ -184,18 +225,20 @@ def test_a_delta_load_settles_a_staging_frame_that_reports_an_ordering(
         "resolver = resolver_for(workspace)\n"
         f"target = ItemRef({fabric_target_lakehouse.name!r})\n"
         f"SCHEMA = {SCHEMA!r}\n"
-        f"OBJECT = {OBJECT!r}\n"
+        f"KEYED = {KEYED!r}\n"
+        f"WHOLE = {WHOLE!r}\n"
         f"HEADER = {HEADER!r}\n"
+        f"WHOLE_HEADER = {WHOLE_HEADER!r}\n"
     )
 
     seen = livy_session.run(preamble + BODY).payload
 
     loaded = seen["range"]
     assert "raised" not in loaded, loaded["raised"]
-    assert loaded["result"]["rows_read"] == 5
     assert loaded["result"]["rows_inserted"] == 5
-    assert seen["range_contents"] == [[0, 0], [1, 0], [2, 0], [3, 0], [4, 0]]
+    assert loaded["contents"] == [[0, 0], [1, 0], [2, 0], [3, 0], [4, 0]]
 
+    # An ordered source through reject discovery, with its evidence written.
     changed = seen["sorted"]
     assert "raised" not in changed, changed["raised"]
     assert changed["result"]["rows_read"] == 5
@@ -203,17 +246,27 @@ def test_a_delta_load_settles_a_staging_frame_that_reports_an_ordering(
     assert changed["result"]["rows_inserted"] == 1
     assert changed["result"]["rows_updated"] == 3
     assert changed["result"]["rows_deleted"] == 2
-    assert seen["sorted_contents"] == [[2, 1], [3, 1], [4, 1], [5, 1]]
+    assert changed["contents"] == [[2, 1], [3, 1], [4, 1], [5, 1]]
+    assert changed["evidence"] == ["_Delete", "_Reject", "_Staging"]
 
+    # A Delta source writing the same evidence.
     read = seen["delta"]
     assert "raised" not in read, read["raised"]
     assert read["result"]["rows_read"] == 6
     assert read["result"]["rows_rejected"] == 1
     assert read["result"]["rows_inserted"] == 1
     assert read["result"]["rows_updated"] == 4
-    assert seen["delta_contents"] == [[2, 2], [3, 2], [4, 2], [5, 2], [7, 2]]
+    assert read["contents"] == [[2, 2], [3, 2], [4, 2], [5, 2], [7, 2]]
+    assert read["evidence"] == ["_Reject", "_Staging"]
+
+    # A full replace, whose staging copy is written before the target empties.
+    replaced = seen["replace"]
+    assert "raised" not in replaced, replaced["raised"]
+    assert replaced["result"]["rows_inserted"] == 2
+    assert replaced["contents"] == [[1, 1], [2, 1]]
+    assert replaced["evidence"] == []
 
     # Every relation each load materialised was given back.
-    for outcome in (loaded, changed, read):
+    for outcome in seen.values():
         assert outcome["leaked_rdds"] == []
         assert outcome["held_views"] == []

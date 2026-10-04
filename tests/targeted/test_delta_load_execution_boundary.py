@@ -62,11 +62,36 @@ class _Row(dict):
     """One answered row, subscripted the way a Spark ``Row`` is."""
 
 
+class _Plan:
+    """The one JVM plan question a load asks: whether staging reports an ordering."""
+
+    def __init__(self, ordered: bool) -> None:
+        self.ordered = ordered
+
+    def queryExecution(self):  # noqa: N802 - Spark's name
+        return self
+
+    def optimizedPlan(self):  # noqa: N802 - Spark's name
+        return self
+
+    def outputOrdering(self):  # noqa: N802 - Spark's name
+        return self
+
+    def isEmpty(self) -> bool:  # noqa: N802 - Scala's name
+        return not self.ordered
+
+
 class _Frame:
     """One statement's result. Its role is the view the load registered it under."""
 
     def __init__(self, spark, text: str) -> None:
         self.spark, self.text, self.view = spark, text, None
+
+    @property
+    def _jdf(self):
+        if self.spark.ordered is None:
+            raise AttributeError("_jdf")
+        return _Plan(self.spark.ordered)
 
     def persist(self):
         self.spark.persisted.append(self)
@@ -138,6 +163,8 @@ class _Spark:
     views: list = field(default_factory=list)
     dropped_views: list = field(default_factory=list)
     identifier_case: list = field(default_factory=list)
+    #: What every plan reports about its ordering; None when it cannot be read.
+    ordered: bool | None = False
 
     def __post_init__(self) -> None:
         self.catalog = _Catalog(self)
@@ -448,18 +475,50 @@ def test_every_phase_is_persisted_and_read_by_name():
     assert [frame.role for frame in spark.persisted] == ["staging", "change"]
 
 
+@pytest.mark.parametrize(
+    ("ordered", "shuffled"),
+    [(False, False), (True, True), (None, True)],
+    ids=["unordered", "ordered", "unreadable"],
+)
 @weaver_test()
-def test_staging_is_repartitioned_so_it_reports_no_source_ordering():
+def test_staging_is_shuffled_when_its_plan_reports_an_ordering(ordered, shuffled):
     """Fabric's Spark 4.1 cannot discover rejects over a cached ordered relation.
 
-    The engine claim is ``tests/fabric/test_ordered_source_load_primitive.py``.
+    A plan that cannot be read counts as ordered, so not knowing costs a shuffle.
+    The engine claim is ``tests/fabric/test_fabric_staging_defects_primitive.py``.
     """
 
-    spark, _result = _load(BUSY)
+    spark = _Spark(counts=BUSY, ordered=ordered)
+    load_table(
+        spark,
+        contract=_contract(),
+        lakehouse=_Lakehouse(),
+        staging_frame=_Staged(),
+    )
 
     staging = spark.persisted[0]
     assert staging.role == "staging"
-    assert staging.text.startswith("SELECT /*+ REPARTITION */ ")
+    assert staging.text.startswith("SELECT /*+ REPARTITION */ ") is shuffled
+
+
+@weaver_test()
+def test_evidence_is_shuffled_as_it_is_written():
+    """Fabric's Spark 4.1 cannot write a table straight from cached staging."""
+
+    spark = _refused(dict(NO_OP, reject=2), match="fault_tolerant = 0")
+
+    written = [one for one in spark.statements if one.startswith("CREATE TABLE")]
+    assert len(written) == 2
+    assert all(" AS SELECT /*+ REPARTITION */ * FROM " in one for one in written)
+
+
+@weaver_test()
+def test_a_full_replace_shuffles_the_staging_it_writes():
+    spark, _result = _load(dict(NO_OP, target=3), contract=_contract(primary_key=()))
+
+    written = next(one for one in spark.statements if one.startswith("CREATE TABLE"))
+    assert " AS SELECT /*+ REPARTITION */ " in written
+    assert "FROM weaver_staging_" in written
 
 
 @weaver_test()
