@@ -3,13 +3,15 @@
 ``spark.range`` and ``orderBy`` give a frame an ordering that Spark carries
 through an aliasing projection. Fabric's Spark 4.1 cannot canonicalise a cached
 relation with an ordering once an inlined CTE references it twice
-(SPARK-59009), which is what reject discovery does over staging. The load must
-still settle every phase, and give back everything it held.
+(SPARK-59009), which is what reject discovery does over staging. Fabric also
+fails writes that read cached staging directly, such as the evidence a rejected
+row leaves, whatever the source. The load must still settle every phase, and
+give back everything it held.
 
 The frames are what a Table's ``read()`` returns; nothing else about the
-object matters here. One submission: a range-sourced load, then a sorted range
-with a rejected row that changes, inserts and deletes. ``full_integration``,
-as the other real Spark reconciliation is.
+object matters here. One submission: a range-sourced load, a sorted range with a
+rejected row that changes, inserts and deletes, then a Delta table with a
+rejected row. ``full_integration``, as the other real Spark reconciliation is.
 """
 
 from __future__ import annotations
@@ -62,12 +64,20 @@ def qualified(suffix=""):
 
 def arrange():
     spark.sql(destination.destination.create_schema_statement(SCHEMA))
-    for suffix in (*WORKING, ""):
+    for suffix in (*WORKING, "Source", ""):
         spark.sql(f"DROP TABLE IF EXISTS {qualified(suffix)}")
     audit = ", ".join(f"`{name}` timestamp NOT NULL" for name in delta_audit_names())
     spark.sql(
         f"CREATE TABLE {qualified()} (`Order id` bigint, `Revision` int, {audit}, "
         f"`{delta_signature_name()}` string NOT NULL) USING delta {COLUMN_MAPPING}"
+    )
+    spark.sql(
+        f"CREATE TABLE {qualified('Source')} (`Order id` bigint, `Revision` int) "
+        f"USING delta {COLUMN_MAPPING}"
+    )
+    spark.sql(
+        f"INSERT INTO {qualified('Source')} VALUES "
+        "(2, 2), (3, 2), (4, 2), (5, 2), (7, 2), (8, NULL)"
     )
 
 
@@ -145,6 +155,10 @@ try:
         fault_tolerant=True,
     )
     seen["sorted_contents"] = contents()
+
+    # 2 to 5 change, 7 arrives, and 8 is rejected for its null.
+    seen["delta"] = run(spark.table(qualified("Source")), fault_tolerant=True)
+    seen["delta_contents"] = contents()
 finally:
     spark.sql(
         "DROP SCHEMA IF EXISTS "
@@ -191,7 +205,15 @@ def test_a_delta_load_settles_a_staging_frame_that_reports_an_ordering(
     assert changed["result"]["rows_deleted"] == 2
     assert seen["sorted_contents"] == [[2, 1], [3, 1], [4, 1], [5, 1]]
 
-    # Every relation either load materialised was given back.
-    for outcome in (loaded, changed):
+    read = seen["delta"]
+    assert "raised" not in read, read["raised"]
+    assert read["result"]["rows_read"] == 6
+    assert read["result"]["rows_rejected"] == 1
+    assert read["result"]["rows_inserted"] == 1
+    assert read["result"]["rows_updated"] == 4
+    assert seen["delta_contents"] == [[2, 2], [3, 2], [4, 2], [5, 2], [7, 2]]
+
+    # Every relation each load materialised was given back.
+    for outcome in (loaded, changed, read):
         assert outcome["leaked_rdds"] == []
         assert outcome["held_views"] == []
