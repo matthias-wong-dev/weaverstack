@@ -163,8 +163,9 @@ def test_preserve_on_a_model_with_no_external_source_is_an_empty_reset():
         "table",
         "column",
         "measure",
-        "relationship",
-        "role",
+        "culture",
+        "name",
+        "visible",
         "expression",
         "partition",
         "binding",
@@ -199,10 +200,12 @@ def test_preserved_readback_requires_only_the_source_shell_and_same_connection(f
         shell["columns"] = [{"name": "Id"}]
     elif fault == "measure":
         shell["measures"] = [{"name": "Rows", "expression": "1"}]
-    elif fault == "relationship":
-        actual["model"]["relationships"] = [{"name": "Old"}]
-    elif fault == "role":
-        actual["model"]["roles"] = [{"name": "Old"}]
+    elif fault == "culture":
+        actual["model"]["culture"] = "fr-FR"
+    elif fault == "name":
+        shell["name"] = "Wrong"
+    elif fault == "visible":
+        shell["isHidden"] = False
     elif fault == "expression":
         actual["model"]["expressions"][0]["expression"] = "changed"
     elif fault == "partition":
@@ -231,3 +234,40 @@ def test_plain_readback_refuses_residual_content_or_connections():
         verify_reset(
             spec, {"model": {"culture": "en-US"}}, [{"connectivityType": "Automatic"}]
         )
+
+
+class _WipeProjection(dict):
+    def __init__(self, values, fields):
+        super().__init__(values)
+        self.fields = fields
+
+    def get(self, key, default=None):
+        assert key in self.fields, f"Readback inspected non-wipe field {key}"
+        return super().get(key, default)
+
+
+@pytest.mark.parametrize("preserve", [False, True])
+@weaver_test()
+def test_readback_projects_only_the_wipe_owned_model_and_source_shell(preserve):
+    from weaver.semantic_models.wipe import reset_definition, verify_reset
+
+    original, parts, connections = _preserved_inputs()
+    spec = reset_definition(
+        "Reporting",
+        original,
+        parts=parts,
+        preserve_data_source=preserve,
+        connections=connections,
+    )
+    model = copy.deepcopy(spec["expected"])
+    model["tables"] = [
+        _WipeProjection(
+            table, {"name", "isHidden", "columns", "measures", "partitions"}
+        )
+        for table in model["tables"]
+    ]
+    verify_reset(
+        spec,
+        {"model": _WipeProjection(model, {"culture", "tables", "expressions"})},
+        connections if preserve else [],
+    )
