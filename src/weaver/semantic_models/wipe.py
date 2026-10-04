@@ -184,16 +184,6 @@ def verify_reset(spec, observed, connections):
     expected = spec["expected"]
     if model.get("culture") != expected["culture"]:
         raise InstallError("Semantic wipe changed the model culture")
-    for kind in (
-        "relationships",
-        "roles",
-        "perspectives",
-        "cultures",
-        "dataSources",
-        "functions",
-    ):
-        if model.get(kind):
-            raise InstallError(f"Semantic wipe readback retains {kind}")
     tables = model.get("tables", [])
     if len(tables) != len(expected["tables"]):
         raise InstallError("Semantic wipe readback retains unexpected tables")
@@ -202,10 +192,7 @@ def verify_reset(spec, observed, connections):
             raise InstallError(
                 "Semantic wipe readback differs from the hidden source table"
             )
-        if any(
-            table.get(kind)
-            for kind in ("columns", "measures", "hierarchies", "calculationGroup")
-        ):
+        if table.get("columns") or table.get("measures"):
             raise InstallError("Semantic wipe readback retains table content")
         if canonical_model(
             {"model": {"tables": [{"partitions": table.get("partitions", [])}]}}

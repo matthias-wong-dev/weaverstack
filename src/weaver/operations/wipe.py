@@ -295,7 +295,7 @@ def plan_wipe(
         if resolved_catalogue is None:
             raise CommandError(
                 "wipe needs named targets or a Weaver catalogue for estate "
-                "discovery. Name Lakehouse/Name or Warehouse/Name, pass "
+                "discovery. Name Lakehouse/Name, Warehouse/Name or SemanticModel/Name, pass "
                 "catalogue='Warehouse/Weaver', or configure a catalogue."
             )
         from ..sessions.host import use_or_create_session
