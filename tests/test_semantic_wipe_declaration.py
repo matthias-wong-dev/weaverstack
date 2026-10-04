@@ -9,6 +9,12 @@ from weaver.sessions.testing import TestSession
 
 
 @weaver_test()
+def test_no_target_or_catalogue_hint_names_semantic_models():
+    with pytest.raises(CommandError, match="SemanticModel/Name"):
+        plan_wipe(workspace="Analytics", session=TestSession())
+
+
+@weaver_test()
 def test_semantic_only_selection_unbinds_its_claims_without_wiping_the_catalogue():
     plan = plan_wipe(
         "SemanticModel/Reporting",
