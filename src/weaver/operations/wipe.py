@@ -109,7 +109,9 @@ class WipePlan:
         return any(self.is_catalogue(target) for target in self.targets)
 
     def _named(self, target: WipeTarget) -> str:
-        items = self.installed.get(str(target))
+        items = [
+            item for item in self.installed.get(str(target), ()) if item != str(target)
+        ]
         return f"{', '.join(items)} → {target}" if items else str(target)
 
     def describe(self) -> str:
