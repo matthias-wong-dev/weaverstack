@@ -193,13 +193,21 @@ emit({{"sha256": hashlib.sha256(_archive_bytes).hexdigest(), "bytes": len(_archi
 
 
 def execute_mutation_remote(
-    session, plan, payloads=None, *, workspace=None, timeout=600, build_datetime=None
+    session,
+    plan,
+    payloads=None,
+    *,
+    workspace=None,
+    timeout=600,
+    build_datetime=None,
+    observer=None,
 ):
     """Submit one complete plan once; an uncertain invocation is never replayed.
 
     The carrier is staged under the plan's Spark-home Lakehouse and removed after
     every outcome. It is transport, not a mutation target, so it is outside the
-    plan's physical scopes.
+    plan's physical scopes. ``observer`` follows the progress Fabric writes beside
+    the carrier while the plan runs.
     """
     from datetime import datetime, timezone
     from urllib.parse import urlsplit
@@ -231,21 +239,6 @@ def execute_mutation_remote(
     build_datetime = build_datetime or datetime.now(timezone.utc).strftime(
         "%Y-%m-%d %H:%M:%S.%f"
     )
-    from .archive_runtime import execution_capacity
-
-    # Fabric runs the plan with this deployment's capacity, which the plan omits.
-    workers, limits = execution_capacity(plan, session.workspace)
-    request = {
-        "plan_id": plan.bundle_id,
-        "invocation_id": invocation_id,
-        "build_datetime": build_datetime,
-        "timeout": timeout,
-        "workers": workers,
-        "limits": limits,
-    }
-    carrier = pack_mutation(plan, payloads, request=request)
-    if carrier is None:
-        raise BuildError("mutation carrier exceeds expanded size bound")
     if home_id is not None:
         session.require_spark_home(home.name, workspace=frozen_workspace)
     scope = session.scope(frozen_workspace)
@@ -253,6 +246,7 @@ def execute_mutation_remote(
     area = scope.resolver.files_root(ItemRef(home.name)) / CARRIER_AREA
     stage = area / invocation_id
     incoming, output = stage / "carrier.zip", stage / "result.json"
+    progress = stage / "progress.json"
 
     def remove_stage():
         store.delete(stage, recursive=True)
@@ -279,6 +273,24 @@ def execute_mutation_remote(
             return "abfss://" + parts[0] + "@" + address.hostname + "/" + parts[1]
         return value
 
+    from .archive_runtime import execution_capacity
+
+    # Fabric runs the plan with this deployment's capacity, which the plan omits.
+    workers, limits = execution_capacity(plan, session.workspace)
+    request = {
+        "plan_id": plan.bundle_id,
+        "invocation_id": invocation_id,
+        "build_datetime": build_datetime,
+        "timeout": timeout,
+        "workers": workers,
+        "limits": limits,
+    }
+    if observer is not None:
+        request["progress"] = native(progress)
+    carrier = pack_mutation(plan, payloads, request=request)
+    if carrier is None:
+        raise BuildError("mutation carrier exceeds expanded size bound")
+
     source = bootstrap_source(
         carrier, native(incoming), native(output), workers=session.direct_delta_workers
     )
@@ -299,13 +311,20 @@ def execute_mutation_remote(
     if not hasattr(session, "archive_mutations"):
         session.archive_mutations = []
     session.archive_mutations.append(record)
+    following = (
+        None if observer is None else _follow(session, store, progress, observer)
+    )
     try:
-        receipt = scope.livy_run(
-            source,
-            name="mutation_archive",
-            timeout=timeout * len(actions),
-            retry_submission=False,
-        )
+        try:
+            receipt = scope.livy_run(
+                source,
+                name="mutation_archive",
+                timeout=timeout * len(actions),
+                retry_submission=False,
+            )
+        finally:
+            if following is not None:
+                following()
         result = read_receipt(receipt, store.read(output))
         if result.get("archive_sha256") != carrier.sha256:
             raise BuildError("mutation carrier result differs")
@@ -331,3 +350,42 @@ def execute_mutation_remote(
             remove_stage()
         except Exception as error:
             record["cleanup_error"] = str(error)
+
+
+def _follow(session, store, location, observer):
+    """Read Fabric's progress beside the Livy wait; return what stops reading.
+
+    A read that fails is retried at the next interval, and the final report
+    supplies anything the progress never showed.
+    """
+
+    import threading
+
+    from .archive_runtime import PROGRESS_INTERVAL
+
+    done = threading.Event()
+    context = session.telemetry.capture_context()
+
+    def read():
+        seen = 0
+        with session.telemetry.use_context(context):
+            while not done.wait(PROGRESS_INTERVAL):
+                try:
+                    records = json.loads(store.read(location))
+                except Exception:  # noqa: BLE001 - progress never changes an outcome
+                    continue
+                for record in records[seen:]:
+                    try:
+                        observer(record)
+                    except Exception:  # noqa: BLE001 - presentation only
+                        pass
+                seen = len(records)
+
+    reader = threading.Thread(target=read, name="weaver-progress", daemon=True)
+    reader.start()
+
+    def stop():
+        done.set()
+        reader.join(PROGRESS_INTERVAL * 5)
+
+    return stop

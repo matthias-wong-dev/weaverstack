@@ -25,14 +25,25 @@ _STAGES = {
     "prune unmanaged objects by logical item": "Removing unmanaged objects",
     "materialise item-owned shortcuts": "Creating shortcuts",
     "create item-owned schemas": "Creating schemas",
+    "publish the mirrored catalogue": "Forking the catalogue and binding items",
 }
 
 GATE = "completion_gate"
+#: How a mirror names the stages of its catalogue build.
+CATALOGUE = "catalogue: "
+
+
+def _said(text: str) -> str:
+    text = text.strip()
+    if text.casefold().startswith(CATALOGUE):
+        return "Catalogue: " + _said(text[len(CATALOGUE) :]).lower()
+    if text.casefold().startswith("empty "):
+        return "Wipe " + text[len("empty ") :]
+    return _STAGES.get(text.casefold()) or text[:1].upper() + text[1:]
 
 
 def stage_label(sequence, targets, count: int) -> str:
-    text = (sequence.description or "").strip()
-    said = _STAGES.get(text.casefold()) or text[:1].upper() + text[1:]
+    said = _said(sequence.description or "")
     names: list[str] = []
     for batch in sequence.batches:
         target = targets.get(batch.target_id)
@@ -64,13 +75,18 @@ class _Stage:
 
 
 class StageProgress:
-    """Start and end lines for each stage of one plan's execution."""
+    """Start and end lines for each stage of one plan's execution.
+
+    Events may arrive twice, from a host's progress and again from its final
+    ledger, and each is presented once. Durations come from the executing
+    host's ledger clock.
+    """
 
     def __init__(self, plan, session) -> None:
         self._session = session
         self._lock = threading.Lock()
+        self._seen: set[tuple[str, str]] = set()
         targets = {target.id: target for target in plan.targets}
-        self._stages: list[_Stage] = []
         self._of: dict[str, _Stage] = {}
         for sequence in plan.sequences:
             actions = [
@@ -79,58 +95,65 @@ class StageProgress:
                 for action in batch.actions
                 if action.executor != GATE
             ]
-            if not actions:
-                continue
-            stage = _Stage(stage_label(sequence, targets, len(actions)), len(actions))
-            self._stages.append(stage)
-            self._of.update(dict.fromkeys(actions, stage))
+            if actions:
+                stage = _Stage(
+                    stage_label(sequence, targets, len(actions)), len(actions)
+                )
+                self._of.update(dict.fromkeys(actions, stage))
 
     def observe(self, event) -> None:
         """Present a stage as its first action starts and its last one ends."""
 
-        stage = self._of.get(event.action_id)
+        record = progress_record(event)
+        if record is not None:
+            self.follow(record)
+
+    def follow(self, record: dict) -> None:
+        stage = self._of.get(record["action_id"])
         if stage is None:
             return
         with self._lock:
-            if event.kind == "dispatched" and stage.frame is None:
-                stage.frame = self._session.open_concurrent_substep(stage.label)
-            elif event.kind == "terminal":
-                self._count(stage, event)
-                if not stage.remaining and stage.frame is not None:
-                    stage.frame.failed = bool(stage.failed or stage.blocked)
-                    stage.frame.note = stage.note
-                    self._session.close_concurrent_substep(stage.frame)
+            key = (record["kind"], record["action_id"])
+            if key in self._seen:
+                return
+            self._seen.add(key)
+            if record["kind"] == DISPATCHED:
+                if stage.frame is None:
+                    stage.first = record["at"]
+                    stage.frame = self._session.open_concurrent_substep(stage.label)
+                return
+            stage.remaining -= 1
+            stage.last = record["at"]
+            if record["status"] in ("failed", "uncertain"):
+                stage.failed += 1
+            elif record["status"] == "blocked":
+                stage.blocked += 1
+            if not stage.remaining and stage.frame is not None:
+                stage.frame.failed = bool(stage.failed or stage.blocked)
+                stage.frame.note = stage.note
+                self._session.close_concurrent_substep(
+                    stage.frame, elapsed=max(stage.last - stage.first, 0.0)
+                )
 
-    def replay(self, report) -> None:
-        """Present each stage of a plan that ran elsewhere, once it has ended.
-
-        Durations come from the executing host's ledger.
-        """
+    def finish(self, report) -> None:
+        """Present whatever the host's progress did not, from its final ledger."""
 
         for event in report.ledger:
-            stage = self._of.get(event.action_id)
-            if stage is None:
-                continue
-            if event.kind == "dispatched" and stage.first is None:
-                stage.first = event.at
-            elif event.kind == "terminal":
-                self._count(stage, event)
-                stage.last = event.at
-        for stage in self._stages:
-            if stage.first is None:
-                continue
-            self._session.finished_substep(
-                stage.label,
-                elapsed=max((stage.last or stage.first) - stage.first, 0.0),
-                failed=bool(stage.failed or stage.blocked),
-                note=stage.note,
-            )
+            self.observe(event)
 
-    @staticmethod
-    def _count(stage: _Stage, event) -> None:
-        stage.remaining -= 1
-        status = getattr(event.value, "status", None)
-        if status in ("failed", "uncertain"):
-            stage.failed += 1
-        elif status == "blocked":
-            stage.blocked += 1
+
+DISPATCHED = "dispatched"
+TERMINAL = "terminal"
+
+
+def progress_record(event) -> dict | None:
+    """A ledger event as plain data, if it starts or ends an action."""
+
+    if event.kind not in (DISPATCHED, TERMINAL):
+        return None
+    return {
+        "kind": event.kind,
+        "action_id": event.action_id,
+        "at": event.at,
+        "status": getattr(event.value, "status", None),
+    }
