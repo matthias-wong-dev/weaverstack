@@ -53,7 +53,9 @@ def _objects(project: Path) -> list[Path]:
 @weaver_test()
 def test_the_generated_projects_pass_check(tmp_path):
     generator = _generator()
-    plan = generator.generate(tmp_path, NAMES, generator.Options(objects=300, scale=0.001))
+    plan = generator.generate(
+        tmp_path, NAMES, generator.Options(objects=300, scale=0.001)
+    )
 
     check(tmp_path / "source")
     check(tmp_path / "estate")
@@ -106,7 +108,11 @@ def test_no_incremental_table_reads_a_parent_that_removes_rows():
     generator = _generator()
     options = generator.Options()
     nodes = generator.plan_estate(generator.plan_sources(options), options)
-    incremental = (generator.APPEND, generator.INCREMENTAL, generator.INCREMENTAL_DELETE)
+    incremental = (
+        generator.APPEND,
+        generator.INCREMENTAL,
+        generator.INCREMENTAL_DELETE,
+    )
 
     blind = [
         node.id
