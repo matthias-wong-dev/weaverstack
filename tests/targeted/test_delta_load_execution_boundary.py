@@ -52,6 +52,9 @@ TARGET_COLUMNS = (
 BUSINESS = ("Customer id", "Customer name", "Email")
 
 #: The suffixes that must never appear in a durable write on a clean load.
+#: Fabric's CTE cache, which keeps a CTE a later query repeats.
+CTE_CACHE = "spark.sql.optimizer.cte.cache.enabled"
+
 WORKING = ("_Staging", "_Reject", "_Delete", "_Upsert", "_Change", "_StagingKeep")
 
 
@@ -62,11 +65,36 @@ class _Row(dict):
     """One answered row, subscripted the way a Spark ``Row`` is."""
 
 
+class _Plan:
+    """The one JVM plan question a load asks: whether staging reports an ordering."""
+
+    def __init__(self, ordered: bool) -> None:
+        self.ordered = ordered
+
+    def queryExecution(self):  # noqa: N802 - Spark's name
+        return self
+
+    def optimizedPlan(self):  # noqa: N802 - Spark's name
+        return self
+
+    def outputOrdering(self):  # noqa: N802 - Spark's name
+        return self
+
+    def isEmpty(self) -> bool:  # noqa: N802 - Scala's name
+        return not self.ordered
+
+
 class _Frame:
     """One statement's result. Its role is the view the load registered it under."""
 
     def __init__(self, spark, text: str) -> None:
         self.spark, self.text, self.view = spark, text, None
+
+    @property
+    def _jdf(self):
+        if self.spark.ordered is None:
+            raise AttributeError("_jdf")
+        return _Plan(self.spark.ordered)
 
     def persist(self):
         self.spark.persisted.append(self)
@@ -138,6 +166,10 @@ class _Spark:
     views: list = field(default_factory=list)
     dropped_views: list = field(default_factory=list)
     identifier_case: list = field(default_factory=list)
+    #: Fabric's CTE cache setting in force for each statement, absent off Fabric.
+    cte_cache: list = field(default_factory=list)
+    #: What every plan reports about its ordering; None when it cannot be read.
+    ordered: bool | None = False
 
     def __post_init__(self) -> None:
         self.catalog = _Catalog(self)
@@ -170,6 +202,7 @@ class _Spark:
 
     def sql(self, text: str) -> _Frame:
         self.resolve(text)
+        self.cte_cache.append(self.conf.values.get(CTE_CACHE))
         if text.startswith(("CREATE TABLE", "DROP TABLE")):
             self.identifier_case.append(
                 (text.split("`", 6)[5], self.conf.get("spark.sql.caseSensitive"))
@@ -260,14 +293,26 @@ class _Catalog:
         self._spark.temporary.pop(self._spark.key(name), None)
 
 
+class _SettingRefused(RuntimeError):
+    """A runtime that will not read or change a setting."""
+
+
 class _Conf:
     def __init__(self) -> None:
         self.values = {"spark.sql.caseSensitive": "false"}
+        #: ("get", key) or ("set", key, value) the runtime refuses.
+        self.refused: set = set()
 
-    def get(self, key: str):
+    def get(self, key: str, *default):
+        if ("get", key) in self.refused:
+            raise _SettingRefused(f"cannot read {key}")
+        if default and key not in self.values:
+            return default[0]
         return self.values[key]
 
     def set(self, key: str, value) -> None:
+        if ("set", key, value) in self.refused:
+            raise _SettingRefused(f"cannot set {key} to {value}")
         self.values[key] = value
 
 
@@ -446,6 +491,52 @@ def test_every_phase_is_persisted_and_read_by_name():
     spark, _result = _load(BUSY)
 
     assert [frame.role for frame in spark.persisted] == ["staging", "change"]
+
+
+@pytest.mark.parametrize(
+    ("ordered", "shuffled"),
+    [(False, False), (True, True), (None, True)],
+    ids=["unordered", "ordered", "unreadable"],
+)
+@weaver_test()
+def test_staging_is_shuffled_when_its_plan_reports_an_ordering(ordered, shuffled):
+    """Fabric's Spark 4.1 cannot discover rejects over a cached ordered relation.
+
+    A plan that cannot be read counts as ordered, so not knowing costs a shuffle.
+    The engine claim is ``tests/fabric/test_fabric_staging_defects_primitive.py``.
+    """
+
+    spark = _Spark(counts=BUSY, ordered=ordered)
+    load_table(
+        spark,
+        contract=_contract(),
+        lakehouse=_Lakehouse(),
+        staging_frame=_Staged(),
+    )
+
+    staging = spark.persisted[0]
+    assert staging.role == "staging"
+    assert staging.text.startswith("SELECT /*+ REPARTITION */ ") is shuffled
+
+
+@weaver_test()
+def test_evidence_is_shuffled_as_it_is_written():
+    """Fabric's Spark 4.1 cannot write a table straight from cached staging."""
+
+    spark = _refused(dict(NO_OP, reject=2), match="fault_tolerant = 0")
+
+    written = [one for one in spark.statements if one.startswith("CREATE TABLE")]
+    assert len(written) == 2
+    assert all(" AS SELECT /*+ REPARTITION */ * FROM " in one for one in written)
+
+
+@weaver_test()
+def test_a_full_replace_shuffles_the_staging_it_writes():
+    spark, _result = _load(dict(NO_OP, target=3), contract=_contract(primary_key=()))
+
+    written = next(one for one in spark.statements if one.startswith("CREATE TABLE"))
+    assert " AS SELECT /*+ REPARTITION */ " in written
+    assert "FROM weaver_staging_" in written
 
 
 @weaver_test()
@@ -890,6 +981,109 @@ def test_mixed_case_runtime_tables_are_created_in_an_exact_case_scope():
         ("CustomerOrder_Delete", "true"),
     ]
     assert spark.conf.get("spark.sql.caseSensitive") == "false"
+
+
+@weaver_test()
+def test_every_statement_runs_with_fabrics_cte_cache_off_and_it_is_restored():
+    """Reject discovery and the purge repeat one chain, which Fabric would keep."""
+
+    spark = _Spark(counts=dict(BUSY, reject=2, clean=1))
+    spark.conf.set(CTE_CACHE, "true")
+
+    load_table(
+        spark,
+        contract=_contract(),
+        lakehouse=_Lakehouse(),
+        staging_frame=_Staged(),
+        fault_tolerant=True,
+    )
+
+    # The evidence drops come before the hold; everything that reads staging after.
+    assert spark.cte_cache[:3] == ["true"] * 3
+    assert set(spark.cte_cache[3:]) == {"false"}
+    assert spark.conf.get(CTE_CACHE) == "true"
+
+
+@weaver_test()
+def test_a_refused_load_restores_fabrics_cte_cache():
+    spark = _Spark(counts=dict(NO_OP, reject=2))
+    spark.conf.set(CTE_CACHE, "true")
+
+    with pytest.raises(LoadError):
+        load_table(
+            spark,
+            contract=_contract(),
+            lakehouse=_Lakehouse(),
+            staging_frame=_Staged(),
+        )
+
+    assert spark.conf.get(CTE_CACHE) == "true"
+
+
+@weaver_test()
+def test_a_session_without_fabrics_cte_cache_is_left_without_it():
+    spark, _result = _load(BUSY)
+
+    assert CTE_CACHE not in spark.conf.values
+    assert set(spark.cte_cache) == {None}
+
+
+@weaver_test()
+def test_overlapping_loads_restore_fabrics_cte_cache_when_the_last_one_leaves():
+    """A first load leaving must not re-enable it under one still running."""
+
+    from weaver.runtime.table_load import _fabric_without_cte_cache
+
+    spark = _Spark()
+    spark.conf.set(CTE_CACHE, "true")
+    first = _fabric_without_cte_cache(spark)
+    second = _fabric_without_cte_cache(spark)
+
+    first.__enter__()
+    second.__enter__()
+    first.__exit__(None, None, None)
+    assert spark.conf.get(CTE_CACHE) == "false"
+    second.__exit__(None, None, None)
+    assert spark.conf.get(CTE_CACHE) == "true"
+
+
+@pytest.mark.parametrize(
+    "refused",
+    [("get", CTE_CACHE), ("set", CTE_CACHE, "false"), ("set", CTE_CACHE, "true")],
+    ids=["read", "disable", "restore"],
+)
+@weaver_test()
+def test_a_load_succeeds_whatever_fabrics_cte_cache_setting_refuses(refused):
+    """The setting is undocumented, so no load may depend on it."""
+
+    spark = _Spark(counts=BUSY)
+    spark.conf.set(CTE_CACHE, "true")
+    spark.conf.refused.add(refused)
+
+    result = load_table(
+        spark,
+        contract=_contract(),
+        lakehouse=_Lakehouse(),
+        staging_frame=_Staged(),
+    )
+
+    assert result.succeeded
+    assert spark.mutations
+
+
+@weaver_test()
+def test_a_refused_restore_leaves_the_loads_own_failure():
+    spark = _Spark(counts=BUSY, fail_on=AT_MUTATION)
+    spark.conf.set(CTE_CACHE, "true")
+    spark.conf.refused.add(("set", CTE_CACHE, "true"))
+
+    with pytest.raises(_Boom):
+        load_table(
+            spark,
+            contract=_contract(),
+            lakehouse=_Lakehouse(),
+            staging_frame=_Staged(),
+        )
 
 
 @weaver_test()
