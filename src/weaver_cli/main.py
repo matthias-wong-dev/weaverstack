@@ -1321,7 +1321,6 @@ def _print_load(report) -> None:
     for node in listed:
         mark = _status_symbol(node.status)
         colour = _status_colour(node.status)
-        # Failures before row movement have no row-count fields.
         moved = rows_moved(node.result)
         counts = f"  ({moved})" if moved else ""
         status = f"{node.status:<24}"
