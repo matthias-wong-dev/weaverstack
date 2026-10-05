@@ -305,3 +305,25 @@ def test_a_sql_endpoint_is_resolved_once_through_the_workspace_api():
 
     assert first.id == "endpoint-id" and again is first
     assert asked == ["workspaces/workspace-id/items?type=SQLEndpoint"]
+
+
+@weaver_test()
+def test_fabric_store_reads_a_file_whole_rather_than_its_head(tmp_path):
+    """``head`` stops at 100 KB in Fabric; a staged run's catalogue is larger."""
+
+    remote = "abfss://workspace-id@onelake.dfs.fabric.microsoft.com/lakehouse/Files/a"
+    content = b"x" * 300_000
+
+    class HeadlessFs:
+        def exists(self, path):
+            return path == remote
+
+        def head(self, path, max_bytes):
+            return content[:102_400].decode()
+
+        def cp(self, source, destination, recurse):
+            assert (source, recurse) == (remote, False)
+            Path(destination.removeprefix("file:")).write_bytes(content)
+            return True
+
+    assert FabricStore(HeadlessFs()).read(Location(remote)) == content

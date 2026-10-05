@@ -9,10 +9,6 @@ from ..errors import CommandError
 from ..locations import Location
 from ..store import Entry, StoreError, StoreNotFoundError
 
-#: notebookutils.fs.head reads up to this many bytes. Bundle files are tiny; this
-#: ceiling is only a guard against an unexpectedly large one.
-_MAX_READ_BYTES = 256 * 1024 * 1024
-
 
 class FabricStore:
     def __init__(self, fs: Any | None = None) -> None:
@@ -97,16 +93,27 @@ class FabricStore:
         return entries
 
     def read(self, location: Location) -> bytes:
-        """Read the UTF-8 text used by bundle files as bytes."""
+        """Read a file whole, through the driver's disk.
+
+        ``notebookutils.fs.head`` returns only the first 100 KB in Fabric,
+        whatever it is asked for, so a larger file read through it arrives cut
+        short.
+        """
+
+        import tempfile
 
         path = self._path(location)
         if not self.fs.exists(path):
             raise StoreError(f"cannot read a location that does not exist: {path}")
-        try:
-            text = self.fs.head(path, _MAX_READ_BYTES)
-        except Exception as exc:  # notebookutils raises a bare Py4J error
-            raise StoreError(f"cannot read {location.value}: {exc}") from exc
-        return text.encode("utf-8")
+        with tempfile.TemporaryDirectory() as scratch:
+            local = Path(scratch) / "read"
+            try:
+                copied = self.fs.cp(path, f"file:{local.as_posix()}", False)
+            except Exception as exc:  # notebookutils raises a bare Py4J error
+                raise StoreError(f"cannot read {location.value}: {exc}") from exc
+            if copied is False:
+                raise StoreError(f"could not read {location.value}")
+            return local.read_bytes()
 
     def write(self, location: Location, data: bytes) -> None:
         """Write bytes that contain UTF-8 text."""
