@@ -376,3 +376,19 @@ def test_build_completion_distinguishes_installation_from_a_prepared_bundle(caps
     assert "selected for build" in prepared
     assert "selected for removal" in prepared
     assert "Installation" not in prepared
+
+    _cli()._print_build(
+        BuildResult(
+            source=".",
+            items=("Lakehouse/Sales",),
+            bundle_id="4d738abc",
+            installation=True,
+            bundle_path=None,
+            status=SUCCEEDED,
+            selection=BuildSelection(Impact((), (), ()), (), (), ()),
+            installation_report=report_of(status=SUCCEEDED),
+        )
+    )
+    current = capsys.readouterr().out
+    assert "nothing to install" in current
+    assert "succeeded" not in current

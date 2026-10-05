@@ -543,3 +543,40 @@ def test_a_child_line_says_what_it_is_doing_not_only_what_to():
     lines = [line for line in _screen(out.getvalue()) if line.strip()]
     first_child = lines[1]
     assert first_child.strip().startswith("Read Warehouse/Reporting")
+
+
+# --- waiting for Spark --------------------------------------------------------
+
+
+def _waiting_scope():
+    from types import SimpleNamespace
+
+    return SimpleNamespace(livy=SimpleNamespace(ready=False, get=lambda: "session"))
+
+
+@weaver_test()
+def test_a_wait_for_spark_inside_a_sub_step_is_said_on_its_line():
+    """A Sub-step has no level beneath it, and its duration already holds the wait."""
+
+    out = _Tty()
+    with ConsoleSession(progress=out) as session:
+        with session.task("Build"):
+            with session.step("Read target inventories"):
+                with session.substep("Read Lakehouse/Sales inventory"):
+                    assert session.foreground_livy(_waiting_scope()) == "session"
+
+    lines = [line for line in _screen(out.getvalue()) if line.strip()]
+    assert not any("Wait for Spark session" in line for line in lines)
+    read = next(line for line in lines if "Read Lakehouse/Sales inventory" in line)
+    assert "s waiting for Spark)" in read
+
+
+@weaver_test()
+def test_a_wait_for_spark_outside_a_sub_step_is_a_sub_step_of_its_own():
+    out = _Tty()
+    with ConsoleSession(progress=out) as session:
+        with session.task("Build"):
+            with session.step("Install"):
+                session.foreground_livy(_waiting_scope())
+
+    assert "Wait for Spark session" in _plain(out.getvalue())

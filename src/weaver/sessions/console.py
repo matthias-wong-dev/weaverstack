@@ -16,7 +16,7 @@ from ..delta_protocol import DirectDeltaAction, ProtocolMinima, SparkDeltaAction
 from ..errors import CommandError
 from ..targets import ItemRef, WarehouseTarget
 from ..workspaces import Workspace
-from .base import TASK, Session, WorkspaceScope
+from .base import SUBSTEP, TASK, Session, WorkspaceScope
 from .program import RemoteProgram
 from .resources import Resource
 
@@ -207,10 +207,7 @@ class ConsoleSession(Session):
                 else:
                     mark = " "
                 colour = RED if event == "failed" else GREEN if mark == "✓" else ""
-                named = self._label(frame)
-                if frame.note:
-                    named += f"  ({frame.note})"
-                label = f"{named:<{self._width() - 2}}"
+                label = f"{self._named(frame):<{self._width() - 2}}"
                 duration = f"{_duration(frame.elapsed):>{self.DURATION_WIDTH}}"
                 print(
                     f"{_styled(mark, colour, stream)} {label}"
@@ -224,6 +221,10 @@ class ConsoleSession(Session):
 
     def _label(self, frame) -> str:
         return "  " * max(frame.depth - 1, 0) + frame.name
+
+    def _named(self, frame) -> str:
+        label = self._label(frame)
+        return f"{label}  ({frame.note})" if frame.note else label
 
     def _width(self) -> int:
         """Return a name-column width that follows terminal resizing.
@@ -246,10 +247,10 @@ class ConsoleSession(Session):
         if frame is None:
             return
         text = (
-            f"⋯ {self._label(frame):<{self._width() - 2}}"
+            f"⋯ {self._named(frame):<{self._width() - 2}}"
             f"{_duration(frame.age):>{self.DURATION_WIDTH}}"
         )
-        label = f"{self._label(frame):<{self._width() - 2}}"
+        label = f"{self._named(frame):<{self._width() - 2}}"
         duration = f"{_duration(frame.age):>{self.DURATION_WIDTH}}"
         rendered = (
             f"{_styled('⋯', DIM, stream)} {label}{_styled(duration, DIM, stream)}"
@@ -688,8 +689,19 @@ class ConsoleSession(Session):
             raise CommandError("No Livy session is available for this workspace.")
         if scope.livy.ready:
             return scope.livy.get()
-        with self.substep("Wait for Spark session"):
+        frame = self._innermost()
+        if frame is None or frame.kind != SUBSTEP:
+            with self.substep("Wait for Spark session"):
+                return scope.livy.get()
+        # A Sub-step has no level beneath it, so the wait is said on its line.
+        import time
+
+        started = time.monotonic()
+        frame.note = "waiting for Spark"
+        try:
             return scope.livy.get()
+        finally:
+            frame.note = f"{_duration(time.monotonic() - started)} waiting for Spark"
 
     def execute_tsql(
         self,

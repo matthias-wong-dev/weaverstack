@@ -1840,7 +1840,10 @@ def _print_action_counts(report, *, indent: str = "  ") -> None:
 
 
 def _print_build(result) -> None:
-    if result.installation:
+    if result.installation and not result.installation_report.action_counts()["total"]:
+        print("Installation")
+        print("  nothing to install")
+    elif result.installation:
         print("Installation")
         _print_action_counts(result.installation_report)
         if result.report_path:

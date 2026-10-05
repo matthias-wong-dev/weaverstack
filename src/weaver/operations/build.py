@@ -408,11 +408,13 @@ def _selection_lines(selection, bindings) -> tuple[str, ...]:
             if binding.item == BUILTIN_ITEM
             else str(binding.item)
         )
-        lines.append(f"  {display}")
-        for label, identities in categories:
-            count = sum(identity.item == binding.item for identity in identities)
-            if count:
-                lines.append(f"    {label:<24}{count}")
+        counted = [
+            (label, sum(identity.item == binding.item for identity in identities))
+            for label, identities in categories
+        ]
+        counted = [(label, count) for label, count in counted if count]
+        lines.append(f"  {display}" if counted else f"  {display:<26}up to date")
+        lines.extend(f"    {label:<24}{count}" for label, count in counted)
     return tuple(lines)
 
 
