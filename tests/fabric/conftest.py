@@ -559,6 +559,38 @@ def injected_weaver_bootstrap(
     return bootstrap_source(url, version)
 
 
+def _restart_when_ended(session) -> None:
+    """Replace the shared session in place when Fabric has ended it.
+
+    A long stretch without Spark, such as the load benchmark's Warehouse seed,
+    leaves the session idle until Fabric ends it, and every module after would
+    fail on it. Fabric refuses a statement for an ended session before accepting
+    it, so the statement is submitted once more to a new session.
+    """
+
+    import threading
+
+    from weaver.fabric import LivyError
+
+    run = session.run
+    restarting = threading.Lock()
+
+    def run_on_a_live_session(code, **kwargs):
+        ended = session.session_url
+        try:
+            return run(code, **kwargs)
+        except LivyError as exc:
+            if "terminal state" not in str(exc):
+                raise
+        with restarting:
+            if session.session_url == ended:
+                print("Fabric ended the shared Livy session; starting another.")
+                session.start()
+        return run(code, **kwargs)
+
+    session.run = run_on_a_live_session
+
+
 @pytest.fixture(scope="session")
 def livy_session(fabric_workspace, fabric_client, request, injected_weaver_bootstrap):
     """One Spark session in Fabric with the Weaver Environment attached.
@@ -658,6 +690,7 @@ def livy_session(fabric_workspace, fabric_client, request, injected_weaver_boots
     request.config._weaver_livy_startup_seconds = startup
     print(f"Fabric Livy session startup: {startup:.2f}s")
     session.weaver_startup_seconds = startup
+    _restart_when_ended(session)
     global _shared_livy_session
     _shared_livy_session = session
     try:
