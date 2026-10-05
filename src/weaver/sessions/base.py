@@ -13,7 +13,7 @@ from abc import ABC, abstractmethod
 from concurrent.futures import Executor, ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Any, Iterator, Sequence
+from typing import Any, Callable, Iterator, Sequence
 
 from ..delta_protocol import (
     DirectDeltaAction,
@@ -141,6 +141,7 @@ class Session(ABC):
         self._closed = False
         #: True while flushers drain through an otherwise open Session.
         self._draining = False
+        self._observers: list = []
 
     # --- context ------------------------------------------------------------
 
@@ -382,9 +383,26 @@ class Session(ABC):
     ) -> Any:
         """Run a Python program in Fabric and return its result.
 
-        A ConsoleSession runs the program's source in Fabric through Livy, where ``emit(...)``
-        returns the result. A NotebookSession calls the in-process form directly.
+        A ConsoleSession runs the program's source in Fabric through Livy, where
+        ``emit(...)`` returns the result. A NotebookSession calls the in-process
+        form directly.
         """
+
+    def execute_run(self, run, *, workspace: Workspace | None = None) -> Any:
+        """Execute a load or test run where its work is.
+
+        A client sends a run with Spark work to Fabric whole, so Fabric
+        schedules every node. Anything else runs here.
+        """
+
+        if run.needs_spark and self.position(workspace) == CLIENT:
+            return self.execute_run_in_fabric(run, workspace=workspace)
+        return run.call(self)
+
+    def execute_run_in_fabric(self, run, *, workspace: Workspace | None = None) -> Any:
+        """Send ``run`` to Fabric and return its report."""
+
+        raise CommandError(f"This Session cannot send a {run.name} to Fabric.")
 
     def execute_spark_sql_actions(
         self,
@@ -685,7 +703,7 @@ class Session(ABC):
             concurrent=True,
         )
         with self._concurrent_lock:
-            self.present(frame, "started")
+            self._present(frame, "started")
         return frame
 
     def close_concurrent_substep(
@@ -701,7 +719,7 @@ class Session(ABC):
         frame.failed = frame.failed or error is not None
         with self._concurrent_lock:
             self.timings.append(frame)
-            self.present(frame, "failed" if frame.failed else "completed", error)
+            self._present(frame, "failed" if frame.failed else "completed", error)
 
     def _framed(self, kind: str, name: str, detail: str | None):
         if kind == TASK:
@@ -723,7 +741,7 @@ class Session(ABC):
         )
         self._frames.append(frame)
         self.telemetry.set_frames(self._frames)
-        self.present(frame, "started")
+        self._present(frame, "started")
         return frame
 
     def _close(self, frame: ReportingFrame, error: BaseException | None = None) -> None:
@@ -740,7 +758,7 @@ class Session(ABC):
         # Keep failures reported as data when the frame closes normally.
         frame.failed = frame.failed or error is not None
         self.timings.append(frame)
-        self.present(frame, "failed" if frame.failed else "completed", error)
+        self._present(frame, "failed" if frame.failed else "completed", error)
 
     def _exit(
         self, kind: str, name: str | None, error: BaseException | None = None
@@ -761,6 +779,26 @@ class Session(ABC):
         self, frame: ReportingFrame, event: str, error: BaseException | None = None
     ) -> None:
         """Present a reporting event. Silent by default."""
+
+    @contextmanager
+    def observing(self, observer: Callable[[ReportingFrame, str], None]):
+        """Call ``observer(frame, event)`` after each event this Session presents."""
+
+        self._observers.append(observer)
+        try:
+            yield
+        finally:
+            self._observers.remove(observer)
+
+    def _present(
+        self, frame: ReportingFrame, event: str, error: BaseException | None = None
+    ) -> None:
+        self.present(frame, event, error)
+        for observer in list(self._observers):
+            try:
+                observer(frame, event)
+            except Exception:  # noqa: BLE001 - observing never changes an outcome
+                pass
 
     def report(self, lines: Sequence[str]) -> None:
         """Present untimed operator information. Silent by default."""

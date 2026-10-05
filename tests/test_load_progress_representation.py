@@ -61,7 +61,6 @@ def present(made, gate, *, machine_output=False, **run):
                 result = made.run(
                     session=session,
                     dispatch=gate.dispatch,
-                    dispatch_many=gate.dispatch_many,
                     lanes=Lanes(),
                     **run,
                 )
@@ -137,7 +136,6 @@ def test_concurrent_warehouse_nodes_each_start_and_finish_once():
             made.run(
                 session=session,
                 dispatch=gate.dispatch,
-                dispatch_many=gate.dispatch_many,
                 lanes=Lanes(),
             )
     releaser.join(WAIT)
@@ -152,17 +150,24 @@ def test_concurrent_warehouse_nodes_each_start_and_finish_once():
 
 
 @weaver_test()
-def test_lakehouse_nodes_sent_together_each_get_their_own_lines():
-    gate = Gate()
+def test_lakehouse_nodes_running_at_once_each_get_their_own_lines():
     names = ["Customer", "Order", "Product"]
+    gate = Gate(hold=names)
 
+    def release_when_all_started():
+        while len(gate.started) < len(names):
+            pass
+        for event in gate.hold.values():
+            event.set()
+
+    releaser = threading.Thread(target=release_when_all_started, daemon=True)
+    releaser.start()
     lines, _ = present(runner(nodes=[lakehouse(name) for name in names]), gate)
+    releaser.join(WAIT)
 
-    assert gate.batches == [tuple(names)]
-    assert node_lines(lines) == [
-        *(("→", LH(name)) for name in names),
-        *(("✓", LH(name)) for name in names),
-    ]
+    assert_one_start_and_one_end(lines, [LH(name) for name in names])
+    marks = [mark for mark, _name in node_lines(lines)]
+    assert marks == ["→"] * len(names) + ["✓"] * len(names)
     assert not any(word in "\n".join(lines) for word in MACHINERY)
 
 

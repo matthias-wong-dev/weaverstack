@@ -26,11 +26,13 @@ def dispatch_primitive(
     workspace=None,
     collect=False,
     publication=None,
+    isolated: bool = False,
 ):
     """Dispatch one installed primitive.
 
     The runtime scope opens only for deployed Python modules. ``reload`` and
     ``ignore_stability_threshold`` are table policy and reach table loads alone.
+    ``isolated`` gives a Python load a Spark session of its own.
     """
 
     if session is None:
@@ -66,6 +68,7 @@ def dispatch_primitive(
             open_runtime,
             reload and table,
             ignore_stability_threshold and table,
+            isolated,
         )
     if kind == ENDPOINT_REFRESH:
         return _endpoint_refresh(node, session, workspace)
@@ -216,6 +219,7 @@ def _python(
     open_runtime,
     reload: bool = False,
     ignore_stability_threshold: bool = False,
+    isolated: bool = False,
 ):
     """Run a deployed Python primitive in the scope that imports its module."""
 
@@ -226,7 +230,6 @@ def _python(
             "Rebuild and reinstall the project."
         )
 
-    from ..runtime.load_refusal import decoded_refusal, refused
     from ..runtime.load_result import LoadResult
 
     row = _scope(open_runtime, node).dispatch_python(
@@ -235,67 +238,9 @@ def _python(
         fault_tolerant=fault_tolerant,
         reload=reload,
         ignore_stability_threshold=ignore_stability_threshold,
+        isolated=isolated,
     )
-    if refused(row):
-        # A refusal the Fabric entry point returned as data rather than raising.
-        # Raised here, so both positions settle through the same path.
-        raise decoded_refusal(row)
     return LoadResult.from_row(row)
-
-
-def dispatch_python_many(
-    nodes,
-    *,
-    session=None,
-    resolved=(),
-    fault_tolerant: bool = False,
-    reload: bool = False,
-    ignore_stability_threshold: bool = False,
-    open_runtime=None,
-    **_unused,
-) -> list:
-    """Dispatch Python primitives together, each in a Spark session of its own.
-
-    Returns each node's result, or the exception it raised, in node order.
-    """
-
-    from ..runtime.load_refusal import decoded_refusal, refused
-    from ..runtime.load_result import LoadResult
-
-    requests = []
-    for node, one in zip(nodes, resolved):
-        table = node.primitive_kind == PYTHON_TABLE
-        requests.append(
-            {
-                "node": node,
-                "expected_class": getattr(one, "expected_class", None),
-                "fault_tolerant": fault_tolerant,
-                "reload": reload and table,
-                "ignore_stability_threshold": ignore_stability_threshold and table,
-            }
-        )
-    outcomes: list = [None] * len(requests)
-    runnable = []
-    for index, request in enumerate(requests):
-        if request["expected_class"] is None:
-            outcomes[index] = RunError(
-                f"Cannot run {request['node'].node_id}: its deployed module has no "
-                "expected class. Rebuild and reinstall the project."
-            )
-        else:
-            runnable.append(index)
-    if runnable:
-        rows = _scope(open_runtime, nodes[runnable[0]]).dispatch_python_many(
-            [requests[index] for index in runnable]
-        )
-        for index, row in zip(runnable, rows):
-            if isinstance(row, BaseException):
-                outcomes[index] = row
-            elif refused(row):
-                outcomes[index] = decoded_refusal(row)
-            else:
-                outcomes[index] = LoadResult.from_row(row)
-    return outcomes
 
 
 def isolated_spark(spark):
@@ -429,7 +374,6 @@ def can_refresh(session, workspace=None) -> bool:
 __all__ = [
     "can_refresh",
     "dispatch_primitive",
-    "dispatch_python_many",
     "isolated_spark",
     "python_primitive",
 ]

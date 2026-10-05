@@ -47,13 +47,12 @@ class RunScope(Protocol):
         fault_tolerant: bool,
         reload: bool = False,
         ignore_stability_threshold: bool = False,
+        isolated: bool = False,
     ) -> dict:
-        """Run one deployed module and return its transport-neutral row."""
+        """Run one deployed module and return its transport-neutral row.
 
-    def dispatch_python_many(self, requests: list) -> list:
-        """Run several deployed modules at once, each in a Spark session of its own.
-
-        Returns each one's row, or the exception it raised, in request order.
+        ``isolated`` runs it in a Spark session of its own, for a module that
+        runs beside others.
         """
 
     def dispatch_validation(self, installed, *, collect: bool) -> Any: ...
@@ -80,10 +79,13 @@ class DirectRunScope:
         fault_tolerant: bool,
         reload: bool = False,
         ignore_stability_threshold: bool = False,
-        spark=None,
+        isolated: bool = False,
     ):
-        from .dispatch import python_primitive
+        from .dispatch import isolated_spark, python_primitive
 
+        spark = None
+        if isolated and self._session is not None:
+            spark = isolated_spark(self._session.spark(self._workspace))
         return python_primitive(
             node_id=node.node_id,
             logical_item=node.logical_id.item,
@@ -101,29 +103,6 @@ class DirectRunScope:
             node_identity=node.logical_id,
             spark=spark,
         ).as_row()
-
-    def dispatch_python_many(self, requests: list) -> list:
-        from concurrent.futures import ThreadPoolExecutor
-
-        from .dispatch import isolated_spark
-
-        spark = self._session.spark(self._workspace)
-
-        def one(request: dict):
-            try:
-                return self.dispatch_python(
-                    request["node"],
-                    expected_class=request["expected_class"],
-                    fault_tolerant=request["fault_tolerant"],
-                    reload=request["reload"],
-                    ignore_stability_threshold=request["ignore_stability_threshold"],
-                    spark=isolated_spark(spark),
-                )
-            except Exception as exc:  # noqa: BLE001 - this request's outcome
-                return exc
-
-        with ThreadPoolExecutor(max_workers=max(1, len(requests))) as pool:
-            return list(pool.map(one, requests))
 
     def dispatch_validation(self, installed, *, collect: bool):
         from ..test_execution import run_installed_validation
@@ -190,77 +169,6 @@ class FabricRunScope:
 
     # --- what dispatch asks of it -------------------------------------------
 
-    def dispatch_python(
-        self,
-        node,
-        *,
-        expected_class: str,
-        fault_tolerant: bool,
-        reload: bool = False,
-        ignore_stability_threshold: bool = False,
-    ):
-        """Dispatch a flattened node without serialising the Runner model."""
-
-        from .entry import run_python_primitive
-
-        arguments = {
-            "run_id": self.run_id,
-            **self._arguments(
-                node,
-                expected_class=expected_class,
-                fault_tolerant=fault_tolerant,
-                reload=reload,
-                ignore_stability_threshold=ignore_stability_threshold,
-            ),
-        }
-        return self._submit(
-            run_python_primitive,
-            arguments,
-            detail=node.node_id,
-            timeout=NODE_STATEMENT_TIMEOUT,
-        )
-
-    def dispatch_python_many(self, requests: list) -> list:
-        """One statement, so the modules run together on the far side."""
-
-        from ..fabric.livy import LivyStatementError
-        from .entry import run_python_primitives
-
-        crossing = [
-            self._arguments(
-                request["node"],
-                expected_class=request["expected_class"],
-                fault_tolerant=request["fault_tolerant"],
-                reload=request["reload"],
-                ignore_stability_threshold=request["ignore_stability_threshold"],
-            )
-            for request in requests
-        ]
-        try:
-            carried = self._submit(
-                run_python_primitives,
-                {"run_id": self.run_id, "requests": crossing},
-                detail=", ".join(one["node_id"] for one in crossing),
-                timeout=NODE_STATEMENT_TIMEOUT,
-            )
-        except Exception as exc:  # noqa: BLE001 - every node shares the statement
-            return [exc for _request in requests]
-        outcomes = []
-        for one in carried:
-            failure = one.get("failure")
-            if failure is None:
-                outcomes.append(one["row"])
-                continue
-            # As the statement would have raised it, had the node run alone.
-            outcomes.append(
-                LivyStatementError(
-                    f"{failure['ename']}: {failure['evalue']}\n{failure['traceback']}",
-                    ename=failure["ename"],
-                    evalue=failure["evalue"],
-                )
-            )
-        return outcomes
-
     def dispatch_validation(self, installed, *, collect: bool):
 
         from .entry import run_validation_primitive
@@ -276,36 +184,6 @@ class FabricRunScope:
             timeout=NODE_STATEMENT_TIMEOUT,
         )
         return _carried(carried, installed)
-
-    @staticmethod
-    def _arguments(
-        node,
-        *,
-        expected_class: str,
-        fault_tolerant: bool,
-        reload: bool,
-        ignore_stability_threshold: bool,
-    ) -> dict:
-        """One node, flattened, without serialising the Runner model."""
-
-        arguments = {
-            "node_id": node.node_id,
-            "item": str(node.logical_id.item),
-            "target": node.physical_target.name,
-            "schema": node.primitive_object.schema,
-            "object": node.primitive_object.object,
-            "expected_class": expected_class,
-            "fault_tolerant": fault_tolerant,
-            "reload": reload,
-            "identity": str(node.logical_id) if node.logical_id else None,
-        }
-        if ignore_stability_threshold:
-            # Named only when set, so an ordinary load still crosses to a
-            # published Weaver that predates the waiver. A requested waiver is
-            # always named, so an older runtime fails loudly rather than
-            # loading without it.
-            arguments["ignore_stability_threshold"] = True
-        return arguments
 
     def close(self) -> None:
         """Release imports without changing the outcome of a finished run.

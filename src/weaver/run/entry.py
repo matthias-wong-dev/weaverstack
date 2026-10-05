@@ -9,100 +9,61 @@ from __future__ import annotations
 from ..runtime.session_scopes import get_scope
 
 
-def run_python_primitive(
-    *,
-    run_id: str,
-    node_id: str,
-    item: str,
-    target: str,
-    schema: str,
-    object: str,
-    expected_class: str,
-    fault_tolerant: bool = False,
-    reload: bool = False,
-    ignore_stability_threshold: bool = False,
-    identity: str | None = None,
-    session=None,
-    workspace=None,
-    spark=None,
-) -> dict:
+def run_staged(entry, *, session, workspace, stage: str) -> dict:
+    """Run ``entry`` with the arguments a client staged, writing its progress.
 
-    from ..declaration.model import WeaverItemId, parse_installed_identity
-    from ..runtime.load_refusal import refusal_envelope
-    from ..runtime.session_scopes import scope_catalogue
-    from ..targets import LAKEHOUSE_TARGET, PhysicalTargetRef
-    from .dispatch import python_primitive
-
-    try:
-        loaded = python_primitive(
-            node_id=node_id,
-            logical_item=WeaverItemId.parse(item),
-            physical_target=PhysicalTargetRef(kind=LAKEHOUSE_TARGET, name=target),
-            schema=schema,
-            object=object,
-            expected_class=expected_class,
-            fault_tolerant=fault_tolerant,
-            reload=reload,
-            ignore_stability_threshold=ignore_stability_threshold,
-            runtime_scope=get_scope(run_id),
-            session=_session(session, workspace),
-            workspace=workspace,
-            # Read where the run opened its scope, not here: the catalogue crossed
-            # once, with the scope, and this is one node of the run that carried it.
-            catalogue=scope_catalogue(run_id),
-            node_identity=parse_installed_identity(identity) if identity else None,
-            spark=spark,
-        )
-    except Exception as exc:  # noqa: BLE001 - re-raised unless it is a refusal
-        # Which failures carry a settled result is the runtime's judgement, not
-        # this surface's. Anything it does not recognise crosses as the failure
-        # it is, traceback and all.
-        envelope = refusal_envelope(exc)
-        if envelope is None:
-            raise
-        return envelope
-    return loaded.as_row()
-
-
-def run_python_primitives(
-    *, run_id: str, requests: list, session=None, workspace=None
-) -> list:
-    """Run several Python primitives at once, each in a Spark session of its own.
-
-    Each one's row, or the failure it raised, crosses back as data, so one
-    node's failure does not stand in for the others.
+    The report is left in the stage. Its size and hash are what cross back.
     """
 
-    import traceback
-    from concurrent.futures import ThreadPoolExecutor
+    import hashlib
+    import json
 
-    from .dispatch import isolated_spark
+    from ..fabric.store import FabricStore
+    from ..locations import Location
+    from ..sessions.run_in_fabric import PROGRESS, REQUEST, RESULT, progress_written
 
-    session = _session(session, workspace)
-    spark = session.spark(workspace)
+    store = FabricStore()
+    root = Location(stage)
+    arguments = json.loads(store.read(root / REQUEST))
+    with progress_written(session, store, root / PROGRESS):
+        report = entry(session=session, workspace=workspace, **arguments)
+    data = json.dumps({"report": report, "warnings": list(session.warnings)})
+    store.write(root / RESULT, data.encode("utf-8"))
+    return {
+        "bytes": len(data.encode("utf-8")),
+        "sha256": hashlib.sha256(data.encode("utf-8")).hexdigest(),
+    }
 
-    def one(arguments: dict) -> dict:
-        try:
-            return {
-                "row": run_python_primitive(
-                    run_id=run_id,
-                    session=session,
-                    workspace=workspace,
-                    spark=isolated_spark(spark),
-                    **arguments,
-                )
-            }
-        except Exception as exc:  # noqa: BLE001 - crosses as this node's failure
-            return {
-                "failure": {
-                    "ename": type(exc).__name__,
-                    "evalue": str(exc),
-                    "traceback": traceback.format_exc(),
-                }
-            }
 
-    with ThreadPoolExecutor(max_workers=max(1, len(requests))) as pool:
-        return list(pool.map(one, requests))
+def run_load_in_fabric(
+    *, session, workspace, catalogue: dict, request: dict, started: str
+) -> dict:
+    """Plan and execute a load a client sent, against the catalogue it read."""
+
+    from datetime import datetime
+
+    from ..catalogue.state import Catalogue
+    from ..catalogue.writer import writer_for
+    from ..operations.load import execute_load, load_runner
+    from .runner import RunRequest
+    from .state import RunState
+
+    read = Catalogue.from_mapping(
+        catalogue, writer=writer_for(session, workspace), session=session
+    )
+    runner = load_runner(
+        session,
+        workspace,
+        RunState(catalogue=read),
+        RunRequest.from_mapping(request),
+    )
+    report = execute_load(
+        session,
+        workspace=workspace,
+        runner=runner,
+        started=datetime.fromisoformat(started),
+    )
+    return report.to_mapping()
 
 
 def run_validation_primitive(
@@ -140,7 +101,7 @@ def _session(session, workspace):
 
 
 __all__ = [
-    "run_python_primitive",
-    "run_python_primitives",
+    "run_load_in_fabric",
+    "run_staged",
     "run_validation_primitive",
 ]

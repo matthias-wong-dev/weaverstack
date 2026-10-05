@@ -31,6 +31,28 @@ class FabricProgram:
     source: str
     timeout: float | None = None
     detail: str | None = None
+    #: Whether a submission that may already have reached Fabric can be sent
+    #: again. A load that records itself cannot.
+    resubmit: bool = True
 
 
-__all__ = ["FabricProgram"]
+@dataclass(frozen=True)
+class FabricRun:
+    """A load or test run, as it runs here and as Fabric runs it whole.
+
+    ``call`` runs it with the Session given. ``entry`` is a module-level
+    function Fabric imports and calls with a Session, the Workspace and
+    ``arguments()``; it returns the report as data, which ``decode`` turns into
+    the report ``call`` returns.
+    """
+
+    name: str
+    #: Whether the run executes anything on Spark.
+    needs_spark: bool
+    call: Callable[[Any], Any]
+    entry: Callable[..., dict]
+    arguments: Callable[[], dict]
+    decode: Callable[[dict], Any]
+
+
+__all__ = ["FabricProgram", "FabricRun"]

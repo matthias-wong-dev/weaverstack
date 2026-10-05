@@ -210,11 +210,11 @@ def execute_mutation_in_fabric(
     the carrier while the plan runs.
     """
     from datetime import datetime, timezone
-    from urllib.parse import urlsplit
     from uuid import uuid4
 
     from ..build_bundle.execution import execution_workspace, spark_home_of
     from ..errors import BuildError
+    from ..fabric.onelake import abfss_path
     from ..mutation.executor import MutationReport, MutationResult, validate_inputs
     from ..targets import ItemRef
     from ..workspaces import CARRIER_AREA
@@ -256,23 +256,6 @@ def execute_mutation_in_fabric(
         except Exception:
             pass
 
-    def native(location):
-        value = location.value
-        if value.startswith("https://"):
-            address = urlsplit(value)
-            parts = address.path.strip("/").split("/", 1)
-            if (
-                address.hostname != "onelake.dfs.fabric.microsoft.com"
-                or len(parts) != 2
-                or address.query
-                or address.fragment
-            ):
-                raise ValueError(
-                    "mutation carrier requires a bound OneLake destination"
-                )
-            return "abfss://" + parts[0] + "@" + address.hostname + "/" + parts[1]
-        return value
-
     from .archive_runtime import execution_capacity
 
     # Fabric runs the plan with this deployment's capacity, which the plan omits.
@@ -286,13 +269,16 @@ def execute_mutation_in_fabric(
         "limits": limits,
     }
     if observer is not None:
-        request["progress"] = native(progress)
+        request["progress"] = abfss_path(progress)
     carrier = pack_mutation(plan, payloads, request=request)
     if carrier is None:
         raise BuildError("mutation carrier exceeds expanded size bound")
 
     source = bootstrap_source(
-        carrier, native(incoming), native(output), workers=session.direct_delta_workers
+        carrier,
+        abfss_path(incoming),
+        abfss_path(output),
+        workers=session.direct_delta_workers,
     )
     store.make_directory(stage)
     try:

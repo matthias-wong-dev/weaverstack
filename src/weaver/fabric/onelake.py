@@ -56,6 +56,26 @@ def abfss_root(workspace_id: str, item_id: str) -> str:
     return f"abfss://{workspace_id}@onelake.dfs.fabric.microsoft.com/{item_id}"
 
 
+def abfss_path(location: Location) -> str:
+    """A bound OneLake location as Spark and NotebookUtils in Fabric address it."""
+
+    from urllib.parse import urlsplit
+
+    value = location.value
+    if not value.startswith("https://"):
+        return value
+    address = urlsplit(value)
+    parts = address.path.strip("/").split("/", 1)
+    if (
+        address.hostname != "onelake.dfs.fabric.microsoft.com"
+        or len(parts) != 2
+        or address.query
+        or address.fragment
+    ):
+        raise CommandError(f"{value!r} is not a bound OneLake location.")
+    return "abfss://" + parts[0] + "@" + address.hostname + "/" + parts[1]
+
+
 @dataclass(frozen=True)
 class OneLakePath:
     """A OneLake location's parts. ``segment`` is the item as the URL spells it."""

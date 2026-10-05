@@ -517,7 +517,13 @@ class ConsoleSession(Session):
             name=program.name,
             timeout=timeout if timeout is not None else program.timeout,
             livy=livy,
+            retry_submission=program.resubmit,
         )
+
+    def execute_run_in_fabric(self, run, *, workspace: Workspace | None = None):
+        from .run_in_fabric import send
+
+        return send(self, run, workspace=workspace)
 
     def execute_spark_sql_batch(
         self,

@@ -32,14 +32,18 @@ class Gate:
         self.in_flight: set[str] = set()
         self.overlapped: set[frozenset] = set()
         self.started: list[str] = []
-        self.batches: list[tuple[str, ...]] = []
+        #: Whether each node was asked for a Spark session of its own.
+        self.isolated: dict[str, bool] = {}
+        self.peak = 0
 
-    def dispatch(self, node, **_asked):
+    def dispatch(self, node, **asked):
         with self.lock:
             self.started.append(node.node_id)
+            self.isolated[node.node_id] = asked.get("isolated", False)
             for other in self.in_flight:
                 self.overlapped.add(frozenset((other, node.node_id)))
             self.in_flight.add(node.node_id)
+            self.peak = max(self.peak, len(self.in_flight))
         try:
             gate = self.hold.get(node.node_id)
             if gate is not None:
@@ -52,34 +56,11 @@ class Gate:
             with self.lock:
                 self.in_flight.discard(node.node_id)
 
-    def dispatch_many(self, nodes, **asked):
-        asked.pop("resolved", None)
-        with self.lock:
-            self.batches.append(tuple(one.node_id for one in nodes))
-        results = [None] * len(nodes)
 
-        def one(index, node):
-            try:
-                results[index] = self.dispatch(node, **asked)
-            except Exception as exc:  # noqa: BLE001 - the node's outcome
-                results[index] = exc
-
-        threads = [
-            threading.Thread(target=one, args=(index, node))
-            for index, node in enumerate(nodes)
-        ]
-        for thread in threads:
-            thread.start()
-        for thread in threads:
-            thread.join()
-        return results
-
-
-def run(made, gate, *, lanes=Lanes(), on_node=None, together=True):
+def run(made, gate, *, lanes=Lanes(), on_node=None):
     return made.run(
         session=object(),
         dispatch=gate.dispatch,
-        dispatch_many=gate.dispatch_many if together else None,
         lanes=lanes,
         on_node=on_node,
     )
@@ -110,13 +91,48 @@ def test_independent_warehouse_loads_run_at_once():
 
 
 @weaver_test()
-def test_python_loads_that_become_ready_together_are_dispatched_together():
-    gate = Gate()
+def test_python_loads_that_become_ready_together_run_at_once_in_sessions_of_their_own():
+    """The first shares the host's Spark session; each one beside it has its own."""
+
+    gate = Gate(hold=("a", "c", "e"))
     made = runner(nodes=[node("a"), node("c"), node("e")])
 
-    result = run(made, gate)
+    def release_when_all_started():
+        while len(gate.started) < 3:
+            pass
+        for event in gate.hold.values():
+            event.set()
 
-    assert gate.batches == [("a", "c", "e")]
+    releaser = threading.Thread(target=release_when_all_started)
+    releaser.start()
+    result = run(made, gate)
+    releaser.join()
+
+    assert {frozenset(("a", "c")), frozenset(("a", "e")), frozenset(("c", "e"))} <= (
+        gate.overlapped
+    )
+    assert gate.isolated == {"a": False, "c": True, "e": True}
+    assert set(statuses(result).values()) == {SUCCEEDED}
+
+
+@weaver_test()
+def test_a_slow_python_load_holds_only_its_own_lane():
+    """A lane frees when its node settles, whatever else is still running."""
+
+    gate = Gate(hold=("a",))
+    made = runner(nodes=[node(name) for name in "abcd"])
+
+    def release_when_d_started():
+        while "d" not in gate.started:
+            pass
+        gate.hold["a"].set()
+
+    releaser = threading.Thread(target=release_when_d_started)
+    releaser.start()
+    result = run(made, gate, lanes=Lanes(spark=2))
+    releaser.join()
+
+    assert {frozenset(("a", "c")), frozenset(("a", "d"))} <= gate.overlapped
     assert set(statuses(result).values()) == {SUCCEEDED}
 
 
@@ -127,8 +143,7 @@ def test_a_lane_holds_no_more_than_its_limit():
 
     run(made, gate, lanes=Lanes(spark=2))
 
-    assert gate.batches[0] == ("a", "b")
-    assert all(len(batch) <= 2 for batch in gate.batches)
+    assert gate.peak <= 2
     assert sorted(gate.started) == list("abcde")
 
 
@@ -145,7 +160,6 @@ def test_a_node_starts_only_after_its_upstream_settled():
     started = gate.started
     assert started.index("b") > started.index("a")
     assert started.index("d") > started.index("c")
-    assert gate.batches[0] == ("a", "c", "e")
     assert set(statuses(result).values()) == {SUCCEEDED}
 
 
@@ -206,18 +220,6 @@ def test_every_node_settles_in_the_thread_that_ran_the_run():
 
 
 @weaver_test()
-def test_without_a_together_seam_python_loads_dispatch_one_by_one():
-    gate = Gate()
-    made = runner(nodes=[node("a"), node("c")])
-
-    result = run(made, gate, together=False)
-
-    assert gate.batches == []
-    assert sorted(gate.started) == ["a", "c"]
-    assert set(statuses(result).values()) == {SUCCEEDED}
-
-
-@weaver_test()
 def test_the_report_keeps_the_graph_order_whatever_finished_first():
     gate = Gate(hold=("a",))
     made = runner(nodes=[procedure("a"), procedure("b")])
@@ -232,7 +234,7 @@ def test_the_report_keeps_the_graph_order_whatever_finished_first():
 
 
 @weaver_test()
-def test_a_python_load_that_starts_alone_is_dispatched_alone():
+def test_a_python_load_that_starts_alone_shares_the_host_spark_session():
     """Nothing shares the host's Spark with it, so it needs no session of its own."""
 
     gate = Gate()
@@ -240,6 +242,6 @@ def test_a_python_load_that_starts_alone_is_dispatched_alone():
 
     result = run(made, gate)
 
-    assert gate.batches == []
+    assert gate.isolated == {"a": False, "b": False}
     assert gate.started == ["a", "b"]
     assert set(statuses(result).values()) == {SUCCEEDED}

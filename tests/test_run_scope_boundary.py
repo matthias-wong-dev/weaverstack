@@ -158,11 +158,8 @@ class _Recording:
 def _answer_for(name: str):
     """What the far side would have returned for one entry point."""
 
-    from weaver.runtime.load_result import LoadResult
     from weaver.runtime.validation_result import TestResult
 
-    if name == "run_python_primitive":
-        return LoadResult(succeeded=True).as_row()
     if name == "run_validation_primitive":
         return {"result": TestResult().to_mapping(), "diagnostics": []}
     return True
@@ -188,18 +185,6 @@ def test_a_workspace_without_an_environment_keeps_none_in_remote_source():
 
 def _sources(session):
     return {program.name: program.source for program in session.submitted}
-
-
-def _row():
-    """A full load row, which is what a dispatch answers with.
-
-    ``from_row`` is the inverse of ``as_row`` and takes every column, so a
-    partial mapping here would fail in the scope rather than in the test.
-    """
-
-    from weaver.runtime.load_result import LoadResult
-
-    return LoadResult(succeeded=True).as_row()
 
 
 def _node():
@@ -251,9 +236,9 @@ def _validation():
 
 
 def _dispatch(scope):
-    scope.dispatch_python(
-        _node(), expected_class="Sales__Customer", fault_tolerant=False
-    )
+    """The one dispatch that still crosses node by node: a Lakehouse validation."""
+
+    scope.dispatch_validation(_validation(), collect=False)
 
 
 @weaver_test()
@@ -317,31 +302,31 @@ def test_a_configuration_failure_is_not_mistaken_for_running_locally():
 
 @weaver_test()
 def test_every_dispatch_names_the_run_whose_scope_it_belongs_to():
-    session = _Recording(answer=_row())
+    session = _Recording()
     scope = open_runtime_scope(session, workspace=_fabric())
 
     _dispatch(scope)
 
-    submitted = _sources(session)["run_python_primitive"]
+    submitted = _sources(session)["run_validation_primitive"]
     assert scope.run_id in submitted
-    assert "Sales__Customer" in submitted
+    assert "Customer" in submitted
 
 
 @weaver_test()
 def test_a_node_is_not_cut_short_by_the_default_statement_deadline():
-    """A load takes as long as its data does. Opening a scope is quick."""
+    """A check takes as long as its data does. Opening a scope is quick."""
 
     from weaver.fabric.livy import DEFAULT_STATEMENT_TIMEOUT
     from weaver.run.runtime_boundary import NODE_STATEMENT_TIMEOUT
 
-    session = _Recording(answer=_row())
+    session = _Recording()
     scope = open_runtime_scope(session, workspace=_fabric())
 
     _dispatch(scope)
 
     timeouts = {program.name: program.timeout for program in session.submitted}
     assert timeouts["open_scope"] is None
-    assert timeouts["run_python_primitive"] == NODE_STATEMENT_TIMEOUT
+    assert timeouts["run_validation_primitive"] == NODE_STATEMENT_TIMEOUT
     assert NODE_STATEMENT_TIMEOUT > DEFAULT_STATEMENT_TIMEOUT
 
 
@@ -351,11 +336,11 @@ def test_the_submitted_program_builds_its_session_around_the_interpreters_spark(
     the call would have to go looking for an active Spark session rather than
     being handed the one the statement is running in."""
 
-    session = _Recording(answer=_row())
+    session = _Recording()
     scope = open_runtime_scope(session, workspace=_fabric())
     _dispatch(scope)
 
-    submitted = _sources(session)["run_python_primitive"]
+    submitted = _sources(session)["run_validation_primitive"]
     assert "NotebookSession(workspace=workspace, spark=spark)" in submitted
     assert submitted.index("workspace = Workspace") < submitted.index(
         "NotebookSession"
@@ -366,8 +351,6 @@ def test_the_submitted_program_builds_its_session_around_the_interpreters_spark(
     "name",
     [
         "open_scope",
-        "run_python_primitive",
-        "run_python_primitives",
         "run_validation_primitive",
         "close_scope",
     ],
@@ -379,10 +362,6 @@ def test_every_submitted_program_is_valid_python(name):
 
     session = _Recording()
     scope = open_runtime_scope(session, workspace=_fabric())
-    _dispatch(scope)
-    session.answer = [{"row": _row()}, {"row": _row()}]
-    scope.dispatch_python_many(_requests("Sales__Customer", "Sales__Order"))
-    session.answer = None
     scope.dispatch_validation(_validation(), collect=True)
     scope.close()
 
@@ -452,8 +431,9 @@ def test_the_scope_is_what_runs_a_python_node():
             fault_tolerant,
             reload,
             ignore_stability_threshold=False,
+            isolated=False,
         ):
-            sent.append((node, expected_class, fault_tolerant, reload))
+            sent.append((node, expected_class, fault_tolerant, reload, isolated))
             # A row, which is what a scope answers with in either position.
             return LoadResult(succeeded=True, rows_read=3).as_row()
 
@@ -465,7 +445,7 @@ def test_the_scope_is_what_runs_a_python_node():
         open_runtime=LazyRunScope(Scope),
     )
 
-    assert sent == [(node, "Sales__Customer", False, False)]
+    assert sent == [(node, "Sales__Customer", False, False, False)]
     assert result.rows_read == 3
 
 
@@ -648,49 +628,3 @@ def test_a_live_session_that_could_not_release_a_scope_is_reported():
     assert len(session.warnings) == 1
     assert "left imported modules in the Fabric session" in session.warnings[0]
     assert "TypeError" in session.warnings[0]
-
-
-def _requests(*expected):
-    return [
-        {
-            "node": _node(),
-            "expected_class": one,
-            "fault_tolerant": False,
-            "reload": False,
-            "ignore_stability_threshold": False,
-        }
-        for one in expected
-    ]
-
-
-@weaver_test()
-def test_python_nodes_dispatched_together_cross_in_one_statement():
-    """They run together on the far side, so one statement carries them all."""
-
-    session = _Recording(answer=[{"row": _row()}, {"row": _row()}])
-    scope = open_runtime_scope(session, workspace=_fabric())
-
-    rows = scope.dispatch_python_many(_requests("Sales__Customer", "Sales__Order"))
-
-    assert rows == [_row(), _row()]
-    batches = [one for one in session.submitted if one.name == "run_python_primitives"]
-    assert len(batches) == 1
-    assert "Sales__Customer" in batches[0].source
-    assert "Sales__Order" in batches[0].source
-
-
-@weaver_test()
-def test_a_node_that_failed_beside_others_fails_alone_as_it_would_have_alone():
-    from weaver.fabric.livy import LivyStatementError
-
-    failure = {"ename": "ValueError", "evalue": "bad rows", "traceback": "Traceback"}
-    session = _Recording(answer=[{"failure": failure}, {"row": _row()}])
-    scope = open_runtime_scope(session, workspace=_fabric())
-
-    failed, loaded = scope.dispatch_python_many(
-        _requests("Sales__Customer", "Sales__Order")
-    )
-
-    assert isinstance(failed, LivyStatementError)
-    assert str(failed).startswith("ValueError: bad rows")
-    assert loaded == _row()

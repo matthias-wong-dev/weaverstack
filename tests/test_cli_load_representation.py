@@ -920,6 +920,13 @@ class _FakeResolver:
     def __init__(self, workspace, **kwargs) -> None:
         self.workspace = workspace
 
+    def files_root(self, item):
+        from weaver.locations import Location
+
+        return Location(
+            f"https://onelake.dfs.fabric.microsoft.com/My Workspace/{item.name}/Files"
+        )
+
     def spark_destination(self, item):
         from weaver.spark import FabricSparkTarget
 
@@ -932,6 +939,30 @@ class _FakeResolver:
         if item.name not in type(self).present:
             raise ItemNotFoundError(f"no {item_type} named {item.name!r} in workspace")
         return object()
+
+
+class _FakeStore:
+    """OneLake as the client stages a run there: bytes by location."""
+
+    def __init__(self) -> None:
+        self.files: dict[str, bytes] = {}
+
+    def make_directory(self, location) -> None:
+        pass
+
+    def write(self, location, data: bytes) -> None:
+        self.files[location.value] = data
+
+    def read(self, location) -> bytes:
+        from weaver.store import StoreError
+
+        if location.value not in self.files:
+            raise StoreError(f"cannot read {location.value}")
+        return self.files[location.value]
+
+    def delete(self, location, *, recursive: bool = False) -> None:
+        for key in [key for key in self.files if key.startswith(location.value)]:
+            del self.files[key]
 
 
 @pytest.fixture
@@ -947,8 +978,8 @@ def livy(monkeypatch):
 
     _FakeLivy.submitted = []
     _FakeLivy.started = 0
-    # One node's load result: the catalogue is read over TDS now, so the only
-    # thing that crosses Livy is the primitive that fills a table.
+    # The receipt for a load sent to Fabric. The catalogue is read over TDS, so
+    # the only thing that crosses Livy is the run.
     _FakeLivy.answer = {
         "succeeded": True,
         "rows_read": 5,
@@ -968,6 +999,9 @@ def livy(monkeypatch):
     monkeypatch.setattr(
         ConsoleScope, "resolver", property(lambda self: _FakeResolver(self.workspace))
     )
+    store = _FakeStore()
+    monkeypatch.setattr(ConsoleScope, "transport_store", property(lambda self: store))
+    monkeypatch.setattr(ConsoleScope, "store", property(lambda self: store))
     # The catalogue is a Warehouse now, so a load reads it over TDS before it
     # crosses. Doubled at the Session's own capability, for the same reason the
     # Livy transport is: what is under test is the crossing, not the engine.
