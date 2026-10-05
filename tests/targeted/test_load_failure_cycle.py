@@ -625,3 +625,31 @@ def test_a_dry_run_is_planned_on_the_client(session, dispatched):
     assert sent == []
     assert dispatched.calls == []
     assert report.dry_run
+
+
+@weaver_test()
+def test_a_load_for_another_workspace_stages_in_that_workspace_s_lakehouse(
+    session, dispatched
+):
+    """A Session may default to one workspace and load another, as a mirror does."""
+
+    from support.sessions import NOWHERE, given_session
+
+    client = given_session(workspace=NOWHERE)
+    homes = []
+
+    def in_fabric(run, *, workspace=None):
+        homes.append(client.scope(workspace).spark_home)
+        raise RuntimeError("stop here")
+
+    client.execute_run_in_fabric = in_fabric
+
+    with pytest.raises(RuntimeError, match="stop here"):
+        run_load(
+            client,
+            workspace=session.workspace,
+            state=RunState(catalogue=session.catalogue),
+            items=(RAW, REPORTING),
+        )
+
+    assert homes == ["Raw_LH"]

@@ -126,7 +126,7 @@ def run_test(
         session, workspace=workspace, targets=targets, dry_run=dry_run
     )
     # Fabric requires a Lakehouse attachment before Spark starts.
-    session.offer_spark_home(lakehouse_names(targets))
+    session.offer_spark_home(lakehouse_names(targets), workspace=workspace)
     started = datetime.now(timezone.utc)
 
     if file is not None:

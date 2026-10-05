@@ -196,7 +196,7 @@ def run_load(
         ).unsettled_identities()
 
     # Fabric requires a Lakehouse attachment before Spark starts.
-    session.offer_spark_home(lakehouse_names(installed.values()))
+    session.offer_spark_home(lakehouse_names(installed.values()), workspace=workspace)
 
     request = RunRequest.load(
         items,
