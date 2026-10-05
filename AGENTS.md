@@ -313,12 +313,14 @@ dependencies:
 decertify → reset runtime state → every physical root
 schema ─→ table ─→ dependent view          drop consumer ─→ drop producer ─→ rebuild
 shortcut create ─→ readiness ─→ consumer   source object ─→ shortcut create
-Lakehouse mutations ··→ refresh start ─→ refresh await ─→ endpoint readers
+Lakehouse mutations ··→ refresh start ─→ refresh await ─→ listed ─→ endpoint readers
 folder ─→ runtime file                     object ─→ Warehouse procedure
 every physical success sink ─→ physical gate ─→ catalogue publication ─→ Registry
 ```
 
-`··→` is `settle_after`: a refresh reflects whatever the mutations left.
+`··→` is `settle_after`: a refresh reflects whatever the mutations left. A
+completed refresh does not mean the endpoint lists a new table yet, so a
+Warehouse waits until it lists every Lakehouse table it reads.
 Publication certifies objects, not endpoint metadata, so the physical gate
 excludes refreshes and publication runs beside them. The Build completes only
 once every refresh it started is current, so the next operation reads a current

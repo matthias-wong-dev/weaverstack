@@ -84,3 +84,35 @@ def test_an_object_never_listed_fails_by_name(monkeypatch):
 
     with pytest.raises(InstallError, match=r"Input_Dev\.Sales\.Order"):
         executor.execute(None, PAYLOAD, context)
+
+
+@weaver_test()
+def test_only_what_an_endpoint_lists_is_waited_for():
+    """An endpoint lists Lakehouse tables and table shortcuts, never Spark views."""
+
+    from types import SimpleNamespace
+
+    from weaver.build_bundle.shortcuts import _endpoint_lists
+    from weaver.declaration.metadata import TABLE, VIEW
+
+    table, view, pointer, folder = (
+        f"Lakehouse/Sales/Tables/Sales.{name}"
+        for name in ("Customer", "Recent", "Order", "Drop")
+    )
+
+    def shortcut(destination, **form):
+        flags = {"is_files": False, "is_view": False, "is_schema": False, **form}
+        return SimpleNamespace(destination=destination, **flags)
+
+    repository = SimpleNamespace(
+        source_documents={
+            table: SimpleNamespace(kind=TABLE),
+            view: SimpleNamespace(kind=VIEW),
+        },
+        shortcuts=(shortcut(pointer), shortcut(folder, is_files=True)),
+    )
+
+    assert _endpoint_lists(repository, table)
+    assert not _endpoint_lists(repository, view)
+    assert _endpoint_lists(repository, pointer)
+    assert not _endpoint_lists(repository, folder)
