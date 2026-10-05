@@ -202,7 +202,12 @@ def _plan_item_shortcuts(
     schemas: list[str] = []
 
     for declaration in declarations:
-        if not declaration.is_schema and declaration.destination_identity is None:
+        # A folder shortcut lives under Files, where no schema holds it.
+        if (
+            not declaration.is_schema
+            and not declaration.is_files
+            and declaration.destination_identity is None
+        ):
             schemas.append(declaration.schema)
         if declaration.destination not in chosen:
             continue
