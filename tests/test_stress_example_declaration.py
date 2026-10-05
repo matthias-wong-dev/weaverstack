@@ -133,3 +133,30 @@ def test_only_the_largest_fact_and_its_copy_have_no_primary_key():
     keyless = [node for node in nodes if node.behaviour == generator.APPEND]
     assert len(keyless) == 2
     assert {node.rows for node in keyless} == {max(node.rows for node in nodes)}
+
+
+@weaver_test()
+def test_a_bookmark_is_read_only_against_a_delta_stamp():
+    """A Warehouse stamps rows with no time zone, so its readers compare Epochs."""
+
+    generator = _generator()
+    options = generator.Options()
+    nodes = generator.plan_estate(generator.plan_sources(options), options)
+    landing = [
+        node
+        for node in nodes
+        if node.layer == "landing" and node.behaviour == generator.INCREMENTAL
+    ]
+    by_item = {
+        item: next(node for node in landing if node.source.item == item)
+        for item in (generator.SOURCE_LAKEHOUSE, generator.SOURCE_WAREHOUSE)
+    }
+
+    lake = generator._python_landing(by_item[generator.SOURCE_LAKEHOUSE], "Source")
+    warehouse = generator._python_landing(
+        by_item[generator.SOURCE_WAREHOUSE], "SourceWarehouse"
+    )
+
+    assert "self.bookmark()" in lake
+    assert "self.bookmark()" not in warehouse
+    assert "high_water(self)" in warehouse

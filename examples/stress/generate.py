@@ -981,7 +981,8 @@ def _python_read(behaviour: str, read: str, *, bookmarked: bool) -> str:
     Each load of a parent table stamps what it changed with a
     ``row_update_datetime``, so a child reads only what changed since its own
     last clean load began, and Delta skips every file older than that. A view
-    carries no audit column, so a reader of one uses the newest Epoch it holds.
+    carries no audit column, so a reader of one, like a reader of a Warehouse,
+    uses the newest Epoch it holds.
     """
 
     if bookmarked:
@@ -1013,7 +1014,11 @@ def _python_read(behaviour: str, read: str, *, bookmarked: bool) -> str:
 def _python_landing(node: Node, shortcut: str) -> str:
     source = node.source
     read = f"{shortcut}(self).{source.name}.dataframe()"
-    body = _python_read(node.behaviour, read, bookmarked=True)
+    # A Warehouse stamps a row with a time of no zone, so a reader compares
+    # Epochs rather than read it against a bookmark through Spark's time zone.
+    body = _python_read(
+        node.behaviour, read, bookmarked=source.item != SOURCE_WAREHOUSE
+    )
     imported = "COLUMNS, high_water" if "high_water" in body else "COLUMNS"
     return f'''"""
 Table ID: {node.id}
