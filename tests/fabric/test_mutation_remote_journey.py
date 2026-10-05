@@ -90,7 +90,7 @@ def test_desktop_plan_delivers_binary_bytes_and_reports_physical_failure(
     plan = physical_plan(
         fabric_workspace, fabric_workspace_item, target, (folder, write)
     )
-    report = weaver_session.execute_mutation_remote(plan, {write.payload: data})
+    report = weaver_session.execute_mutation_in_fabric(plan, {write.payload: data})
     assert report.succeeded, [(r.action_id, r.status, r.error) for r in report.results]
     store = weaver_session.transport_store(fabric_workspace)
     resolver = weaver_session.resolver(fabric_workspace)
@@ -103,7 +103,7 @@ def test_desktop_plan_delivers_binary_bytes_and_reports_physical_failure(
         resolver.files_root(ItemRef(target.name)).join("_weaver_carriers")
     )
     assert weaver_session.archive_mutations[-1]["action_ids"] == ["mkdir", "bytes"]
-    failed = weaver_session.execute_mutation_remote(
+    failed = weaver_session.execute_mutation_in_fabric(
         physical_plan(fabric_workspace, fabric_workspace_item, target, (folder,))
     )
     assert failed.by_id["mkdir"].status == "failed"
@@ -168,7 +168,7 @@ def test_lost_response_is_uncertain_without_replay_and_normal_build_converges(
 
     with monkeypatch.context() as patcher:
         patcher.setattr(scope, "livy_run", lost_response)
-        uncertain = weaver_session.execute_mutation_remote(bundle.plan, payloads)
+        uncertain = weaver_session.execute_mutation_in_fabric(bundle.plan, payloads)
     record = weaver_session.archive_mutations[-1]
     assert len(submissions) == 1 and submissions[0]["retry_submission"] is False
     assert all(r.status == "uncertain" for r in uncertain.results)

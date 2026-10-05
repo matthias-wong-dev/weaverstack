@@ -237,7 +237,7 @@ def _python(
         ignore_stability_threshold=ignore_stability_threshold,
     )
     if refused(row):
-        # A refusal the remote entry point returned as data rather than raising.
+        # A refusal the Fabric entry point returned as data rather than raising.
         # Raised here, so both positions settle through the same path.
         raise decoded_refusal(row)
     return LoadResult.from_row(row)

@@ -255,9 +255,9 @@ plan and payload bytes through `Session.execute_mutation`.
 The Session owns execution routing. `ConsoleSession` executes a plan with no
 frozen Spark attachment through the shared native executor, reaching TDS,
 OneLake and REST from the desktop, so it starts no Spark session. A plan that
-attaches Spark uses `execute_mutation_remote(plan, payloads=None)`, which submits
-the whole plan once to Fabric. Native and remote execution both use
-`MutationExecutor` and the existing physical executors.
+attaches Spark uses `execute_mutation_in_fabric(plan, payloads=None)`, which
+submits the whole plan once to Fabric. Execution on the client and in Fabric both
+use `MutationExecutor` and the existing physical executors.
 
 The internal carrier contains the canonical plan, optional payloads and matching
 Weaver runtime sources and static resources. It validates all payload hashes

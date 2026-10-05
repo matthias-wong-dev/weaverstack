@@ -60,7 +60,7 @@ def execute_bundle(bundle, session, *, executors=None, build_datetime=None):
                         if result.error
                         else None,
                         error_message=result.error,
-                        # A remote report's values arrive frozen.
+                        # A report from Fabric arrives with its values frozen.
                         details=thaw_value(value)
                         if isinstance(value, Mapping)
                         else None,

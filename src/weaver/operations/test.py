@@ -200,11 +200,11 @@ def _dispatch_collecting(*, collect: bool):
 def _require_lakehouse_environment(session, *, workspace, targets, dry_run: bool):
     """Require an Environment before planning a desktop Lakehouse run."""
 
-    from ..sessions.base import ACROSS_BOUNDARY
+    from ..sessions.base import CLIENT
 
     if dry_run or workspace.environment or not lakehouse_names(targets):
         return
-    if session.position(workspace) != ACROSS_BOUNDARY:
+    if session.position(workspace) != CLIENT:
         return
     target = next(target for target in targets if target.is_lakehouse)
     raise CommandError(

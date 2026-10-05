@@ -318,7 +318,7 @@ class Catalogue:
         return installed_dag(self)
 
     def to_mapping(self) -> dict[str, object]:
-        """A versioned JSON-safe representation for remote callers."""
+        """A versioned JSON-safe representation that crosses into Fabric."""
 
         return {
             "format_version": 1,

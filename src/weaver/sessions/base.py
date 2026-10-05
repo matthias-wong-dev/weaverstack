@@ -43,11 +43,12 @@ def workspace_context(workspace: Workspace) -> tuple:
     )
 
 
-#: Where execution happens relative to this process. Run scope uses this because
-#: deployed modules are imported where Spark is.
+#: Where execution happens relative to this process: in Fabric, or from a client
+#: that reaches Fabric through Livy, TDS, OneLake and REST. Run scope uses this
+#: because deployed modules are imported where Spark is.
 
-IN_SESSION = "in_session"
-ACROSS_BOUNDARY = "across_boundary"
+FABRIC = "fabric"
+CLIENT = "client"
 UNPLACED = "unplaced"
 
 #: The reporting hierarchy: task, step, then physical sub-step. Failures attach
@@ -204,7 +205,7 @@ class Session(ABC):
             self._workflow_id = previous
 
     def position(self, workspace: Workspace | None = None) -> str:
-        """Return whether execution is in-session, across-boundary, or unplaced.
+        """Return whether execution is in Fabric, from a client, or unplaced.
 
         A Session with no workspace is unplaced.
         """
@@ -213,7 +214,7 @@ class Session(ABC):
             self.workspace_or_default(workspace)
         except CommandError:
             return UNPLACED
-        return IN_SESSION if self.executes_here(workspace) else ACROSS_BOUNDARY
+        return FABRIC if self.executes_here(workspace) else CLIENT
 
     @abstractmethod
     def executes_here(self, workspace: Workspace | None = None) -> bool:
@@ -381,7 +382,7 @@ class Session(ABC):
     ) -> Any:
         """Run a Python program in Fabric and return its result.
 
-        A ConsoleSession runs remote source through Livy, where ``emit(...)``
+        A ConsoleSession runs the program's source in Fabric through Livy, where ``emit(...)``
         returns the result. A NotebookSession calls the in-process form directly.
         """
 
@@ -403,7 +404,7 @@ class Session(ABC):
         outcomes.
 
         ``timeout`` is the allowance for each action. A host that places several
-        actions in one remote submission preserves the aggregate allowance.
+        actions in one Livy submission preserves the aggregate allowance.
         """
 
         origin = time.monotonic()
@@ -463,7 +464,7 @@ class Session(ABC):
         final query share temporary views and session state.
 
         ``exact_case`` applies to the whole batch because a desktop caller cannot
-        set the remote Spark configuration directly.
+        set Fabric's Spark configuration directly.
 
         The other statements are run for their effect, as they are in a session.
         """
@@ -1023,8 +1024,8 @@ def run_labelled_spark_statements(
 
 
 __all__ = [
-    "ACROSS_BOUNDARY",
-    "IN_SESSION",
+    "CLIENT",
+    "FABRIC",
     "STEP",
     "SUBSTEP",
     "TASK",

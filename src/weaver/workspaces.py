@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 CATALOGUE_KIND = "Warehouse"
 
 CLI_AREA = "cli"
-#: Lakehouse Files area holding in-flight remote mutation carriers.
+#: Lakehouse Files area holding the carriers of mutations running in Fabric.
 CARRIER_AREA = "_weaver_carriers"
 
 

@@ -17,7 +17,7 @@ from ..errors import CommandError
 from ..targets import ItemRef, WarehouseTarget
 from ..workspaces import Workspace
 from .base import SUBSTEP, TASK, Session, WorkspaceScope
-from .program import RemoteProgram
+from .program import FabricProgram
 from .resources import Resource
 
 RESET = "\x1b[0m"
@@ -116,10 +116,10 @@ class ConsoleSession(Session):
 
     # --- progress -----------------------------------------------------------
 
-    def execute_mutation_remote(self, plan, payloads=None, **options):
-        from .install_archive import execute_mutation_remote
+    def execute_mutation_in_fabric(self, plan, payloads=None, **options):
+        from .install_archive import execute_mutation_in_fabric
 
-        return execute_mutation_remote(self, plan, payloads, **options)
+        return execute_mutation_in_fabric(self, plan, payloads, **options)
 
     def execute_mutation(self, plan, payloads=None, **options):
         from .mutation_progress import StageProgress
@@ -132,7 +132,7 @@ class ConsoleSession(Session):
                 plan, payloads, observer=progress.observe, **options
             )
         else:
-            report = self.execute_mutation_remote(
+            report = self.execute_mutation_in_fabric(
                 plan, payloads, observer=progress.follow, **options
             )
         try:
@@ -455,9 +455,9 @@ class ConsoleSession(Session):
         workspace: Workspace | None = None,
         timeout: float | None = None,
     ) -> Any:
-        from .delta_table import remote_delta_table_program
+        from .delta_table import fabric_delta_table_program
 
-        source = remote_delta_table_program(
+        source = fabric_delta_table_program(
             qualified_name,
             columns,
             identity_column=identity_column,
@@ -484,13 +484,13 @@ class ConsoleSession(Session):
         if not ordered:
             return []
         from ..fabric.livy import DEFAULT_STATEMENT_TIMEOUT
-        from .delta_table import remote_delta_table_actions_program
+        from .delta_table import fabric_delta_table_actions_program
 
         allowance = DEFAULT_STATEMENT_TIMEOUT if timeout is None else timeout
         scope = self.scope(workspace)
         livy = self.foreground_livy(scope)
         return scope.livy_run(
-            remote_delta_table_actions_program(ordered),
+            fabric_delta_table_actions_program(ordered),
             name="delta_table_actions",
             timeout=allowance * len(ordered),
             livy=livy,
@@ -499,14 +499,14 @@ class ConsoleSession(Session):
 
     def execute_python(
         self,
-        program: RemoteProgram,
+        program: FabricProgram,
         *,
         workspace: Workspace | None = None,
         timeout: float | None = None,
     ) -> Any:
         # The caller owns the reporting frame; telemetry records the Livy cost.
         scope = self.scope(workspace)
-        # Remote Python imports Weaver, so it requires a published Environment.
+        # Python run in Fabric imports Weaver, so it requires a published Environment.
         # Spark SQL and TDS do not.
         scope._check_weaver_available()
         livy = self.foreground_livy(scope)
@@ -1013,7 +1013,7 @@ class ConsoleScope(WorkspaceScope):
         return result.payload
 
     def _statement_failure(self, exc, name: str):
-        """Add publishing guidance when remote Weaver cannot be imported.
+        """Add publishing guidance when Fabric cannot import Weaver.
 
         A missing Weaver import means the published Environment lacks code the
         submitted program needs.

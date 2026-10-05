@@ -79,10 +79,10 @@ def test_lost_remote_response_is_uncertain_without_replay(tmp_path):
         direct_delta_workers=16,
         workspace=None,
     )
-    assert hasattr(install_archive, "execute_mutation_remote"), (
+    assert hasattr(install_archive, "execute_mutation_in_fabric"), (
         "remote plan API is missing"
     )
-    report = install_archive.execute_mutation_remote(session, plan)
+    report = install_archive.execute_mutation_in_fabric(session, plan)
     assert len(calls) == 1 and calls[0]["retry_submission"] is False
     assert calls[0]["livy"] == "waited-for session"
     assert all(result.status == "uncertain" for result in report.results)
@@ -144,7 +144,7 @@ def test_carrier_is_staged_in_the_spark_home_lakehouse(tmp_path):
         direct_delta_workers=16,
         workspace=None,
     )
-    report = install_archive.execute_mutation_remote(session, plan)
+    report = install_archive.execute_mutation_in_fabric(session, plan)
     assert len(submissions) == 1
     assert all(result.status == "uncertain" for result in report.results)
     assert (
@@ -251,7 +251,7 @@ def test_console_carries_only_spark_plans_into_fabric(monkeypatch, kind, spark, 
     )
     monkeypatch.setattr(
         ConsoleSession,
-        "execute_mutation_remote",
+        "execute_mutation_in_fabric",
         lambda s, p, b, **kw: calls.append(("remote", p, b)),
     )
     session = ConsoleSession(workspace=Workspace(workspace="Demo"))

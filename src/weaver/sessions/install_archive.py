@@ -192,7 +192,7 @@ emit({{"sha256": hashlib.sha256(_archive_bytes).hexdigest(), "bytes": len(_archi
     return "exec(" + repr(isolated) + ', {"spark": spark, "emit": emit})\n'
 
 
-def execute_mutation_remote(
+def execute_mutation_in_fabric(
     session,
     plan,
     payloads=None,
@@ -235,7 +235,7 @@ def execute_mutation_remote(
         else next(t for t in plan.targets if t.id == home_id)
     )
     if home is None:
-        raise BuildError("remote mutation requires a Lakehouse target")
+        raise BuildError("a mutation run in Fabric requires a Lakehouse target")
     build_datetime = build_datetime or datetime.now(timezone.utc).strftime(
         "%Y-%m-%d %H:%M:%S.%f"
     )

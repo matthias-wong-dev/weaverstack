@@ -43,7 +43,7 @@ from support.observation import observation_from, observe_body
 from support.weaver_test import weaver_test
 
 import weaver
-from weaver.sessions.program import RemoteProgram
+from weaver.sessions.program import FabricProgram
 
 #: What a scenario crosses, named for the operation it drives. The two sets hold
 #: the same four resources: a build and a run each reach Livy, OneLake, REST and
@@ -153,7 +153,7 @@ def _observe(journey, queries):
 
     return observation_from(
         journey.session.execute_python(
-            RemoteProgram(
+            FabricProgram(
                 name="observe the acceptance estate",
                 call=lambda: None,
                 source=observe_body(queries, {}, {}),
@@ -531,7 +531,7 @@ def test_a_realistic_estate_builds_from_nothing(acceptance, monkeypatch):
     acceptance.require("seed-neighbour")
 
     plans = []
-    remote = type(acceptance.session).execute_mutation_remote
+    remote = type(acceptance.session).execute_mutation_in_fabric
 
     def capture_remote(session, plan, payloads=None, **options):
         plans.append(plan)
@@ -540,7 +540,7 @@ def test_a_realistic_estate_builds_from_nothing(acceptance, monkeypatch):
     archive_offset = len(getattr(acceptance.session, "archive_mutations", ()))
     with monkeypatch.context() as capture:
         capture.setattr(
-            type(acceptance.session), "execute_mutation_remote", capture_remote
+            type(acceptance.session), "execute_mutation_in_fabric", capture_remote
         )
         step = acceptance.step(
             "build",
@@ -932,7 +932,7 @@ def _mutate_the_foreign_world(journey) -> None:
     # Written through Spark, because the target is Delta. The instant is now, so
     # the changed rows fall inside the next incremental window.
     journey.session.execute_python(
-        RemoteProgram(
+        FabricProgram(
             name="mutate the foreign world",
             call=lambda: None,
             source="from pyspark.sql import functions as F\n"
@@ -1833,7 +1833,7 @@ def _restore_the_foreign_baseline(journey) -> None:
 
     item = journey.external_lakehouse
     journey.session.execute_python(
-        RemoteProgram(
+        FabricProgram(
             name="restore the foreign baseline",
             call=lambda: None,
             source=external_seed.lakehouse_seed_program(

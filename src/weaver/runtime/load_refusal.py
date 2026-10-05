@@ -43,7 +43,7 @@ def refused(row: Any) -> bool:
 
 
 def decoded_refusal(row: Mapping[str, Any]) -> LoadError:
-    """Rebuild the error a remote entry point returned instead of raising."""
+    """Rebuild the error a Fabric entry point returned instead of raising."""
 
     version = row.get(REFUSAL_KEY)
     if version != REFUSAL_VERSION:

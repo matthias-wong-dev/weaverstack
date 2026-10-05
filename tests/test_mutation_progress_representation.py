@@ -159,7 +159,7 @@ def test_a_desktop_session_follows_a_plan_running_in_fabric(monkeypatch):
                 observer(record)
         return report
 
-    monkeypatch.setattr(ConsoleSession, "execute_mutation_remote", remote)
+    monkeypatch.setattr(ConsoleSession, "execute_mutation_in_fabric", remote)
     out = io.StringIO()
 
     with ConsoleSession(progress=out, workspace=Workspace(workspace="Demo")) as session:

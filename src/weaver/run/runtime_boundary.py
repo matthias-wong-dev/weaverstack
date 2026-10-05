@@ -9,7 +9,7 @@ from __future__ import annotations
 import uuid
 from typing import Any, Protocol
 
-from ..sessions.program import RemoteProgram
+from ..sessions.program import FabricProgram
 
 #: How long a node's statement may run. A load takes as long as its data does,
 #: so the deadline only ends a wait that can no longer be answered.
@@ -144,7 +144,7 @@ def open_runtime_scope(session, *, workspace=None, catalogue=None) -> RunScope:
     """Open the scope that will import this run's Python primitives."""
 
     from ..runtime.python_context import RuntimeScope
-    from ..sessions.base import ACROSS_BOUNDARY
+    from ..sessions.base import CLIENT
 
     if session is None:
         return DirectRunScope(RuntimeScope.new(), catalogue=catalogue)
@@ -153,7 +153,7 @@ def open_runtime_scope(session, *, workspace=None, catalogue=None) -> RunScope:
     # That judgement is the Session's: inferring it from an error would turn a
     # bad configuration into a local scope, and the run would report success
     # against an estate it never reached.
-    if session.position(workspace) == ACROSS_BOUNDARY:
+    if session.position(workspace) == CLIENT:
         return FabricRunScope.begin(session, workspace=workspace, catalogue=catalogue)
     return DirectRunScope(RuntimeScope.new(), session, workspace, catalogue=catalogue)
 
@@ -380,7 +380,7 @@ class FabricRunScope:
             f"emit({name}({passed}))\n"
         )
         return self._session.execute_python(
-            RemoteProgram(
+            FabricProgram(
                 name=name, call=call, source=source, detail=detail, timeout=timeout
             ),
             workspace=workspace,
