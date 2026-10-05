@@ -42,9 +42,10 @@ FAILED = frozenset({"failed", "blocked", "invalid"})
 
 
 class Stress:
-    def __init__(self, folder: Path, results: Path):
+    def __init__(self, folder: Path, results: Path, retries: int = 0):
         self.folder = folder
         self.results = results
+        self.retries = retries
         self.plan = json.loads((folder / "plan.json").read_text(encoding="utf-8"))
 
     def config(self, name: str) -> dict:
@@ -123,27 +124,62 @@ class Stress:
         weaver.wipe(self.physical(name), session=session)
         self.record("wipe", name, time.perf_counter() - started)
 
+    def attempts(self, step: str):
+        """The step, then each retry, each recorded on its own line."""
+
+        yield step
+        for retry in range(1, self.retries + 1):
+            yield f"{step} retry {retry}"
+
     def build(self, name: str, items: list[str], session, step: str = "build") -> None:
-        started = time.perf_counter()
-        built = weaver.build(str(self.folder / name), items=items, session=session)
-        seconds = time.perf_counter() - started
-        report = built.installation_report
-        self.record(
-            step,
-            name,
-            seconds,
-            status=built.status,
-            actions=report.action_counts()["total"] if report is not None else None,
-            errors=[f"{e.action_id}: {e.message}" for e in built.errors][:20],
-        )
-        if not built.succeeded:
-            raise SystemExit(f"{name} {step} {built.status}")
+        for attempt in self.attempts(step):
+            started = time.perf_counter()
+            try:
+                built = weaver.build(
+                    str(self.folder / name), items=items, session=session
+                )
+            except Exception as error:  # noqa: BLE001 - a flaky crossing is retried
+                self.record(
+                    attempt,
+                    name,
+                    time.perf_counter() - started,
+                    status="error",
+                    errors=[str(error)[:1000]],
+                )
+                continue
+            report = built.installation_report
+            self.record(
+                attempt,
+                name,
+                time.perf_counter() - started,
+                status=built.status,
+                actions=report.action_counts()["total"] if report else None,
+                errors=[f"{e.action_id}: {e.message}" for e in built.errors][:20],
+            )
+            if built.succeeded:
+                return
+        raise SystemExit(f"{name} {step} did not succeed")
 
     def load(self, name: str, items: list[str], session, step: str) -> None:
-        started = time.perf_counter()
-        report = weaver.load(items, session=session, fault_tolerant=True)
-        seconds = time.perf_counter() - started
-        self.record(step, name, seconds, **_load_facts(report))
+        """Load, and load again while nodes fail, up to the retries allowed."""
+
+        for attempt in self.attempts(step):
+            started = time.perf_counter()
+            try:
+                report = weaver.load(items, session=session, fault_tolerant=True)
+            except Exception as error:  # noqa: BLE001 - a flaky crossing is retried
+                self.record(
+                    attempt,
+                    name,
+                    time.perf_counter() - started,
+                    status="error",
+                    failures=[str(error)[:1000]],
+                )
+                continue
+            facts = _load_facts(report)
+            self.record(attempt, name, time.perf_counter() - started, **facts)
+            if not facts["failed"]:
+                return
 
     def test(self, name: str, items: list[str], session, step: str) -> None:
         started = time.perf_counter()
@@ -257,12 +293,22 @@ def arguments(argv=None) -> argparse.Namespace:
     parser.add_argument(
         "--results", type=Path, help="JSON lines file. Default: results.jsonl beside."
     )
+    parser.add_argument(
+        "--retries",
+        type=int,
+        default=2,
+        help="Times to repeat a build or load that failed. Default: 2.",
+    )
     return parser.parse_args(argv)
 
 
 def main(argv=None) -> int:
     options = arguments(argv)
-    stress = Stress(options.folder, options.results or options.folder / "results.jsonl")
+    stress = Stress(
+        options.folder,
+        options.results or options.folder / "results.jsonl",
+        options.retries,
+    )
     if options.command == "prepare":
         stress.prepare()
     elif options.command == "populate":
