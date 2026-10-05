@@ -423,35 +423,134 @@ def test_a_discovered_estate_still_puts_the_catalogue_last(monkeypatch):
         _operations(),
         "_installed_estate",
         lambda *_a, **_k: (
-            WipeTarget.parse("Warehouse/Weaver"),
-            WipeTarget.parse("Lakehouse/Landing_Dev"),
+            ("Warehouse/_weaver", WipeTarget.parse("Warehouse/Weaver")),
+            ("Lakehouse/Sales", WipeTarget.parse("Lakehouse/Landing_Dev")),
         ),
     )
 
     assert _names(_plan()) == ["Lakehouse/Landing_Dev", "Warehouse/Weaver"]
 
 
-@weaver_test()
-def test_an_unscoped_wipe_reads_installations_and_not_configuration(
-    tmp_path, monkeypatch
-):
-    """What configuration declares is what a build would install."""
-
+def _configured(tmp_path, targets: str):
     configuration = tmp_path / "workspace-config.yml"
     configuration.write_text(
-        "workspace: Analytics\ncatalogue: Warehouse/Weaver\ntargets:\n"
-        "  Warehouse/Sales: Declared_Only\n",
+        "workspace: Analytics\ncatalogue: Warehouse/Weaver\ntargets:\n" + targets,
         encoding="utf-8",
     )
+    return configuration
+
+
+def _recorded(monkeypatch, *pairs):
     monkeypatch.setattr(
         _operations(),
         "_installed_estate",
-        lambda *_a, **_k: (WipeTarget.parse("Warehouse/Installed"),),
+        lambda *_a, **_k: tuple(
+            (item, WipeTarget.parse(target)) for item, target in pairs
+        ),
+    )
+
+
+@weaver_test()
+def test_a_configured_wipe_follows_installations_the_configuration_binds(
+    tmp_path, monkeypatch
+):
+    configuration = _configured(
+        tmp_path,
+        "  Lakehouse/Landing: DEV_Landing\n"
+        "  Warehouse/Curated: DEV_Curated\n"
+        # Bound for reading, and installed nowhere, so not emptied.
+        "  Lakehouse/Reference: Landing\n",
+    )
+    _recorded(
+        monkeypatch,
+        ("Warehouse/_weaver", "Warehouse/Weaver"),
+        ("Lakehouse/Landing", "Lakehouse/DEV_Landing"),
+        ("Warehouse/Curated", "Warehouse/DEV_Curated"),
     )
 
     plan = plan_wipe(workspace_config=configuration, session=_session())
 
-    assert _names(plan) == ["Warehouse/Installed", "Warehouse/Weaver"]
+    assert _names(plan) == [
+        "Lakehouse/DEV_Landing",
+        "Warehouse/DEV_Curated",
+        "Warehouse/Weaver",
+    ]
+    described = plan.describe()
+    assert "Lakehouse/Landing → Lakehouse/DEV_Landing" in described
+    assert "Warehouse/Curated → Warehouse/DEV_Curated" in described
+
+
+@weaver_test()
+def test_a_configured_wipe_refuses_an_installation_the_configuration_binds_elsewhere(
+    tmp_path, monkeypatch
+):
+    """A catalogue recording another physical item is not followed into it."""
+
+    configuration = _configured(
+        tmp_path,
+        "  Lakehouse/Landing: DEV_Landing\n  Warehouse/Curated: DEV_Curated\n",
+    )
+    _recorded(
+        monkeypatch,
+        ("Lakehouse/Landing", "Lakehouse/Landing"),
+        ("Warehouse/Curated", "Warehouse/DEV_Curated"),
+    )
+
+    with pytest.raises(CommandError) as refused:
+        plan_wipe(workspace_config=configuration, session=_session())
+
+    said = str(refused.value)
+    assert "Lakehouse/Landing  installed in Landing, configured as DEV_Landing" in said
+    assert "Warehouse/Curated" not in said.split("\n")[1]
+    assert "weaver wipe Lakehouse/DEV_Landing Warehouse/DEV_Curated" in said
+
+
+@weaver_test()
+def test_a_configured_wipe_refuses_an_installation_the_configuration_does_not_name(
+    tmp_path, monkeypatch
+):
+    configuration = _configured(tmp_path, "  Lakehouse/Landing: DEV_Landing\n")
+    _recorded(
+        monkeypatch,
+        ("Lakehouse/Landing", "Lakehouse/DEV_Landing"),
+        ("Warehouse/Curated", "Warehouse/Curated"),
+    )
+
+    with pytest.raises(
+        CommandError, match="Warehouse/Curated  installed in Curated, not configured"
+    ):
+        plan_wipe(workspace_config=configuration, session=_session())
+
+
+@weaver_test()
+def test_a_wipe_given_only_a_catalogue_follows_its_installations(monkeypatch):
+    """With no configuration to check against, the catalogue is the guidance."""
+
+    _recorded(monkeypatch, ("Lakehouse/Landing", "Lakehouse/Landing"))
+
+    plan = plan_wipe(
+        workspace="Analytics", catalogue="Warehouse/Weaver", session=_session()
+    )
+
+    assert _names(plan) == ["Lakehouse/Landing", "Warehouse/Weaver"]
+
+
+@weaver_test()
+def test_named_targets_are_emptied_exactly_whatever_the_configuration_binds(
+    tmp_path, monkeypatch
+):
+    configuration = _configured(tmp_path, "  Lakehouse/Landing: DEV_Landing\n")
+    monkeypatch.setattr(
+        _operations(),
+        "_installed_estate",
+        lambda *_a, **_k: pytest.fail("named targets read the estate"),
+    )
+
+    plan = plan_wipe(
+        "Lakehouse/Leftover", workspace_config=configuration, session=_session()
+    )
+
+    assert _names(plan) == ["Lakehouse/Leftover", "Warehouse/Weaver"]
 
 
 @weaver_test()
