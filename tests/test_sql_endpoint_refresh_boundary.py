@@ -183,6 +183,29 @@ def test_a_failed_refresh_is_a_known_failure_that_settles_the_operation():
 
 
 @weaver_test()
+def test_a_refresh_may_outlast_the_allowance_an_action_otherwise_has():
+    """Fabric syncs every table, so a large Lakehouse refreshes for longer."""
+
+    clock = Clock()
+    resolver = _Resolver(clock, polls=200)
+
+    report, _ran = _execute(resolver, clock)
+
+    assert report.succeeded
+    assert resolver.calls[-1][1] > 600
+
+
+@weaver_test()
+def test_a_refresh_past_its_own_allowance_is_uncertain():
+    clock = Clock()
+
+    report, _ran = _execute(_Resolver(clock, polls=1000), clock)
+
+    assert report.by_id["await"].status == "uncertain"
+    assert "deadline expired" in report.by_id["await"].error
+
+
+@weaver_test()
 def test_fabric_refresh_start_returns_a_handle_without_waiting():
     response = SimpleNamespace(
         status_code=202,

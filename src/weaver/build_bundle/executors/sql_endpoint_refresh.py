@@ -16,6 +16,9 @@ AWAIT_EXECUTOR = "await_sql_endpoint_refresh"
 REFRESH_RESULT = "sql_endpoint_refresh"
 #: The minimum interval between observations when Fabric gives no Retry-After.
 POLL_INTERVAL = 2.0
+#: Fabric syncs every table a Lakehouse holds, so a refresh after a build of
+#: about 1,900 objects outlasts the ten minutes an action is otherwise allowed.
+REFRESH_TIMEOUT = 1800.0
 
 START_CONTRACT = DriverContract(
     START_EXECUTOR, None, produces=REFRESH_RESULT, starts_operation=True
@@ -74,6 +77,8 @@ def endpoint_refresh_drivers(contexts, *, outcome, clock=time):
         return Pending(refresh, clock.monotonic() + delay)
 
     return {
-        START_EXECUTOR: MutationDriver(start, contract=START_CONTRACT),
+        START_EXECUTOR: MutationDriver(
+            start, contract=START_CONTRACT, timeout=REFRESH_TIMEOUT
+        ),
         AWAIT_EXECUTOR: MutationDriver(observe, contract=AWAIT_CONTRACT),
     }

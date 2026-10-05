@@ -82,6 +82,9 @@ class MutationDriver:
     preflight: Callable | None = None
     serial_resources: tuple[str, ...] = ()
     cancel: Callable | None = None
+    #: The seconds an action, or the operation it starts, may take, where the
+    #: invocation's allowance per action is too short for it.
+    timeout: float | None = None
 
 
 @dataclass(frozen=True)
@@ -461,7 +464,9 @@ class _Invocation:
         if owner != action.id:
             state.deadline = self.operations[owner].deadline
         elif state.deadline is None:
-            state.deadline = self.now() + self.executor.timeout
+            driver = self.executor.drivers.get(action.executor)
+            allowance = getattr(driver, "timeout", None) or self.executor.timeout
+            state.deadline = self.now() + allowance
         if state.pending is None:
             state.ready_queue_seconds += self.now() - state.ready_at
             state.attempts += 1
