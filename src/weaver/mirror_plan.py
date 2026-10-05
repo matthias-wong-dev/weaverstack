@@ -6,13 +6,17 @@ rows. Execution then reads nothing it did not plan:
 
 .. code-block:: text
 
-    wipe catalogue ─→ catalogue build ─→ fork ─────────────┐
-    wipe item A ─→ reconstruct item A ─────────────────────┤
-    wipe item B ─→ reconstruct item B ─────────────────────┴→ record ─→ binding
+    wipe catalogue ─→ catalogue build ─────────────────────┐
+    wipe item A ─→ reconstruct item A ─→ refresh endpoint ─┤
+    wipe item B ─→ reconstruct item B ─────────────────────┴→ fork, record, bind
 
-Recording and binding write shared catalogue tables, so each is one action for
-the whole mirror. Items are bound only after every reconstruction and the
-catalogue fork have succeeded, so an incomplete mirror is never published.
+A reconstructed Lakehouse's SQL endpoint is refreshed, and a Warehouse view
+that reads it through the endpoint waits until it is current.
+
+The fork, the record of what each item borrows and the binding of each item to
+its mirror are one transaction, after every reconstruction. Until it commits
+the destination catalogue records no installation: it never claims the
+source's items, and an incomplete mirror is never published.
 """
 
 from __future__ import annotations
@@ -22,6 +26,14 @@ import tempfile
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
+from .build_bundle.executors.sql_endpoint_refresh import (
+    AWAIT_EXECUTOR,
+    REFRESH_RESULT,
+    START_EXECUTOR,
+)
+from .build_bundle.executors.sql_endpoint_refresh import (
+    CONTRACTS as ENDPOINT_REFRESH_CONTRACTS,
+)
 from .build_bundle.payloads import sha256_hex
 from .errors import CommandError
 from .mutation import (
@@ -171,29 +183,9 @@ def mirror_mutation_plan(resolved, *, session) -> tuple[MutationPlan, dict, dict
         compiling, resolved, catalogue=catalogue, after=finishing(wipe)
     )
 
-    from .catalogue.fork import fork_statements
-
-    path, digest = compiling.payload(
-        "fork.sql",
-        "\n".join(
-            fork_statements(
-                source_catalogue=resolved.source.name, borrowed=resolved.borrowed
-            )
-        ).encode("utf-8"),
-    )
-    fork = _action(
-        "mirror-fork-catalogue",
-        "fork_catalogue",
-        catalogue,
-        executor="tsql",
-        payload=path,
-        digest=digest,
-        depends_on=(built,),
-        resources=(f"warehouse:{catalogue.item_id}",),
-    )
-    compiling.stage("fork catalogue state", catalogue, [fork])
-
     reconstructed: dict[str, tuple[str, ...]] = {}
+    #: What a reader through each Lakehouse's SQL endpoint waits for.
+    current: dict[str, tuple[str, ...]] = {}
     published: list[str] = []
     summary = {}
     for each in resolved.items:
@@ -203,10 +195,13 @@ def mirror_mutation_plan(resolved, *, session) -> tuple[MutationPlan, dict, dict
         )
         compiling.payloads.update(written)
         compiling.stage(f"empty {each.target}", destination, cleared)
+        # A Lakehouse reads its producers through OneLake; a Warehouse reads
+        # them through their SQL endpoints.
+        produced = reconstructed if each.kind == LAKEHOUSE else current
         producers = tuple(
             action
             for item in _producers(each, resolved)
-            for action in reconstructed.get(item, ())
+            for action in produced.get(item, ())
         )
         if each.kind == LAKEHOUSE:
             actions, summary[str(each.item)] = _lakehouse(
@@ -232,7 +227,16 @@ def mirror_mutation_plan(resolved, *, session) -> tuple[MutationPlan, dict, dict
             )
         reconstructed[str(each.item)] = tuple(a.id for a in actions)
         published.extend((*finishing(cleared), *(a.id for a in actions)))
-    _publish(compiling, resolved, catalogue, after=(fork.id, *published))
+        if each.kind == LAKEHOUSE:
+            refreshed = _refresh_endpoint(
+                compiling,
+                each,
+                destination,
+                after=(*finishing(cleared), *(a.id for a in actions)),
+            )
+            current[str(each.item)] = (refreshed,)
+            published.append(refreshed)
+    _publish(compiling, resolved, catalogue, after=(built, *published))
 
     spark_home = next(
         (
@@ -263,8 +267,42 @@ def mirror_mutation_plan(resolved, *, session) -> tuple[MutationPlan, dict, dict
         ),
         required_completion=every,
         protected_scopes=tuple(compiling.protected),
+        driver_contracts=ENDPOINT_REFRESH_CONTRACTS if current else (),
     )
     return replace(plan, bundle_id=compute_bundle_id(plan)), compiling.payloads, summary
+
+
+def _refresh_endpoint(compiling, each, destination, *, after) -> str:
+    """Refresh a reconstructed Lakehouse's SQL endpoint; return the await.
+
+    The refresh starts once the reconstruction has a known outcome.
+    """
+
+    from .build_bundle.models import AWAIT_ENDPOINT_REFRESH, START_ENDPOINT_REFRESH
+    from .mutation.models import ResultReference
+
+    slug = destination.id
+    start = replace(
+        _action(
+            f"mirror-start-endpoint-refresh-{slug}",
+            START_ENDPOINT_REFRESH,
+            destination,
+            executor=START_EXECUTOR,
+        ),
+        settle_after=tuple(dict.fromkeys(after)),
+    )
+    finish = replace(
+        _action(
+            f"mirror-await-endpoint-refresh-{slug}",
+            AWAIT_ENDPOINT_REFRESH,
+            destination,
+            executor=AWAIT_EXECUTOR,
+            depends_on=(start.id,),
+        ),
+        result_from=ResultReference(start.id, REFRESH_RESULT),
+    )
+    compiling.stage(f"refresh {each.target} SQL endpoint", destination, [start, finish])
+    return finish.id
 
 
 def _uses_spark(action) -> bool:
@@ -780,16 +818,18 @@ def _lakehouse(
 
 
 def _publish(compiling, resolved, catalogue, *, after) -> None:
-    """Record what every item borrows, then bind every item to its mirror, last.
+    """Fork the source's state, record what each item borrows and bind each item.
 
-    Both write shared catalogue tables, so each is one action for the whole
-    mirror, after every reconstruction and the fork have succeeded.
+    One transaction, after every reconstruction: until it commits, the
+    destination catalogue records no installation, so nothing can read it as
+    owning the source's items or an incomplete destination.
     """
 
     from . import __version__
     from .catalogue.borrow import record_statements
+    from .catalogue.fork import copied_tables, copy_statement, create_statement
     from .catalogue.render import InstallationScope, render_merge
-    from .catalogue.tables import INSTALLATION
+    from .catalogue.tables import INSTALLATION, MIRROR
 
     recorded = [
         statement
@@ -799,23 +839,9 @@ def _publish(compiling, resolved, catalogue, *, after) -> None:
             source_workspace=resolved.workspace.workspace,
             source_target=each.source_target,
         )
+        # ``_.Mirror`` is created below, outside the transaction.
+        if statement != create_statement(MIRROR)
     ]
-    previous = tuple(dict.fromkeys(after))
-    actions = []
-    if recorded:
-        path, digest = compiling.payload("record.sql", "\n".join(recorded).encode())
-        record = _action(
-            "mirror-record",
-            "record_mirror",
-            catalogue,
-            executor="tsql",
-            payload=path,
-            digest=digest,
-            depends_on=previous,
-            resources=(f"warehouse:{catalogue.item_id}",),
-        )
-        actions.append(record)
-        previous = (record.id,)
     merges = []
     for each in resolved.items:
         item = each.item
@@ -836,21 +862,50 @@ def _publish(compiling, resolved, catalogue, *, after) -> None:
                 scope=InstallationScope(item.item_type, item.item_name),
             )
         )
-    if merges:
-        path, digest = compiling.payload("bind.sql", "\n".join(merges).encode())
-        actions.append(
-            _action(
-                "mirror-bind",
-                "bind_installation",
-                catalogue,
-                executor="tsql",
-                payload=path,
-                digest=digest,
-                depends_on=previous,
-                resources=(f"warehouse:{catalogue.item_id}",),
-            )
-        )
-    compiling.stage("bind the mirrored items", catalogue, actions)
+    forked = [
+        copy_statement(table, source_catalogue=resolved.source.name)
+        for table in copied_tables(borrowed=resolved.borrowed)
+    ]
+    created = [create_statement(MIRROR)] if resolved.borrowed or recorded else []
+    path, digest = compiling.payload(
+        "publish.sql",
+        transaction_script(created, [*forked, *recorded, *merges]).encode("utf-8"),
+    )
+    published = _action(
+        "mirror-publish-catalogue",
+        "publish_mirror",
+        catalogue,
+        executor="tsql",
+        payload=path,
+        digest=digest,
+        depends_on=tuple(dict.fromkeys(after)),
+        resources=(f"warehouse:{catalogue.item_id}",),
+    )
+    compiling.stage("publish the mirrored catalogue", catalogue, [published])
+
+
+def transaction_script(prepared, statements) -> str:
+    """``prepared`` statements, then ``statements`` committed together or not at all.
+
+    Fabric Warehouse refuses ``SET XACT_ABORT``, so a failure rolls back in
+    ``CATCH`` and is raised again.
+    """
+
+    body = "\n".join("    " + line for line in "\n".join(statements).splitlines())
+    return "\n".join(
+        [
+            *prepared,
+            "begin try",
+            "    begin transaction;",
+            body,
+            "    commit transaction;",
+            "end try",
+            "begin catch",
+            "    if @@trancount > 0 rollback transaction;",
+            "    throw;",
+            "end catch;",
+        ]
+    )
 
 
 class StoredNames:
