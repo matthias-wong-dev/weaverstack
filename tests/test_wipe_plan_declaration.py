@@ -481,6 +481,23 @@ def test_a_configured_wipe_follows_installations_the_configuration_binds(
 
 
 @weaver_test()
+def test_a_wipe_names_an_item_once_where_it_is_installed_under_its_own_name(
+    tmp_path, monkeypatch
+):
+    configuration = _configured(tmp_path, "  Lakehouse/Landing: Landing\n")
+    _recorded(
+        monkeypatch,
+        ("Warehouse/_weaver", "Warehouse/Weaver"),
+        ("Lakehouse/Landing", "Lakehouse/Landing"),
+    )
+
+    described = plan_wipe(workspace_config=configuration, session=_session()).describe()
+
+    assert "  Lakehouse/Landing\n" in described + "\n"
+    assert "→" not in described
+
+
+@weaver_test()
 def test_a_configured_wipe_refuses_an_installation_the_configuration_binds_elsewhere(
     tmp_path, monkeypatch
 ):
