@@ -45,12 +45,14 @@ from support.weaver_test import weaver_test
 import weaver
 from weaver.sessions.program import FabricProgram
 
-#: What a scenario crosses, named for the operation it drives. The two sets hold
-#: the same four resources: a build and a run each reach Livy, OneLake, REST and
-#: TDS over this estate. Pytest compares a declaration with the crossings its
-#: claim body made, so a set that stopped being accurate would fail.
+#: What a scenario crosses, named for the operation it drives. A build reaches
+#: Livy, OneLake, REST and TDS over this estate. A run with Spark work reads the
+#: catalogue over TDS, stages itself in OneLake and goes to Fabric over Livy;
+#: Fabric refreshes endpoints from inside the run. Pytest compares a declaration
+#: with the crossings its claim body made, so a set that stopped being accurate
+#: would fail.
 BUILDING = {"livy", "onelake", "rest", "tds"}
-RUNNING = {"livy", "onelake", "rest", "tds"}
+RUNNING = {"livy", "onelake", "tds"}
 
 #: What emptying a Lakehouse and cleaning the catalogue's claims crosses.
 #: Storage and the shortcut control plane for the item, TDS for the catalogue.
@@ -1060,7 +1062,7 @@ def test_the_installed_graph_holds_the_relationships_the_repository_declared(
         assert node.artefact
 
 
-@weaver_test(integration=True, resources=RUNNING)
+@weaver_test(integration=True, resources=RUNNING | REPORTING)
 def test_loading_an_upstream_after_a_test_passed_turns_health_amber(acceptance):
     """
     Intent: Freshness is decided against the same installed graph load planning
