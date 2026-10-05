@@ -578,7 +578,8 @@ source code definitions, case-exact source paths and the deployed load tree,
 and compiles one plan: the destination catalogue is emptied and built against its
 known-empty state, while each item's destination is emptied and reconstructed,
 and each reconstructed Lakehouse's SQL endpoint is refreshed before a Warehouse
-reads through it. The fork, the record of what each item borrows and each item's
+reads through it. A refreshed endpoint can still be listing new shortcut
+tables, so the Warehouse waits until it sees every object it reads. The fork, the record of what each item borrows and each item's
 binding are one transaction, last, after every reconstruction. Until it commits
 the destination catalogue records no installation, so it never claims the
 source's items.

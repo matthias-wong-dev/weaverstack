@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from support.bundles import runs_before
 from support.weaver_test import weaver_test
 
@@ -385,14 +387,19 @@ def test_a_warehouse_reading_a_mirrored_lakehouse_waits_for_its_sql_endpoint(
     )
     session = _Session(resolver=_Resolver(tmp_path), store=FilesystemStore())
 
-    plan, _payloads, _summary = mirror_mutation_plan(resolved, session=session)
+    plan, payloads, _summary = mirror_mutation_plan(resolved, session=session)
 
     start = "mirror-start-endpoint-refresh-lakehouse-Input_Dev"
     current = "mirror-await-endpoint-refresh-lakehouse-Input_Dev"
+    listed = "mirror-await-endpoint-objects-warehouse-Model_Dev"
     views = "mirror-pointers-warehouse-Model_Dev-000"
     assert runs_before(plan, "mirror-await-tables-pointers-lakehouse-Input_Dev", start)
     assert runs_before(plan, start, current)
-    assert runs_before(plan, current, views)
+    # A refreshed endpoint can still be listing the new tables.
+    assert runs_before(plan, current, listed)
+    assert runs_before(plan, listed, views)
+    awaited = json.loads(payloads[_actions(plan)[listed].payload])
+    assert awaited == {"objects": [["Input_Dev", "Sales", "Customer"]]}
     assert runs_before(plan, current, PUBLISH)
     assert _actions(plan)[current].result_from.action_id == start
     assert plan.driver_contracts == CONTRACTS

@@ -172,6 +172,31 @@ def _scripts(
     return actions
 
 
+def _await_endpoint_objects(compiling, target, objects, *, after) -> list:
+    """Wait until ``target`` lists each ``(item, schema, object)`` it reads."""
+
+    if not objects:
+        return []
+    from .build_bundle.executors.endpoint_objects import EXECUTOR
+
+    path, digest = compiling.payload(
+        f"endpoint-objects-{target.id}.endpoint-objects.json",
+        json.dumps({"objects": [list(each) for each in objects]}).encode(),
+    )
+    return [
+        _action(
+            f"mirror-await-endpoint-objects-{target.id}",
+            "await_endpoint_objects",
+            target,
+            executor=EXECUTOR,
+            payload=path,
+            digest=digest,
+            depends_on=after,
+            resources=(f"warehouse:{target.item_id}",),
+        )
+    ]
+
+
 def mirror_mutation_plan(resolved, *, session) -> tuple[MutationPlan, dict, dict]:
     """The mirror as one sealed plan, its payloads, and what it reconstructs."""
 
@@ -191,6 +216,12 @@ def mirror_mutation_plan(resolved, *, session) -> tuple[MutationPlan, dict, dict
     )
 
     kinds = {str(each.item): each.kind for each in resolved.items}
+    #: Lakehouses whose SQL endpoints this plan refreshes.
+    endpoints = {
+        other.destination.casefold()
+        for other in resolved.items
+        if other.kind == LAKEHOUSE
+    }
     reconstructed: dict[str, tuple[str, ...]] = {}
     #: What a reader through each Lakehouse's SQL endpoint waits for.
     current: dict[str, tuple[str, ...]] = {}
@@ -234,6 +265,7 @@ def mirror_mutation_plan(resolved, *, session) -> tuple[MutationPlan, dict, dict
                 after=finishing(cleared),
                 catalogue_built=built,
                 producers=producers,
+                endpoints=endpoints,
                 session=session,
             )
         reconstructed[str(each.item)] = tuple(a.id for a in actions)
@@ -457,6 +489,7 @@ def _warehouse(
     after,
     catalogue_built,
     producers,
+    endpoints,
     session,
 ):
     from .catalogue.borrow import (
@@ -467,7 +500,7 @@ def _warehouse(
         surface_view_statements,
     )
     from .catalogue.borrow import view_statement as borrowed_view
-    from .catalogue.shortcuts import schemas_of, view_statement
+    from .catalogue.shortcuts import schemas_of, view_source, view_statement
     from .operations.mirror import _recreatable
     from .targets import ItemRef, WarehouseTarget
 
@@ -542,13 +575,32 @@ def _warehouse(
         and p.target_name.casefold() == each.destination.casefold()
         for p in pointers
     )
+    # A refreshed endpoint can still be listing new tables, so the views over
+    # it wait until this Warehouse sees every object they read.
+    awaited = _await_endpoint_objects(
+        compiling,
+        destination,
+        sorted(
+            {
+                view_source(p)
+                for p in pointers
+                if p.target_workspace is None and p.target_name.casefold() in endpoints
+            }
+        ),
+        after=(*ready, *producers),
+    )
     recreated = _scripts(
         compiling,
         f"mirror-pointers-{slug}",
         destination,
         [view_statement(p) for p in pointers],
         kind="recreate_shortcuts",
-        depends_on=(*ready, *producers, *(relations_built if reads_here else ())),
+        depends_on=(
+            *ready,
+            *producers,
+            *(a.id for a in awaited),
+            *(relations_built if reads_here else ()),
+        ),
     )
     # Copied code may read any local relation, pointer or surface view, and
     # Fabric refuses a definition while DDL on an object it references runs.
@@ -568,12 +620,14 @@ def _warehouse(
         ),
         ordered=True,
     )
-    every = [*schemas, *actions, *surface, *recreated, *programmables]
+    every = [*schemas, *actions, *surface, *awaited, *recreated, *programmables]
     # Each stage waits on something different, so each is timed on its own.
     compiling.stage(f"reconstruct {each.target}", destination, [*schemas, *actions])
     compiling.stage(f"recreate catalogue views in {each.target}", destination, surface)
     compiling.stage(
-        f"recreate views over other items in {each.target}", destination, recreated
+        f"recreate views over other items in {each.target}",
+        destination,
+        [*awaited, *recreated],
     )
     compiling.stage(
         f"copy procedures and functions into {each.target}", destination, programmables
