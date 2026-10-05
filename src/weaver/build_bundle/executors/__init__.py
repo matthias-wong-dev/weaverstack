@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from .base import ActionExecutor, InstallationContext, ResolvedTarget, SkippedExecution
 from .copy_files import CopyFilesExecutor
+from .endpoint_objects import EndpointObjectsExecutor
 from .folder import FolderExecutor
 from .load_file import LoadFileExecutor
 from .runtime_state import RuntimeStateExecutor
@@ -37,12 +38,14 @@ def default_executors() -> dict[str, ActionExecutor]:
         ShortcutReadinessExecutor.name: ShortcutReadinessExecutor(),
         RuntimeStateExecutor.name: RuntimeStateExecutor(),
         LakehouseWipeExecutor.name: LakehouseWipeExecutor(),
+        EndpointObjectsExecutor.name: EndpointObjectsExecutor(),
     }
 
 
 __all__ = [
     "ActionExecutor",
     "CopyFilesExecutor",
+    "EndpointObjectsExecutor",
     "InstallationContext",
     "ResolvedTarget",
     "RuntimeStateExecutor",

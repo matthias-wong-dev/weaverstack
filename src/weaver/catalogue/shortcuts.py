@@ -142,8 +142,8 @@ def _is_surface(shortcut: InstalledShortcut) -> bool:
     return destination.object_id.schema == CATALOGUE_SCHEMA
 
 
-def view_statement(recreated: Recreated) -> str:
-    """Materialise a same-workspace Warehouse shortcut using a three-part name."""
+def view_source(recreated: Recreated) -> tuple[str, str, str]:
+    """The item, schema and object a recreated Warehouse shortcut reads."""
 
     shortcut = recreated.shortcut
     if shortcut.is_logical and shortcut.source is not None:
@@ -152,9 +152,14 @@ def view_statement(recreated: Recreated) -> str:
     else:
         schema = shortcut.target_schema
         name = shortcut.target_object or ""
-    source = ".".join(
-        identifier(part) for part in (recreated.target_name, schema, name)
-    )
+    return recreated.target_name, schema, name
+
+
+def view_statement(recreated: Recreated) -> str:
+    """Materialise a same-workspace Warehouse shortcut using a three-part name."""
+
+    shortcut = recreated.shortcut
+    source = ".".join(identifier(part) for part in view_source(recreated))
     destination = shortcut.destination.object_id
     return (
         f"create or alter view {identifier(destination.schema)}."
