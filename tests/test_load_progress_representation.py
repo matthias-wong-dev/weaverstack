@@ -227,3 +227,16 @@ def test_a_large_successful_run_ends_with_its_summary_alone(capsys):
     assert not any(name in printed for name in names)
     assert " 12 succeeded" in printed
     assert "read                 120" in printed
+
+
+@weaver_test()
+def test_a_refresh_finishes_without_row_counts():
+    """Waiting for an endpoint moves no rows, so it says none."""
+
+    from weaver.run.resolution import ENDPOINT_REFRESH
+
+    refresh = node("refresh", primitive_kind=ENDPOINT_REFRESH)
+    lines, _ = present(runner(nodes=[refresh]), Gate())
+
+    finished = next(line for line in lines if line.startswith("✓   Refresh"))
+    assert "read" not in finished

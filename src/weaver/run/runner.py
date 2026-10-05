@@ -59,14 +59,16 @@ def _node_substep(session, node, *, concurrent: bool = False):
         yield frame
 
 
-def _conclude(frame, outcome) -> None:
+def _conclude(frame, node, outcome) -> None:
     """Mark a node's frame with its outcome before the frame closes."""
+
+    from .resolution import ENDPOINT_REFRESH, ONELAKE_PUBLICATION
 
     if frame is None:
         return
     if outcome.status == FAILED:
         frame.failed = True
-    else:
+    elif node.primitive_kind not in (ENDPOINT_REFRESH, ONELAKE_PUBLICATION):
         frame.note = rows_moved(outcome.result)
 
 
@@ -618,7 +620,7 @@ class Runner:
                     if isinstance(value, BaseException)
                     else settle(node, returned=value)
                 )
-                _conclude(frame, outcome)
+                _conclude(frame, node, outcome)
                 settled.append(
                     self._settled(
                         node,
@@ -716,7 +718,7 @@ class Runner:
                 outcome = settle(node, raised=exc)
             else:
                 outcome = settle(node, returned=returned)
-            _conclude(frame, outcome)
+            _conclude(frame, node, outcome)
         return self._settled(
             node,
             outcome.status,
