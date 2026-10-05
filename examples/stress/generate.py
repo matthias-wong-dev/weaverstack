@@ -133,8 +133,8 @@ APPEND = "append"  # no primary key, Incremental: true
 INCREMENTAL = "incremental"  # primary key, Incremental: true, deletions as a flag
 INCREMENTAL_DELETE = "incremental-delete"  # the same, deletions claimed
 UPSERT = "upsert"  # primary key, Incremental: false, deletions by absence
-REPLACE = "replace"  # no primary key, Incremental: false
 STATIC = "static"  # Static: true
+INCREMENTAL_BEHAVIOURS = (APPEND, INCREMENTAL, INCREMENTAL_DELETE)
 VIEW = "view"
 FOLDER = "folder"
 
@@ -314,14 +314,15 @@ def _weighted(rng: random.Random, choices) -> str:
     return choices[-1][0]
 
 
-def _landing_behaviour(source: Source, rng: random.Random) -> str:
+def _landing_behaviour(source: Source, rng: random.Random, largest: int) -> str:
     if source.folder:
         return FOLDER
     if source.feed:
         if not source.updates and not source.deletes:
-            return APPEND
+            # Only the largest fact appends without a key.
+            return APPEND if source.rows == largest else INCREMENTAL
         return INCREMENTAL if rng.random() < 0.7 else INCREMENTAL_DELETE
-    choices = [(UPSERT, 0.4), (REPLACE, 0.25), (INCREMENTAL, 0.2)]
+    choices = [(UPSERT, 0.65), (INCREMENTAL, 0.25)]
     if source.rows <= 10_000:
         choices.append((STATIC, 0.15))
     return _weighted(rng, choices)
@@ -340,13 +341,11 @@ def _child_behaviour(parent: Node, rng: random.Random) -> str | None:
 
     choices = []
     if _appends(parent):
-        choices.append((APPEND, 0.7))
+        choices.append((INCREMENTAL, 0.7))
     elif not parent.removes:
         choices += [(INCREMENTAL, 0.5), (INCREMENTAL_DELETE, 0.15)]
     if parent.rows <= LARGE:
         choices.append((UPSERT, 0.4))
-    if parent.rows <= 1_000_000:
-        choices.append((REPLACE, 0.3))
     if parent.rows <= 10_000:
         choices.append((STATIC, 0.1))
     return _weighted(rng, choices) if choices else None
@@ -362,9 +361,10 @@ def plan_estate(sources: list[Source], options: Options) -> list[Node]:
     rng = random.Random(options.seed + 1)
     layers: dict[str, list[Node]] = {}
 
+    largest = max(source.rows for source in sources)
     landing = []
     for source in sources:
-        behaviour = _landing_behaviour(source, rng)
+        behaviour = _landing_behaviour(source, rng, largest)
         landing.append(
             Node(
                 item=LAKE,
@@ -389,7 +389,7 @@ def plan_estate(sources: list[Source], options: Options) -> list[Node]:
             schema=f"Cur{folder.source.schema}",
             name=f"{folder.name}Rows",
             language="python",
-            behaviour=APPEND,
+            behaviour=INCREMENTAL,
             rows=folder.source.inserts * 30,
             layer="curated",
             parent=folder,
@@ -397,7 +397,6 @@ def plan_estate(sources: list[Source], options: Options) -> list[Node]:
         folder.children.append(node)
         parsed.append(node)
 
-    largest = max(source.rows for source in sources)
     quotas = _quotas(options.objects - len(landing))
     sequence = 0
     for name, item, language, _share, parents in LAYERS:
@@ -444,8 +443,16 @@ def plan_estate(sources: list[Source], options: Options) -> list[Node]:
                     continue
             sequence += 1
             noun = NOUNS[sequence % len(NOUNS)]
+            # A build describes a Spark SQL query before its table exists, so a
+            # table that reads its own high-water mark is Python, whose read()
+            # only a load runs.
+            written = (
+                "python"
+                if language == "sparksql" and behaviour in INCREMENTAL_BEHAVIOURS
+                else language
+            )
             node = _node(
-                parent, name, item, language, behaviour, f"{noun}{sequence:04d}"
+                parent, name, item, written, behaviour, f"{noun}{sequence:04d}"
             )
             if behaviour == VIEW:
                 node.live = parent.removes or rng.random() < 0.5
@@ -454,7 +461,7 @@ def plan_estate(sources: list[Source], options: Options) -> list[Node]:
                     node.dimension = rng.choice(candidates)
             else:
                 node.live = behaviour == UPSERT or (
-                    behaviour in (REPLACE, STATIC) and parent.removes
+                    behaviour == STATIC and parent.removes
                 )
             made.append(node)
         layers[name] = made
@@ -498,6 +505,23 @@ def _write(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
+def _high_water(table: str) -> str:
+    """Declare ``@held``: the newest Epoch ``table`` holds, or -1.
+
+    A build runs the query to shape the table before the table exists. Fabric
+    resolves a name inside ``if`` only when the block runs, so the guard lets the
+    first build pass.
+    """
+
+    return (
+        "declare @held int = -1;\n"
+        f"if object_id(N'{table}') is not null\n"
+        "begin\n"
+        f"    set @held = (select coalesce(max([Epoch]), -1) from {table});\n"
+        "end;\n\n"
+    )
+
+
 def _schema_document(root: Path, item: str, schema: str, description: str) -> None:
     _write(
         root / item / "schemas" / f"{schema}.yml",
@@ -532,7 +556,6 @@ def _description(node: Node) -> str:
         INCREMENTAL: "merges what changed, keeping deletions as a flag",
         INCREMENTAL_DELETE: "merges what changed and deletes what was deleted",
         UPSERT: "compares the whole source and deletes what is gone",
-        REPLACE: "replaces everything on each load",
         STATIC: "loads once",
         VIEW: "presents",
         FOLDER: "copies the files that are new",
@@ -827,11 +850,11 @@ def _tsql_source(source: Source) -> str:
         ctes = (
             f"today as (\n{clock}\n),\n"
             "held as (\n"
-            "    select coalesce(max(t.[Epoch]), -1) as h\n"
-            f"    from [{source.schema}].[{source.name}] as t\n"
+            "    select @held as h\n"
             f"),\nids as (\n{ids}\n)"
         )
-        window = "\nwhere x.Epoch > (select h from held)"
+        window = "\nwhere x.Epoch > @held"
+        preamble = _high_water(f"[{source.schema}].[{source.name}]")
     else:
         ctes = (
             f"today as (\n{clock}\n),\n"
@@ -842,6 +865,7 @@ def _tsql_source(source: Source) -> str:
             ")"
         )
         window = ""
+        preamble = ""
     update = (
         f"today.e - (((today.e - i.Id) % {updates}) + {updates}) % {updates}"
         if updates
@@ -868,7 +892,7 @@ Dependencies:
 Schema:
 {_tsql_schema()}
 */
-with {ctes}
+{preamble}with {ctes}
 select x.Id
      , x.Epoch
      , x.IsDeleted
@@ -939,11 +963,9 @@ def high_water(table) -> int:
 '''
 
 
-def _python_landing(node: Node, shortcut: str) -> str:
-    source = node.source
-    read = f"{shortcut}(self).{source.name}.dataframe().select(*COLUMNS)"
+def _python_read(behaviour: str, read: str) -> str:
     newer = "rows.where(rows.Epoch > high_water(self))"
-    body = {
+    return {
         APPEND: f"        rows = {read}\n        return {newer}, None",
         INCREMENTAL: f"        rows = {read}\n        return {newer}, None",
         INCREMENTAL_DELETE: (
@@ -955,7 +977,13 @@ def _python_landing(node: Node, shortcut: str) -> str:
             "        )"
         ),
         UPSERT: f"        rows = {read}\n        return rows.where(~rows.IsDeleted)",
-    }.get(node.behaviour, f"        return {read}")
+    }.get(behaviour, f"        return {read}")
+
+
+def _python_landing(node: Node, shortcut: str) -> str:
+    source = node.source
+    read = f"{shortcut}(self).{source.name}.dataframe().select(*COLUMNS)"
+    body = _python_read(node.behaviour, read)
     imported = "COLUMNS, high_water" if "high_water" in body else "COLUMNS"
     return f'''"""
 Table ID: {node.id}
@@ -977,6 +1005,37 @@ from weaver import Table
 class {node.schema}__{node.name}(Table):
     def read(self):
 {body}
+'''
+
+
+def _python_table(node: Node) -> str:
+    parent = node.parent
+    read = (
+        f'self.spark.table(self.lakehouse.qualify("{parent.schema}", '
+        f'"{parent.name}")).select(*COLUMNS)'
+    )
+    return f'''"""
+Table ID: {node.id}
+
+Description: {_description(node)}
+
+Lineage: Copied from {parent.id}.
+
+{_keys(node.behaviour)}Dependencies:
+  - {parent.id}
+
+Schema:
+{_delta_schema()}
+"""
+
+from lib.estate import COLUMNS, high_water
+
+from weaver import Table
+
+
+class {node.schema}__{node.name}(Table):
+    def read(self):
+{_python_read(node.behaviour, read)}
 '''
 
 
@@ -1021,13 +1080,11 @@ def _parsed_folder(node: Node) -> str:
     return f'''"""
 Table ID: {node.id}
 
-Description: The rows of each file {folder.id} receives, appended as they arrive.
+Description: The rows of each file {folder.id} receives, merged as they arrive.
 
 Lineage: $Files/{folder.id}
 
-Incremental: true
-
-Schema:
+{_keys(node.behaviour)}Schema:
 {_delta_schema()}
 """
 
@@ -1061,19 +1118,20 @@ def _columns(tsql: bool, alias: str = "p") -> str:
 
 
 def _sql_table(node: Node, parent: str, *, tsql: bool) -> str:
-    me = f"[{node.schema}].[{node.name}]" if tsql else node.id
-    epoch, ident = _quoted("Epoch", tsql), _quoted("Id", tsql)
+    behaviour = node.behaviour
+    # A Spark SQL query cannot guard a read of its own table.
+    assert tsql or behaviour not in INCREMENTAL_BEHAVIOURS, node.id
     deleted = "p.[IsDeleted] = 1" if tsql else "p.IsDeleted"
     live = "p.[IsDeleted] = 0" if tsql else "not p.IsDeleted"
-    newer = f"p.{epoch} > (select coalesce(max(t.{epoch}), -1) from {me} as t)"
+    newer = "p.[Epoch] > @held"
     query = f"select {_columns(tsql)}\nfrom {parent} as p"
-    behaviour = node.behaviour
+    preamble = _high_water(_tsql_name(node)) if tsql else ""
     if behaviour in (APPEND, INCREMENTAL):
-        body = f"{query}\nwhere {newer};\n"
+        body = f"{preamble}{query}\nwhere {newer};\n"
     elif behaviour == INCREMENTAL_DELETE:
         body = (
-            f"{query}\nwhere {newer}\n  and {live};\n\n"
-            f"select p.{ident}\nfrom {parent} as p\nwhere {newer}\n  and {deleted};\n"
+            f"{preamble}{query}\nwhere {newer}\n  and {live};\n\n"
+            f"select p.[Id]\nfrom {parent} as p\nwhere {newer}\n  and {deleted};\n"
         )
     elif behaviour == UPSERT and not node.parent.removes:
         body = f"{query}\nwhere {live};\n"
@@ -1164,7 +1222,6 @@ def render_estate(root: Path, nodes: list[Node], names: dict) -> None:
                     names["source_workspace"],
                     kind="folder",
                 )
-                schemas[LAKE].add("SrcDrop")
                 _write(lake / "Files" / module, _landing_folder(node, shortcut))
                 continue
             prefix = "Src" if source.item == SOURCE_LAKEHOUSE else "Whs"
@@ -1176,7 +1233,8 @@ def render_estate(root: Path, nodes: list[Node], names: dict) -> None:
             continue
         if node.item == LAKE:
             if node.language == "python":
-                text = _parsed_folder(node)
+                parsed = node.parent.behaviour == FOLDER
+                text = _parsed_folder(node) if parsed else _python_table(node)
                 path = lake / "Tables" / module
             elif node.behaviour == VIEW:
                 dimension = node.dimension.id if node.dimension else None
@@ -1231,7 +1289,7 @@ def render_tests(root: Path, nodes: list[Node]) -> None:
             and node.parent is not None
             and node.behaviour != STATIC
             and node.rows <= 100_000
-            and node.language in ("sparksql", "tsql")
+            and node.parent.behaviour != FOLDER
         ):
             chosen.setdefault((node.item, node.behaviour), node)
     for (item, behaviour), node in sorted(chosen.items()):

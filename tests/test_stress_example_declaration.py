@@ -122,3 +122,14 @@ def test_no_incremental_table_reads_a_parent_that_removes_rows():
         and node.parent.removes
     ]
     assert not blind
+
+
+@weaver_test()
+def test_only_the_largest_fact_and_its_copy_have_no_primary_key():
+    generator = _generator()
+    options = generator.Options()
+    nodes = generator.plan_estate(generator.plan_sources(options), options)
+
+    keyless = [node for node in nodes if node.behaviour == generator.APPEND]
+    assert len(keyless) == 2
+    assert {node.rows for node in keyless} == {max(node.rows for node in nodes)}

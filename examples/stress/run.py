@@ -106,7 +106,7 @@ class Stress:
                     report = weaver.initialise(
                         Path(scratch) / "project",
                         workspace=config["workspace"],
-                        catalogue=config["catalogue"],
+                        catalogue=config["catalogue"].split("/", 1)[-1],
                         environment=config["environment"],
                         lakehouse=_at(lakehouses, position),
                         warehouse=_at(warehouses, position),
@@ -128,13 +128,12 @@ class Stress:
         built = weaver.build(str(self.folder / name), items=items, session=session)
         seconds = time.perf_counter() - started
         report = built.installation_report
-        actions = getattr(report, "actions", None)
         self.record(
             step,
             name,
             seconds,
             status=built.status,
-            actions=len(actions) if actions is not None else None,
+            actions=report.action_counts()["total"] if report is not None else None,
             errors=[f"{e.action_id}: {e.message}" for e in built.errors][:20],
         )
         if not built.succeeded:
