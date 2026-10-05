@@ -554,15 +554,21 @@ enumerate inside the frozen scope when an action runs. A Warehouse is one
 dynamic-SQL action. A Lakehouse area detaches its shortcuts, waits for OneLake to
 release their paths, and is swept only after a successful detach. Targets are
 independent; a removed catalogue or an unbind follows them all. The estate an
-unscoped wipe empties is what `_.Installation` records.
+unscoped wipe empties is what `_.Installation` records. Where the workspace
+configuration has `targets:`, every recorded installation must be bound there to
+the same physical item, or the wipe refuses and asks for named targets. Named
+targets are emptied exactly as named.
 
 A mirror plans before it acts too. `check_mirror` proves the source and refuses
 unsafe destinations, then `mirror_mutation_plan` reads what the mirror needs,
 source code definitions, case-exact source paths and the deployed load tree,
-and compiles one plan: the destination catalogue is emptied, built against its
-known-empty state and forked, while each item's destination is emptied and
-reconstructed. An item is recorded and bound to its mirror last, only after its
-own reconstruction and the fork succeed.
+and compiles one plan: the destination catalogue is emptied and built against its
+known-empty state, while each item's destination is emptied and reconstructed,
+and each reconstructed Lakehouse's SQL endpoint is refreshed before a Warehouse
+reads through it. The fork, the record of what each item borrows and each item's
+binding are one transaction, last, after every reconstruction. Until it commits
+the destination catalogue records no installation, so it never claims the
+source's items.
 
 One disposition, one meaning. `REMOVE` takes the catalogue last, `UNBIND` keeps
 it and deletes its claims for the targets emptied and is never handed it as a

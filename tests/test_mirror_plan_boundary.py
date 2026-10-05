@@ -16,6 +16,8 @@ from weaver.store import FilesystemStore
 from weaver.workspaces import CatalogueRef, Workspace
 
 WORKSPACE = "Analytics"
+#: The one action that forks, records and binds.
+PUBLISH = "mirror-publish-catalogue"
 
 
 def _resolved(item, kind, *, relations=(), programmables=()):
@@ -81,7 +83,7 @@ def _actions(plan):
 
 
 @weaver_test()
-def test_a_warehouse_mirror_binds_last_after_its_reconstruction_and_the_fork():
+def test_a_warehouse_mirror_publishes_its_catalogue_last_in_one_transaction():
     relation = Borrowed(
         WeaverDocumentId.parse("Warehouse/Model/Rpt.Sales"), "table", "view"
     )
@@ -99,7 +101,7 @@ def test_a_warehouse_mirror_binds_last_after_its_reconstruction_and_the_fork():
     plan, payloads, summary = mirror_mutation_plan(resolved, session=session)
 
     actions = _actions(plan)
-    bind = "mirror-bind"
+    bind = PUBLISH
     assert not any(bind in a.depends_on for a in actions.values())
     for action in actions:
         if action != bind and not action.startswith("wipe-warehouse-Weaver_Dev"):
@@ -107,7 +109,19 @@ def test_a_warehouse_mirror_binds_last_after_its_reconstruction_and_the_fork():
                 action
             )
     assert runs_before(plan, "wipe-warehouse-Weaver_Dev", "complete-build")
-    assert runs_before(plan, "complete-build", "mirror-fork-catalogue")
+    assert runs_before(plan, "complete-build", bind)
+    # Nothing records an installation until the fork, record and bind commit.
+    script = payloads[actions[bind].payload].decode()
+    assert script.index("begin transaction") < script.index("[_].[Installation]")
+    assert script.index("[_].[Installation]") < script.index("commit transaction")
+    assert "rollback transaction" in script
+    copying = [
+        action.id
+        for action in actions.values()
+        if action.payload is not None
+        and b"[Weaver].[_].[Installation]" in payloads[action.payload]
+    ]
+    assert copying == [bind]
     assert runs_before(plan, "complete-build", "mirror-surface-warehouse-Model_Dev-000")
     # The item's own reconstruction does not wait for the catalogue.
     assert not runs_before(
@@ -240,11 +254,11 @@ def test_a_lakehouse_mirror_resolves_case_exact_sources_and_awaits_its_shortcuts
         "clear-files-lakehouse-Input_Dev",
         copy_id := "mirror-load-tree-lakehouse-Input_Dev",
     )
-    assert runs_before(plan, copy_id, "mirror-bind")
+    assert runs_before(plan, copy_id, PUBLISH)
     assert runs_before(
         plan,
         "mirror-await-tables-pointers-lakehouse-Input_Dev",
-        "mirror-bind",
+        PUBLISH,
     )
     assert plan.execution.spark_home_target_id == "lakehouse-Input_Dev"
     assert summary["Lakehouse/Input"]["files"] == 1
@@ -310,20 +324,78 @@ def test_a_shortcut_into_another_mirrored_item_reads_what_this_plan_builds(tmp_p
         "mirror-await-tables-pointers-lakehouse-Input_Dev",
         "mirror-recreated-lakehouse-Model_Dev",
     )
-    # Both items publish to shared catalogue tables in one step each, last.
-    publishing = [
-        a.id
-        for a in actions.values()
-        if a.kind in ("record_mirror", "bind_installation")
-    ]
-    assert publishing == ["mirror-record", "mirror-bind"]
+    # Both items publish to the shared catalogue tables in one step, last.
+    publishing = [a.id for a in actions.values() if a.kind == "publish_mirror"]
+    assert publishing == [PUBLISH]
     for reconstruction in (
         "mirror-recreated-lakehouse-Model_Dev",
         "mirror-await-tables-pointers-lakehouse-Input_Dev",
     ):
-        assert runs_before(plan, reconstruction, "mirror-record")
-    bound = payloads[actions["mirror-bind"].payload].decode()
+        assert runs_before(plan, reconstruction, PUBLISH)
+    bound = payloads[actions[PUBLISH].payload].decode()
     assert "Input_Dev" in bound and "Model_Dev" in bound
+
+
+@weaver_test()
+def test_a_warehouse_reading_a_mirrored_lakehouse_waits_for_its_sql_endpoint(
+    tmp_path,
+):
+    """A Warehouse reads a Lakehouse through its SQL endpoint, which lists the
+    reconstructed tables only once Fabric has refreshed it."""
+
+    from dataclasses import replace
+
+    from weaver.build_bundle.executors.sql_endpoint_refresh import CONTRACTS
+    from weaver.installed import InstalledShortcut
+
+    (tmp_path / "Input" / "Tables" / "Sales" / "Customer").mkdir(parents=True)
+    producer = _resolved(
+        "Input",
+        "Lakehouse",
+        relations=(
+            Borrowed(
+                WeaverDocumentId.parse("Lakehouse/Input/Tables/Sales.Customer"),
+                "table",
+                "table",
+            ),
+        ),
+    )
+    consumer_item = WeaverItemId.parse("Warehouse/Model")
+    consumer = MirrorItem(
+        item=consumer_item,
+        source_target="Model",
+        destination="Model_Dev",
+        shortcuts=(
+            InstalledShortcut(
+                destination=WeaverDocumentId.parse("Warehouse/Model/Sales.Upstream"),
+                source=WeaverDocumentId.parse("Lakehouse/Input/Tables/Sales.Customer"),
+                shortcut_type="view",
+                target_type="logical",
+                target_item=WeaverItemId.parse("Lakehouse/Input"),
+                target_schema="Sales",
+                target_object="Customer",
+            ),
+        ),
+    )
+    resolved = replace(
+        producer,
+        items=(*producer.items, consumer),
+        bindings={**producer.bindings, consumer_item: "Model_Dev"},
+        installations={**producer.installations, consumer_item: {}},
+    )
+    session = _Session(resolver=_Resolver(tmp_path), store=FilesystemStore())
+
+    plan, _payloads, _summary = mirror_mutation_plan(resolved, session=session)
+
+    start = "mirror-start-endpoint-refresh-lakehouse-Input_Dev"
+    current = "mirror-await-endpoint-refresh-lakehouse-Input_Dev"
+    views = "mirror-pointers-warehouse-Model_Dev-000"
+    assert runs_before(plan, "mirror-await-tables-pointers-lakehouse-Input_Dev", start)
+    assert runs_before(plan, start, current)
+    assert runs_before(plan, current, views)
+    assert runs_before(plan, current, PUBLISH)
+    assert _actions(plan)[current].result_from.action_id == start
+    assert plan.driver_contracts == CONTRACTS
 
 
 @weaver_test()
@@ -408,5 +480,5 @@ def test_a_wide_lakehouse_mirror_spreads_its_views_and_waits_across_actions(tmp_
     waits = [a for a in actions if a.startswith("mirror-await-tables-pointers-")]
     assert len(views) == 3 and len(waits) == 3
     for each in (*views, *waits):
-        assert runs_before(plan, each, "mirror-bind")
+        assert runs_before(plan, each, PUBLISH)
     assert not any(runs_before(plan, a, b) for a in views for b in views if a != b)
