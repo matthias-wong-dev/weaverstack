@@ -51,7 +51,9 @@ def stage_label(sequence, targets, count: int) -> str:
         if name not in names:
             names.append(name)
     actions = f"{count} {'action' if count == 1 else 'actions'}"
-    return " · ".join(part for part in (", ".join(names), said, actions) if part)
+    # A stage that already names its target says it once.
+    named = "" if any(name in said for name in names) else ", ".join(names)
+    return " · ".join(part for part in (named, said, actions) if part)
 
 
 @dataclass

@@ -106,7 +106,7 @@ SHORTCUT_REMOVALS = 8
 
 #: OneLake may answer for a removed shortcut's path after Fabric stops listing it.
 NAME_RELEASE_TIMEOUT = 300.0
-NAME_RELEASE_POLL_INTERVAL = 3.0
+NAME_RELEASE_POLL_INTERVAL = 1.0
 
 
 @dataclass(frozen=True)

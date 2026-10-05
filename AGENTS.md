@@ -338,9 +338,9 @@ suit a mid-sized capacity; an F64 sustains twice as much. The limits travel
 with an invocation, outside plan identity. They throttle execution only; an
 ordering the plan needs is an edge, never a low limit. Each Warehouse lane
 leases its own pooled connection, and four concurrent DDL lanes ran without
-conflict in Fabric. Ready T-SQL actions on one Warehouse share a round trip,
-each in its own `TRY`/`CATCH` with its own outcome; Fabric refuses
-`SET XACT_ABORT`. Waiting work holds no resource.
+conflict in Fabric. Ready T-SQL actions on one Warehouse share round trips
+spread across its free lanes, each action in its own `TRY`/`CATCH` with its own
+outcome; Fabric refuses `SET XACT_ABORT`. Waiting work holds no resource.
 `spark_table` actions with authored setup share an exclusion, because their
 temporary views are session-scoped. The identifier-case scope is shared by
 concurrent statements in one mode and exclusive between modes.

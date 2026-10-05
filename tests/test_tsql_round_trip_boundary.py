@@ -128,3 +128,34 @@ def test_ready_actions_share_one_round_trip_and_keep_their_own_outcomes():
     assert report.by_id["broken"].status == "failed"
     assert report.by_id["broken"].error == "refused"
     assert report.by_id["dependent"].status == "blocked"
+
+
+@weaver_test()
+def test_ready_actions_are_shared_across_the_free_lanes():
+    """Eight ready actions and four lanes make four round trips of two."""
+
+    warehouse = _Warehouse(failing="never")
+    contexts = {
+        "sales": InstallationContext(
+            resolver=object(), store=object(), target=None, sql=warehouse
+        )
+    }
+    plan, payloads = _plan(
+        {
+            f"v{index}": f"create view [S].[V{index}] as select 1 as x;"
+            for index in range(8)
+        },
+        dependent_on="",
+    )
+    driver = replace(
+        physical_driver(TSqlExecutor(), contexts, required_capabilities=()),
+        batch=round_trip_driver(contexts, details=lambda action, payload: {}),
+        batch_size=25,
+    )
+
+    report = MutationExecutor(
+        {"tsql": driver}, workers=8, limits={"warehouse:Sales": 4}
+    ).execute(plan, payloads)
+
+    assert sorted(len(trip) for trip in warehouse.round_trips) == [2, 2, 2, 2]
+    assert all(result.status == "succeeded" for result in report.results)

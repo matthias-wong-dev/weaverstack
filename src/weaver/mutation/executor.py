@@ -523,29 +523,39 @@ class _Invocation:
                 and not state.action.exclusions
                 and state.action.executor not in self.contracts
             ):
-                for other_key in sorted(self.ready, key=self.order.get):
-                    other = self.states[other_key]
-                    if (
-                        other_key == key
-                        or other_key in self.active
-                        or other_key in self.results
-                        or other.pending
-                    ):
-                        continue
-                    if (
-                        other.action.executor,
-                        other.action.target_id,
-                        other.action.resources,
-                        other.action.exclusions,
-                    ) == (
-                        state.action.executor,
-                        state.action.target_id,
-                        state.action.resources,
-                        (),
-                    ):
-                        group.append(other)
-                        if len(group) >= driver.batch_size:
-                            break
+
+                def shape(member):
+                    action = member.action
+                    return (
+                        action.executor,
+                        action.target_id,
+                        action.resources,
+                        action.exclusions,
+                    )
+
+                alike = [
+                    other
+                    for other_key, other in (
+                        (k, self.states[k])
+                        for k in sorted(self.ready, key=self.order.get)
+                    )
+                    if other_key != key
+                    and other_key not in self.active
+                    and other_key not in self.results
+                    and not other.pending
+                    and shape(other) == shape(state)
+                ]
+                # Ready work is shared across the free lanes, so a round trip
+                # never holds back what another lane could run now.
+                free = min(
+                    (
+                        self.executor.limits[k] - self.used.get(k, 0)
+                        for k in self.keys(state)
+                    ),
+                    default=1,
+                )
+                share = -(-(len(alike) + 1) // max(free, 1))
+                group.extend(alike[: min(driver.batch_size, share) - 1])
             keys = self.keys(state)
             task = _Task(tuple(group), keys, len(group) > 1)
             task_id = key

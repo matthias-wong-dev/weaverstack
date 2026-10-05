@@ -234,3 +234,22 @@ def test_presentation_failing_changes_no_outcome():
     plain = execute(plan, drivers)
 
     assert [r.status for r in observed.results] == [r.status for r in plain.results]
+
+
+@weaver_test()
+def test_a_stage_that_names_its_target_says_it_once():
+    from weaver.mutation import BoundTarget, MutationBatch, MutationSequence
+    from weaver.sessions.mutation_progress import stage_label
+
+    targets = {"t": BoundTarget("t", "warehouse", "t-id", item_name="Sales_Dev")}
+
+    def label(description):
+        sequence = MutationSequence(1, description, (MutationBatch("b", "t", ()),))
+        return stage_label(sequence, targets, 2)
+
+    assert label("reconstruct Warehouse/Sales_Dev") == (
+        "Reconstruct Warehouse/Sales_Dev · 2 actions"
+    )
+    assert label("build dependency layer") == (
+        "Warehouse/Sales_Dev · Building objects · 2 actions"
+    )

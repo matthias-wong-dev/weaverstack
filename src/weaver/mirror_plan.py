@@ -51,8 +51,8 @@ from .wipe_plan import finishing, target_wipe_actions
 
 #: Deployed code is copied; other ``Files/_`` state remains destination-owned.
 LOAD_TREE = "_/Load"
-#: Statements in one Warehouse round trip. Each runs as its own dynamic batch.
-STATEMENTS_PER_SCRIPT = 200
+#: Statements in one Warehouse script. Each runs as its own dynamic batch.
+STATEMENTS_PER_SCRIPT = 50
 #: Lakehouse wrapper views created by one Spark action.
 VIEWS_PER_ACTION = 10
 
@@ -138,8 +138,14 @@ def _action(
     )
 
 
-def _scripts(compiling, name, target, statements, *, kind, depends_on) -> list:
-    """Warehouse statements as scripts of at most ``STATEMENTS_PER_SCRIPT``."""
+def _scripts(
+    compiling, name, target, statements, *, kind, depends_on, ordered=False
+) -> list:
+    """Warehouse statements as scripts of at most ``STATEMENTS_PER_SCRIPT``.
+
+    Independent scripts share the Warehouse's lanes. ``ordered`` scripts run one
+    after another, in statement order.
+    """
 
     statements = list(statements)
     actions = []
@@ -161,8 +167,8 @@ def _scripts(compiling, name, target, statements, *, kind, depends_on) -> list:
             resources=(f"warehouse:{target.item_id}",),
         )
         actions.append(action)
-        # Scripts in one sequence keep their statement order.
-        previous = (action.id,)
+        if ordered:
+            previous = (action.id,)
     return actions
 
 
@@ -508,7 +514,7 @@ def _warehouse(
         kind="create_schemas",
         depends_on=after,
     )
-    ready = tuple(a.id for a in schemas[-1:])
+    ready = tuple(a.id for a in schemas)
     actions = _scripts(
         compiling,
         f"mirror-relations-{slug}",
@@ -520,7 +526,7 @@ def _warehouse(
         kind="borrow_relations",
         depends_on=ready,
     )
-    relations_built = tuple(a.id for a in actions[-1:])
+    relations_built = tuple(a.id for a in actions)
     # The ``_`` surface views read the destination catalogue's tables.
     surface = _scripts(
         compiling,
@@ -546,6 +552,7 @@ def _warehouse(
     )
     # Copied code may read any local relation, pointer or surface view, and
     # Fabric refuses a definition while DDL on an object it references runs.
+    # One routine may call another, so the copies keep the source's order.
     code = programmable_statements(str(row["definition"]) for row in rows)
     programmables = _scripts(
         compiling,
@@ -556,12 +563,21 @@ def _warehouse(
         depends_on=(
             *ready,
             *relations_built,
-            *(a.id for a in surface[-1:]),
-            *(a.id for a in recreated[-1:]),
+            *(a.id for a in surface),
+            *(a.id for a in recreated),
         ),
+        ordered=True,
     )
     every = [*schemas, *actions, *surface, *recreated, *programmables]
-    compiling.stage(f"reconstruct {each.target}", destination, every)
+    # Each stage waits on something different, so each is timed on its own.
+    compiling.stage(f"reconstruct {each.target}", destination, [*schemas, *actions])
+    compiling.stage(f"recreate catalogue views in {each.target}", destination, surface)
+    compiling.stage(
+        f"recreate views over other items in {each.target}", destination, recreated
+    )
+    compiling.stage(
+        f"copy procedures and functions into {each.target}", destination, programmables
+    )
     return every, {
         "source": each.source,
         "target": each.target,
