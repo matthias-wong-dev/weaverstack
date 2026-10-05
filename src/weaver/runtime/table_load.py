@@ -56,37 +56,86 @@ def _exact_case(spark):
             spark.conf.set(_CASE_SENSITIVE, previous)
 
 
-#: Fabric caches a CTE that a later query repeats, and keeps the cache after both
-#: queries with no name to release it by. Reject discovery and the purge repeat
-#: the validation chain, so the cache is off while any load in a session runs.
-_CTE_CACHE = "spark.sql.optimizer.cte.cache.enabled"
-_CTE_CACHE_HOLDS: dict = {}
-_CTE_CACHE_LOCK = threading.Lock()
+# --- Fabric Spark 4.1 workarounds ---------------------------------------------
+#
+# Each changes only how a relation is planned or cached, so a load gives the
+# same result whether or not Fabric still has the defect. Remove one once the
+# runtime no longer has its defect: without it,
+# tests/fabric/test_fabric_staging_defects_primitive.py must still pass.
+
+
+def _fabric_staging_shuffle(frame) -> str:
+    """The hint staging is cached with: a shuffle when its plan reports an ordering.
+
+    SPARK-59009: a cached relation whose plan reports an ordering, as staging
+    from ``spark.range`` or a sort does, fails once an inlined CTE references it
+    more than once, as reject discovery does. Remove once Fabric's runtime has
+    the Apache Spark fix.
+
+    The ordering is the one the cached relation would carry. PySpark exposes it
+    only through the JVM plan, so a plan that cannot be read counts as ordered:
+    not knowing costs a shuffle, never a load.
+    """
+
+    try:
+        ordering = frame._jdf.queryExecution().optimizedPlan().outputOrdering()
+        ordered = not ordering.isEmpty()
+    except Exception:  # noqa: BLE001 - see above
+        ordered = True
+    return "/*+ REPARTITION */ " if ordered else ""
+
+
+#: Fabric fails a CREATE TABLE AS SELECT that reads cached staging directly
+#: ("Heavy batch should consist of arrow vectors"), whatever the source, and a
+#: shuffle between them avoids it. The evidence tables and a full replace write
+#: this way. Remove once that write succeeds on Fabric.
+_FABRIC_WRITE_SHUFFLE = "/*+ REPARTITION */ "
+
+
+#: Fabric caches a CTE that a later query repeats and keeps it after both
+#: queries, under a name nothing can release, so the caches accumulate in the
+#: session. Reject discovery and the purge repeat the validation chain. The
+#: setting is undocumented, so every step of the hold is fail-open and no load
+#: depends on it. Remove once Fabric releases those caches itself.
+_FABRIC_CTE_CACHE = "spark.sql.optimizer.cte.cache.enabled"
+_FABRIC_CTE_CACHE_HOLDS: dict = {}
+_FABRIC_CTE_CACHE_LOCK = threading.Lock()
 
 
 @contextmanager
-def _without_cte_cache(spark):
-    """Hold Fabric's CTE cache off, restoring it when the last holder leaves."""
+def _fabric_without_cte_cache(spark):
+    """Hold Fabric's CTE cache off, restoring it when the last holder leaves.
+
+    Reading, changing or restoring the setting can fail without affecting the
+    load: the cache is then simply left as it is.
+    """
 
     key = id(spark)
-    with _CTE_CACHE_LOCK:
-        hold = _CTE_CACHE_HOLDS.get(key)
+    with _FABRIC_CTE_CACHE_LOCK:
+        hold = _FABRIC_CTE_CACHE_HOLDS.get(key)
         if hold is None:
-            previous = spark.conf.get(_CTE_CACHE, None)
-            restore = previous if str(previous).lower() == "true" else None
-            if restore is not None:
-                spark.conf.set(_CTE_CACHE, "false")
-            hold = _CTE_CACHE_HOLDS[key] = {"holders": 0, "restore": restore}
+            restore = None
+            try:
+                previous = spark.conf.get(_FABRIC_CTE_CACHE, None)
+                if str(previous).lower() == "true":
+                    spark.conf.set(_FABRIC_CTE_CACHE, "false")
+                    restore = previous
+            except Exception:  # noqa: BLE001 - see above
+                pass
+            hold = _FABRIC_CTE_CACHE_HOLDS[key] = {"holders": 0, "restore": restore}
         hold["holders"] += 1
     try:
         yield
     finally:
-        with _CTE_CACHE_LOCK:
+        with _FABRIC_CTE_CACHE_LOCK:
             hold["holders"] -= 1
             if not hold["holders"]:
-                del _CTE_CACHE_HOLDS[key]
+                del _FABRIC_CTE_CACHE_HOLDS[key]
                 if hold["restore"] is not None:
-                    spark.conf.set(_CTE_CACHE, hold["restore"])
+                    try:
+                        spark.conf.set(_FABRIC_CTE_CACHE, hold["restore"])
+                    except Exception:  # noqa: BLE001 - see above
+                        pass
 
 
 #: Weaver-owned columns carried only by working relations.
@@ -161,7 +210,7 @@ def load_table(
     # working the state machine out a second time.
     kept: set = set()
     evidence: dict = {}
-    with _without_cte_cache(spark):
+    with _fabric_without_cte_cache(spark):
         try:
             return _reconcile(
                 spark,
@@ -211,18 +260,10 @@ def _reconcile(
         _keep_evidence(spark, names, kept, **relations)
 
     source = _register(spark, held, staging_frame, names["target"], "source")
-    # The repartition drops any ordering the source reports, such as a range's
-    # or a sort's. Fabric's Spark 4.1 fails to canonicalise a cached relation
-    # that has one once an inlined CTE references it twice, as reject discovery
-    # does (SPARK-59009). Without it, Fabric also fails writes that read the
-    # cached staging directly, such as the evidence tables and a full replace,
-    # whatever the source ("Heavy batch should consist of arrow vectors").
+    projection = f"{qualified('s', columns)} FROM {source} AS s"
+    shuffle = _fabric_staging_shuffle(spark.sql(f"SELECT {projection}"))
     staging, staging_view = _hold(
-        spark,
-        held,
-        f"SELECT /*+ REPARTITION */ {qualified('s', columns)} FROM {source} AS s",
-        names["target"],
-        "staging",
+        spark, held, f"SELECT {shuffle}{projection}", names["target"], "staging"
     )
     # Both the metrics and the force that materialises staging for the phases
     # after it, so the authored source is evaluated exactly once.
@@ -1003,7 +1044,7 @@ def _full_replace(spark, names, staging_view, columns, rows_read: int) -> LoadRe
     with _exact_case(spark):
         spark.sql(
             f"CREATE TABLE {names['staging']} USING delta {COLUMN_MAPPING} AS "
-            f"SELECT {named} FROM {staging_view}"
+            f"SELECT {_FABRIC_WRITE_SHUFFLE}{named} FROM {staging_view}"
         )
     rows_deleted = _count(spark, names["target"])
     spark.sql(f"DELETE FROM {names['target']}")
@@ -1110,7 +1151,7 @@ def _keep_evidence(spark, names, kept: set, **relations) -> None:
         with _exact_case(spark):
             spark.sql(
                 f"CREATE TABLE {names[role]} USING delta {COLUMN_MAPPING} AS "
-                f"SELECT * FROM {view}"
+                f"SELECT {_FABRIC_WRITE_SHUFFLE}* FROM {view}"
             )
         # Recorded after the write, so being in ``kept`` means the table is
         # there. A write that failed leaves the role to be attempted again.
