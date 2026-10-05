@@ -43,6 +43,7 @@ from support.observation import observation_from, observe_body
 from support.weaver_test import weaver_test
 
 import weaver
+from weaver.errors import CommandError
 from weaver.sessions.program import FabricProgram
 
 #: What a scenario crosses, named for the operation it drives. A build reaches
@@ -1679,7 +1680,8 @@ def test_unbind_empties_one_target_and_keeps_the_catalogue(acceptance):
 def test_the_whole_estate_comes_from_the_catalogue_and_goes_last(acceptance):
     """
     Intent: naming no target empties the estate the catalogue records, the
-    catalogue last, without mutating the foreign source workspace.
+    catalogue last, without mutating the foreign source workspace. Configured
+    targets that do not account for that estate refuse the wipe.
 
     Proof: the planned targets are the installed bindings plus the catalogue at
     the end; afterwards the catalogue holds no `_` tables, and the foreign
@@ -1693,9 +1695,19 @@ def test_the_whole_estate_comes_from_the_catalogue_and_goes_last(acceptance):
         for item in ("Lakehouse/Landing", "Lakehouse/Curated", "Warehouse/Serving")
     }
 
+    # The suite's configured targets name only the Spark home, so they do not
+    # account for this estate, and a wipe planned from them is refused.
+    with pytest.raises(CommandError, match="Name the physical items"):
+        weaver.plan_wipe(session=acceptance.session)
+
+    # Named by workspace and catalogue alone, a wipe follows the catalogue.
     acceptance.step(
         "estate-plan",
-        lambda: weaver.plan_wipe(session=acceptance.session),
+        lambda: weaver.plan_wipe(
+            workspace=acceptance.workspace.workspace,
+            catalogue=str(catalogue),
+            session=acceptance.session,
+        ),
     )
     acceptance.require("estate-plan")
     plan = acceptance["estate-plan"].result
