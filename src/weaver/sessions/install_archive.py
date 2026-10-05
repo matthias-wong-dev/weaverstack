@@ -321,6 +321,7 @@ def execute_mutation_remote(
                 name="mutation_archive",
                 timeout=timeout * len(actions),
                 retry_submission=False,
+                livy=session.foreground_livy(scope),
             )
         finally:
             if following is not None:

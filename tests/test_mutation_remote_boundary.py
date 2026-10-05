@@ -74,6 +74,8 @@ def test_lost_remote_response_is_uncertain_without_replay(tmp_path):
     session = SimpleNamespace(
         scope=lambda workspace: scope,
         require_spark_home=lambda *args, **kwargs: None,
+        # The wait for Spark is shown before the plan is submitted to it.
+        foreground_livy=lambda scope: "waited-for session",
         direct_delta_workers=16,
         workspace=None,
     )
@@ -82,6 +84,7 @@ def test_lost_remote_response_is_uncertain_without_replay(tmp_path):
     )
     report = install_archive.execute_mutation_remote(session, plan)
     assert len(calls) == 1 and calls[0]["retry_submission"] is False
+    assert calls[0]["livy"] == "waited-for session"
     assert all(result.status == "uncertain" for result in report.results)
     assert session.archive_mutations[0]["status"] == "uncertain"
     assert "remote response lost" in session.archive_mutations[0]["error"]
@@ -137,6 +140,7 @@ def test_carrier_is_staged_in_the_spark_home_lakehouse(tmp_path):
     session = SimpleNamespace(
         scope=lambda _: scope,
         require_spark_home=lambda *a, **kw: None,
+        foreground_livy=lambda scope: None,
         direct_delta_workers=16,
         workspace=None,
     )

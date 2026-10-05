@@ -464,7 +464,7 @@ class ConsoleSession(Session):
             protocol_minima=protocol_minima,
         )
         scope = self.scope(workspace)
-        livy = self._foreground_livy(scope)
+        livy = self.foreground_livy(scope)
         return scope.livy_run(
             source,
             name="delta_table",
@@ -487,7 +487,7 @@ class ConsoleSession(Session):
 
         allowance = DEFAULT_STATEMENT_TIMEOUT if timeout is None else timeout
         scope = self.scope(workspace)
-        livy = self._foreground_livy(scope)
+        livy = self.foreground_livy(scope)
         return scope.livy_run(
             remote_delta_table_actions_program(ordered),
             name="delta_table_actions",
@@ -508,7 +508,7 @@ class ConsoleSession(Session):
         # Remote Python imports Weaver, so it requires a published Environment.
         # Spark SQL and TDS do not.
         scope._check_weaver_available()
-        livy = self._foreground_livy(scope)
+        livy = self.foreground_livy(scope)
         scope.ensure_weaver(livy=livy)
         scope.check_published_version(self.warn, livy=livy)
         return scope.livy_run(
@@ -555,7 +555,7 @@ class ConsoleSession(Session):
             "        spark.conf.set(_key, _previous)\n"
             "emit(_rows)\n"
         )
-        livy = self._foreground_livy(scope)
+        livy = self.foreground_livy(scope)
         return scope.livy_run(source, name="spark_sql", timeout=timeout, livy=livy)
 
     def describe_spark_query_actions(
@@ -607,7 +607,7 @@ class ConsoleSession(Session):
             "        spark.conf.set(_key, _previous)\n"
             "emit(_results)\n"
         )
-        livy = self._foreground_livy(scope)
+        livy = self.foreground_livy(scope)
         return scope.livy_run(
             source,
             name="spark_sql_query_shapes",
@@ -672,7 +672,7 @@ class ConsoleSession(Session):
             "        spark.conf.set(_key, _previous)\n"
             "emit(_results)\n"
         )
-        livy = self._foreground_livy(scope)
+        livy = self.foreground_livy(scope)
         return scope.livy_run(
             source,
             name="spark_sql_actions",
@@ -681,7 +681,9 @@ class ConsoleSession(Session):
             retry_submission=False,
         )
 
-    def _foreground_livy(self, scope: "ConsoleScope"):
+    def foreground_livy(self, scope: "ConsoleScope"):
+        """The scope's Livy session, with any wait for it shown as a Sub-step."""
+
         if scope.livy is None:
             raise CommandError("No Livy session is available for this workspace.")
         if scope.livy.ready:
