@@ -29,11 +29,11 @@ FILES_SURFACE = "files"
 
 # Bound discovery reports a missing shortcut before its consumer runs.
 ADDRESSABLE_TIMEOUT = 300.0
-ADDRESSABLE_POLL_INTERVAL = 5.0
+ADDRESSABLE_POLL_INTERVAL = 2.0
 
 # OneLake may retain a removed shortcut's namespace after it stops listing it.
 NAME_RELEASE_TIMEOUT = 300.0
-NAME_RELEASE_POLL_INTERVAL = 3.0
+NAME_RELEASE_POLL_INTERVAL = 1.0
 
 
 class ShortcutExecutor:

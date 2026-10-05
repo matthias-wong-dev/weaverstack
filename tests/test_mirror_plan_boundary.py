@@ -482,3 +482,46 @@ def test_a_wide_lakehouse_mirror_spreads_its_views_and_waits_across_actions(tmp_
     for each in (*views, *waits):
         assert runs_before(plan, each, PUBLISH)
     assert not any(runs_before(plan, a, b) for a in views for b in views if a != b)
+
+
+@weaver_test()
+def test_a_wide_warehouse_mirror_spreads_its_views_and_keeps_its_code_in_order():
+    """Borrowed views are independent, so their scripts share the Warehouse's
+    lanes. One routine may call another, so copied code runs in source order.
+    Each wait has its own stage, so each is timed on its own."""
+
+    from weaver.mirror_plan import STATEMENTS_PER_SCRIPT
+
+    relations = [
+        Borrowed(
+            WeaverDocumentId.parse(f"Warehouse/Model/Rpt.T{index}"), "table", "view"
+        )
+        for index in range(STATEMENTS_PER_SCRIPT * 2 + 1)
+    ]
+    routines = [
+        {
+            "schema_name": "Code",
+            "object_name": f"P{index}",
+            "definition": f"CREATE PROCEDURE [Code].[P{index}] AS SELECT {index}",
+        }
+        for index in range(STATEMENTS_PER_SCRIPT + 1)
+    ]
+    resolved = _resolved("Model", "Warehouse", relations=relations)
+
+    plan, _payloads, _summary = mirror_mutation_plan(
+        resolved, session=_Session(rows=routines)
+    )
+
+    actions = _actions(plan)
+    views = sorted(a for a in actions if a.startswith("mirror-relations-"))
+    code = sorted(a for a in actions if a.startswith("mirror-code-"))
+    assert len(views) == 3 and len(code) == 2
+    for first in views:
+        assert not any(runs_before(plan, first, other) for other in views)
+    assert runs_before(plan, code[0], code[1])
+    for view in views:
+        assert runs_before(plan, view, code[0])
+    stages = [sequence.description for sequence in plan.sequences]
+    assert "reconstruct Warehouse/Model_Dev" in stages
+    assert "recreate catalogue views in Warehouse/Model_Dev" in stages
+    assert "copy procedures and functions into Warehouse/Model_Dev" in stages
