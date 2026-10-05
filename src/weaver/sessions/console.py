@@ -128,14 +128,15 @@ class ConsoleSession(Session):
         # Only Spark work needs the plan carried into Fabric. TDS, OneLake and
         # REST are reached from here, so a plan without Spark starts no session.
         if plan.execution.spark_home_target_id is None:
-            return super().execute_mutation(
+            report = super().execute_mutation(
                 plan, payloads, observer=progress.observe, **options
             )
-        # One submission runs the whole plan, so its stages are known only
-        # once it returns.
-        report = self.execute_mutation_remote(plan, payloads, **options)
+        else:
+            report = self.execute_mutation_remote(
+                plan, payloads, observer=progress.follow, **options
+            )
         try:
-            progress.replay(report)
+            progress.finish(report)
         except Exception:  # noqa: BLE001 - presentation never changes an outcome
             pass
         return report

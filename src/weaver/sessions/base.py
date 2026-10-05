@@ -688,32 +688,19 @@ class Session(ABC):
         return frame
 
     def close_concurrent_substep(
-        self, frame: ReportingFrame, error: BaseException | None = None
+        self,
+        frame: ReportingFrame,
+        error: BaseException | None = None,
+        *,
+        elapsed: float | None = None,
     ) -> None:
-        frame.elapsed = time.monotonic() - frame.started
+        """``elapsed`` is the work's own duration where another host timed it."""
+
+        frame.elapsed = time.monotonic() - frame.started if elapsed is None else elapsed
         frame.failed = frame.failed or error is not None
         with self._concurrent_lock:
             self.timings.append(frame)
             self.present(frame, "failed" if frame.failed else "completed", error)
-
-    def finished_substep(
-        self, name: str, *, elapsed: float, failed: bool = False, note=None
-    ) -> ReportingFrame:
-        """Report a concurrent Sub-step that ran elsewhere and was timed there."""
-
-        frame = ReportingFrame(
-            kind=SUBSTEP,
-            name=name,
-            depth=len(self._frames),
-            elapsed=elapsed,
-            failed=failed,
-            concurrent=True,
-            note=note,
-        )
-        with self._concurrent_lock:
-            self.timings.append(frame)
-            self.present(frame, "failed" if failed else "completed")
-        return frame
 
     def _framed(self, kind: str, name: str, detail: str | None):
         if kind == TASK:

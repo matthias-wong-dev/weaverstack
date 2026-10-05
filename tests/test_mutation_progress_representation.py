@@ -115,25 +115,21 @@ def test_each_stage_run_here_starts_and_ends_once():
 
 
 @weaver_test()
-def test_a_stage_run_in_fabric_is_reported_once_from_its_ledger():
+def test_a_stage_the_progress_missed_is_reported_from_the_final_ledger():
     plan, drivers = plan_and_driver()
     report = execute(plan, drivers)
     out = io.StringIO()
 
     with ConsoleSession(progress=out) as session:
-        StageProgress(plan, session).replay(report)
+        StageProgress(plan, session).finish(report)
 
     lines = stage_lines(out)
-    assert len(lines) == 2
-    assert all(line.startswith("✗") for line in lines)
-    assert FIRST in lines[0] and LATER in lines[1]
-    assert all(re.search(r"\d+\.\ds$", line) for line in lines)
+    assert [line[0] for line in lines if FIRST in line] == ["→", "✗"]
+    assert [line[0] for line in lines if LATER in line] == ["→", "✗"]
+    assert all(re.search(r"\d+\.\ds$", line) for line in lines if line[0] == "✗")
 
 
-@weaver_test()
-def test_a_desktop_session_replays_the_plan_it_carried_into_fabric(monkeypatch):
-    from weaver.workspaces import Workspace
-
+def fabric_plan():
     plan, drivers = plan_and_driver()
     plan = sealed(
         replace(
@@ -142,17 +138,89 @@ def test_a_desktop_session_replays_the_plan_it_carried_into_fabric(monkeypatch):
             execution=replace(plan.execution, spark_home_target_id="sales"),
         )
     )
+    return plan, drivers
+
+
+@weaver_test()
+def test_a_desktop_session_follows_a_plan_running_in_fabric(monkeypatch):
+    """What Fabric's progress showed is not shown again from its final ledger."""
+
+    from weaver.sessions.mutation_progress import progress_record
+    from weaver.workspaces import Workspace
+
+    plan, drivers = fabric_plan()
     report = execute(plan, drivers)
-    monkeypatch.setattr(
-        ConsoleSession, "execute_mutation_remote", lambda s, p, b, **kw: report
-    )
+    first = {"fail", "sibling"}
+
+    def remote(session, plan, payloads, *, observer, **options):
+        for event in report.ledger:
+            record = progress_record(event)
+            if record is not None and record["action_id"] in first:
+                observer(record)
+        return report
+
+    monkeypatch.setattr(ConsoleSession, "execute_mutation_remote", remote)
     out = io.StringIO()
 
     with ConsoleSession(progress=out, workspace=Workspace(workspace="Demo")) as session:
         returned = session.execute_mutation(plan, {})
 
     assert returned is report
-    assert len(stage_lines(out)) == 2
+    lines = stage_lines(out)
+    assert [line[0] for line in lines if FIRST in line] == ["→", "✗"]
+    assert [line[0] for line in lines if LATER in line] == ["→", "✗"]
+
+
+@weaver_test()
+def test_fabric_progress_reaches_the_desktop_while_the_plan_runs(monkeypatch):
+    """The writer Fabric runs and the reader the desktop runs, through one file."""
+
+    import sys
+    import threading
+    import types
+
+    from weaver.sessions import archive_runtime, install_archive
+    from weaver.sessions.mutation_progress import progress_record
+
+    monkeypatch.setattr(archive_runtime, "PROGRESS_INTERVAL", 0.01)
+    files = {}
+    written = threading.Event()
+
+    def put(location, content, overwrite):
+        files[location] = content.encode()
+        written.set()
+
+    monkeypatch.setitem(
+        sys.modules,
+        "notebookutils",
+        types.SimpleNamespace(fs=types.SimpleNamespace(put=put)),
+    )
+
+    class Store:
+        def read(self, location):
+            return files[location]
+
+    plan, drivers = plan_and_driver()
+    seen = []
+    with ConsoleSession(progress=False) as session:
+        stop_reading = install_archive._follow(
+            session, Store(), "progress", seen.append
+        )
+        observe, stop_writing = archive_runtime._progress_writer("progress")
+        report = execute(plan, drivers, observe)
+        assert written.wait(5)
+        stop_writing()
+        expected = len([e for e in report.ledger if progress_record(e)])
+        for _attempt in range(500):
+            if len(seen) == expected:
+                break
+            threading.Event().wait(0.01)
+        stop_reading()
+
+    terminal = {r["action_id"]: r["status"] for r in seen if r["kind"] == "terminal"}
+    assert terminal["fail"] == "failed"
+    assert terminal["dependent"] == "blocked"
+    assert report.by_id["fail"].status == "failed"
 
 
 @weaver_test()
