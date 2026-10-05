@@ -16,6 +16,10 @@ from ..errors import LoadError
 #: Reserved root package for isolated runtime trees.
 ROOT_PACKAGE = "_weaver_runtime"
 
+#: Concurrent ``importlib.invalidate_caches`` calls race to delete the same
+#: ``sys.path_importer_cache`` entries, and the loser raises ``KeyError``.
+_INVALIDATING = threading.Lock()
+
 
 @dataclass(frozen=True)
 class PythonRuntimeContext:
@@ -88,7 +92,8 @@ def import_deployed_module(
     _FINDER.register(context)
     # A build may have added files since anything last looked at this directory,
     # and the finder caches directory listings per path.
-    importlib.invalidate_caches()
+    with _INVALIDATING:
+        importlib.invalidate_caches()
 
     dotted = relative[: -len(".py")] if relative.endswith(".py") else relative
     name = context.qualified(dotted.replace("/", "."))
