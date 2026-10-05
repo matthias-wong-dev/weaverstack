@@ -32,15 +32,17 @@ def run_installed_validation(
     workspace=None,
     runtime_scope=None,
     collect_diagnostics: bool = False,
+    spark=None,
 ):
     """Run one installed validation through the Session.
 
     Returns the result the validation produced, with any diagnostic rows
     attached. A run's status is the Runner's to decide from that result, as it
-    is for a load.
+    is for a load. ``spark`` is the Spark session of its own a Lakehouse
+    validation runs in beside others.
     """
 
-    environment = _capabilities(session, workspace, runtime_scope)
+    environment = _capabilities(session, workspace, runtime_scope, spark)
     try:
         validation.require_installed()
         if primitive_kind(validation) == WAREHOUSE_PROCEDURE:
@@ -90,14 +92,17 @@ class _Capabilities:
     require a Spark session.
     """
 
-    def __init__(self, session, workspace, runtime_scope) -> None:
+    def __init__(self, session, workspace, runtime_scope, spark=None) -> None:
         self._session = session
         self._workspace = workspace
         self.resolver = session.resolver(workspace)
         self.runtime_scope = runtime_scope
+        self._spark = spark
 
     @property
     def spark(self):
+        if self._spark is not None:
+            return self._spark
         return self._session.spark(self._workspace)
 
     def sql_for(self, target):
@@ -108,8 +113,8 @@ class _Capabilities:
         )
 
 
-def _capabilities(session, workspace, runtime_scope):
-    return _Capabilities(session, workspace, runtime_scope)
+def _capabilities(session, workspace, runtime_scope, spark=None):
+    return _Capabilities(session, workspace, runtime_scope, spark)
 
 
 def primitive_kind(validation: InstalledValidation) -> str:

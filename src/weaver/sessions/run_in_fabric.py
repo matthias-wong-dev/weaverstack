@@ -85,14 +85,23 @@ def send(session, run, *, workspace=None):
     return run.decode(carried["report"])
 
 
+def _workspace_literal(workspace) -> str:
+    if workspace is None:
+        return "None"
+    environment = None if workspace.environment is None else str(workspace.environment)
+    return (
+        f"Workspace(workspace={workspace.workspace!r}, "
+        f"catalogue={workspace.catalogue!r}, "
+        f"environment={environment!r})"
+    )
+
+
 def _program(run, workspace, stage: str, *, workflow_id=None) -> FabricProgram:
     """The statement Fabric runs.
 
     The Livy interpreter outlives it, so the Session it opens is closed with it.
     ``workflow_id`` is the client's workflow, which the run records under.
     """
-
-    from ..run.runtime_boundary import _workspace_literal
 
     entry = run.entry
     source = (

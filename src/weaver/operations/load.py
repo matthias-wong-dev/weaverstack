@@ -153,6 +153,7 @@ def run_load(
 
     from ..run import RunRequest, RunState
     from ..run.entry import run_load_in_fabric
+    from ..run.runner import needs_spark
     from ..run.state import read_installed_catalogue
     from ..sessions.program import FabricRun
 
@@ -248,12 +249,6 @@ def load_runner(session, workspace, state, request):
     )
 
 
-def needs_spark(graph) -> bool:
-    """Whether a run graph executes anything on Spark."""
-
-    return any(node.primitive_kind in SPARK_KINDS for node in graph.nodes)
-
-
 def execute_load(session, *, workspace, runner, started) -> LoadRunReport:
     """Execute a planned load and record what it did, where ``session`` runs."""
 
@@ -293,8 +288,6 @@ def execute_load(session, *, workspace, runner, started) -> LoadRunReport:
 
 #: The primitive kinds a reload can reconstruct.
 RELOADABLE_KINDS = (WAREHOUSE_PROCEDURE, PYTHON_TABLE)
-#: The primitive kinds that run on Spark.
-SPARK_KINDS = (PYTHON_TABLE, PYTHON_FOLDER)
 
 
 def _refuse_unsupported_reload(graph) -> None:

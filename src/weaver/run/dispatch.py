@@ -43,7 +43,7 @@ def dispatch_primitive(
 
     kind = node.primitive_kind
     if getattr(node, "installed", None) is not None:
-        return _validation(node, session, workspace, open_runtime, collect)
+        return _validation(node, session, workspace, open_runtime, collect, isolated)
     if kind == WAREHOUSE_PROCEDURE:
         return _warehouse_procedure(
             node,
@@ -79,7 +79,9 @@ def dispatch_primitive(
     )
 
 
-def _validation(node, session, workspace, open_runtime, collect: bool):
+def _validation(
+    node, session, workspace, open_runtime, collect: bool, isolated: bool = False
+):
     from ..test_execution import primitive_kind, run_installed_validation
 
     installed = node.installed
@@ -95,7 +97,9 @@ def _validation(node, session, workspace, open_runtime, collect: bool):
             collect_diagnostics=collect,
         )
 
-    return _scope(open_runtime, node).dispatch_validation(installed, collect=collect)
+    return _scope(open_runtime, node).dispatch_validation(
+        installed, collect=collect, isolated=isolated
+    )
 
 
 def _scope(open_runtime, node):

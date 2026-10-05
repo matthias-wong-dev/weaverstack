@@ -205,9 +205,9 @@ Because the catalogue is a Warehouse, a Warehouse-only workflow performs zero
 Livy submissions. Catalogue reads, publication, `_.Log` writes and `_.Bookmark`
 reads and writes must never be the reason a Spark session starts.
 
-What crosses as a program is a load with Spark work, sent whole to Fabric,
-where its deployed modules are imported beside Spark. `weaver load` therefore
-requires the published wheel.
+What crosses as a program is a load or test with Spark work, sent whole to
+Fabric, where its deployed modules are imported beside Spark. `weaver load` and
+`weaver test` therefore require the published wheel.
 
 A Fabric test that runs Weaver on the laptop tests the desktop position, not the
 in-Fabric one. That is what the `remote` and `hosted` markers are for, and why a
@@ -422,9 +422,15 @@ primitive that starts beside others runs in a Spark session of its own within
 the one Spark application, so settings and temporary views stay its own. Every
 node is decided as a serial run decides it, in graph order once its upstream has
 settled, and every settlement and catalogue write happens in the thread running
-the run.
+the run. Without fault tolerance a failure starts nothing more: running nodes
+finish and settle, and nodes not yet started stay pending. Two concurrent load
+commands are separate writers of the same catalogue tables, which a Warehouse
+can refuse as an update conflict.
 
-Fabric runs every load with Spark work, because a Livy session runs its
+A test run schedules the same way: Warehouse validations take Warehouse lanes
+and Lakehouse validations take Spark lanes. A finding never stops the rest.
+
+Fabric runs every load or test with Spark work, because a Livy session runs its
 statements one at a time and so cannot run nodes side by side for a client.
 `Session.execute_run` routes it: a client sends the whole run once
 (`weaver.sessions.run_in_fabric`), with the catalogue it read and its request
@@ -432,13 +438,9 @@ staged beside the Lakehouse its Spark session attaches to, and Fabric plans and
 runs the graph against that catalogue and records it. Fabric writes the Steps
 and Sub-steps it presents beside the stage, and the client presents them as they
 arrive, with Fabric's times. A submission is never resent; a lost result leaves
-the outcome unknown, and the catalogue log records what ran. A Warehouse-only
-load runs on the client, over TDS, and starts no Spark session.
-
-Without fault tolerance a failure starts nothing more: running nodes finish and
-settle, and nodes not yet started stay pending. Two concurrent load commands are
-separate writers of the same catalogue tables, which a Warehouse can refuse as
-an update conflict. A test run is serial.
+the outcome unknown, and the catalogue log records what ran. A run with no Spark
+work runs on the client, over TDS, and starts no Spark session. A client never
+imports a deployed module, so it opens no runtime scope.
 
 ## Architecture invariants
 

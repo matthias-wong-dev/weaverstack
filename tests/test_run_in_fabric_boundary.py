@@ -354,6 +354,37 @@ def test_a_node_that_failed_before_counting_anything_crosses_back():
     assert node.result.rows_read == 0
 
 
+@weaver_test()
+def test_a_named_test_run_keeps_the_diagnostic_rows_that_crossed_beside_it():
+    """The report never holds diagnostic rows, so Fabric sends them alongside."""
+
+    from weaver.operations.test import _decoded
+    from weaver.test_report import ValidationNodeReport, ValidationRunReport
+
+    report = ValidationRunReport(
+        status="failed",
+        nodes=(
+            ValidationNodeReport(
+                logical_id="Lakehouse/Sales/Tables/Sales.Customer",
+                kind="Test",
+                physical_target="Lakehouse/Sales",
+                primitive_kind="python_validation",
+                dispatch_location="",
+                status="failed",
+                executed=True,
+            ),
+        ),
+    )
+    carried = report.to_mapping()
+    carried["diagnostics"] = {
+        "Lakehouse/Sales/Tables/Sales.Customer": [{"Id": 1, "Side": "missing"}]
+    }
+
+    (node,) = _decoded(json.loads(json.dumps(carried))).nodes
+
+    assert node.diagnostics == ({"Id": 1, "Side": "missing"},)
+
+
 # --- one Livy interpreter, many runs -------------------------------------------
 
 #: The Sessions each program opened, in the order it opened them.

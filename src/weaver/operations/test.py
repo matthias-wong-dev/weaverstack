@@ -107,8 +107,11 @@ def run_test(
     target, including for a file run.
     """
 
-    from ..run import Runner, RunRequest, RunState
+    from ..run import RunRequest, RunState
+    from ..run.entry import run_test_in_fabric
+    from ..run.runner import needs_spark
     from ..run.state import read_installed_catalogue
+    from ..sessions.program import FabricRun
 
     with session.step("Read catalogue"):
         if state is None:
@@ -146,25 +149,52 @@ def run_test(
             workflow_id=None,
         )
 
+    request = RunRequest.test(
+        items,
+        name=name,
+        dry_run=dry_run,
+        # Validations are independent; a finding does not block the rest.
+        fault_tolerant=True,
+    )
     with session.step("Build run graph"):
-        runner = Runner(
-            state,
-            RunRequest.test(
-                items,
-                name=name,
-                dry_run=dry_run,
-                # Validations are independent; a finding does not block the rest.
-                fault_tolerant=True,
-            ),
-            workspace=workspace,
-        )
+        runner = validation_runner(workspace, state, request)
+
+    run = FabricRun(
+        name="test",
+        needs_spark=not dry_run and needs_spark(runner.graph),
+        call=lambda here: execute_test(
+            here, workspace=workspace, runner=runner, started=started
+        ),
+        entry=run_test_in_fabric,
+        arguments=lambda: {
+            "catalogue": state.catalogue.to_mapping(),
+            "request": request.to_mapping(),
+            "started": started.isoformat(),
+        },
+        decode=_decoded,
+    )
+    return session.execute_run(run, workspace=workspace)
+
+
+def validation_runner(workspace, state, request):
+    """The Runner for a test run."""
+
+    from ..run import Runner
+
+    return Runner(state, request, workspace=workspace)
+
+
+def execute_test(session, *, workspace, runner, started) -> ValidationRunReport:
+    """Execute a planned test run and record what it found, where ``session`` runs."""
+
     from ..run import open_run_record
+    from ..run.runner import Lanes
 
     record = (
         None
-        if dry_run
+        if runner.request.dry_run
         else open_run_record(
-            state.catalogue,
+            runner.state.catalogue,
             workspace=workspace,
             task_type=TASK_TYPE,
             session=session,
@@ -174,8 +204,10 @@ def run_test(
         result = runner.run(
             session=session,
             # Return diagnostics only when one validation was requested.
-            dispatch=_dispatch_collecting(collect=name is not None),
+            dispatch=_dispatch_collecting(collect=runner.request.name is not None),
             on_node=None if record is None else record.settled,
+            # Validations are independent, so they run at once.
+            lanes=Lanes(),
         )
     if record is not None:
         with session.step("Record what the run did"):
@@ -185,6 +217,24 @@ def run_test(
         nodes=tuple(_as_validation_node(node) for node in result.nodes),
         started=started,
         workflow_id=None if record is None else record.workflow_id,
+    )
+
+
+def _decoded(carried: dict) -> ValidationRunReport:
+    """A report Fabric returned, with the diagnostic rows that crossed beside it."""
+
+    from dataclasses import replace
+
+    report = ValidationRunReport.from_mapping(carried)
+    diagnostics = carried.get("diagnostics") or {}
+    return replace(
+        report,
+        nodes=tuple(
+            replace(node, diagnostics=tuple(diagnostics[node.logical_id]))
+            if node.logical_id in diagnostics
+            else node
+            for node in report.nodes
+        ),
     )
 
 

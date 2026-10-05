@@ -22,6 +22,8 @@ ENDPOINT_REFRESH = "endpoint_refresh"
 ONELAKE_PUBLICATION = "onelake_publication"
 #: How a validation is reached, from where it is installed.
 PYTHON_VALIDATION = "python_validation"
+#: The primitive kinds that run on Spark, as deployed modules.
+SPARK_KINDS = (PYTHON_TABLE, PYTHON_FOLDER, PYTHON_VALIDATION)
 
 PYTHON_KINDS = (PYTHON_TABLE, PYTHON_FOLDER)
 

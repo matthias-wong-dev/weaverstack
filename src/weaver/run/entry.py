@@ -6,8 +6,6 @@ different versions.
 
 from __future__ import annotations
 
-from ..runtime.session_scopes import get_scope
-
 
 def run_staged(entry, *, session, workspace, stage: str, workflow_id=None) -> dict:
     """Run ``entry`` with the arguments a client staged, writing its progress.
@@ -33,12 +31,12 @@ def run_staged(entry, *, session, workspace, stage: str, workflow_id=None) -> di
     within = session.workflow(workflow_id) if workflow_id else nullcontext()
     with within, progress_written(session, store, root / PROGRESS):
         report = entry(session=session, workspace=workspace, **arguments)
-    data = json.dumps({"report": report, "warnings": list(session.warnings)})
-    store.write(root / RESULT, data.encode("utf-8"))
-    return {
-        "bytes": len(data.encode("utf-8")),
-        "sha256": hashlib.sha256(data.encode("utf-8")).hexdigest(),
-    }
+    # Diagnostic rows carry whatever a check selected, so they cross as text.
+    data = json.dumps(
+        {"report": report, "warnings": list(session.warnings)}, default=str
+    ).encode("utf-8")
+    store.write(root / RESULT, data)
+    return {"bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()}
 
 
 def run_load_in_fabric(
@@ -48,20 +46,10 @@ def run_load_in_fabric(
 
     from datetime import datetime
 
-    from ..catalogue.state import Catalogue
-    from ..catalogue.writer import writer_for
     from ..operations.load import execute_load, load_runner
-    from .runner import RunRequest
-    from .state import RunState
 
-    read = Catalogue.from_mapping(
-        catalogue, writer=writer_for(session, workspace), session=session
-    )
     runner = load_runner(
-        session,
-        workspace,
-        RunState(catalogue=read),
-        RunRequest.from_mapping(request),
+        session, workspace, *_planned(session, workspace, catalogue, request)
     )
     report = execute_load(
         session,
@@ -72,42 +60,48 @@ def run_load_in_fabric(
     return report.to_mapping()
 
 
-def run_validation_primitive(
-    *,
-    run_id: str,
-    installed: dict,
-    collect: bool = False,
-    session=None,
-    workspace=None,
+def run_test_in_fabric(
+    *, session, workspace, catalogue: dict, request: dict, started: str
 ) -> dict:
+    """Plan and execute a test run a client sent, against the catalogue it read.
 
-    from ..test_execution import run_installed_validation
-    from ..test_plan import InstalledValidation
+    A named run's diagnostic rows cross beside the report, which never holds them.
+    """
 
-    carried = run_installed_validation(
-        InstalledValidation.from_mapping(installed),
-        session=_session(session, workspace),
-        workspace=workspace,
-        runtime_scope=get_scope(run_id),
-        collect_diagnostics=collect,
+    from datetime import datetime
+
+    from ..operations.test import execute_test, validation_runner
+
+    runner = validation_runner(
+        workspace, *_planned(session, workspace, catalogue, request)
     )
-    return {
-        "result": carried.result.to_mapping(),
-        "diagnostics": list(carried.diagnostics or ()),
+    report = execute_test(
+        session,
+        workspace=workspace,
+        runner=runner,
+        started=datetime.fromisoformat(started),
+    )
+    carried = report.to_mapping()
+    carried["diagnostics"] = {
+        node.logical_id: list(node.diagnostics)
+        for node in report.nodes
+        if node.diagnostics
     }
+    return carried
 
 
-def _session(session, workspace):
+def _planned(session, workspace, catalogue: dict, request: dict):
+    """The state and request a client planned against, writing through here."""
 
-    if session is not None:
-        return session
-    from ..sessions.host import session_for
+    from ..catalogue.state import Catalogue
+    from ..catalogue.writer import writer_for
+    from .runner import RunRequest
+    from .state import RunState
 
-    return session_for(workspace)
+    read = Catalogue.from_mapping(
+        catalogue, writer=writer_for(session, workspace), session=session
+    )
+    return RunState(catalogue=read), RunRequest.from_mapping(request)
 
 
-__all__ = [
-    "run_load_in_fabric",
-    "run_staged",
-    "run_validation_primitive",
-]
+__all__ = ["run_load_in_fabric", "run_staged", "run_test_in_fabric"]
