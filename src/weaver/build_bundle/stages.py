@@ -214,7 +214,7 @@ def _numbered(
 
 
 _SPARK = frozenset({"spark_sql", "spark_sql_batch", "spark_table"})
-_TDS = frozenset({"tsql", "tsql_batch", "runtime_state"})
+_TDS = frozenset({"tsql", "tsql_batch", "runtime_state", "await_endpoint_objects"})
 _ONELAKE = frozenset({"folder", "load_file"})
 #: Session-scoped temporary views authored as table setup can collide.
 TEMPORARY_VIEWS = "spark:temporary-views"

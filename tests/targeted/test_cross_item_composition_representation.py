@@ -45,7 +45,7 @@ def repository():
 
 
 @pytest.fixture(scope="module")
-def plan(repository, tmp_path_factory):
+def bundle(repository, tmp_path_factory):
     """The bundle a first build of the whole estate emits, into empty targets."""
 
     bindings = effective_item_bindings(
@@ -70,6 +70,11 @@ def plan(repository, tmp_path_factory):
         catalogue=FixtureCatalogue.from_registry_rows(),
         catalogue_binding=WarehouseBinding(ItemRef("Weaver"), workspace_name=WORKSPACE),
     )
+    return bundle
+
+
+@pytest.fixture(scope="module")
+def plan(bundle):
     return bundle.plan
 
 
@@ -138,6 +143,7 @@ def test_the_warehouse_waits_for_the_lakehouse_it_reads(plan):
             "Lakehouse--Sales--Tables--DWG.Customer",
             "start-sql-endpoint-refresh-Lakehouse--Sales",
             "await-sql-endpoint-refresh-Lakehouse--Sales",
+            "await-endpoint-objects-Warehouse--Reporting",
             "shortcuts-Warehouse--Reporting",
             "Warehouse--Reporting--Rpt.CustomerReport",
             "Warehouse--Reporting--Rpt.ActiveCustomerReport",
@@ -147,6 +153,27 @@ def test_the_warehouse_waits_for_the_lakehouse_it_reads(plan):
     assert all(
         runs_before(plan, first, second) for first, second in zip(chain, chain[1:])
     )
+
+
+@weaver_test()
+def test_the_warehouse_waits_until_the_endpoint_lists_what_it_reads(bundle):
+    """A completed refresh does not mean the endpoint lists a new table yet, so
+    the Warehouse asks through its own connection before its views read it."""
+
+    import json
+
+    waiting = next(
+        action
+        for _s, _b, action in bundle.plan.actions()
+        if action.id == "await-endpoint-objects-Warehouse--Reporting"
+    )
+
+    assert waiting.executor == "await_endpoint_objects"
+    assert waiting.resources == (f"warehouse:{WAREHOUSE}",)
+    payload = json.loads(
+        bundle.store.read(bundle.location.join(*waiting.payload.split("/")))
+    )
+    assert payload == {"objects": [[LAKEHOUSE, "DWG", "Customer"]]}
 
 
 @weaver_test()
