@@ -92,6 +92,7 @@ def node(node_id: str, **kwargs) -> RunNode:
             ),
         ),
         role=kwargs.pop("role", "load"),
+        installed=kwargs.pop("installed", None),
     )
 
 

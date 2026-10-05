@@ -427,7 +427,9 @@ write happens in the thread running the run. Without fault tolerance a failure
 starts nothing more: running nodes finish and settle, and nodes not yet started
 stay pending. Two concurrent load commands are separate writers of the same
 catalogue tables, which a Warehouse can refuse as an update conflict. A test run
-is serial.
+schedules the same way: Warehouse validations take Warehouse lanes, and Lakehouse
+validations that start together go to the host together
+(`dispatch_validations_many`). A finding never stops the rest.
 
 ## Architecture invariants
 

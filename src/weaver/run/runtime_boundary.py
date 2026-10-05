@@ -58,6 +58,9 @@ class RunScope(Protocol):
 
     def dispatch_validation(self, installed, *, collect: bool) -> Any: ...
 
+    def dispatch_validations_many(self, requests: list) -> list:
+        """Each request's result, or the exception it raised, in order."""
+
     def close(self) -> None: ...
 
 
@@ -125,7 +128,7 @@ class DirectRunScope:
         with ThreadPoolExecutor(max_workers=max(1, len(requests))) as pool:
             return list(pool.map(one, requests))
 
-    def dispatch_validation(self, installed, *, collect: bool):
+    def dispatch_validation(self, installed, *, collect: bool, spark=None):
         from ..test_execution import run_installed_validation
 
         return run_installed_validation(
@@ -134,7 +137,28 @@ class DirectRunScope:
             workspace=self._workspace,
             runtime_scope=self.runtime_scope,
             collect_diagnostics=collect,
+            spark=spark,
         )
+
+    def dispatch_validations_many(self, requests: list) -> list:
+        from concurrent.futures import ThreadPoolExecutor
+
+        from .dispatch import isolated_spark
+
+        spark = self._session.spark(self._workspace)
+
+        def one(request: dict):
+            try:
+                return self.dispatch_validation(
+                    request["installed"],
+                    collect=request["collect"],
+                    spark=isolated_spark(spark),
+                )
+            except Exception as exc:  # noqa: BLE001 - this request's outcome
+                return exc
+
+        with ThreadPoolExecutor(max_workers=max(1, len(requests))) as pool:
+            return list(pool.map(one, requests))
 
     def close(self) -> None:
         self.runtime_scope.close()
@@ -276,6 +300,48 @@ class FabricRunScope:
             timeout=NODE_STATEMENT_TIMEOUT,
         )
         return _carried(carried, installed)
+
+    def dispatch_validations_many(self, requests: list) -> list:
+        """One statement, so the validations run together on the far side."""
+
+        from ..fabric.livy import LivyStatementError
+        from .entry import run_validation_primitives
+
+        try:
+            carried = self._submit(
+                run_validation_primitives,
+                {
+                    "run_id": self.run_id,
+                    "requests": [
+                        {
+                            "installed": request["installed"].to_mapping(),
+                            "collect": request["collect"],
+                        }
+                        for request in requests
+                    ],
+                },
+                detail=", ".join(
+                    str(getattr(request["installed"], "logical", ""))
+                    for request in requests
+                ),
+                timeout=NODE_STATEMENT_TIMEOUT,
+            )
+        except Exception as exc:  # noqa: BLE001 - every validation shares it
+            return [exc for _request in requests]
+        outcomes = []
+        for request, one in zip(requests, carried):
+            failure = one.get("failure")
+            if failure is None:
+                outcomes.append(_carried(one, request["installed"]))
+                continue
+            outcomes.append(
+                LivyStatementError(
+                    f"{failure['ename']}: {failure['evalue']}\n{failure['traceback']}",
+                    ename=failure["ename"],
+                    evalue=failure["evalue"],
+                )
+            )
+        return outcomes
 
     @staticmethod
     def _arguments(

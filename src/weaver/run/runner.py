@@ -19,6 +19,7 @@ from .result import (
     VALIDATED,
     RunNodeResult,
     RunResult,
+    findings,
     rows_moved,
     run_status,
 )
@@ -68,7 +69,12 @@ def _conclude(frame, node, outcome) -> None:
         return
     if outcome.status == FAILED:
         frame.failed = True
-    elif node.primitive_kind not in (ENDPOINT_REFRESH, ONELAKE_PUBLICATION):
+    if getattr(node, "installed", None) is not None:
+        frame.note = findings(outcome.result) if frame.failed else None
+    elif not frame.failed and node.primitive_kind not in (
+        ENDPOINT_REFRESH,
+        ONELAKE_PUBLICATION,
+    ):
         frame.note = rows_moved(outcome.result)
 
 
@@ -174,8 +180,9 @@ def _now() -> str:
 class Lanes:
     """How many nodes of each kind a run keeps going at once.
 
-    Python primitives share the host's Spark application, each in a Spark
-    session of its own, and go to the host together. A Warehouse procedure
+    Python primitives, loads and Lakehouse validations alike, share the host's
+    Spark application, each in a Spark session of its own, and go to the host
+    together. A Warehouse procedure
     holds a connection of its own Warehouse. Anything else is a short wait.
     """
 
@@ -184,9 +191,14 @@ class Lanes:
     other: int = 4
 
     def of(self, node) -> tuple:
-        from .resolution import PYTHON_FOLDER, PYTHON_TABLE, WAREHOUSE_PROCEDURE
+        from .resolution import (
+            PYTHON_FOLDER,
+            PYTHON_TABLE,
+            PYTHON_VALIDATION,
+            WAREHOUSE_PROCEDURE,
+        )
 
-        if node.primitive_kind in (PYTHON_TABLE, PYTHON_FOLDER):
+        if node.primitive_kind in (PYTHON_TABLE, PYTHON_FOLDER, PYTHON_VALIDATION):
             return ("spark",)
         if node.primitive_kind == WAREHOUSE_PROCEDURE:
             return ("warehouse", getattr(node.physical_target, "name", ""))

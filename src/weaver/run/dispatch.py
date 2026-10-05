@@ -298,6 +298,20 @@ def dispatch_python_many(
     return outcomes
 
 
+def dispatch_validations_many(
+    nodes, *, session=None, open_runtime=None, collect: bool = False, **_unused
+) -> list:
+    """Dispatch Lakehouse validations together, each in a Spark session of its own.
+
+    Returns each node's result, or the exception it raised, in node order.
+    """
+
+    if session is None:
+        raise RunError("Cannot run validations without a Session.")
+    requests = [{"installed": node.installed, "collect": collect} for node in nodes]
+    return _scope(open_runtime, nodes[0]).dispatch_validations_many(requests)
+
+
 def isolated_spark(spark):
     """A Spark session of its own, for one of several loads running at once.
 

@@ -170,12 +170,17 @@ def run_test(
             session=session,
         )
     )
+    from ..run.runner import Lanes
+
     with session.step("Execute"):
         result = runner.run(
             session=session,
             # Return diagnostics only when one validation was requested.
             dispatch=_dispatch_collecting(collect=name is not None),
             on_node=None if record is None else record.settled,
+            # Validations are independent, so they run at once.
+            lanes=Lanes(),
+            dispatch_many=_dispatch_many_collecting(collect=name is not None),
         )
     if record is not None:
         with session.step("Record what the run did"):
@@ -195,6 +200,15 @@ def _dispatch_collecting(*, collect: bool):
         return dispatch_primitive(node, collect=collect, **asked)
 
     return dispatch
+
+
+def _dispatch_many_collecting(*, collect: bool):
+    from ..run.dispatch import dispatch_validations_many
+
+    def dispatch_many(nodes, **asked):
+        return dispatch_validations_many(nodes, collect=collect, **asked)
+
+    return dispatch_many
 
 
 def _require_lakehouse_environment(session, *, workspace, targets, dry_run: bool):

@@ -1473,26 +1473,19 @@ def _run_test(workspace, *, items, name, file, dry_run: bool, session=None):
 
 
 def _print_test(report) -> None:
+    from weaver.run.result import findings
+
     status = _style(report.status, _status_colour(report.status))
-    print(f"test {status}\n")
-    for node in report.nodes:
+    print(f"test {status}")
+    # Progress has already said each validation started and finished. A plan's
+    # validations are all planned, so a plan lists every one.
+    listed = [node for node in report.nodes if _test_needs_attention(node)]
+    if listed:
+        print()
+    for node in listed:
         result = node.result
-        found = ""
-        if (
-            result is not None
-            and getattr(result, "error_message", None) is None
-            and hasattr(result, "violation_count")
-        ):
-            found = f"  ({result.violation_count} violation(s))"
-        elif (
-            result is not None
-            and getattr(result, "error_message", None) is None
-            and hasattr(result, "missing_count")
-        ):
-            found = (
-                f"  ({result.missing_count} missing, "
-                f"{result.unexpected_count} unexpected)"
-            )
+        found = findings(result)
+        found = f"  ({found})" if found else ""
         status = f"{node.status:<10}"
         print(
             f"  {_style(status, _status_colour(node.status))} "
@@ -1521,6 +1514,12 @@ def _print_test(report) -> None:
         print(f"\n  {node.logical_id}:")
         for row in node.diagnostics:
             print(f"    {row}")
+
+
+def _test_needs_attention(node) -> bool:
+    from weaver.test_report import PASSED
+
+    return node.status != PASSED or bool(node.messages)
 
 
 def _test_mapping(report, *, targeted: bool) -> dict:

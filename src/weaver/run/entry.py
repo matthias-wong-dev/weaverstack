@@ -112,6 +112,7 @@ def run_validation_primitive(
     collect: bool = False,
     session=None,
     workspace=None,
+    spark=None,
 ) -> dict:
 
     from ..test_execution import run_installed_validation
@@ -123,11 +124,50 @@ def run_validation_primitive(
         workspace=workspace,
         runtime_scope=get_scope(run_id),
         collect_diagnostics=collect,
+        spark=spark,
     )
     return {
         "result": carried.result.to_mapping(),
         "diagnostics": list(carried.diagnostics or ()),
     }
+
+
+def run_validation_primitives(
+    *, run_id: str, requests: list, session=None, workspace=None
+) -> list:
+    """Run several Lakehouse validations at once, each in a Spark session of its own.
+
+    Each one's result, or the failure it raised, crosses back as data.
+    """
+
+    import traceback
+    from concurrent.futures import ThreadPoolExecutor
+
+    from .dispatch import isolated_spark
+
+    session = _session(session, workspace)
+    spark = session.spark(workspace)
+
+    def one(arguments: dict) -> dict:
+        try:
+            return run_validation_primitive(
+                run_id=run_id,
+                session=session,
+                workspace=workspace,
+                spark=isolated_spark(spark),
+                **arguments,
+            )
+        except Exception as exc:  # noqa: BLE001 - crosses as this node's failure
+            return {
+                "failure": {
+                    "ename": type(exc).__name__,
+                    "evalue": str(exc),
+                    "traceback": traceback.format_exc(),
+                }
+            }
+
+    with ThreadPoolExecutor(max_workers=max(1, len(requests))) as pool:
+        return list(pool.map(one, requests))
 
 
 def _session(session, workspace):
@@ -143,4 +183,5 @@ __all__ = [
     "run_python_primitive",
     "run_python_primitives",
     "run_validation_primitive",
+    "run_validation_primitives",
 ]
