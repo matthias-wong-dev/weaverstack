@@ -19,6 +19,7 @@ from .result import (
     VALIDATED,
     RunNodeResult,
     RunResult,
+    Timed,
     findings,
     rows_moved,
     run_status,
@@ -627,6 +628,12 @@ class Runner:
                 returned = [exc for _node in nodes]
             settled = []
             for (node, resolved), value, frame in zip(group, returned, opened):
+                # Each node's own times, where the host that ran it reported them.
+                own = value if isinstance(value, Timed) else None
+                if own is not None:
+                    value = own.value
+                    if frame is not None:
+                        frame.elapsed = own.seconds
                 outcome = (
                     settle(node, raised=value)
                     if isinstance(value, BaseException)
@@ -641,7 +648,8 @@ class Runner:
                         location=getattr(resolved, "dispatch_location", None),
                         result=outcome.result,
                         messages=outcome.messages,
-                        started_at=started,
+                        started_at=started if own is None else own.started_at,
+                        finished_at=None if own is None else own.finished_at,
                         raised=outcome.raised,
                         refused=outcome.refused,
                     )
@@ -769,6 +777,7 @@ class Runner:
         messages: tuple = (),
         result: object = None,
         started_at: str | None = None,
+        finished_at: str | None = None,
         location: str | None = None,
         raised: bool = False,
         refused: bool = False,
@@ -800,7 +809,7 @@ class Runner:
             messages=messages,
             result=result,
             started_at=started_at,
-            finished_at=_now() if executed else None,
+            finished_at=(finished_at or _now()) if executed else None,
             target_type=target_type,
             target_name=target_name,
             schema_name=stored[0],

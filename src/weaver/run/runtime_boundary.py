@@ -109,12 +109,13 @@ class DirectRunScope:
         from concurrent.futures import ThreadPoolExecutor
 
         from .dispatch import isolated_spark
+        from .result import Timed, run_timed
 
         spark = self._session.spark(self._workspace)
 
-        def one(request: dict):
-            try:
-                return self.dispatch_python(
+        def one(request: dict) -> Timed:
+            value, times = run_timed(
+                lambda: self.dispatch_python(
                     request["node"],
                     expected_class=request["expected_class"],
                     fault_tolerant=request["fault_tolerant"],
@@ -122,8 +123,8 @@ class DirectRunScope:
                     ignore_stability_threshold=request["ignore_stability_threshold"],
                     spark=isolated_spark(spark),
                 )
-            except Exception as exc:  # noqa: BLE001 - this request's outcome
-                return exc
+            )
+            return Timed(value, **times)
 
         with ThreadPoolExecutor(max_workers=max(1, len(requests))) as pool:
             return list(pool.map(one, requests))
@@ -144,18 +145,19 @@ class DirectRunScope:
         from concurrent.futures import ThreadPoolExecutor
 
         from .dispatch import isolated_spark
+        from .result import Timed, run_timed
 
         spark = self._session.spark(self._workspace)
 
-        def one(request: dict):
-            try:
-                return self.dispatch_validation(
+        def one(request: dict) -> Timed:
+            value, times = run_timed(
+                lambda: self.dispatch_validation(
                     request["installed"],
                     collect=request["collect"],
                     spark=isolated_spark(spark),
                 )
-            except Exception as exc:  # noqa: BLE001 - this request's outcome
-                return exc
+            )
+            return Timed(value, **times)
 
         with ThreadPoolExecutor(max_workers=max(1, len(requests))) as pool:
             return list(pool.map(one, requests))
@@ -249,6 +251,7 @@ class FabricRunScope:
 
         from ..fabric.livy import LivyStatementError
         from .entry import run_python_primitives
+        from .result import Timed
 
         crossing = [
             self._arguments(
@@ -273,14 +276,18 @@ class FabricRunScope:
         for one in carried:
             failure = one.get("failure")
             if failure is None:
-                outcomes.append(one["row"])
+                outcomes.append(Timed.carried(one, one["row"]))
                 continue
             # As the statement would have raised it, had the node run alone.
             outcomes.append(
-                LivyStatementError(
-                    f"{failure['ename']}: {failure['evalue']}\n{failure['traceback']}",
-                    ename=failure["ename"],
-                    evalue=failure["evalue"],
+                Timed.carried(
+                    one,
+                    LivyStatementError(
+                        f"{failure['ename']}: {failure['evalue']}\n"
+                        f"{failure['traceback']}",
+                        ename=failure["ename"],
+                        evalue=failure["evalue"],
+                    ),
                 )
             )
         return outcomes
@@ -306,6 +313,7 @@ class FabricRunScope:
 
         from ..fabric.livy import LivyStatementError
         from .entry import run_validation_primitives
+        from .result import Timed
 
         try:
             carried = self._submit(
@@ -332,13 +340,17 @@ class FabricRunScope:
         for request, one in zip(requests, carried):
             failure = one.get("failure")
             if failure is None:
-                outcomes.append(_carried(one, request["installed"]))
+                outcomes.append(Timed.carried(one, _carried(one, request["installed"])))
                 continue
             outcomes.append(
-                LivyStatementError(
-                    f"{failure['ename']}: {failure['evalue']}\n{failure['traceback']}",
-                    ename=failure["ename"],
-                    evalue=failure["evalue"],
+                Timed.carried(
+                    one,
+                    LivyStatementError(
+                        f"{failure['ename']}: {failure['evalue']}\n"
+                        f"{failure['traceback']}",
+                        ename=failure["ename"],
+                        evalue=failure["evalue"],
+                    ),
                 )
             )
         return outcomes

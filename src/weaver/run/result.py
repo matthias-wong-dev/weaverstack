@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
-from typing import Any, Mapping
+from datetime import datetime, timezone
+from typing import Any, Callable, Mapping
 
 from ..errors import WeaverError
 
@@ -16,6 +18,46 @@ class RunError(WeaverError):
     def __init__(self, message: str, *, result: object | None = None) -> None:
         super().__init__(message)
         self.result = result
+
+
+@dataclass(frozen=True)
+class Timed:
+    """One node's outcome from a batch, with when its own work ran.
+
+    Nodes dispatched together return together, so only the host that ran each
+    one knows when it finished.
+    """
+
+    value: Any
+    started_at: str
+    finished_at: str
+    seconds: float
+
+    @classmethod
+    def carried(cls, payload: Mapping, value: Any) -> Any:
+        """``value`` with the times in ``payload``, or alone if it has none."""
+
+        if "seconds" not in payload:
+            return value
+        return cls(
+            value, payload["started_at"], payload["finished_at"], payload["seconds"]
+        )
+
+
+def run_timed(call: Callable[[], Any]) -> tuple[Any, dict]:
+    """``call()``'s result, or the exception it raised, and when it ran."""
+
+    started = datetime.now(timezone.utc).isoformat()
+    clock = time.perf_counter()
+    try:
+        value = call()
+    except Exception as exc:  # noqa: BLE001 - the caller's outcome
+        value = exc
+    return value, {
+        "started_at": started,
+        "finished_at": datetime.now(timezone.utc).isoformat(),
+        "seconds": time.perf_counter() - clock,
+    }
 
 
 def reports_outcome(result: object) -> bool:
@@ -336,7 +378,9 @@ __all__ = [
     "VALIDATED",
     "RunNodeResult",
     "RunResult",
+    "Timed",
     "findings",
     "rows_moved",
     "run_status",
+    "run_timed",
 ]

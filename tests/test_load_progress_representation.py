@@ -240,3 +240,36 @@ def test_a_refresh_finishes_without_row_counts():
 
     finished = next(line for line in lines if line.startswith("✓   Refresh"))
     assert "read" not in finished
+
+
+@weaver_test()
+def test_lakehouse_nodes_sent_together_each_report_their_own_times():
+    """A batch returns when its slowest node does; each node keeps its own time."""
+
+    from weaver.run.result import Timed
+
+    gate = Gate()
+    together = gate.dispatch_many
+    names = ["Customer", "Order"]
+    took = {"Customer": (1.0, "00:00:01"), "Order": (3.0, "00:00:03")}
+
+    def dispatch_many(nodes, **asked):
+        return [
+            Timed(
+                value,
+                started_at="2026-10-05T00:00:00+00:00",
+                finished_at=f"2026-10-05T{took[node.node_id][1]}+00:00",
+                seconds=took[node.node_id][0],
+            )
+            for node, value in zip(nodes, together(nodes, **asked))
+        ]
+
+    gate.dispatch_many = dispatch_many
+    lines, result = present(runner(nodes=[lakehouse(name) for name in names]), gate)
+
+    for name, (seconds, finished) in took.items():
+        line = next(one for one in lines if one.startswith(f"✓   {LH(name)}"))
+        assert line.endswith(f"{seconds:.1f}s"), line
+        node = next(one for one in result.nodes if one.node_id == name)
+        assert node.started_at == "2026-10-05T00:00:00+00:00"
+        assert node.finished_at == f"2026-10-05T{finished}+00:00"

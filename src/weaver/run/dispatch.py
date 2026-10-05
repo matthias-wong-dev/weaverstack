@@ -256,7 +256,8 @@ def dispatch_python_many(
 ) -> list:
     """Dispatch Python primitives together, each in a Spark session of its own.
 
-    Returns each node's result, or the exception it raised, in node order.
+    Returns each node's result, or the exception it raised, in node order, each
+    as a :class:`~weaver.run.result.Timed` where the scope timed it.
     """
 
     from ..runtime.load_refusal import decoded_refusal, refused
@@ -285,16 +286,26 @@ def dispatch_python_many(
         else:
             runnable.append(index)
     if runnable:
+        from dataclasses import replace
+
+        from .result import Timed
+
+        def loaded(row):
+            if isinstance(row, BaseException):
+                return row
+            if refused(row):
+                return decoded_refusal(row)
+            return LoadResult.from_row(row)
+
         rows = _scope(open_runtime, nodes[runnable[0]]).dispatch_python_many(
             [requests[index] for index in runnable]
         )
         for index, row in zip(runnable, rows):
-            if isinstance(row, BaseException):
-                outcomes[index] = row
-            elif refused(row):
-                outcomes[index] = decoded_refusal(row)
-            else:
-                outcomes[index] = LoadResult.from_row(row)
+            outcomes[index] = (
+                replace(row, value=loaded(row.value))
+                if isinstance(row, Timed)
+                else loaded(row)
+            )
     return outcomes
 
 
@@ -303,7 +314,8 @@ def dispatch_validations_many(
 ) -> list:
     """Dispatch Lakehouse validations together, each in a Spark session of its own.
 
-    Returns each node's result, or the exception it raised, in node order.
+    Returns each node's result, or the exception it raised, in node order, each
+    as a :class:`~weaver.run.result.Timed` where the scope timed it.
     """
 
     if session is None:

@@ -680,6 +680,61 @@ def test_python_nodes_dispatched_together_cross_in_one_statement():
 
 
 @weaver_test()
+def test_each_node_sent_together_returns_with_the_times_it_ran():
+    from weaver.fabric.livy import LivyStatementError
+    from weaver.run.result import Timed
+
+    failure = {"ename": "ValueError", "evalue": "bad rows", "traceback": "Traceback"}
+    ran = {"started_at": "2026-10-05T00:00:00+00:00"}
+    session = _Recording(
+        answer=[
+            {"failure": failure, **ran, "finished_at": "late", "seconds": 9.0},
+            {"row": _row(), **ran, "finished_at": "early", "seconds": 1.0},
+        ]
+    )
+    scope = open_runtime_scope(session, workspace=_fabric())
+
+    failed, loaded = scope.dispatch_python_many(
+        _requests("Sales__Customer", "Sales__Order")
+    )
+
+    assert isinstance(failed.value, LivyStatementError)
+    assert (failed.finished_at, failed.seconds) == ("late", 9.0)
+    assert loaded == Timed(_row(), ran["started_at"], "early", 1.0)
+
+
+@weaver_test()
+def test_the_fabric_side_times_each_node_it_runs_beside_others(monkeypatch):
+    import time
+
+    from weaver.run import dispatch, entry
+
+    def run_python_primitive(*, node_id, **_asked):
+        if node_id == "slow":
+            time.sleep(0.2)
+            raise ValueError("bad rows")
+        return _row()
+
+    class Spark:
+        def spark(self, _workspace):
+            return object()
+
+    monkeypatch.setattr(entry, "run_python_primitive", run_python_primitive)
+    monkeypatch.setattr(dispatch, "isolated_spark", lambda spark: spark)
+
+    slow, fast = entry.run_python_primitives(
+        run_id="run-a",
+        requests=[{"node_id": "slow"}, {"node_id": "fast"}],
+        session=Spark(),
+    )
+
+    assert slow["failure"]["evalue"] == "bad rows"
+    assert fast["row"] == _row()
+    assert slow["seconds"] >= 0.2 > fast["seconds"]
+    assert fast["started_at"] <= fast["finished_at"] <= slow["finished_at"]
+
+
+@weaver_test()
 def test_a_node_that_failed_beside_others_fails_alone_as_it_would_have_alone():
     from weaver.fabric.livy import LivyStatementError
 

@@ -654,7 +654,8 @@ class Session(ABC):
         It is timed like any Sub-step but held off the frame stack, which
         describes nesting, so it is reported when it starts as well as when it
         ends. The external work inside it is attributed to it in whichever
-        thread runs it.
+        thread runs it. Work another host timed sets ``elapsed`` on the frame
+        before it closes.
         """
 
         from dataclasses import replace
@@ -669,7 +670,7 @@ class Session(ABC):
             error = exc
             raise
         finally:
-            self.close_concurrent_substep(frame, error)
+            self.close_concurrent_substep(frame, error, elapsed=frame.elapsed)
 
     def open_concurrent_substep(
         self, name: str, detail: str | None = None

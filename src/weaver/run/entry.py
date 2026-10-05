@@ -69,14 +69,15 @@ def run_python_primitives(
 ) -> list:
     """Run several Python primitives at once, each in a Spark session of its own.
 
-    Each one's row, or the failure it raised, crosses back as data, so one
-    node's failure does not stand in for the others.
+    Each one's row, or the failure it raised, crosses back as data with when it
+    ran, so one node's failure or duration does not stand in for the others.
     """
 
     import traceback
     from concurrent.futures import ThreadPoolExecutor
 
     from .dispatch import isolated_spark
+    from .result import run_timed
 
     session = _session(session, workspace)
     spark = session.spark(workspace)
@@ -101,8 +102,12 @@ def run_python_primitives(
                 }
             }
 
+    def timed(arguments: dict) -> dict:
+        carried, times = run_timed(lambda: one(arguments))
+        return {**carried, **times}
+
     with ThreadPoolExecutor(max_workers=max(1, len(requests))) as pool:
-        return list(pool.map(one, requests))
+        return list(pool.map(timed, requests))
 
 
 def run_validation_primitive(
@@ -137,13 +142,15 @@ def run_validation_primitives(
 ) -> list:
     """Run several Lakehouse validations at once, each in a Spark session of its own.
 
-    Each one's result, or the failure it raised, crosses back as data.
+    Each one's result, or the failure it raised, crosses back as data with
+    when it ran.
     """
 
     import traceback
     from concurrent.futures import ThreadPoolExecutor
 
     from .dispatch import isolated_spark
+    from .result import run_timed
 
     session = _session(session, workspace)
     spark = session.spark(workspace)
@@ -166,8 +173,12 @@ def run_validation_primitives(
                 }
             }
 
+    def timed(arguments: dict) -> dict:
+        carried, times = run_timed(lambda: one(arguments))
+        return {**carried, **times}
+
     with ThreadPoolExecutor(max_workers=max(1, len(requests))) as pool:
-        return list(pool.map(one, requests))
+        return list(pool.map(timed, requests))
 
 
 def _session(session, workspace):
