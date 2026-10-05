@@ -153,6 +153,7 @@ def execute_mutation(
     timeout=600,
     build_datetime=None,
     executors=None,
+    observer=None,
 ):
     """Bind physical capabilities and execute one complete MutationPlan.
 
@@ -231,7 +232,7 @@ def execute_mutation(
             )
     drivers.update(endpoint_refresh_drivers(contexts, outcome=error_outcome))
     return MutationExecutor(
-        drivers, workers=workers, limits=limits, timeout=timeout
+        drivers, workers=workers, limits=limits, timeout=timeout, observer=observer
     ).execute(plan, payloads, invocation_id=invocation_id)
 
 

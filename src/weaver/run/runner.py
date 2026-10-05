@@ -19,6 +19,7 @@ from .result import (
     VALIDATED,
     RunNodeResult,
     RunResult,
+    rows_moved,
     run_status,
 )
 from .state import RunState
@@ -56,6 +57,17 @@ def _node_substep(session, node, *, concurrent: bool = False):
     opened = session.concurrent_substep if concurrent else session.substep
     with opened(node_label(node)) as frame:
         yield frame
+
+
+def _conclude(frame, outcome) -> None:
+    """Mark a node's frame with its outcome before the frame closes."""
+
+    if frame is None:
+        return
+    if outcome.status == FAILED:
+        frame.failed = True
+    else:
+        frame.note = rows_moved(outcome.result)
 
 
 #: Run every loadable object installed in the requested logical items.
@@ -573,17 +585,15 @@ class Runner:
     def _dispatched_together(self, group, *, dispatch_many, session) -> list:
         """Dispatch Python primitives in one call and settle each one's outcome."""
 
-        from contextlib import ExitStack
-
         from .outcome import settle
 
         nodes = [node for node, _resolved in group]
         started = _now()
-        with ExitStack() as frames:
-            opened = [
-                frames.enter_context(_node_substep(session, node, concurrent=True))
-                for node in nodes
-            ]
+        # Opened and closed in node order, so each node's start and end lines
+        # follow the order the nodes were admitted in.
+        frames = [_node_substep(session, node, concurrent=True) for node in nodes]
+        opened = [frame.__enter__() for frame in frames]
+        try:
             try:
                 returned = dispatch_many(
                     nodes,
@@ -608,8 +618,7 @@ class Runner:
                     if isinstance(value, BaseException)
                     else settle(node, returned=value)
                 )
-                if frame is not None and outcome.status == FAILED:
-                    frame.failed = True
+                _conclude(frame, outcome)
                 settled.append(
                     self._settled(
                         node,
@@ -623,6 +632,12 @@ class Runner:
                         refused=outcome.refused,
                     )
                 )
+        except BaseException as exc:
+            for frame in frames:
+                frame.__exit__(type(exc), exc, exc.__traceback__)
+            raise
+        for frame in frames:
+            frame.__exit__(None, None, None)
         return settled
 
     def _dry_run(self, ordered) -> tuple:
@@ -701,8 +716,7 @@ class Runner:
                 outcome = settle(node, raised=exc)
             else:
                 outcome = settle(node, returned=returned)
-            if frame is not None and outcome.status == FAILED:
-                frame.failed = True
+            _conclude(frame, outcome)
         return self._settled(
             node,
             outcome.status,
