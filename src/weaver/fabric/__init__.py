@@ -20,7 +20,10 @@ from .environment import (
 )
 from .livy import (
     LivyError,
+    LivyOutcomeUnknown,
+    LivyRefused,
     LivySession,
+    LivySessionEnded,
     LivySessionInfo,
     LivyStatementError,
     StatementResult,
@@ -77,6 +80,9 @@ __all__ = [
     "LivySessionInfo",
     "WorkspaceLivySession",
     "LivyError",
+    "LivyOutcomeUnknown",
+    "LivyRefused",
+    "LivySessionEnded",
     "LivyStatementError",
     "StatementResult",
     "emit_source",

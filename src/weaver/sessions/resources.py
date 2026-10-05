@@ -35,7 +35,9 @@ class Resource(Generic[T]):
 
     ``acquire`` is called at most once per attempt and never concurrently.
     ``release`` is called only for a value this resource actually acquired, so a
-    Session never closes what it was given.
+    Session never closes what it was given. ``max_attempts`` bounds consecutive
+    failed acquisitions: one that succeeds starts the count again, so a
+    long-lived Session can recover each time a working resource later fails.
     """
 
     def __init__(
@@ -62,6 +64,8 @@ class Resource(Generic[T]):
         self._state = ResourceState.NOT_STARTED
         self._future: Future | None = None
         self._attempts = 0
+        #: Acquisitions that have failed since the last one that succeeded.
+        self._failures = 0
         self._error: BaseException | None = None
 
     # --- state --------------------------------------------------------------
@@ -143,6 +147,7 @@ class Resource(Generic[T]):
                     self._attempts -= 1
                 else:
                     self._state = ResourceState.FAILED
+                    self._failures += 1
                 self._error = exc
             raise
         with self._lock:
@@ -153,6 +158,7 @@ class Resource(Generic[T]):
                     f"The {self.name} resource was closed while starting."
                 )
             self._state = ResourceState.READY
+            self._failures = 0
         return value
 
     def fail(self, error: BaseException | None = None) -> None:
@@ -174,8 +180,8 @@ class Resource(Generic[T]):
     def reacquire(self) -> None:
         """Permit another acquisition within the configured attempt limit.
 
-        Bounded: a resource that has exhausted its attempts stays failed and
-        says so.
+        Bounded: a resource whose acquisition has failed ``max_attempts`` times
+        in a row stays failed and says so.
         """
 
         with self._lock:
@@ -183,9 +189,9 @@ class Resource(Generic[T]):
                 raise ResourceError(f"The {self.name} resource is closed.")
             if self._state is not ResourceState.FAILED:
                 return
-            if self._attempts >= self._max_attempts:
+            if self._failures >= self._max_attempts:
                 raise ResourceError(
-                    f"The {self.name} resource failed {self._attempts} times and "
+                    f"The {self.name} resource failed {self._failures} times and "
                     f"cannot be acquired again: {self._error}"
                 ) from self._error
             self._state = ResourceState.NOT_STARTED

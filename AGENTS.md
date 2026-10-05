@@ -440,7 +440,10 @@ staged beside the Lakehouse its Spark session attaches to, and Fabric plans and
 runs the graph against that catalogue and records it. Fabric writes the Steps
 and Sub-steps it presents beside the stage, and the client presents them as they
 arrive, with Fabric's times. A submission is never resent; a lost result leaves
-the outcome unknown, and the catalogue log records what ran. A run with no Spark
+the outcome unknown, and the catalogue log records what ran. Fabric ends a Livy
+session left idle and refuses statements for it before accepting them, so
+`LivySession` replaces the session in place and submits that statement once
+more. Any other refusal is a known failure that leaves the session in use. A run with no Spark
 work runs on the client, over TDS, and starts no Spark session. A client never
 imports a deployed module, so it opens no runtime scope.
 

@@ -17,7 +17,7 @@ import pytest
 from support.weaver_test import weaver_test
 
 from weaver.errors import OutcomeUnknown
-from weaver.fabric import LivyError
+from weaver.fabric import LivyOutcomeUnknown, LivyRefused
 from weaver.locations import Location
 from weaver.run.result import RunError
 from weaver.sessions.program import FabricRun
@@ -68,7 +68,9 @@ class Resolver:
 class Fabric(TestSession):
     """A client whose submitted statement runs as Fabric would run it."""
 
-    def __init__(self, *, progress=(), report=None, lost=False, tamper=False):
+    def __init__(
+        self, *, progress=(), report=None, lost=False, refused=False, tamper=False
+    ):
         super().__init__(workspace=WORKSPACE, resolver=Resolver(), store=Store())
         self.offer_spark_home(["Sales"])
         self.programs = []
@@ -76,6 +78,7 @@ class Fabric(TestSession):
         self._progress = list(progress)
         self._report = {"status": "succeeded"} if report is None else report
         self._lost = lost
+        self._refused = refused
         self._tamper = tamper
 
     def execute_python(self, program, *, workspace=None, timeout=None):
@@ -84,8 +87,10 @@ class Fabric(TestSession):
         stage = Location(re.search(r"stage='([^']+)'", program.source).group(1))
         self.requests.append(json.loads(store.read(stage / REQUEST)))
         store.write(stage / PROGRESS, json.dumps(self._progress).encode())
+        if self._refused:
+            raise LivyRefused("Request body cannot exceed 4194304 bytes")
         if self._lost:
-            raise LivyError("the connection was reset")
+            raise LivyOutcomeUnknown("the connection was reset")
         data = json.dumps({"report": self._report, "warnings": ["mind"]}).encode()
         store.write(stage / RESULT, data + (b" " if self._tamper else b""))
         return {"bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()}
@@ -170,6 +175,18 @@ def test_a_lost_response_leaves_the_outcome_unknown():
         _send(session, _run(session))
 
     assert len(session.programs) == 1
+    assert session.scope(WORKSPACE).store.files == {}
+
+
+@weaver_test()
+def test_a_run_fabric_refused_is_a_known_failure():
+    """Fabric refused the statement before accepting it, so nothing ran."""
+
+    session = Fabric(refused=True)
+
+    with pytest.raises(LivyRefused):
+        _send(session, _run(session))
+
     assert session.scope(WORKSPACE).store.files == {}
 
 

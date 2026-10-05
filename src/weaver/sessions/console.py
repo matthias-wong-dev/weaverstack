@@ -930,6 +930,7 @@ class ConsoleScope(WorkspaceScope):
             token=self.token_provider(),
             lakehouse=self.spark_home,
         )
+        session.restarted = lambda: self.telemetry.count("livy.restarted")
         session.start()
         return session
 
@@ -988,13 +989,18 @@ class ConsoleScope(WorkspaceScope):
     ):
         """Submit one statement to this scope's Livy session and return its payload.
 
-        A statement that fails is the caller's failure, not the session's: the
-        exception is re-raised and the resource left as it was, because the
-        session is still up and costs a minute to replace. Only a session that
-        has died is marked failed.
+        A statement that fails, or that Fabric refuses, is the caller's failure,
+        not the session's: the exception is re-raised and the resource left as it
+        was, because the session is still up and costs a minute to replace. Only
+        a session that has died is marked failed.
         """
 
-        from ..fabric import LivyError, LivyStatementError
+        from ..fabric import (
+            LivyError,
+            LivyRefused,
+            LivySessionEnded,
+            LivyStatementError,
+        )
 
         if self.livy is None:
             raise CommandError("No Livy session is available for this workspace.")
@@ -1008,8 +1014,12 @@ class ConsoleScope(WorkspaceScope):
                 result = livy.run(source, **kwargs)
             except LivyStatementError as exc:
                 raise self._statement_failure(exc, name) from exc
+            except LivySessionEnded:
+                self.livy.fail()
+                raise
+            except LivyRefused:
+                raise
             except LivyError:
-                # Only a transport failure invalidates the shared Livy resource.
                 self.livy.fail()
                 raise
         if not result.returned:

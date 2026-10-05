@@ -100,15 +100,30 @@ def test_a_failed_resource_refuses_further_use_until_it_is_reacquired(executor):
 
 @weaver_test()
 def test_recovery_is_bounded_rather_than_endless(executor):
-    resource = Resource("livy", lambda: "livy", executor=executor, max_attempts=2)
-    resource.get()
-    resource.fail(RuntimeError("dead"))
+    def acquire():
+        raise RuntimeError("no capacity")
+
+    resource = Resource("livy", acquire, executor=executor, max_attempts=2)
+    with pytest.raises(RuntimeError):
+        resource.get()
     resource.reacquire()
-    resource.get()
-    resource.fail(RuntimeError("dead again"))
+    with pytest.raises(RuntimeError):
+        resource.get()
 
     with pytest.raises(ResourceError, match="failed 2 times"):
         resource.reacquire()
+
+
+@weaver_test()
+def test_a_resource_that_came_back_and_worked_can_come_back_again(executor):
+    """A long-lived Session outlives more than one session Fabric ends."""
+
+    resource = Resource("livy", lambda: "livy", executor=executor, max_attempts=2)
+    resource.get()
+    for _ in range(3):
+        resource.fail(RuntimeError("dead"))
+        resource.reacquire()
+        assert resource.get() == "livy"
 
 
 @weaver_test()

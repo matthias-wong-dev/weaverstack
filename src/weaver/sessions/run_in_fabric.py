@@ -40,7 +40,6 @@ RESULT = "result.json"
 def send(session, run, *, workspace=None):
     """Run ``run`` in Fabric, present its progress here, and return its report."""
 
-    from ..fabric import LivyError, LivyStatementError
     from ..fabric.onelake import abfss_path
     from ..run.result import RunError
     from ..targets import ItemRef
@@ -65,9 +64,7 @@ def send(session, run, *, workspace=None):
         following = _Following(session, store, stage / PROGRESS)
         try:
             receipt = session.execute_python(program, workspace=workspace)
-        except LivyStatementError:
-            raise
-        except LivyError as exc:
+        except OutcomeUnknown as exc:
             raise OutcomeUnknown(
                 f"The {run.name} sent to Fabric did not report back: {exc}. It may "
                 "have run; the catalogue log records what it did."
