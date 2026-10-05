@@ -188,9 +188,18 @@ def _show(name: str, path: Path, entries: list[str]) -> None:
     print()
 
 
-def _execute(entries, parsed_commands, *, session) -> int:
-    """Stop at the first failed command, leaving later entries unrun."""
+#: Commands whose failing status reports findings about the data rather than a
+#: failure to do the work. A workflow carries on past them.
+FINDINGS = frozenset({"test", "health"})
 
+
+def _execute(entries, parsed_commands, *, session) -> int:
+    """Stop at the first failed command, leaving later entries unrun.
+
+    Findings do not stop the sequence; the workflow fails once it has finished.
+    """
+
+    found = []
     for number, (entry, parsed) in enumerate(zip(entries, parsed_commands), start=1):
         print(f"\n[{number}/{len(entries)}] {entry}\n")
         parsed.session = session
@@ -203,8 +212,17 @@ def _execute(entries, parsed_commands, *, session) -> int:
 
             _render_error(exc)
             return _stopped(number, entry)
-        if status:
+        if status and getattr(parsed, "command", None) in FINDINGS:
+            found.append(f"[{number}] {entry}")
+        elif status:
             return _stopped(number, entry)
+    if found:
+        print(
+            f"\nCommands completed: {len(entries)}, with findings from "
+            + ", ".join(found),
+            file=sys.stderr,
+        )
+        return 1
     print(f"\n✓ Commands completed: {len(entries)}")
     return 0
 
