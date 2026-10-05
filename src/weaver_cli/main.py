@@ -1306,24 +1306,24 @@ def _run_load(
 
 
 def _print_load(report) -> None:
+    from weaver.run.result import rows_moved
+
     mode = "plan" if report.dry_run else "load"
     reload = " (reload)" if getattr(report, "reload", False) else ""
     report_status = _style(report.status, _status_colour(report.status))
     requested = _public_requested(report.requested)
-    print(f"{mode}{reload} {report_status}: {', '.join(requested)}\n")
-    for node in report.nodes:
+    print(f"{mode}{reload} {report_status}: {', '.join(requested)}")
+    # Progress has already said each node started and finished. A plan has no
+    # progress, so it lists every node.
+    listed = [node for node in report.nodes if report.dry_run or _needs_attention(node)]
+    if listed:
+        print()
+    for node in listed:
         mark = _status_symbol(node.status)
         colour = _status_colour(node.status)
-        counts = ""
         # Failures before row movement have no row-count fields.
-        if node.result is not None and hasattr(node.result, "rows_read"):
-            counts = (
-                f"  (read {node.result.rows_read}, "
-                f"+{node.result.rows_inserted} "
-                f"~{node.result.rows_updated} "
-                f"-{node.result.rows_deleted} "
-                f"!{node.result.rows_rejected})"
-            )
+        moved = rows_moved(node.result)
+        counts = f"  ({moved})" if moved else ""
         status = f"{node.status:<24}"
         print(
             f"  {_style(mark, colour)} {_style(status, colour)} {node.node_id}{counts}"
@@ -1336,6 +1336,14 @@ def _print_load(report) -> None:
     _print_load_summary(report)
     if report.workflow_id:
         print(f"\n  Workflow: {_style(report.workflow_id, _DIM)}")
+
+
+def _needs_attention(node) -> bool:
+    from weaver.load_report import SUCCEEDED
+
+    return node.status != SUCCEEDED or any(
+        message.severity != "info" for message in node.messages
+    )
 
 
 def _print_load_summary(report) -> None:

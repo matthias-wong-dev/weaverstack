@@ -329,13 +329,15 @@ def test_naming_no_workspace_at_all_fails_saying_which_value_is_missing(capsys):
 
 
 @weaver_test()
-def test_a_successful_run_renders_its_nodes_and_exits_zero(recorded, capsys):
+def test_a_successful_run_renders_its_summary_and_exits_zero(recorded, capsys):
+    """Progress has already said each node finished; the report adds the totals."""
+
     exit_code = main(_command())
     captured = capsys.readouterr()
 
     assert exit_code == 0
-    assert "load:Lakehouse/Sales/Tables/Sales.Customer" in captured.out
-    assert "succeeded" in captured.out
+    assert "load:Lakehouse/Sales/Tables/Sales.Customer" not in captured.out
+    assert "load succeeded: Lakehouse/Sales" in captured.out
     assert "1 succeeded" in captured.out
     assert "Rows" in captured.out
     assert "read" in captured.out and "5" in captured.out
@@ -379,8 +381,10 @@ def test_load_rollup_sums_loaders_without_counting_publication_nodes(capsys):
     assert "1 succeeded with rejects" in output
     assert "read                  12" in output
     assert "inserted               8" in output
-    assert "999" in output  # still visible on the publication node's own line
     assert "read               1,011" not in output
+    # The node with rejects is listed with its counts; plain successes are not.
+    assert "Sales.Order  (read 7, +3 ~2 -1 !1)" in output
+    assert "refresh:Lakehouse/Sales" not in output
 
 
 @weaver_test()
@@ -542,7 +546,7 @@ def test_load_status_colour_is_semantic_on_a_terminal(monkeypatch):
     _cli_module()._print_load(report)
 
     printed = output.getvalue()
-    assert "\x1b[32m✓\x1b[0m" in printed
+    assert "\x1b[32m    1 succeeded" in printed
     assert "\x1b[33msucceeded_with_rejects" in printed
     assert "\x1b[31mfailed" in printed
     assert "\x1b[33mblocked" in printed

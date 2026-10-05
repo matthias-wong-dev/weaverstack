@@ -73,6 +73,10 @@ class ReportingFrame:
     started: float = field(default_factory=time.monotonic)
     elapsed: float | None = None
     failed: bool = False
+    #: Runs beside other frames of its Step, off the frame stack.
+    concurrent: bool = False
+    #: What the work produced, for presentation beside its duration.
+    note: str | None = None
 
     @property
     def age(self) -> float:
@@ -647,16 +651,15 @@ class Session(ABC):
     ) -> Iterator[ReportingFrame]:
         """A Sub-step that runs beside others of the current Step.
 
-        It is reported and timed like any Sub-step but held off the frame stack,
-        which describes nesting, and the external work inside it is attributed
-        to it in whichever thread runs it.
+        It is timed like any Sub-step but held off the frame stack, which
+        describes nesting, so it is reported when it starts as well as when it
+        ends. The external work inside it is attributed to it in whichever
+        thread runs it.
         """
 
         from dataclasses import replace
 
-        frame = ReportingFrame(
-            kind=SUBSTEP, name=name, detail=detail, depth=len(self._frames)
-        )
+        frame = self.open_concurrent_substep(name, detail)
         context = replace(self.telemetry.capture_context(), substep=name)
         error = None
         try:
@@ -666,11 +669,51 @@ class Session(ABC):
             error = exc
             raise
         finally:
-            frame.elapsed = time.monotonic() - frame.started
-            frame.failed = frame.failed or error is not None
-            with self._concurrent_lock:
-                self.timings.append(frame)
-                self.present(frame, "failed" if frame.failed else "completed", error)
+            self.close_concurrent_substep(frame, error)
+
+    def open_concurrent_substep(
+        self, name: str, detail: str | None = None
+    ) -> ReportingFrame:
+        """Start a concurrent Sub-step whose work no one thread brackets."""
+
+        frame = ReportingFrame(
+            kind=SUBSTEP,
+            name=name,
+            detail=detail,
+            depth=len(self._frames),
+            concurrent=True,
+        )
+        with self._concurrent_lock:
+            self.present(frame, "started")
+        return frame
+
+    def close_concurrent_substep(
+        self, frame: ReportingFrame, error: BaseException | None = None
+    ) -> None:
+        frame.elapsed = time.monotonic() - frame.started
+        frame.failed = frame.failed or error is not None
+        with self._concurrent_lock:
+            self.timings.append(frame)
+            self.present(frame, "failed" if frame.failed else "completed", error)
+
+    def finished_substep(
+        self, name: str, *, elapsed: float, failed: bool = False, note=None
+    ) -> ReportingFrame:
+        """Report a concurrent Sub-step that ran elsewhere and was timed there."""
+
+        frame = ReportingFrame(
+            kind=SUBSTEP,
+            name=name,
+            depth=len(self._frames),
+            elapsed=elapsed,
+            failed=failed,
+            concurrent=True,
+            note=note,
+        )
+        with self._concurrent_lock:
+            self.timings.append(frame)
+            self.present(frame, "failed" if failed else "completed")
+        return frame
 
     def _framed(self, kind: str, name: str, detail: str | None):
         if kind == TASK:

@@ -122,11 +122,23 @@ class ConsoleSession(Session):
         return execute_mutation_remote(self, plan, payloads, **options)
 
     def execute_mutation(self, plan, payloads=None, **options):
+        from .mutation_progress import StageProgress
+
+        progress = StageProgress(plan, self)
         # Only Spark work needs the plan carried into Fabric. TDS, OneLake and
         # REST are reached from here, so a plan without Spark starts no session.
         if plan.execution.spark_home_target_id is None:
-            return super().execute_mutation(plan, payloads, **options)
-        return self.execute_mutation_remote(plan, payloads, **options)
+            return super().execute_mutation(
+                plan, payloads, observer=progress.observe, **options
+            )
+        # One submission runs the whole plan, so its stages are known only
+        # once it returns.
+        report = self.execute_mutation_remote(plan, payloads, **options)
+        try:
+            progress.replay(report)
+        except Exception:  # noqa: BLE001 - presentation never changes an outcome
+            pass
+        return report
 
     # --- progress -----------------------------------------------------------
 
@@ -154,6 +166,16 @@ class ConsoleSession(Session):
               Install Lakehouse/Sales                    18.6s
             ✓ Build                                      40.7s
 
+        A concurrent frame is off the stack, so it is marked when it starts as
+        well as when it ends, and the two may be far apart:
+
+        .. code-block:: text
+
+            →   Load Warehouse/Reporting/Sales.Customer
+            →   Load Warehouse/Reporting/Sales.Order
+            ✓   Load Warehouse/Reporting/Sales.Order  (read 9, +9 ~0 -0 !0)     5.1s
+            ✓   Load Warehouse/Reporting/Sales.Customer  (read 4, +1 ~3 -0 !0)  8.3s
+
         A transient line shows the innermost active frame:
 
         .. code-block:: text
@@ -172,15 +194,22 @@ class ConsoleSession(Session):
             if event == "started":
                 if frame.kind == TASK:
                     print(f"\n{frame.name}\n", file=stream)
+                elif frame.concurrent:
+                    print(
+                        f"{_styled('→', DIM, stream)} {self._label(frame)}", file=stream
+                    )
             else:
                 if event == "failed":
                     mark = "✗"
-                elif frame.kind == TASK:
+                elif frame.kind == TASK or frame.concurrent:
                     mark = "✓"
                 else:
                     mark = " "
                 colour = RED if event == "failed" else GREEN if mark == "✓" else ""
-                label = f"{self._label(frame):<{self._width() - 2}}"
+                named = self._label(frame)
+                if frame.note:
+                    named += f"  ({frame.note})"
+                label = f"{named:<{self._width() - 2}}"
                 duration = f"{_duration(frame.elapsed):>{self.DURATION_WIDTH}}"
                 print(
                     f"{_styled(mark, colour, stream)} {label}"

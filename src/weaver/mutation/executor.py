@@ -196,6 +196,7 @@ class MutationExecutor:
         limits=None,
         timeout=600,
         failure_policy="continue_independent",
+        observer=None,
     ):
         from ..errors import BuildError
 
@@ -213,6 +214,8 @@ class MutationExecutor:
         self.limits = dict(limits or {})
         self.timeout = timeout
         self.failure_policy = failure_policy
+        #: Called with each ledger event, for presentation only.
+        self.observer = observer
 
     def execute(
         self,
@@ -321,6 +324,11 @@ class _Invocation:
             self.invocation_id,
         )
         self.ledger.append(event)
+        if self.executor.observer is not None:
+            try:
+                self.executor.observer(event)
+            except Exception:  # noqa: BLE001 - presentation never changes an outcome
+                pass
 
     def terminal(self, state, status, value=None, error=None):
         key = state.action.id
