@@ -168,6 +168,43 @@ def test_build_concurrency_must_be_positive():
 
 
 @weaver_test()
+def test_a_load_and_test_run_their_configured_lanes():
+    from weaver.run.runner import Lanes
+
+    workspace = parse_workspace(
+        {
+            "workspace": "Analytics",
+            "execution": {"run": {"spark_concurrency": 24}},
+        }
+    )
+
+    assert Lanes.configured(workspace) == Lanes(spark=24, warehouse=4)
+    assert Lanes.configured(None) == Lanes()
+
+
+@weaver_test()
+def test_run_concurrency_must_be_positive():
+    with pytest.raises(ConfigError, match=r"execution\.run\.warehouse_concurrency"):
+        parse_workspace(
+            {
+                "workspace": "Analytics",
+                "execution": {"run": {"warehouse_concurrency": 0}},
+            }
+        )
+
+
+@weaver_test()
+def test_run_concurrency_names_only_what_it_knows():
+    with pytest.raises(ConfigError, match="unknown keys: onelake_concurrency"):
+        parse_workspace(
+            {
+                "workspace": "Analytics",
+                "execution": {"run": {"onelake_concurrency": 2}},
+            }
+        )
+
+
+@weaver_test()
 def test_missing_file_is_reported(tmp_path: Path):
     with pytest.raises(ConfigError, match="not found"):
         load_workspace(tmp_path / "absent.yml")

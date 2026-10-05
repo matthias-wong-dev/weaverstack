@@ -348,11 +348,17 @@ class _Staged:
     says, so being asked is a failure rather than an answer.
     """
 
-    def __init__(self, columns=BUSINESS) -> None:
+    def __init__(self, columns=BUSINESS, *, empty: bool | None = None) -> None:
         self.columns = list(columns)
+        self.empty = empty
 
     def createOrReplaceTempView(self, name: str) -> None:  # noqa: N802 - Spark's name
         self.view = name
+
+    def isEmpty(self) -> bool:  # noqa: N802 - Spark's name
+        if self.empty is None:
+            raise AssertionError("the load asked whether a claim held anything")
+        return self.empty
 
     def take(self, n: int):
         raise AssertionError("the load read a frame it was only meant to name")
@@ -1304,6 +1310,44 @@ def test_an_incremental_load_takes_a_claim_without_reading_it():
     )
 
     assert result.succeeded
+
+
+@weaver_test()
+def test_an_empty_incremental_window_asks_nothing_more_and_changes_nothing():
+    """Most windows are empty on most days, so the load ends once staging is counted."""
+
+    spark, result = _load({"staging": 0}, contract=_incremental())
+
+    assert result.succeeded
+    assert (result.rows_read, result.rows_inserted, result.rows_deleted) == (0, 0, 0)
+    assert [frame.role for frame in spark.persisted] == ["staging"]
+    assert not spark.mutations
+    assert not any(one.startswith("DESCRIBE DETAIL") for one in spark.statements)
+    assert not spark.leaked
+
+
+@weaver_test()
+def test_an_empty_window_with_an_empty_claim_changes_nothing():
+    spark, result = _load(
+        {"staging": 0},
+        contract=_incremental(),
+        deletes=_Staged(("Customer id",), empty=True),
+    )
+
+    assert result.succeeded
+    assert not spark.mutations
+
+
+@weaver_test()
+def test_an_empty_window_still_deletes_what_it_claims():
+    spark, result = _load(
+        {"staging": 0, "delete": 2},
+        contract=_incremental(),
+        deletes=_Staged(("Customer id",), empty=False),
+    )
+
+    assert result.rows_deleted == 2
+    assert len(spark.mutations) == 1
 
 
 # --- evidence a failure with no outcome of its own leaves ---------------------

@@ -189,8 +189,6 @@ class _Planner:
         self.nodes: dict[str, LoadNode] = {}
         self.edges: set[tuple[str, str]] = set()
         self.refresh_nodes: dict[str, LoadNode] = {}
-        #: Which physical targets a refresh barrier must wait for, by refresh id.
-        self.refresh_sources: dict[str, PhysicalTargetRef] = {}
 
     # --- planning -------------------------------------------------------------
 
@@ -213,7 +211,6 @@ class _Planner:
             visited: set[str] = set()
             for node in seeds:
                 self._select(node, visited, allowed_items=allowed_items)
-            self._place_refresh_barriers()
         dag = LoadDag(
             nodes=tuple(sorted(self.nodes.values(), key=lambda node: node.sort_key)),
             edges=tuple(sorted(self.edges)),
@@ -338,8 +335,11 @@ class _Planner:
             else:
                 # A shortcut read as SQL: the producer's endpoint has to catch up
                 # before the consumer can see it, so the barrier replaces the
-                # direct edge rather than sitting beside it.
+                # direct edge rather than sitting beside it. The refresh waits
+                # for what is read through it, and other loads in the Lakehouse
+                # run beside it.
                 refresh_id = self._refresh_node(crossed).node_id
+                self.edges.add((upstream_id, refresh_id))
                 self.edges.add((refresh_id, node.node_id))
         return node.node_id
 
@@ -403,24 +403,7 @@ class _Planner:
             )
             self.refresh_nodes[node_id] = node
             self.nodes[node_id] = node
-            self.refresh_sources[node_id] = target
         return node
-
-    def _place_refresh_barriers(self) -> None:
-        """Every selected load in a refreshed Lakehouse runs before its barrier.
-
-        Broad by necessity: one barrier per affected Lakehouse, behind all of
-        its selected loads rather than only those a shortcut names. A narrower
-        placement would need to know which tables a consumer's query touches,
-        and the catalogue records the shortcut rather than the read.
-        """
-
-        for node_id, target in self.refresh_sources.items():
-            for node in list(self.nodes.values()):
-                if node.primitive_kind in (ENDPOINT_REFRESH, ONELAKE_PUBLICATION):
-                    continue
-                if node.physical_target == target:
-                    self.edges.add((node.node_id, node_id))
 
     # --- dependency traversal --------------------------------------------------
 

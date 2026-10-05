@@ -154,6 +154,8 @@ def generate_tsql_load_script(
         load_body = _primary_key_body(names, contract, claims_deletes)
     else:
         load_body = _full_replace_body(names)
+    if contract.incremental:
+        load_body = _unless_window_empty(load_body, names, claims_deletes)
 
     procedure = render_sql_template(
         "load/load_procedure",
@@ -189,6 +191,22 @@ def generate_tsql_load_script(
         "load/install_load_procedure",
         column_metadata_sql=_column_metadata_sql(names, contract),
         procedure_template_sql_literal=_sql_literal(procedure),
+    )
+
+
+def _unless_window_empty(load_body: str, names: dict, claims_deletes: bool) -> str:
+    """Run an incremental body only when its window holds a row or a claim.
+
+    Most windows are empty on most days, and the body's statements would each
+    answer that again.
+    """
+
+    work = "@weaver_rows_read > 0"
+    if claims_deletes:
+        work += f"\n   or exists (select 1 from {names['delete']})"
+    return (
+        "-- An empty window with nothing claimed changes nothing.\n"
+        f"if {work}\nbegin\n{_indent(load_body, 4)}\nend;"
     )
 
 

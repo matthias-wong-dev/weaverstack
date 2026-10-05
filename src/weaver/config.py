@@ -12,6 +12,7 @@ from .workspaces import (
     BuildConcurrency,
     EnvironmentRef,
     ExecutionSettings,
+    RunConcurrency,
     TargetDeclaration,
     Workspace,
 )
@@ -138,27 +139,33 @@ def _execution(raw: Any, *, where: str) -> ExecutionSettings:
             spark_concurrency: 4
             onelake_concurrency: 8
             shortcut_concurrency: 2
+          run:
+            spark_concurrency: 4
+            warehouse_concurrency: 4
     """
 
     if raw is None:
         return ExecutionSettings()
     if not isinstance(raw, dict):
         raise ConfigError(f"{where} must be a mapping")
-    unknown = set(raw) - {"build"}
+    unknown = set(raw) - {"build", "run"}
     if unknown:
         raise ConfigError(f"{where} has unknown keys: " + ", ".join(sorted(unknown)))
-    build = raw.get("build")
-    if build is None:
-        return ExecutionSettings()
-    if not isinstance(build, dict):
-        raise ConfigError(f"{where}.build must be a mapping")
-    known = {field.name for field in fields(BuildConcurrency)}
-    unknown = set(build) - known
+    return ExecutionSettings(
+        build=_concurrency(raw.get("build"), BuildConcurrency, where=f"{where}.build"),
+        run=_concurrency(raw.get("run"), RunConcurrency, where=f"{where}.run"),
+    )
+
+
+def _concurrency(raw: Any, kind, *, where: str):
+    if raw is None:
+        return kind()
+    if not isinstance(raw, dict):
+        raise ConfigError(f"{where} must be a mapping")
+    unknown = set(raw) - {field.name for field in fields(kind)}
     if unknown:
-        raise ConfigError(
-            f"{where}.build has unknown keys: " + ", ".join(sorted(unknown))
-        )
-    return ExecutionSettings(build=BuildConcurrency(**build))
+        raise ConfigError(f"{where} has unknown keys: " + ", ".join(sorted(unknown)))
+    return kind(**raw)
 
 
 def _targets(raw: Any) -> dict[WeaverItemId, TargetDeclaration]:

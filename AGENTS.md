@@ -417,8 +417,12 @@ own boundaries, not Fabric readiness.
 
 ## Load scheduling
 
-A load's `Runner` dispatches every node whose upstream has settled, within
-`Lanes`: four Warehouse procedures per Warehouse, and four Python primitives.
+A load's `Runner` dispatches every node whose upstream has settled, within the
+lanes the Workspace's `execution.run` sets: by default four procedures per
+Warehouse and four Python primitives. A node is a few small Spark jobs or T-SQL
+statements, so a load is bound by latency, and more lanes run more of it at
+once. A Warehouse reading a Lakehouse waits for one SQL endpoint refresh, and
+that refresh waits only for the Lakehouse loads read through it.
 Each node is dispatched on its own and frees its lane when it settles. A Python
 primitive that starts beside others runs in a Spark session of its own within
 the one Spark application, so settings and temporary views stay its own. Every

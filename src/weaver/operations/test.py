@@ -207,7 +207,7 @@ def execute_test(session, *, workspace, runner, started) -> ValidationRunReport:
             dispatch=_dispatch_collecting(collect=runner.request.name is not None),
             on_node=None if record is None else record.settled,
             # Validations are independent, so they run at once.
-            lanes=Lanes(),
+            lanes=Lanes.configured(workspace),
         )
     if record is not None:
         with session.step("Record what the run did"):

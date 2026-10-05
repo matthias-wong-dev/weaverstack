@@ -210,6 +210,15 @@ class Lanes:
     warehouse: int = 4
     other: int = 4
 
+    @classmethod
+    def configured(cls, workspace) -> "Lanes":
+        """The lanes a Workspace's ``execution.run`` sets."""
+
+        if workspace is None:
+            return cls()
+        run = workspace.execution.run
+        return cls(spark=run.spark_concurrency, warehouse=run.warehouse_concurrency)
+
     def of(self, node) -> tuple:
         from .resolution import SPARK_KINDS, WAREHOUSE_PROCEDURE
 

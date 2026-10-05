@@ -27,6 +27,7 @@ from weaver.sessions.run_in_fabric import (
     RESULT,
     RUN_TIMEOUT,
     progress_written,
+    send,
 )
 from weaver.sessions.testing import TestSession
 from weaver.store import StoreError
@@ -69,9 +70,16 @@ class Fabric(TestSession):
     """A client whose submitted statement runs as Fabric would run it."""
 
     def __init__(
-        self, *, progress=(), report=None, lost=False, refused=False, tamper=False
+        self,
+        *,
+        progress=(),
+        report=None,
+        lost=False,
+        refused=False,
+        tamper=False,
+        workspace=WORKSPACE,
     ):
-        super().__init__(workspace=WORKSPACE, resolver=Resolver(), store=Store())
+        super().__init__(workspace=workspace, resolver=Resolver(), store=Store())
         self.offer_spark_home(["Sales"])
         self.programs = []
         self.requests = []
@@ -112,8 +120,6 @@ def _run(session, **arguments):
 
 
 def _send(session, run):
-    from weaver.sessions.run_in_fabric import send
-
     return send(session, run, workspace=WORKSPACE)
 
 
@@ -144,6 +150,31 @@ def test_a_run_crosses_once_and_is_never_sent_again():
     ast.parse(program.source)
     assert "run_staged(_entry, session=session" in program.source
     assert "NotebookSession(workspace=workspace, spark=spark)" in program.source
+
+
+@weaver_test()
+def test_fabric_runs_with_the_clients_lanes():
+    """The submitted workspace carries the execution settings the client read."""
+
+    from dataclasses import replace
+
+    from weaver.workspaces import ExecutionSettings, RunConcurrency
+
+    configured = replace(
+        WORKSPACE,
+        execution=ExecutionSettings(run=RunConcurrency(spark_concurrency=24)),
+    )
+    session = Fabric(workspace=configured)
+
+    send(session, _run(session), workspace=configured)
+
+    (program,) = session.programs
+    (literal,) = [
+        line for line in program.source.splitlines() if line.startswith("workspace =")
+    ]
+    namespace: dict = {}
+    exec("from weaver.workspaces import *\n" + literal, namespace)
+    assert namespace["workspace"].execution.run.spark_concurrency == 24
 
 
 @weaver_test()

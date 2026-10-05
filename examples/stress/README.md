@@ -31,8 +31,8 @@ so the estate measures Weaver rather than capacity:
 | 1M to 1k | 913 | 1,000,000 to 1,000 | inserts, updates, deletes |
 | folders | 40 | a file per change | a new file |
 
-Sources of 10M rows or more deliver only what changed. Smaller sources deliver
-their whole contents. A source changes every 1 to 20 days according to its
+Sources of 10M rows or more deliver only what changed. Smaller sources hold
+their whole contents, with each row stamped by the load that last changed it. A source changes every 1 to 20 days according to its
 size, so a typical day changes about one source in seven.
 
 The estate reads them through four layers in each of three items:
@@ -47,23 +47,27 @@ Every table loads one of Weaver's ways:
 
 | Behaviour | Declared as | Reads | Tables |
 |---|---|---|---|
-| upsert | `Primary key: Id` | everything, so a missing row is deleted | 1,480 |
-| incremental | `Incremental: true`, `Primary key: Id` | rows newer than it holds | 426 |
-| static | `Static: true` | everything, once | 190 |
-| incremental with deletes | the same, with a delete query | rows newer, and the keys deleted | 46 |
-| append | `Incremental: true`, no primary key | rows newer than it holds | 2 |
+| incremental | `Incremental: true`, `Primary key: Id` | what changed, keeping a deletion as a flag | 1,721 |
+| incremental with deletes | the same, with a delete query | what changed, deleting the rows flagged deleted | 280 |
+| upsert | `Primary key: Id` | everything, so a missing row is deleted | 79 |
+| static | `Static: true` | everything, once | 62 |
+| append | `Incremental: true`, no primary key | what is new | 2 |
 
 The two appends are the 500M fact and its copy in `Warehouse/Core`. Every other
-table has a primary key. A table over 10M rows only ever appends or merges what
-changed. An incremental table never reads a parent that removes rows, because a
-removed row leaves no change behind. Each item carries one Test per behaviour,
-which compares a small table with what its parent says it should hold.
+table has a primary key. Landing keeps a deletion as an `IsDeleted` flag, so
+every layer above it can read incrementally. A table that deletes rows is read
+only by views, and a few other tables (upserts of at most 100,000 rows) compare
+the whole of what they read. Each item carries one Test per behaviour, which
+compares a small table with what its parent says it should hold.
 
-An incremental table reads the newest `Epoch` it already holds. A build runs a
-SQL table's query to shape it before the table exists, so a T-SQL table reads
-its own table inside `if object_id(...) is not null`, which Fabric resolves
-only when the block runs. Spark SQL has no such guard, so the Lakehouse's
-incremental tables are Python, whose `read()` only a load runs.
+A Lakehouse table reads what its parent changed since its own last clean load
+began: each load stamps the rows it changes with `row_update_datetime`, and
+`self.bookmark()` is when this table last loaded cleanly, so Delta skips every
+file older than that. A view carries no audit column, so a table reading one
+reads the newest `Epoch` it already holds. A T-SQL table does the same, reading
+its own table inside `if object_id(...) is not null`, because a build runs its
+query to shape the table before the table exists and Fabric resolves a name
+inside `if` only when the block runs.
 
 ## The day
 
@@ -126,5 +130,7 @@ in minutes.
 - **First load** is mostly Fabric moving rows, about 3.1 billion of them at
   scale 1.
 
-A load runs at most four Python primitives at once, and four procedures per
-Warehouse, which is why the T-SQL objects are split across two Warehouses.
+The configurations run 24 Python primitives at once and 12 procedures per
+Warehouse (`execution.run`). Each node is a few small Spark jobs or T-SQL
+statements, so a load is bound by latency rather than by compute, and more
+lanes run more of it at once.

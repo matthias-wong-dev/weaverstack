@@ -7,6 +7,7 @@ later run from reusing modules replaced by a rebuild.
 
 from __future__ import annotations
 
+import threading
 from typing import Any, Protocol
 
 
@@ -46,13 +47,19 @@ class DirectRunScope:
         self._session = session
         self._workspace = workspace
         self._catalogue = catalogue
+        self._inherited: dict | None = None
+        self._inheriting = threading.Lock()
 
     def _spark(self, isolated: bool):
-        from .dispatch import isolated_spark
+        from .dispatch import inherited_settings, isolated_spark
 
         if not isolated or self._session is None:
             return None
-        return isolated_spark(self._session.spark(self._workspace))
+        parent = self._session.spark(self._workspace)
+        with self._inheriting:
+            if self._inherited is None:
+                self._inherited = inherited_settings(parent)
+        return isolated_spark(parent, self._inherited)
 
     def dispatch_python(
         self,

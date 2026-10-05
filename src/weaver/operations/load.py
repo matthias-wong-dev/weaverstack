@@ -275,7 +275,7 @@ def execute_load(session, *, workspace, runner, started) -> LoadRunReport:
             if record is None or not runner.request.reload
             else _reset_before(record),
             # Independent branches of a load run at once.
-            lanes=Lanes(),
+            lanes=Lanes.configured(workspace),
         )
 
     if record is not None:

@@ -247,24 +247,43 @@ def _python(
     return LoadResult.from_row(row)
 
 
-def isolated_spark(spark):
+def isolated_spark(spark, inherited=None):
     """A Spark session of its own, for one of several loads running at once.
 
     It shares the application, its executors and its cache, and starts from
     the parent's runtime settings, so what one load sets or names as a
-    temporary view stays its own.
+    temporary view stays its own. ``inherited`` is what
+    :func:`inherited_settings` read from the parent; reading it costs a py4j
+    round trip per setting, so a run reads it once.
     """
 
     session = spark.newSession()
-    fresh = _settings(session)
-    for key, value in _settings(spark).items():
-        if fresh.get(key) == value:
-            continue
+    if inherited is None:
+        inherited = inherited_settings(spark, session)
+    for key, value in inherited.items():
         try:
             session.conf.set(key, value)
         except Exception:  # noqa: BLE001 - a static setting is shared already
             pass
     return session
+
+
+#: Settings a load holds only while one statement runs, so a parent caught
+#: holding one passes on nothing a new session needs.
+_STATEMENT_SCOPED = frozenset(
+    {"spark.sql.caseSensitive", "spark.sql.optimizer.cte.cache.enabled"}
+)
+
+
+def inherited_settings(spark, fresh=None) -> dict:
+    """The parent's runtime settings a new session does not already start with."""
+
+    defaults = _settings(spark.newSession() if fresh is None else fresh)
+    return {
+        key: value
+        for key, value in _settings(spark).items()
+        if defaults.get(key) != value and key not in _STATEMENT_SCOPED
+    }
 
 
 def _settings(spark) -> dict:
@@ -378,6 +397,7 @@ def can_refresh(session, workspace=None) -> bool:
 __all__ = [
     "can_refresh",
     "dispatch_primitive",
+    "inherited_settings",
     "isolated_spark",
     "python_primitive",
 ]

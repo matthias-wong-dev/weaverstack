@@ -89,7 +89,8 @@ def _workspace_literal(workspace) -> str:
     return (
         f"Workspace(workspace={workspace.workspace!r}, "
         f"catalogue={workspace.catalogue!r}, "
-        f"environment={environment!r})"
+        f"environment={environment!r}, "
+        f"execution={workspace.execution!r})"
     )
 
 
@@ -102,7 +103,9 @@ def _program(run, workspace, stage: str, *, workflow_id=None) -> FabricProgram:
 
     entry = run.entry
     source = (
-        "from weaver.workspaces import Workspace\n"
+        "from weaver.workspaces import (\n"
+        "    BuildConcurrency, ExecutionSettings, RunConcurrency, Workspace\n"
+        ")\n"
         "from weaver.sessions import NotebookSession\n"
         "from weaver.run.entry import run_staged\n"
         f"from {entry.__module__} import {entry.__name__}\n"

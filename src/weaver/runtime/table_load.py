@@ -273,6 +273,11 @@ def _reconcile(
     # ``_Staging`` answers is what the source proposed.
     evidence["staging"] = staging_view
 
+    # An incremental window with no rows and no claimed deletion changes nothing,
+    # and most windows are empty on most days.
+    if not rows_read and contract.incremental and _claims_nothing(deletes):
+        return LoadResult(succeeded=True)
+
     if contract.replaces_wholesale:
         return _full_replace(spark, names, staging_view, columns, rows_read)
 
@@ -920,6 +925,10 @@ def _apply_changes(
         f"     VALUES ({qualified('chg', written)}, current_timestamp(), "
         f"current_timestamp(), {live_delete_literal()})"
     )
+
+
+def _claims_nothing(deletes) -> bool:
+    return deletes is None or deletes.isEmpty()
 
 
 def _delete_driver(contract: LoadContract, deletes):

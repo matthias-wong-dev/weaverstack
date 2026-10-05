@@ -84,6 +84,15 @@ DIMENSION_ROWS = 1000
 
 LARGE = 10_000_000
 
+#: Nodes a load runs at once. Loads are latency-bound rather than
+#: compute-bound: on an F64, 60 Lakehouse loads ran 3.5 times faster at 24
+#: Spark lanes than at 4.
+SPARK_CONCURRENCY = 24
+WAREHOUSE_CONCURRENCY = 12
+
+#: The largest table that compares its whole source on every load.
+UPSERT_ROWS = 100_000
+
 
 @dataclass(frozen=True)
 class Tier:
@@ -315,17 +324,16 @@ def _weighted(rng: random.Random, choices) -> str:
 
 
 def _landing_behaviour(source: Source, rng: random.Random, largest: int) -> str:
+    """Landing keeps a deletion as a flag, so every layer above can read it."""
+
     if source.folder:
         return FOLDER
-    if source.feed:
-        if not source.updates and not source.deletes:
-            # Only the largest fact appends without a key.
-            return APPEND if source.rows == largest else INCREMENTAL
-        return INCREMENTAL if rng.random() < 0.7 else INCREMENTAL_DELETE
-    choices = [(UPSERT, 0.65), (INCREMENTAL, 0.25)]
-    if source.rows <= 10_000:
-        choices.append((STATIC, 0.15))
-    return _weighted(rng, choices)
+    if source.rows == largest:
+        # Only the largest fact appends without a key.
+        return APPEND
+    if source.rows <= DIMENSION_ROWS and rng.random() < 0.2:
+        return STATIC
+    return INCREMENTAL
 
 
 def _appends(node: Node) -> bool:
@@ -341,13 +349,13 @@ def _child_behaviour(parent: Node, rng: random.Random) -> str | None:
 
     choices = []
     if _appends(parent):
-        choices.append((INCREMENTAL, 0.7))
+        choices.append((INCREMENTAL, 1.0))
     elif not parent.removes:
-        choices += [(INCREMENTAL, 0.5), (INCREMENTAL_DELETE, 0.15)]
-    if parent.rows <= LARGE:
-        choices.append((UPSERT, 0.4))
-    if parent.rows <= 10_000:
-        choices.append((STATIC, 0.1))
+        choices += [(INCREMENTAL, 0.65), (INCREMENTAL_DELETE, 0.25)]
+    if parent.rows <= UPSERT_ROWS:
+        choices.append((UPSERT, 0.06 if choices else 1.0))
+    if parent.rows <= DIMENSION_ROWS:
+        choices.append((STATIC, 0.04))
     return _weighted(rng, choices) if choices else None
 
 
@@ -433,6 +441,10 @@ def plan_estate(sources: list[Source], options: Options) -> list[Node]:
                 if sum(1 for c in parent.children if c.layer == name) >= 2:
                     continue
             else:
+                # A table that deletes is read by views, so its deletions never
+                # have to reach a table that reads it.
+                if parent.removes and rng.random() < 0.95:
+                    continue
                 behaviour = _child_behaviour(parent, rng)
                 if behaviour is None:
                     continue
@@ -963,27 +975,45 @@ def high_water(table) -> int:
 '''
 
 
-def _python_read(behaviour: str, read: str) -> str:
-    newer = "rows.where(rows.Epoch > high_water(self))"
+def _python_read(behaviour: str, read: str, *, bookmarked: bool) -> str:
+    """A read() body. A table parent is read past this table's bookmark.
+
+    Each load of a parent table stamps what it changed with a
+    ``row_update_datetime``, so a child reads only what changed since its own
+    last clean load began, and Delta skips every file older than that. A view
+    carries no audit column, so a reader of one uses the newest Epoch it holds.
+    """
+
+    if bookmarked:
+        newer = (
+            "rows.where(rows.row_update_datetime > self.bookmark()).select(*COLUMNS)"
+        )
+        rows = read
+    else:
+        newer = "rows.where(rows.Epoch > high_water(self))"
+        rows = f"{read}.select(*COLUMNS)"
     return {
-        APPEND: f"        rows = {read}\n        return {newer}, None",
-        INCREMENTAL: f"        rows = {read}\n        return {newer}, None",
+        APPEND: f"        rows = {rows}\n        return {newer}, None",
+        INCREMENTAL: f"        rows = {rows}\n        return {newer}, None",
         INCREMENTAL_DELETE: (
-            f"        rows = {read}\n"
+            f"        rows = {rows}\n"
             f"        changed = {newer}\n"
             "        return (\n"
             "            changed.where(~changed.IsDeleted),\n"
             '            changed.where(changed.IsDeleted).select("Id"),\n'
             "        )"
         ),
-        UPSERT: f"        rows = {read}\n        return rows.where(~rows.IsDeleted)",
-    }.get(behaviour, f"        return {read}")
+        UPSERT: (
+            f"        rows = {read}.select(*COLUMNS)\n"
+            "        return rows.where(~rows.IsDeleted)"
+        ),
+    }.get(behaviour, f"        return {read}.select(*COLUMNS)")
 
 
 def _python_landing(node: Node, shortcut: str) -> str:
     source = node.source
-    read = f"{shortcut}(self).{source.name}.dataframe().select(*COLUMNS)"
-    body = _python_read(node.behaviour, read)
+    read = f"{shortcut}(self).{source.name}.dataframe()"
+    body = _python_read(node.behaviour, read, bookmarked=True)
     imported = "COLUMNS, high_water" if "high_water" in body else "COLUMNS"
     return f'''"""
 Table ID: {node.id}
@@ -1011,9 +1041,10 @@ class {node.schema}__{node.name}(Table):
 def _python_table(node: Node) -> str:
     parent = node.parent
     read = (
-        f'self.spark.table(self.lakehouse.qualify("{parent.schema}", '
-        f'"{parent.name}")).select(*COLUMNS)'
+        f'self.spark.table(self.lakehouse.qualify("{parent.schema}", "{parent.name}"))'
     )
+    body = _python_read(node.behaviour, read, bookmarked=parent.table)
+    imported = "COLUMNS, high_water" if "high_water" in body else "COLUMNS"
     return f'''"""
 Table ID: {node.id}
 
@@ -1028,14 +1059,14 @@ Schema:
 {_delta_schema()}
 """
 
-from lib.estate import COLUMNS, high_water
+from lib.estate import {imported}
 
 from weaver import Table
 
 
 class {node.schema}__{node.name}(Table):
     def read(self):
-{_python_read(node.behaviour, read)}
+{body}
 '''
 
 
@@ -1336,7 +1367,11 @@ def render_configuration(out: Path, names: dict) -> None:
             f"workspace: {workspace}\n"
             f"environment: {names['environment']}\n"
             f"catalogue: Warehouse/{catalogue}\n\n"
-            f"targets:\n{bound}"
+            f"targets:\n{bound}\n"
+            "execution:\n"
+            "  run:\n"
+            f"    spark_concurrency: {SPARK_CONCURRENCY}\n"
+            f"    warehouse_concurrency: {WAREHOUSE_CONCURRENCY}\n"
         )
 
     _write(
