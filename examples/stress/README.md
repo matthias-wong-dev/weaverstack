@@ -45,19 +45,25 @@ The estate reads them through four layers in each of three items:
 
 Every table loads one of Weaver's ways:
 
-| Behaviour | Declared as | Reads |
-|---|---|---|
-| append | `Incremental: true`, no primary key | rows newer than it holds |
-| incremental | `Incremental: true`, `Primary key: Id` | rows newer than it holds |
-| incremental with deletes | the same, with a delete query | rows newer, and the keys deleted |
-| upsert | `Primary key: Id` | everything, so a missing row is deleted |
-| replace | no primary key | everything, replacing what it holds |
-| static | `Static: true` | everything, once |
+| Behaviour | Declared as | Reads | Tables |
+|---|---|---|---|
+| upsert | `Primary key: Id` | everything, so a missing row is deleted | 1,480 |
+| incremental | `Incremental: true`, `Primary key: Id` | rows newer than it holds | 426 |
+| static | `Static: true` | everything, once | 190 |
+| incremental with deletes | the same, with a delete query | rows newer, and the keys deleted | 46 |
+| append | `Incremental: true`, no primary key | rows newer than it holds | 2 |
 
-A table over 10M rows only ever appends or merges what changed. An incremental
-table never reads a parent that removes rows, because a removed row leaves no
-change behind. Each item carries one Test per behaviour, which compares a small
-table with what its parent says it should hold.
+The two appends are the 500M fact and its copy in `Warehouse/Core`. Every other
+table has a primary key. A table over 10M rows only ever appends or merges what
+changed. An incremental table never reads a parent that removes rows, because a
+removed row leaves no change behind. Each item carries one Test per behaviour,
+which compares a small table with what its parent says it should hold.
+
+An incremental table reads the newest `Epoch` it already holds. A build runs a
+SQL table's query to shape it before the table exists, so a T-SQL table reads
+its own table inside `if object_id(...) is not null`, which Fabric resolves
+only when the block runs. Spark SQL has no such guard, so the Lakehouse's
+incremental tables are Python, whose `read()` only a load runs.
 
 ## The day
 
@@ -75,7 +81,14 @@ Generate the projects. The names of the physical items have neutral defaults;
 python examples/stress/generate.py stress --workspace "Stress" --environment weaver
 ```
 
-Then, with the published Environment named in `--environment`:
+Publish Weaver into the Environment named in `--environment`. From a checkout
+ahead of the release, add `--dev` so the Environment gets this Weaver:
+
+```bash
+weaver fabric environment publish weaver --dev --workspace "Stress"
+```
+
+Then:
 
 ```bash
 python examples/stress/run.py stress prepare
