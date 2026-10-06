@@ -203,19 +203,20 @@ def _only_in_prose(source: str, word: str) -> bool:
 
 
 @weaver_test()
-def test_only_the_run_boundary_submits_a_program():
+def test_only_a_session_submits_a_program():
     """Which crossing waits on Environment publication, held to one.
 
     A program is Python that imports Weaver where Spark is, so submitting one
-    asserts the published wheel. Spark SQL, TDS and storage reach the same
-    workspace without it, which is what lets a desktop build run against a
-    workspace nothing has been installed into.
+    asserts the published wheel. The one a client submits is a load or test run
+    it sends to Fabric, and the Session sends it. Spark SQL, TDS and storage
+    reach the same workspace without it, which is what lets a desktop build run
+    against a workspace nothing has been installed into.
 
     A build that started submitting programs would put a publish back in front
     of every build, and would do it silently.
     """
 
-    allowed = {"src/weaver/run/runtime_boundary.py"}
+    allowed: set[str] = set()
     callers = set()
     for path in sorted((ROOT / "src").rglob("*.py")):
         relative = path.relative_to(ROOT).as_posix()
@@ -225,6 +226,6 @@ def test_only_the_run_boundary_submits_a_program():
             callers.add(relative)
 
     assert callers == allowed, (
-        "submitting a program is what requires Environment publication; keep it to the "
-        f"run boundary, or say here why another crossing needs the wheel: {sorted(callers)}"
+        "submitting a program is what requires Environment publication; keep it to "
+        f"the Session, or say here why another crossing needs the wheel: {sorted(callers)}"
     )

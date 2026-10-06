@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class BundleEnvironment:
-    """The Fabric Environment a bundle's remote programs are published to.
+    """The Fabric Environment a bundle's programs run with.
 
     ``workspace`` preserves a qualified ``Workspace/Environment`` reference;
     ``None`` means the workload workspace owns it.

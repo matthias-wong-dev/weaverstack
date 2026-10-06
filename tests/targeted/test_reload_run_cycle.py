@@ -156,7 +156,7 @@ def test_only_the_loadable_tables_have_state_to_end(catalogue):
         before_node=_reset_before(record),
     )
 
-    assert dispatched == [EXPORT, ORDER, DAILY, REFRESH, SUMMARY]
+    assert dispatched == [EXPORT, ORDER, REFRESH, DAILY, SUMMARY]
     assert _reset_objects(writer) == [
         # The two Lakehouse tables name their area; the Warehouse one has none.
         "Tables/Sales.Order",

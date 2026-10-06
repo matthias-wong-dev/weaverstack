@@ -457,16 +457,26 @@ def test_load_dag_inserts_endpoint_refresh_before_shortcut_consumers(estate):
 
 
 @weaver_test()
-def test_load_dag_places_the_barrier_after_every_selected_load_in_that_lakehouse(
-    estate,
-):
+def test_load_dag_places_the_barrier_after_only_what_is_read_through_it(estate):
+    """Other loads in the Lakehouse run beside the refresh and what waits on it."""
+
     dag = load_dag(estate, items=(PRODUCER, CONSUMER))
 
     assert dag.upstream("refresh:Lakehouse/Raw_LH") == {
         "load:Lakehouse/Raw_LH/Tables/Sales.Order",
-        "load:Lakehouse/Raw_LH/Tables/Sales.Daily",
-        "load:Lakehouse/Raw_LH/Files/Sales.Export",
     }
+    assert "refresh:Lakehouse/Raw_LH" not in dag.upstream(
+        "load:Lakehouse/Raw_LH/Tables/Sales.Daily"
+    )
+
+
+@weaver_test()
+def test_load_dag_refresh_syncs_only_the_tables_read_through_it(estate):
+    """Fabric syncs each changed table in turn, so the barrier names its tables."""
+
+    dag = load_dag(estate, items=(PRODUCER, CONSUMER))
+
+    assert dag.by_id["refresh:Lakehouse/Raw_LH"].refresh_tables == (("Sales", "Order"),)
 
 
 #: The consumer's two bound references to the producer, on the surface a
@@ -516,6 +526,7 @@ def test_load_dag_coalesces_one_endpoint_refresh_per_lakehouse(tmp_path):
         "load:Lakehouse/Raw_LH/Tables/Sales.Order",
         "load:Lakehouse/Raw_LH/Tables/Sales.Customer",
     }
+    assert refreshes[0].refresh_tables == (("Sales", "Customer"), ("Sales", "Order"))
 
 
 @weaver_test()

@@ -49,6 +49,30 @@ class RunFailure:
         return {"succeeded": False, "error_message": self.error_message}
 
 
+def rows_moved(result: object) -> str | None:
+    """A load result's row counts as one short phrase, if it has any."""
+
+    if result is None or not hasattr(result, "rows_read"):
+        return None
+    return (
+        f"read {result.rows_read}, +{result.rows_inserted} "
+        f"~{result.rows_updated} -{result.rows_deleted} !{result.rows_rejected}"
+    )
+
+
+def findings(result: object) -> str | None:
+    """A validation result's findings as one short phrase, if it evaluated."""
+
+    if result is None or getattr(result, "error_message", None) is not None:
+        return None
+    if hasattr(result, "violation_count"):
+        count = result.violation_count
+        return f"{count} violation{'' if count == 1 else 's'}"
+    if hasattr(result, "missing_count"):
+        return f"{result.missing_count} missing, {result.unexpected_count} unexpected"
+    return None
+
+
 # --- what a run says about a node ---------------------------------------------
 
 
@@ -312,5 +336,7 @@ __all__ = [
     "VALIDATED",
     "RunNodeResult",
     "RunResult",
+    "findings",
+    "rows_moved",
     "run_status",
 ]

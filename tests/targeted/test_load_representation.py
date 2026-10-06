@@ -164,16 +164,22 @@ def test_a_view_has_no_generated_load():
 #: A fingerprint of what each generator currently emits, beside the version that
 #: describes it. See the test below.
 GENERATED_FINGERPRINTS = {
-    "tsql": (20, "c5e7119093f72d925106971c35c914f6f5ba0266c04650cbd12a19bca7be519c"),
+    "tsql": (
+        22,
+        "c5e7119093f72d925106971c35c914f6f5ba0266c04650cbd12a19bca7be519c",
+    ),
     "tsql_append": (
-        20,
-        "4683fc8dfe3f29eee6ef91a4bc9ff9ad3a13301dd8bbaf6398e81ad89419a0a3",
+        22,
+        "029d684dcaf635224ef0e568fd78aa8b95fbdef482cfa120f8b75abf2882f09f",
     ),
     "tsql_append_validated": (
-        20,
-        "746faf122d1c67842e27c7766f68ea9c099a7801ff9a93258a6a3cb59e6e68eb",
+        22,
+        "940beba21590afa6c39d7fe8fc4ea3f598f81da4344759258410b19298276e90",
     ),
-    "spark": (9, "d0cdda197f8619dc2f679b7ef270154e439b76aaaf27f5001c79b489304a6acf"),
+    "spark": (
+        9,
+        "d0cdda197f8619dc2f679b7ef270154e439b76aaaf27f5001c79b489304a6acf",
+    ),
 }
 
 
@@ -869,7 +875,7 @@ def test_a_key_the_source_still_produces_is_not_retired():
 
     body = _body(_constrained_source(incremental=True))
     purge = body.index("delete from [Sales].[Customer_Staging]")
-    narrow = body.index("delete d\n    from [Sales].[Customer_Delete] as d")
+    narrow = body.index("delete d\n        from [Sales].[Customer_Delete] as d")
     upsert = body.index("create table [Sales].[Customer_Upsert] as")
 
     assert purge < narrow < upsert
@@ -1300,3 +1306,50 @@ def test_a_small_load_signs_staging_before_comparing_it_with_the_target():
         "if object_id(N''[Sales].[Customer_Signed]'', N''U'') is not null"
         in (payload[:branch])
     )
+
+
+@weaver_test()
+def test_an_incremental_load_with_an_empty_window_runs_nothing_after_counting():
+    """Most windows are empty on most days."""
+
+    body = _body(_incremental(WAREHOUSE_TABLE))
+
+    gate = body.index("if @weaver_rows_read > 0\n")
+    assert body.index("select @weaver_rows_read = count(*)") < gate
+    assert gate < body.index("select @weaver_target_rows = count(*)")
+
+
+@weaver_test()
+def test_an_empty_window_still_runs_when_it_claims_a_deletion():
+    body = _body(_constrained_source(incremental=True))
+
+    assert (
+        "if @weaver_rows_read > 0\n"
+        "       or exists (select 1 from [Sales].[Customer_Delete])" in body
+    )
+
+
+@weaver_test()
+def test_a_full_load_is_never_skipped_for_reading_nothing():
+    """Absence from a full load is a deletion, so reading nothing is work."""
+
+    assert "if @weaver_rows_read > 0" not in _body(WAREHOUSE_TABLE)
+
+
+@weaver_test()
+def test_a_skipped_window_counts_no_deletion():
+    """What the target lost is counted inside the gate, with the load it describes.
+
+    Outside it, a skipped body leaves no count of the target from before, and the
+    target's whole size would read as deleted.
+    """
+
+    body = _body(_constrained_source(incremental=True))
+
+    gate = body.index("if @weaver_rows_read > 0\n")
+    counted = body.index("select @weaver_rows_deleted =")
+    assert gate < counted
+    # The count is the gated block's last statement.
+    assert body.index("from [Sales].[Customer];\n    end;", counted) > counted
+    assert body.count("select @weaver_rows_deleted =") == 1
+    assert "-- Counted with the load it describes." in body

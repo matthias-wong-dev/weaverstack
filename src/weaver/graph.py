@@ -101,6 +101,15 @@ class Graph:
 
         return self._order if key is None else self._topological_order(key)
 
+    def heights(self) -> dict[str, int]:
+        """How many nodes the longest chain from each node to a leaf holds."""
+
+        height: dict[str, int] = {}
+        for node in reversed(self._order):
+            below = self._downstream[node]
+            height[node] = 1 + max((height[child] for child in below), default=0)
+        return height
+
     def layers(self) -> tuple[tuple[str, ...], ...]:
         """Waves that may run in parallel.
 

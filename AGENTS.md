@@ -205,9 +205,9 @@ Because the catalogue is a Warehouse, a Warehouse-only workflow performs zero
 Livy submissions. Catalogue reads, publication, `_.Log` writes and `_.Bookmark`
 reads and writes must never be the reason a Spark session starts.
 
-What crosses as a program is a run's Python primitives, which are deployed
-modules imported where Spark is. `weaver load` therefore requires the published
-wheel.
+What crosses as a program is a load or test with Spark work, sent whole to
+Fabric, where its deployed modules are imported beside Spark. `weaver load` and
+`weaver test` therefore require the published wheel.
 
 A Fabric test that runs Weaver on the laptop tests the desktop position, not the
 in-Fabric one. That is what the `remote` and `hosted` markers are for, and why a
@@ -255,9 +255,9 @@ plan and payload bytes through `Session.execute_mutation`.
 The Session owns execution routing. `ConsoleSession` executes a plan with no
 frozen Spark attachment through the shared native executor, reaching TDS,
 OneLake and REST from the desktop, so it starts no Spark session. A plan that
-attaches Spark uses `execute_mutation_remote(plan, payloads=None)`, which submits
-the whole plan once to Fabric. Native and remote execution both use
-`MutationExecutor` and the existing physical executors.
+attaches Spark uses `execute_mutation_in_fabric(plan, payloads=None)`, which
+submits the whole plan once to Fabric. Execution on the client and in Fabric both
+use `MutationExecutor` and the existing physical executors.
 
 The internal carrier contains the canonical plan, optional payloads and matching
 Weaver runtime sources and static resources. It validates all payload hashes
@@ -313,16 +313,22 @@ dependencies:
 decertify → reset runtime state → every physical root
 schema ─→ table ─→ dependent view          drop consumer ─→ drop producer ─→ rebuild
 shortcut create ─→ readiness ─→ consumer   source object ─→ shortcut create
-Lakehouse mutations ··→ refresh start ─→ refresh await ─→ endpoint readers
+read table mutations ··→ refresh start ─→ refresh await ─→ listed ─→ endpoint readers
 folder ─→ runtime file                     object ─→ Warehouse procedure
 every physical success sink ─→ physical gate ─→ catalogue publication ─→ Registry
 ```
 
-`··→` is `settle_after`: a refresh reflects whatever the mutations left.
+`··→` is `settle_after`: a refresh reflects whatever the mutations left. Fabric
+syncs each changed table in turn, about half a second apiece, so a refresh
+names the tables the plan reads through the endpoint, 25 to a request, and
+follows only their mutations. A Lakehouse nothing in the plan reads through is
+not refreshed; the next load or build syncs what it reads. A schema read
+through the endpoint syncs every table. A completed refresh does not mean the
+endpoint lists a new table yet, so a Warehouse waits until it lists every
+Lakehouse table it reads, asking Fabric to sync what is missing.
 Publication certifies objects, not endpoint metadata, so the physical gate
-excludes refreshes and publication runs beside them. The Build completes only
-once every refresh it started is current, so the next operation reads a current
-endpoint. A known
+excludes refreshes. The Build completes only once every refresh it started is
+current. A known
 failure blocks only its dependents; independent branches continue, and
 publication, which needs every physical success, does not run. The final gate
 over every success sink is the required completion.
@@ -338,9 +344,9 @@ suit a mid-sized capacity; an F64 sustains twice as much. The limits travel
 with an invocation, outside plan identity. They throttle execution only; an
 ordering the plan needs is an edge, never a low limit. Each Warehouse lane
 leases its own pooled connection, and four concurrent DDL lanes ran without
-conflict in Fabric. Ready T-SQL actions on one Warehouse share a round trip,
-each in its own `TRY`/`CATCH` with its own outcome; Fabric refuses
-`SET XACT_ABORT`. Waiting work holds no resource.
+conflict in Fabric. Ready T-SQL actions on one Warehouse share round trips
+spread across its free lanes, each action in its own `TRY`/`CATCH` with its own
+outcome; Fabric refuses `SET XACT_ABORT`. Waiting work holds no resource.
 `spark_table` actions with authored setup share an exclusion, because their
 temporary views are session-scoped. The identifier-case scope is shared by
 concurrent statements in one mode and exclusive between modes.
@@ -415,19 +421,45 @@ own boundaries, not Fabric readiness.
 
 ## Load scheduling
 
-A load's `Runner` dispatches every node whose upstream has settled, within
-`Lanes`: four Warehouse procedures per Warehouse, and four Python primitives.
-Python primitives that start together go to the host together
-(`dispatch_python_many`), and each runs in a Spark session of its own within
-the one Spark application, so settings and temporary views stay its own. From
-the desktop they cross as one Livy statement, because a Livy session runs its
-statements one at a time. Every node is decided as a serial run decides it, in
-graph order once its upstream has settled, and every settlement and catalogue
-write happens in the thread running the run. Without fault tolerance a failure
-starts nothing more: running nodes finish and settle, and nodes not yet started
-stay pending. Two concurrent load commands are separate writers of the same
-catalogue tables, which a Warehouse can refuse as an update conflict. A test run
-is serial.
+A load's `Runner` dispatches every node whose upstream has settled, within the
+lanes the Workspace's `execution.run` sets: by default four procedures per
+Warehouse and four Python primitives. A node is a few small Spark jobs or T-SQL
+statements, so a load is bound by latency, and more lanes run more of it at
+once. A Warehouse reading a Lakehouse waits for one SQL endpoint refresh, and
+that refresh waits only for the Lakehouse loads read through it and syncs only
+the tables read through it.
+Each node is dispatched on its own and frees its lane when it settles. Of the
+nodes ready at once, the one with the longest chain still beneath it starts
+first, so a refresh many loads wait behind is reached early and what follows it
+overlaps the rest. A Python
+primitive that starts beside others runs in a Spark session of its own within
+the one Spark application, so settings and temporary views stay its own. Every
+node is decided as a serial run decides it, once its upstream has settled, and
+every settlement and catalogue write happens in the thread running
+the run. Without fault tolerance a failure starts nothing more: running nodes
+finish and settle, and nodes not yet started stay pending. Two concurrent load
+commands are separate writers of the same catalogue tables, which a Warehouse
+can refuse as an update conflict.
+
+A test run schedules the same way: Warehouse validations take Warehouse lanes
+and Lakehouse validations take Spark lanes. A finding never stops the rest.
+
+Fabric runs every load or test with Spark work, because a Livy session runs its
+statements one at a time and so cannot run nodes side by side for a client.
+`Session.execute_run` routes it: a client sends the whole run once
+(`weaver.sessions.run_in_fabric`), with the catalogue it read and its request
+staged beside the Lakehouse its Spark session attaches to, and Fabric plans and
+runs the graph against that catalogue and records it. Fabric writes the Steps
+and Sub-steps it presents beside the stage, and the client presents them as they
+arrive, with Fabric's times. A submission is never resent; a lost result leaves
+the outcome unknown, and the catalogue log records what ran. Fabric ends a Livy
+session left idle and refuses statements for it before accepting them, so
+`LivySession` replaces the session in place and submits that statement once
+more, following each statement on the session that accepted it and admitting
+no caller to a replacement until it is bootstrapped. Any other refusal is a
+known failure that leaves the session in use. A run with no Spark
+work runs on the client, over TDS, and starts no Spark session. A client never
+imports a deployed module, so it opens no runtime scope.
 
 ## Architecture invariants
 
@@ -554,15 +586,22 @@ enumerate inside the frozen scope when an action runs. A Warehouse is one
 dynamic-SQL action. A Lakehouse area detaches its shortcuts, waits for OneLake to
 release their paths, and is swept only after a successful detach. Targets are
 independent; a removed catalogue or an unbind follows them all. The estate an
-unscoped wipe empties is what `_.Installation` records.
+unscoped wipe empties is what `_.Installation` records. Where the workspace
+configuration has `targets:`, every recorded installation must be bound there to
+the same physical item, or the wipe refuses and asks for named targets. Named
+targets are emptied exactly as named.
 
 A mirror plans before it acts too. `check_mirror` proves the source and refuses
 unsafe destinations, then `mirror_mutation_plan` reads what the mirror needs,
 source code definitions, case-exact source paths and the deployed load tree,
-and compiles one plan: the destination catalogue is emptied, built against its
-known-empty state and forked, while each item's destination is emptied and
-reconstructed. An item is recorded and bound to its mirror last, only after its
-own reconstruction and the fork succeed.
+and compiles one plan: the destination catalogue is emptied and built against its
+known-empty state, while each item's destination is emptied and reconstructed,
+and each reconstructed Lakehouse's SQL endpoint is refreshed before a Warehouse
+reads through it. A refreshed endpoint can still be listing new shortcut
+tables, so the Warehouse waits until it sees every object it reads. The fork, the record of what each item borrows and each item's
+binding are one transaction, last, after every reconstruction. Until it commits
+the destination catalogue records no installation, so it never claims the
+source's items.
 
 One disposition, one meaning. `REMOVE` takes the catalogue last, `UNBIND` keeps
 it and deletes its claims for the targets emptied and is never handed it as a

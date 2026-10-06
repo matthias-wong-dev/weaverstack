@@ -44,7 +44,9 @@ def test_pending_releases_single_worker_for_completed_parent_child():
     report = mutation.MutationExecutor(
         {"folder": MutationDriver(run)}, workers=1, clock=clock
     ).execute(plan)
-    assert [c[0] for c in calls] == ["await", "parent", "child", "await"]
+    # The longer chain starts first; the pending await still frees the one
+    # worker for the child.
+    assert [c[0] for c in calls] == ["parent", "await", "child", "await"]
     assert [r.action_id for r in report.results] == ["await", "parent", "child"]
     assert all(r.status == "succeeded" for r in report.results)
     assert report.by_id["await"].attempts == 1
@@ -1185,3 +1187,32 @@ def test_action_exclusion_survives_other_settlement_until_pending_expiry():
     assert clock.now == 3
     assert report.by_id["await"].status == "uncertain"
     assert report.operations[0].status == "settled"
+
+
+@weaver_test()
+def test_of_the_actions_ready_at_once_the_longest_chain_starts_first():
+    """An endpoint refresh many objects wait behind is reached early."""
+
+    from weaver.mutation import MutationExecutor
+    from weaver.mutation.executor import Completed, MutationDriver
+
+    clock = Clock()
+    calls = []
+
+    def run(request):
+        calls.append(request.action.id)
+        return Completed()
+
+    plan = sealed(
+        (
+            _action("alone"),
+            _action("first"),
+            _action("second", ("first",)),
+            _action("third", ("second",)),
+        )
+    )
+    MutationExecutor({"folder": MutationDriver(run)}, workers=1, clock=clock).execute(
+        plan
+    )
+
+    assert calls.index("first") < calls.index("alone")

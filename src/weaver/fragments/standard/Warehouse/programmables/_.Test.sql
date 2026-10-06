@@ -177,8 +177,8 @@ begin
         , datediff(millisecond, @weaver_started, @weaver_completed)
         , @weaver_message
         , null
-        , sysdatetime()
-        , sysdatetime()
+        , sysutcdatetime()
+        , sysutcdatetime()
         , convert(datetime2(6), '9999-12-31 23:59:59.999999')
     );
 
@@ -202,7 +202,7 @@ begin
         , target.[Completed datetime] = @weaver_completed
         , target.[Duration milliseconds] = datediff(millisecond, @weaver_started, @weaver_completed)
         , target.[Failure count] = @weaver_failure_count
-        , target.[Row update datetime] = sysdatetime()
+        , target.[Row update datetime] = sysutcdatetime()
     when not matched then insert (
         [Item type]
         , [Item name]
@@ -231,8 +231,8 @@ begin
         , @weaver_completed
         , datediff(millisecond, @weaver_started, @weaver_completed)
         , @weaver_failure_count
-        , sysdatetime()
-        , sysdatetime()
+        , sysutcdatetime()
+        , sysutcdatetime()
         , convert(datetime2(6), '9999-12-31 23:59:59.999999')
     );
 

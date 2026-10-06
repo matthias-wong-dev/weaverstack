@@ -312,7 +312,7 @@ def _seed(sql) -> None:
         "insert into [Wh].[Product] ([ProductId], [ProductName], [Row signature], "
         "[Row insert datetime], [Row update datetime], [Row delete datetime]) "
         f"values ({SENTINEL[0]}, N'{SENTINEL[1]}', "
-        f"hashbytes('SHA2_256', N'{SENTINEL[1]}'), sysdatetime(), sysdatetime(), "
+        f"hashbytes('SHA2_256', N'{SENTINEL[1]}'), sysutcdatetime(), sysutcdatetime(), "
         "convert(datetime2(6), '9999-12-31 23:59:59.999999'));"
     )
 

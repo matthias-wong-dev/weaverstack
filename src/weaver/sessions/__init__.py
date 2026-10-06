@@ -23,7 +23,7 @@ from .host import (
     use_or_create_session,
 )
 from .notebook import NotebookScope, NotebookSession
-from .program import RemoteProgram
+from .program import FabricProgram
 from .public import session
 from .resources import Resource, ResourceError, ResourceState
 from .telemetry import (
@@ -42,7 +42,7 @@ __all__ = [
     "RESOURCES",
     "NotebookScope",
     "NotebookSession",
-    "RemoteProgram",
+    "FabricProgram",
     "session",
     "ReportingFrame",
     "RecordedCall",

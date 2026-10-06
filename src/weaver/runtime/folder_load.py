@@ -111,7 +111,7 @@ def new_staging_folder(destination: str | Path, staging: str | Path) -> StagingF
     return StagingFolder(path=staging_path)
 
 
-#: Retry a brief remote-filesystem propagation delay during staging cleanup.
+#: Retry a brief OneLake propagation delay during staging cleanup.
 RESET_ATTEMPTS = 5
 RESET_PAUSE = 0.5
 

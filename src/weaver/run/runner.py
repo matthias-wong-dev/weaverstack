@@ -19,6 +19,8 @@ from .result import (
     VALIDATED,
     RunNodeResult,
     RunResult,
+    findings,
+    rows_moved,
     run_status,
 )
 from .state import RunState
@@ -56,6 +58,24 @@ def _node_substep(session, node, *, concurrent: bool = False):
     opened = session.concurrent_substep if concurrent else session.substep
     with opened(node_label(node)) as frame:
         yield frame
+
+
+def _conclude(frame, node, outcome) -> None:
+    """Mark a node's frame with its outcome before the frame closes."""
+
+    from .resolution import ENDPOINT_REFRESH, ONELAKE_PUBLICATION
+
+    if frame is None:
+        return
+    if outcome.status == FAILED:
+        frame.failed = True
+    if getattr(node, "installed", None) is not None:
+        frame.note = findings(outcome.result) if frame.failed else None
+    elif not frame.failed and node.primitive_kind not in (
+        ENDPOINT_REFRESH,
+        ONELAKE_PUBLICATION,
+    ):
+        frame.note = rows_moved(outcome.result)
 
 
 #: Run every loadable object installed in the requested logical items.
@@ -135,6 +155,26 @@ class RunRequest:
             return self.name
         return self.names or None
 
+    @classmethod
+    def from_mapping(cls, payload) -> "RunRequest":
+        from ..declaration.model import WeaverDocumentId, WeaverItemId
+
+        selected = payload.get("selected")
+        return cls(
+            kind=payload["kind"],
+            items=tuple(WeaverItemId.parse(one) for one in payload["items"]),
+            name=payload.get("name"),
+            names=tuple(payload.get("names") or ()),
+            selected=None
+            if selected is None
+            else tuple(WeaverDocumentId.parse(one) for one in selected),
+            file=payload.get("file"),
+            fault_tolerant=bool(payload.get("fault_tolerant")),
+            dry_run=bool(payload.get("dry_run")),
+            reload=bool(payload.get("reload")),
+            ignore_stability_threshold=bool(payload.get("ignore_stability_threshold")),
+        )
+
     def to_mapping(self) -> dict:
         return {
             "kind": self.kind,
@@ -160,19 +200,29 @@ def _now() -> str:
 class Lanes:
     """How many nodes of each kind a run keeps going at once.
 
-    Python primitives share the host's Spark application, each in a Spark
-    session of its own, and go to the host together. A Warehouse procedure
-    holds a connection of its own Warehouse. Anything else is a short wait.
+    A Python primitive, a load or a Lakehouse validation, that starts beside
+    others runs in a Spark session of its own, in the host's one Spark
+    application. A Warehouse procedure holds a connection of its own Warehouse.
+    Anything else is a short wait.
     """
 
     spark: int = 4
     warehouse: int = 4
     other: int = 4
 
-    def of(self, node) -> tuple:
-        from .resolution import PYTHON_FOLDER, PYTHON_TABLE, WAREHOUSE_PROCEDURE
+    @classmethod
+    def configured(cls, workspace) -> "Lanes":
+        """The lanes a Workspace's ``execution.run`` sets."""
 
-        if node.primitive_kind in (PYTHON_TABLE, PYTHON_FOLDER):
+        if workspace is None:
+            return cls()
+        run = workspace.execution.run
+        return cls(spark=run.spark_concurrency, warehouse=run.warehouse_concurrency)
+
+    def of(self, node) -> tuple:
+        from .resolution import SPARK_KINDS, WAREHOUSE_PROCEDURE
+
+        if node.primitive_kind in SPARK_KINDS:
             return ("spark",)
         if node.primitive_kind == WAREHOUSE_PROCEDURE:
             return ("warehouse", getattr(node.physical_target, "name", ""))
@@ -182,6 +232,14 @@ class Lanes:
         return {"spark": self.spark, "warehouse": self.warehouse}.get(
             lane[0], self.other
         )
+
+
+def needs_spark(graph) -> bool:
+    """Whether a run graph executes anything on Spark."""
+
+    from .resolution import SPARK_KINDS
+
+    return any(node.primitive_kind in SPARK_KINDS for node in graph.nodes)
 
 
 def _blocked_by(node, upstream, *, validated: bool = False):
@@ -284,17 +342,15 @@ class Runner:
         on_node: Callable | None = None,
         before_node: Callable | None = None,
         lanes: Lanes | None = None,
-        dispatch_many: Callable | None = None,
     ) -> RunResult:
         """Execute the graph and return every planned node's result.
 
         ``before_node`` runs only before dispatch. ``on_node`` runs whenever a
         node settles, including blocked, skipped and unresolved nodes.
 
-        ``lanes`` runs independent nodes at once, within those limits, and
-        ``dispatch_many`` takes the Python primitives that start together.
-        Without them nodes run one at a time in graph order. Either way a
-        node settles, and ``on_node`` sees it, in this thread.
+        ``lanes`` runs independent nodes at once, within those limits. Without
+        them nodes run one at a time in graph order. Either way a node settles,
+        and ``on_node`` sees it, in this thread.
         """
 
         started = _now()
@@ -393,7 +449,6 @@ class Runner:
                     settle=settle,
                     session=session,
                     dispatch=dispatch,
-                    dispatch_many=dispatch_many,
                     before=before_node,
                     lanes=lanes,
                 )
@@ -411,16 +466,17 @@ class Runner:
         settle,
         session,
         dispatch,
-        dispatch_many,
         before,
         lanes: Lanes,
     ) -> None:
         """Dispatch every node whose upstream has settled, within ``lanes``.
 
-        Each node is decided as the serial run decides it, in graph order, once
-        its upstream has settled. A failure without fault tolerance starts
-        nothing more: what is running finishes and settles, and what had not
-        started is left pending.
+        Each node is decided as the serial run decides it, once its upstream has
+        settled. Of the nodes ready at once, the one with the longest chain still
+        beneath it starts first, so a barrier such as an endpoint refresh is
+        reached early and the work behind it overlaps the rest; ties keep graph
+        order. A failure without fault tolerance starts nothing more: what is
+        running finishes and settles, and what had not started is left pending.
         """
 
         from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
@@ -428,7 +484,8 @@ class Runner:
         # Made here, once, rather than by whichever worker first asks.
         self.publication
         self.runtime_scope(session)
-        waiting = list(ordered)
+        heights = self.graph.topology.heights()
+        waiting = sorted(ordered, key=lambda node: -heights[node.node_id])
         decided: set[str] = set()
         running: dict = {}
         occupied: dict = {}
@@ -510,7 +567,6 @@ class Runner:
             return None
 
         def admit(pool) -> None:
-            together: dict = {}
             for node, resolved in runnable():
                 lane = lanes.of(node)
                 if occupied.get(lane, 0) >= lanes.limit(lane):
@@ -520,11 +576,9 @@ class Runner:
                 if failed is not None:
                     record(failed)
                     continue
-                alone = occupied.get(lane, 0) == 0
+                # Alone on the host's Spark, a node needs no session of its own.
+                isolated = lane == ("spark",) and occupied.get(lane, 0) > 0
                 occupied[lane] = occupied.get(lane, 0) + 1
-                if lane == ("spark",) and dispatch_many is not None:
-                    together.setdefault(lane, []).append((node, resolved, alone))
-                    continue
                 future = pool.submit(
                     self._dispatched,
                     node,
@@ -532,29 +586,9 @@ class Runner:
                     session=session,
                     resolved=resolved,
                     concurrent=True,
+                    isolated=isolated,
                 )
-                running[future] = (lane, 1)
-            for lane, group in together.items():
-                if len(group) == 1 and group[0][2]:
-                    # Nothing else is running on this host's Spark, so the node
-                    # needs no session of its own.
-                    node, resolved, _alone = group[0]
-                    future = pool.submit(
-                        self._dispatched,
-                        node,
-                        dispatch=dispatch,
-                        session=session,
-                        resolved=resolved,
-                        concurrent=True,
-                    )
-                else:
-                    future = pool.submit(
-                        self._dispatched_together,
-                        [(node, resolved) for node, resolved, _alone in group],
-                        dispatch_many=dispatch_many,
-                        session=session,
-                    )
-                running[future] = (lane, len(group))
+                running[future] = lane
 
         workers = lanes.spark + lanes.warehouse + lanes.other
         with ThreadPoolExecutor(max_workers=workers) as pool:
@@ -564,66 +598,8 @@ class Runner:
                     break
                 done, _pending = wait(running, return_when=FIRST_COMPLETED)
                 for future in done:
-                    lane, count = running.pop(future)
-                    occupied[lane] -= count
-                    settled = future.result()
-                    for result in settled if isinstance(settled, list) else [settled]:
-                        record(result)
-
-    def _dispatched_together(self, group, *, dispatch_many, session) -> list:
-        """Dispatch Python primitives in one call and settle each one's outcome."""
-
-        from contextlib import ExitStack
-
-        from .outcome import settle
-
-        nodes = [node for node, _resolved in group]
-        started = _now()
-        with ExitStack() as frames:
-            opened = [
-                frames.enter_context(_node_substep(session, node, concurrent=True))
-                for node in nodes
-            ]
-            try:
-                returned = dispatch_many(
-                    nodes,
-                    session=session,
-                    state=self.state,
-                    resolved=[resolved for _node, resolved in group],
-                    fault_tolerant=self.request.fault_tolerant,
-                    reload=self.request.reload,
-                    ignore_stability_threshold=(
-                        self.request.ignore_stability_threshold
-                    ),
-                    open_runtime=self.runtime_scope(session),
-                    workspace=self.workspace,
-                    publication=self.publication,
-                )
-            except Exception as exc:  # noqa: BLE001 - failures become node results
-                returned = [exc for _node in nodes]
-            settled = []
-            for (node, resolved), value, frame in zip(group, returned, opened):
-                outcome = (
-                    settle(node, raised=value)
-                    if isinstance(value, BaseException)
-                    else settle(node, returned=value)
-                )
-                if frame is not None and outcome.status == FAILED:
-                    frame.failed = True
-                settled.append(
-                    self._settled(
-                        node,
-                        outcome.status,
-                        executed=True,
-                        location=getattr(resolved, "dispatch_location", None),
-                        result=outcome.result,
-                        messages=outcome.messages,
-                        started_at=started,
-                        raised=outcome.raised,
-                        refused=outcome.refused,
-                    )
-                )
-        return settled
+                    occupied[running.pop(future)] -= 1
+                    record(future.result())
 
     def _dry_run(self, ordered) -> tuple:
 
@@ -669,7 +645,15 @@ class Runner:
         return tuple(settled)
 
     def _dispatched(
-        self, node, *, dispatch, session, resolved=None, before=None, concurrent=False
+        self,
+        node,
+        *,
+        dispatch,
+        session,
+        resolved=None,
+        before=None,
+        concurrent=False,
+        isolated=False,
     ) -> RunNodeResult:
         """Dispatch one node, treating ``before`` failures as node failures."""
 
@@ -695,14 +679,14 @@ class Runner:
                     open_runtime=self.runtime_scope(session),
                     workspace=self.workspace,
                     publication=self.publication,
+                    isolated=isolated,
                 )
             except Exception as exc:  # noqa: BLE001 - failures become node results
                 # Do not intercept process-control exceptions.
                 outcome = settle(node, raised=exc)
             else:
                 outcome = settle(node, returned=returned)
-            if frame is not None and outcome.status == FAILED:
-                frame.failed = True
+            _conclude(frame, node, outcome)
         return self._settled(
             node,
             outcome.status,

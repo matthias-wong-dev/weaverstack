@@ -6,141 +6,102 @@ different versions.
 
 from __future__ import annotations
 
-from ..runtime.session_scopes import get_scope
 
+def run_staged(entry, *, session, workspace, stage: str, workflow_id=None) -> dict:
+    """Run ``entry`` with the arguments a client staged, writing its progress.
 
-def run_python_primitive(
-    *,
-    run_id: str,
-    node_id: str,
-    item: str,
-    target: str,
-    schema: str,
-    object: str,
-    expected_class: str,
-    fault_tolerant: bool = False,
-    reload: bool = False,
-    ignore_stability_threshold: bool = False,
-    identity: str | None = None,
-    session=None,
-    workspace=None,
-    spark=None,
-) -> dict:
-
-    from ..declaration.model import WeaverItemId, parse_installed_identity
-    from ..runtime.load_refusal import refusal_envelope
-    from ..runtime.session_scopes import scope_catalogue
-    from ..targets import LAKEHOUSE_TARGET, PhysicalTargetRef
-    from .dispatch import python_primitive
-
-    try:
-        loaded = python_primitive(
-            node_id=node_id,
-            logical_item=WeaverItemId.parse(item),
-            physical_target=PhysicalTargetRef(kind=LAKEHOUSE_TARGET, name=target),
-            schema=schema,
-            object=object,
-            expected_class=expected_class,
-            fault_tolerant=fault_tolerant,
-            reload=reload,
-            ignore_stability_threshold=ignore_stability_threshold,
-            runtime_scope=get_scope(run_id),
-            session=_session(session, workspace),
-            workspace=workspace,
-            # Read where the run opened its scope, not here: the catalogue crossed
-            # once, with the scope, and this is one node of the run that carried it.
-            catalogue=scope_catalogue(run_id),
-            node_identity=parse_installed_identity(identity) if identity else None,
-            spark=spark,
-        )
-    except Exception as exc:  # noqa: BLE001 - re-raised unless it is a refusal
-        # Which failures carry a settled result is the runtime's judgement, not
-        # this surface's. Anything it does not recognise crosses as the failure
-        # it is, traceback and all.
-        envelope = refusal_envelope(exc)
-        if envelope is None:
-            raise
-        return envelope
-    return loaded.as_row()
-
-
-def run_python_primitives(
-    *, run_id: str, requests: list, session=None, workspace=None
-) -> list:
-    """Run several Python primitives at once, each in a Spark session of its own.
-
-    Each one's row, or the failure it raised, crosses back as data, so one
-    node's failure does not stand in for the others.
+    The report is left in the stage. Its size and hash are what cross back.
+    ``workflow_id`` is the client's workflow, if it runs in one.
     """
 
-    import traceback
-    from concurrent.futures import ThreadPoolExecutor
+    import hashlib
+    import json
+    from contextlib import nullcontext
 
-    from .dispatch import isolated_spark
+    from ..fabric.store import FabricStore
+    from ..lakehouse import release_mounts
+    from ..locations import Location
+    from ..sessions.run_in_fabric import PROGRESS, REQUEST, RESULT, progress_written
 
-    session = _session(session, workspace)
-    spark = session.spark(workspace)
-
-    def one(arguments: dict) -> dict:
-        try:
-            return {
-                "row": run_python_primitive(
-                    run_id=run_id,
-                    session=session,
-                    workspace=workspace,
-                    spark=isolated_spark(spark),
-                    **arguments,
-                )
-            }
-        except Exception as exc:  # noqa: BLE001 - crosses as this node's failure
-            return {
-                "failure": {
-                    "ename": type(exc).__name__,
-                    "evalue": str(exc),
-                    "traceback": traceback.format_exc(),
-                }
-            }
-
-    with ThreadPoolExecutor(max_workers=max(1, len(requests))) as pool:
-        return list(pool.map(one, requests))
+    # The interpreter outlives the run; an earlier run's mounts can be stale.
+    release_mounts()
+    store = FabricStore()
+    root = Location(stage)
+    arguments = json.loads(store.read(root / REQUEST))
+    within = session.workflow(workflow_id) if workflow_id else nullcontext()
+    with within, progress_written(session, store, root / PROGRESS):
+        report = entry(session=session, workspace=workspace, **arguments)
+    # Diagnostic rows carry whatever a check selected, so they cross as text.
+    data = json.dumps(
+        {"report": report, "warnings": list(session.warnings)}, default=str
+    ).encode("utf-8")
+    store.write(root / RESULT, data)
+    return {"bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()}
 
 
-def run_validation_primitive(
-    *,
-    run_id: str,
-    installed: dict,
-    collect: bool = False,
-    session=None,
-    workspace=None,
+def run_load_in_fabric(
+    *, session, workspace, catalogue: dict, request: dict, started: str
 ) -> dict:
+    """Plan and execute a load a client sent, against the catalogue it read."""
 
-    from ..test_execution import run_installed_validation
-    from ..test_plan import InstalledValidation
+    from datetime import datetime
 
-    carried = run_installed_validation(
-        InstalledValidation.from_mapping(installed),
-        session=_session(session, workspace),
-        workspace=workspace,
-        runtime_scope=get_scope(run_id),
-        collect_diagnostics=collect,
+    from ..operations.load import execute_load, load_runner
+
+    runner = load_runner(
+        session, workspace, *_planned(session, workspace, catalogue, request)
     )
-    return {
-        "result": carried.result.to_mapping(),
-        "diagnostics": list(carried.diagnostics or ()),
+    report = execute_load(
+        session,
+        workspace=workspace,
+        runner=runner,
+        started=datetime.fromisoformat(started),
+    )
+    return report.to_mapping()
+
+
+def run_test_in_fabric(
+    *, session, workspace, catalogue: dict, request: dict, started: str
+) -> dict:
+    """Plan and execute a test run a client sent, against the catalogue it read.
+
+    A named run's diagnostic rows cross beside the report, which never holds them.
+    """
+
+    from datetime import datetime
+
+    from ..operations.test import execute_test, validation_runner
+
+    runner = validation_runner(
+        workspace, *_planned(session, workspace, catalogue, request)
+    )
+    report = execute_test(
+        session,
+        workspace=workspace,
+        runner=runner,
+        started=datetime.fromisoformat(started),
+    )
+    carried = report.to_mapping()
+    carried["diagnostics"] = {
+        node.logical_id: list(node.diagnostics)
+        for node in report.nodes
+        if node.diagnostics
     }
+    return carried
 
 
-def _session(session, workspace):
+def _planned(session, workspace, catalogue: dict, request: dict):
+    """The state and request a client planned against, writing through here."""
 
-    if session is not None:
-        return session
-    from ..sessions.host import session_for
+    from ..catalogue.state import Catalogue
+    from ..catalogue.writer import writer_for
+    from .runner import RunRequest
+    from .state import RunState
 
-    return session_for(workspace)
+    read = Catalogue.from_mapping(
+        catalogue, writer=writer_for(session, workspace), session=session
+    )
+    return RunState(catalogue=read), RunRequest.from_mapping(request)
 
 
-__all__ = [
-    "run_python_primitive",
-    "run_python_primitives",
-    "run_validation_primitive",
-]
+__all__ = ["run_load_in_fabric", "run_staged", "run_test_in_fabric"]

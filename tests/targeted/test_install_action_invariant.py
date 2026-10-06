@@ -66,10 +66,10 @@ COVERED = {
     "prune_schema": ("test_prune_table_action_removes_an_object_nothing_declares",),
     "prune_folder": ("test_prune_table_action_removes_an_object_nothing_declares",),
     "start_sql_endpoint_refresh": (
-        "test_each_mutated_lakehouse_had_its_endpoint_refreshed_for_real",
+        "test_a_warehouse_shortcut_is_a_view_over_the_bound_lakehouse",
     ),
     "await_sql_endpoint_refresh": (
-        "test_each_mutated_lakehouse_had_its_endpoint_refreshed_for_real",
+        "test_a_warehouse_shortcut_is_a_view_over_the_bound_lakehouse",
     ),
     "await_table_shortcuts": ("test_the_shortcut_exists_as_a_onelake_shortcut",),
     "write_file": ("test_a_build_here_rewrites_this_items_runtime_module_alone",),

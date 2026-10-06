@@ -303,7 +303,7 @@ def _insert(rows: Sequence[Mapping[str, str]]) -> str:
     values = ",\n       ".join(
         "("
         + ", ".join(literal(row[column]) for column in columns)
-        + ", sysdatetime(), sysdatetime(), "
+        + ", sysutcdatetime(), sysutcdatetime(), "
         + f"convert(datetime2(6), '{AUDIT_LIVE_DELETE_DATETIME}'))"
         for row in rows
     )

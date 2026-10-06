@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 CATALOGUE_KIND = "Warehouse"
 
 CLI_AREA = "cli"
-#: Lakehouse Files area holding in-flight remote mutation carriers.
+#: Lakehouse Files area holding the carriers of mutations running in Fabric.
 CARRIER_AREA = "_weaver_carriers"
 
 
@@ -173,8 +173,27 @@ class BuildConcurrency:
 
 
 @dataclass(frozen=True)
+class RunConcurrency:
+    """The most nodes a load or test runs at once, by kind.
+
+    ``spark_concurrency`` counts Python primitives, each in a Spark session of
+    its own within the one Spark application. ``warehouse_concurrency`` counts
+    procedures on each Warehouse, each holding a connection of its own.
+    """
+
+    spark_concurrency: int = 4
+    warehouse_concurrency: int = 4
+
+    def __post_init__(self) -> None:
+        for name, value in vars(self).items():
+            if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+                raise ConfigError(f"execution.run.{name} must be a positive integer")
+
+
+@dataclass(frozen=True)
 class ExecutionSettings:
     build: BuildConcurrency = field(default_factory=BuildConcurrency)
+    run: RunConcurrency = field(default_factory=RunConcurrency)
 
 
 @dataclass(frozen=True)

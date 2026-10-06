@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import threading
+from contextlib import contextmanager
+
 from .resolution import (
     ENDPOINT_REFRESH,
     ONELAKE_PUBLICATION,
@@ -26,11 +29,13 @@ def dispatch_primitive(
     workspace=None,
     collect=False,
     publication=None,
+    isolated: bool = False,
 ):
     """Dispatch one installed primitive.
 
     The runtime scope opens only for deployed Python modules. ``reload`` and
     ``ignore_stability_threshold`` are table policy and reach table loads alone.
+    ``isolated`` gives a Python load a Spark session of its own.
     """
 
     if session is None:
@@ -41,7 +46,7 @@ def dispatch_primitive(
 
     kind = node.primitive_kind
     if getattr(node, "installed", None) is not None:
-        return _validation(node, session, workspace, open_runtime, collect)
+        return _validation(node, session, workspace, open_runtime, collect, isolated)
     if kind == WAREHOUSE_PROCEDURE:
         return _warehouse_procedure(
             node,
@@ -66,6 +71,7 @@ def dispatch_primitive(
             open_runtime,
             reload and table,
             ignore_stability_threshold and table,
+            isolated,
         )
     if kind == ENDPOINT_REFRESH:
         return _endpoint_refresh(node, session, workspace)
@@ -76,7 +82,9 @@ def dispatch_primitive(
     )
 
 
-def _validation(node, session, workspace, open_runtime, collect: bool):
+def _validation(
+    node, session, workspace, open_runtime, collect: bool, isolated: bool = False
+):
     from ..test_execution import primitive_kind, run_installed_validation
 
     installed = node.installed
@@ -92,7 +100,9 @@ def _validation(node, session, workspace, open_runtime, collect: bool):
             collect_diagnostics=collect,
         )
 
-    return _scope(open_runtime, node).dispatch_validation(installed, collect=collect)
+    return _scope(open_runtime, node).dispatch_validation(
+        installed, collect=collect, isolated=isolated
+    )
 
 
 def _scope(open_runtime, node):
@@ -216,6 +226,7 @@ def _python(
     open_runtime,
     reload: bool = False,
     ignore_stability_threshold: bool = False,
+    isolated: bool = False,
 ):
     """Run a deployed Python primitive in the scope that imports its module."""
 
@@ -226,7 +237,6 @@ def _python(
             "Rebuild and reinstall the project."
         )
 
-    from ..runtime.load_refusal import decoded_refusal, refused
     from ..runtime.load_result import LoadResult
 
     row = _scope(open_runtime, node).dispatch_python(
@@ -235,87 +245,78 @@ def _python(
         fault_tolerant=fault_tolerant,
         reload=reload,
         ignore_stability_threshold=ignore_stability_threshold,
+        isolated=isolated,
     )
-    if refused(row):
-        # A refusal the remote entry point returned as data rather than raising.
-        # Raised here, so both positions settle through the same path.
-        raise decoded_refusal(row)
     return LoadResult.from_row(row)
 
 
-def dispatch_python_many(
-    nodes,
-    *,
-    session=None,
-    resolved=(),
-    fault_tolerant: bool = False,
-    reload: bool = False,
-    ignore_stability_threshold: bool = False,
-    open_runtime=None,
-    **_unused,
-) -> list:
-    """Dispatch Python primitives together, each in a Spark session of its own.
-
-    Returns each node's result, or the exception it raised, in node order.
-    """
-
-    from ..runtime.load_refusal import decoded_refusal, refused
-    from ..runtime.load_result import LoadResult
-
-    requests = []
-    for node, one in zip(nodes, resolved):
-        table = node.primitive_kind == PYTHON_TABLE
-        requests.append(
-            {
-                "node": node,
-                "expected_class": getattr(one, "expected_class", None),
-                "fault_tolerant": fault_tolerant,
-                "reload": reload and table,
-                "ignore_stability_threshold": ignore_stability_threshold and table,
-            }
-        )
-    outcomes: list = [None] * len(requests)
-    runnable = []
-    for index, request in enumerate(requests):
-        if request["expected_class"] is None:
-            outcomes[index] = RunError(
-                f"Cannot run {request['node'].node_id}: its deployed module has no "
-                "expected class. Rebuild and reinstall the project."
-            )
-        else:
-            runnable.append(index)
-    if runnable:
-        rows = _scope(open_runtime, nodes[runnable[0]]).dispatch_python_many(
-            [requests[index] for index in runnable]
-        )
-        for index, row in zip(runnable, rows):
-            if isinstance(row, BaseException):
-                outcomes[index] = row
-            elif refused(row):
-                outcomes[index] = decoded_refusal(row)
-            else:
-                outcomes[index] = LoadResult.from_row(row)
-    return outcomes
-
-
-def isolated_spark(spark):
+def isolated_spark(spark, inherited=None):
     """A Spark session of its own, for one of several loads running at once.
 
     It shares the application, its executors and its cache, and starts from
     the parent's runtime settings, so what one load sets or names as a
-    temporary view stays its own.
+    temporary view stays its own. ``inherited`` is what
+    :func:`inherited_settings` read from the parent; reading it costs a py4j
+    round trip per setting, so a run reads it once.
     """
 
     session = spark.newSession()
-    fresh = _settings(session)
-    for key, value in _settings(spark).items():
-        if fresh.get(key) == value:
-            continue
+    if inherited is None:
+        inherited = inherited_settings(spark, session)
+    for key, value in inherited.items():
         try:
             session.conf.set(key, value)
         except Exception:  # noqa: BLE001 - a static setting is shared already
             pass
     return session
+
+
+#: The thread-local property naming the fair-scheduler pool a thread's jobs join.
+_POOL = "spark.scheduler.pool"
+
+
+@contextmanager
+def own_pool(spark):
+    """Run this thread's Spark jobs in a fair-scheduler pool of its own.
+
+    Fabric schedules an application's pools fairly, but jobs that name no pool
+    share the default pool, which runs them first come first served. A small
+    load that started beside a large merge would wait for every task of it.
+    A pool per worker thread bounds the pools at the run's lanes.
+    """
+
+    try:
+        context = spark.sparkContext
+        previous = context.getLocalProperty(_POOL)
+        context.setLocalProperty(_POOL, f"weaver-{threading.current_thread().name}")
+    except Exception:  # noqa: BLE001 - scheduling is never worth a failed load
+        yield
+        return
+    try:
+        yield
+    finally:
+        try:
+            context.setLocalProperty(_POOL, previous)
+        except Exception:  # noqa: BLE001 - see above
+            pass
+
+
+#: Settings a load holds only while one statement runs, so a parent caught
+#: holding one passes on nothing a new session needs.
+_STATEMENT_SCOPED = frozenset(
+    {"spark.sql.caseSensitive", "spark.sql.optimizer.cte.cache.enabled"}
+)
+
+
+def inherited_settings(spark, fresh=None) -> dict:
+    """The parent's runtime settings a new session does not already start with."""
+
+    defaults = _settings(spark.newSession() if fresh is None else fresh)
+    return {
+        key: value
+        for key, value in _settings(spark).items()
+        if defaults.get(key) != value and key not in _STATEMENT_SCOPED
+    }
 
 
 def _settings(spark) -> dict:
@@ -411,7 +412,9 @@ def _endpoint_refresh(node, session, workspace):
             f"Cannot refresh the SQL endpoint for {node.physical_target}: this "
             "Session does not support endpoint refresh"
         )
-    refresh(ItemRef(node.physical_target.name))
+    # A barrier that names no table syncs every table.
+    tables = getattr(node, "refresh_tables", None)
+    refresh(ItemRef(node.physical_target.name), tables=list(tables) if tables else None)
     return LoadResult(succeeded=True)
 
 
@@ -429,7 +432,7 @@ def can_refresh(session, workspace=None) -> bool:
 __all__ = [
     "can_refresh",
     "dispatch_primitive",
-    "dispatch_python_many",
+    "inherited_settings",
     "isolated_spark",
     "python_primitive",
 ]

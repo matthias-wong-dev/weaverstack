@@ -98,7 +98,7 @@ def record_installation(executor: SqlExecutor) -> None:
         ", [Row insert datetime], [Row update datetime], [Row delete datetime])"
         " values (source.[Item type], source.[Item name], source.[Target name]"
         ", source.[Weaver version], source.[Signature]"
-        ", sysdatetime(), sysdatetime()"
+        ", sysutcdatetime(), sysutcdatetime()"
         ", convert(datetime2(6), '9999-12-31 23:59:59.999999'));\n"
     )
 

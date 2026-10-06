@@ -318,7 +318,7 @@ class Catalogue:
         return installed_dag(self)
 
     def to_mapping(self) -> dict[str, object]:
-        """A versioned JSON-safe representation for remote callers."""
+        """A versioned JSON-safe representation that crosses into Fabric."""
 
         return {
             "format_version": 1,
@@ -344,7 +344,9 @@ class Catalogue:
         }
 
     @classmethod
-    def from_mapping(cls, mapping) -> "Catalogue":
+    def from_mapping(cls, mapping, *, writer=None, session=None) -> "Catalogue":
+        """The catalogue ``to_mapping`` carried, writing through ``writer``."""
+
         version = mapping.get("format_version")
         if version != 1:
             raise BuildError(
@@ -365,6 +367,8 @@ class Catalogue:
         return cls(
             rows=MappingProxyType(rows),
             materialised=frozenset(mapping.get("materialised", ())),
+            writer=writer,
+            session=session,
         )
 
     # --- constructors ---------------------------------------------------------

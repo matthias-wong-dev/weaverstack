@@ -192,21 +192,29 @@ emit({{"sha256": hashlib.sha256(_archive_bytes).hexdigest(), "bytes": len(_archi
     return "exec(" + repr(isolated) + ', {"spark": spark, "emit": emit})\n'
 
 
-def execute_mutation_remote(
-    session, plan, payloads=None, *, workspace=None, timeout=600, build_datetime=None
+def execute_mutation_in_fabric(
+    session,
+    plan,
+    payloads=None,
+    *,
+    workspace=None,
+    timeout=600,
+    build_datetime=None,
+    observer=None,
 ):
     """Submit one complete plan once; an uncertain invocation is never replayed.
 
     The carrier is staged under the plan's Spark-home Lakehouse and removed after
     every outcome. It is transport, not a mutation target, so it is outside the
-    plan's physical scopes.
+    plan's physical scopes. ``observer`` follows the progress Fabric writes beside
+    the carrier while the plan runs.
     """
     from datetime import datetime, timezone
-    from urllib.parse import urlsplit
     from uuid import uuid4
 
     from ..build_bundle.execution import execution_workspace, spark_home_of
     from ..errors import BuildError
+    from ..fabric.onelake import abfss_path
     from ..mutation.executor import MutationReport, MutationResult, validate_inputs
     from ..targets import ItemRef
     from ..workspaces import CARRIER_AREA
@@ -227,10 +235,27 @@ def execute_mutation_remote(
         else next(t for t in plan.targets if t.id == home_id)
     )
     if home is None:
-        raise BuildError("remote mutation requires a Lakehouse target")
+        raise BuildError("a mutation run in Fabric requires a Lakehouse target")
     build_datetime = build_datetime or datetime.now(timezone.utc).strftime(
         "%Y-%m-%d %H:%M:%S.%f"
     )
+    if home_id is not None:
+        session.require_spark_home(home.name, workspace=frozen_workspace)
+    scope = session.scope(frozen_workspace)
+    store = scope.transport_store
+    area = scope.resolver.files_root(ItemRef(home.name)) / CARRIER_AREA
+    stage = area / invocation_id
+    incoming, output = stage / "carrier.zip", stage / "result.json"
+    progress = stage / "progress.json"
+
+    def remove_stage():
+        store.delete(stage, recursive=True)
+        try:
+            # Non-recursive, so another invocation's carrier keeps the area.
+            store.delete(area)
+        except Exception:
+            pass
+
     from .archive_runtime import execution_capacity
 
     # Fabric runs the plan with this deployment's capacity, which the plan omits.
@@ -243,44 +268,17 @@ def execute_mutation_remote(
         "workers": workers,
         "limits": limits,
     }
+    if observer is not None:
+        request["progress"] = abfss_path(progress)
     carrier = pack_mutation(plan, payloads, request=request)
     if carrier is None:
         raise BuildError("mutation carrier exceeds expanded size bound")
-    if home_id is not None:
-        session.require_spark_home(home.name, workspace=frozen_workspace)
-    scope = session.scope(frozen_workspace)
-    store = scope.transport_store
-    area = scope.resolver.files_root(ItemRef(home.name)) / CARRIER_AREA
-    stage = area / invocation_id
-    incoming, output = stage / "carrier.zip", stage / "result.json"
-
-    def remove_stage():
-        store.delete(stage, recursive=True)
-        try:
-            # Non-recursive, so another invocation's carrier keeps the area.
-            store.delete(area)
-        except Exception:
-            pass
-
-    def native(location):
-        value = location.value
-        if value.startswith("https://"):
-            address = urlsplit(value)
-            parts = address.path.strip("/").split("/", 1)
-            if (
-                address.hostname != "onelake.dfs.fabric.microsoft.com"
-                or len(parts) != 2
-                or address.query
-                or address.fragment
-            ):
-                raise ValueError(
-                    "mutation carrier requires a bound OneLake destination"
-                )
-            return "abfss://" + parts[0] + "@" + address.hostname + "/" + parts[1]
-        return value
 
     source = bootstrap_source(
-        carrier, native(incoming), native(output), workers=session.direct_delta_workers
+        carrier,
+        abfss_path(incoming),
+        abfss_path(output),
+        workers=session.direct_delta_workers,
     )
     store.make_directory(stage)
     try:
@@ -299,13 +297,21 @@ def execute_mutation_remote(
     if not hasattr(session, "archive_mutations"):
         session.archive_mutations = []
     session.archive_mutations.append(record)
+    following = (
+        None if observer is None else _follow(session, store, progress, observer)
+    )
     try:
-        receipt = scope.livy_run(
-            source,
-            name="mutation_archive",
-            timeout=timeout * len(actions),
-            retry_submission=False,
-        )
+        try:
+            receipt = scope.livy_run(
+                source,
+                name="mutation_archive",
+                timeout=timeout * len(actions),
+                retry_submission=False,
+                livy=session.foreground_livy(scope),
+            )
+        finally:
+            if following is not None:
+                following()
         result = read_receipt(receipt, store.read(output))
         if result.get("archive_sha256") != carrier.sha256:
             raise BuildError("mutation carrier result differs")
@@ -331,3 +337,42 @@ def execute_mutation_remote(
             remove_stage()
         except Exception as error:
             record["cleanup_error"] = str(error)
+
+
+def _follow(session, store, location, observer):
+    """Read Fabric's progress beside the Livy wait; return what stops reading.
+
+    A read that fails is retried at the next interval, and the final report
+    supplies anything the progress never showed.
+    """
+
+    import threading
+
+    from .archive_runtime import PROGRESS_INTERVAL
+
+    done = threading.Event()
+    context = session.telemetry.capture_context()
+
+    def read():
+        seen = 0
+        with session.telemetry.use_context(context):
+            while not done.wait(PROGRESS_INTERVAL):
+                try:
+                    records = json.loads(store.read(location))
+                except Exception:  # noqa: BLE001 - progress never changes an outcome
+                    continue
+                for record in records[seen:]:
+                    try:
+                        observer(record)
+                    except Exception:  # noqa: BLE001 - presentation only
+                        pass
+                seen = len(records)
+
+    reader = threading.Thread(target=read, name="weaver-progress", daemon=True)
+    reader.start()
+
+    def stop():
+        done.set()
+        reader.join(PROGRESS_INTERVAL * 5)
+
+    return stop

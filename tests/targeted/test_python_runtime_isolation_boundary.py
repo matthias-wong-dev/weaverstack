@@ -285,6 +285,41 @@ def test_concurrent_imports_of_two_estates_do_not_collide(raw, curated):
     assert len(seen) == 16
 
 
+@weaver_test()
+def test_concurrent_imports_never_invalidate_the_import_caches_at_once(
+    raw, curated, monkeypatch
+):
+    """Two invalidations at once race to delete the same cache entries."""
+
+    import importlib
+    import time
+
+    inside = []
+    overlapped = []
+    invalidate = importlib.invalidate_caches
+
+    def watched():
+        inside.append(1)
+        if len(inside) > 1:
+            overlapped.append(len(inside))
+        time.sleep(0.01)
+        invalidate()
+        inside.pop()
+
+    monkeypatch.setattr(importlib, "invalidate_caches", watched)
+    threads = [
+        threading.Thread(target=_customer, args=(context,))
+        for _ in range(4)
+        for context in (raw, curated)
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert overlapped == []
+
+
 # --- what a failure says ------------------------------------------------------
 
 

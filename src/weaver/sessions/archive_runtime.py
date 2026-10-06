@@ -153,6 +153,7 @@ def execute_mutation(
     timeout=600,
     build_datetime=None,
     executors=None,
+    observer=None,
 ):
     """Bind physical capabilities and execute one complete MutationPlan.
 
@@ -231,7 +232,7 @@ def execute_mutation(
             )
     drivers.update(endpoint_refresh_drivers(contexts, outcome=error_outcome))
     return MutationExecutor(
-        drivers, workers=workers, limits=limits, timeout=timeout
+        drivers, workers=workers, limits=limits, timeout=timeout, observer=observer
     ).execute(plan, payloads, invocation_id=invocation_id)
 
 
@@ -279,19 +280,24 @@ def run_mutation(root, spark, output, archive_sha256, *, workers):
         if a.payload is not None
     }
     workspace = execution_workspace(plan.execution, plan)
-    with ArchiveSession(
-        workspace=workspace, spark=spark, direct_delta_workers=workers
-    ) as session:
-        report = execute_mutation(
-            plan,
-            payloads,
-            session,
-            invocation_id=request["invocation_id"],
-            timeout=request["timeout"],
-            workers=request["workers"],
-            limits=request["limits"],
-            build_datetime=request["build_datetime"],
-        )
+    observe, stop = _progress_writer(request.get("progress"))
+    try:
+        with ArchiveSession(
+            workspace=workspace, spark=spark, direct_delta_workers=workers
+        ) as session:
+            report = execute_mutation(
+                plan,
+                payloads,
+                session,
+                invocation_id=request["invocation_id"],
+                timeout=request["timeout"],
+                workers=request["workers"],
+                limits=request["limits"],
+                build_datetime=request["build_datetime"],
+                observer=observe,
+            )
+    finally:
+        stop()
     return {
         "status": "completed",
         "archive_sha256": archive_sha256,
@@ -300,3 +306,58 @@ def run_mutation(root, spark, output, archive_sha256, *, workers):
         "invocation_id": request["invocation_id"],
         "report": encode_report(report),
     }
+
+
+#: Seconds between progress writes, and between a desktop's reads of them.
+PROGRESS_INTERVAL = 2.0
+
+
+def _progress_writer(location):
+    """Publish each action's start and end for the desktop that submitted the plan.
+
+    The file is rewritten beside execution in the invocation's own carrier
+    directory, so a write never delays an action or changes an outcome.
+    """
+
+    if location is None:
+        return None, lambda: None
+    try:
+        from notebookutils import fs
+    except ImportError:
+        return None, lambda: None
+    import json
+    import threading
+
+    from .mutation_progress import progress_record
+
+    records = []
+    lock = threading.Lock()
+    done = threading.Event()
+
+    def observe(event):
+        record = progress_record(event)
+        if record is not None:
+            with lock:
+                records.append(record)
+
+    def write():
+        written = 0
+        while not done.wait(PROGRESS_INTERVAL):
+            with lock:
+                snapshot = list(records)
+            if len(snapshot) == written:
+                continue
+            try:
+                fs.put(location, json.dumps(snapshot), True)
+                written = len(snapshot)
+            except Exception:  # noqa: BLE001 - progress never changes an outcome
+                pass
+
+    writer = threading.Thread(target=write, name="weaver-progress", daemon=True)
+    writer.start()
+
+    def stop():
+        done.set()
+        writer.join(PROGRESS_INTERVAL * 5)
+
+    return observe, stop

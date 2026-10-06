@@ -19,7 +19,6 @@ from factories import (
     target_inventory,
     warehouse_table,
 )
-from support.runs import together
 from support.sessions import given_session
 from support.weaver_test import weaver_test
 from support.workspaces import WORKSPACE, given_workspace
@@ -140,6 +139,7 @@ def test_public_load_reconstructs_a_built_runtime_reference_without_manual_depen
         workspace=workspace,
         lakehouses=("Landing",),
         warehouses=("Weaver", "Curated"),
+        executes_here=True,
     )
     catalogue = installed_catalogue(repository, bindings, session=session)
 
@@ -176,7 +176,6 @@ def test_public_load_reconstructs_a_built_runtime_reference_without_manual_depen
         )
 
     monkeypatch.setattr(run_module, "dispatch_primitive", dispatch)
-    monkeypatch.setattr(run_module, "dispatch_python_many", together(dispatch))
 
     first = weaver.load(("Lakehouse/Landing", "Warehouse/Curated"), session=session)
     assert first.status == TASK_SUCCEEDED

@@ -82,6 +82,9 @@ class MutationDriver:
     preflight: Callable | None = None
     serial_resources: tuple[str, ...] = ()
     cancel: Callable | None = None
+    #: The seconds an action, or the operation it starts, may take, where the
+    #: invocation's allowance per action is too short for it.
+    timeout: float | None = None
 
 
 @dataclass(frozen=True)
@@ -196,6 +199,7 @@ class MutationExecutor:
         limits=None,
         timeout=600,
         failure_policy="continue_independent",
+        observer=None,
     ):
         from ..errors import BuildError
 
@@ -213,6 +217,8 @@ class MutationExecutor:
         self.limits = dict(limits or {})
         self.timeout = timeout
         self.failure_policy = failure_policy
+        #: Called with each ledger event, for presentation only.
+        self.observer = observer
 
     def execute(
         self,
@@ -307,6 +313,30 @@ class _Invocation:
                     self.children[parent].append((key, False))
             if not self.remaining[key]:
                 self.ready.add(key)
+        self.height = self._heights()
+
+    def _heights(self):
+        """How many actions the longest chain from each action onwards holds.
+
+        Ready actions start longest chain first, so an endpoint refresh that the
+        Warehouse objects wait behind is reached as early as it can be.
+        """
+
+        waiting = dict(self.remaining)
+        frontier = [key for key, count in waiting.items() if not count]
+        ordered = []
+        while frontier:
+            key = frontier.pop()
+            ordered.append(key)
+            for child, _required in self.children[key]:
+                waiting[child] -= 1
+                if not waiting[child]:
+                    frontier.append(child)
+        height = {}
+        for key in reversed(ordered):
+            below = (height[child] for child, _required in self.children[key])
+            height[key] = 1 + max(below, default=0)
+        return height
 
     def now(self):
         return self.executor.clock.monotonic()
@@ -321,6 +351,11 @@ class _Invocation:
             self.invocation_id,
         )
         self.ledger.append(event)
+        if self.executor.observer is not None:
+            try:
+                self.executor.observer(event)
+            except Exception:  # noqa: BLE001 - presentation never changes an outcome
+                pass
 
     def terminal(self, state, status, value=None, error=None):
         key = state.action.id
@@ -453,7 +488,9 @@ class _Invocation:
         if owner != action.id:
             state.deadline = self.operations[owner].deadline
         elif state.deadline is None:
-            state.deadline = self.now() + self.executor.timeout
+            driver = self.executor.drivers.get(action.executor)
+            allowance = getattr(driver, "timeout", None) or self.executor.timeout
+            state.deadline = self.now() + allowance
         if state.pending is None:
             state.ready_queue_seconds += self.now() - state.ready_at
             state.attempts += 1
@@ -485,7 +522,9 @@ class _Invocation:
         )
 
     def dispatch(self, pool):
-        for key in sorted(self.ready, key=self.order.get):
+        for key in sorted(
+            self.ready, key=lambda key: (-self.height[key], self.order[key])
+        ):
             if len(self.running) >= self.executor.workers:
                 break
             state = self.states[key]
@@ -515,29 +554,39 @@ class _Invocation:
                 and not state.action.exclusions
                 and state.action.executor not in self.contracts
             ):
-                for other_key in sorted(self.ready, key=self.order.get):
-                    other = self.states[other_key]
-                    if (
-                        other_key == key
-                        or other_key in self.active
-                        or other_key in self.results
-                        or other.pending
-                    ):
-                        continue
-                    if (
-                        other.action.executor,
-                        other.action.target_id,
-                        other.action.resources,
-                        other.action.exclusions,
-                    ) == (
-                        state.action.executor,
-                        state.action.target_id,
-                        state.action.resources,
-                        (),
-                    ):
-                        group.append(other)
-                        if len(group) >= driver.batch_size:
-                            break
+
+                def shape(member):
+                    action = member.action
+                    return (
+                        action.executor,
+                        action.target_id,
+                        action.resources,
+                        action.exclusions,
+                    )
+
+                alike = [
+                    other
+                    for other_key, other in (
+                        (k, self.states[k])
+                        for k in sorted(self.ready, key=self.order.get)
+                    )
+                    if other_key != key
+                    and other_key not in self.active
+                    and other_key not in self.results
+                    and not other.pending
+                    and shape(other) == shape(state)
+                ]
+                # Ready work is shared across the free lanes, so a round trip
+                # never holds back what another lane could run now.
+                free = min(
+                    (
+                        self.executor.limits[k] - self.used.get(k, 0)
+                        for k in self.keys(state)
+                    ),
+                    default=1,
+                )
+                share = -(-(len(alike) + 1) // max(free, 1))
+                group.extend(alike[: min(driver.batch_size, share) - 1])
             keys = self.keys(state)
             task = _Task(tuple(group), keys, len(group) > 1)
             task_id = key

@@ -658,6 +658,11 @@ def livy_session(fabric_workspace, fabric_client, request, injected_weaver_boots
     request.config._weaver_livy_startup_seconds = startup
     print(f"Fabric Livy session startup: {startup:.2f}s")
     session.weaver_startup_seconds = startup
+    # A long stretch without Spark, such as the load benchmark's Warehouse seed,
+    # leaves the session idle until Fabric ends it; the session replaces itself.
+    session.restarted = lambda: print(
+        "Fabric ended the shared Livy session; started another."
+    )
     global _shared_livy_session
     _shared_livy_session = session
     try:

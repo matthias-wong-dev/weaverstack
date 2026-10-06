@@ -509,6 +509,8 @@ def test_install_selection_does_not_expose_the_internal_catalogue_item():
     assert "_weaver" not in rendered
     assert "Lakehouse/Sales" in rendered
     assert "Catalogue Warehouse/Weaver" in rendered
+    # Nothing selected reads as current, not as a heading with nothing under it.
+    assert all(line.endswith("up to date") for line in rendered.splitlines()[1:])
 
 
 # --- and missing context is a sentence ----------------------------------------

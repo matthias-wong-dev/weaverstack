@@ -64,7 +64,7 @@ def create_delta_table_in_session(
             spark.conf.set(_CASE_SENSITIVE, previous)
 
 
-def remote_delta_table_program(
+def fabric_delta_table_program(
     qualified_name: str,
     columns: Sequence[Sequence[Any]],
     *,
@@ -125,7 +125,7 @@ def remote_delta_table_program(
     )
 
 
-def remote_delta_table_actions_program(actions: Sequence[SparkDeltaAction]) -> str:
+def fabric_delta_table_actions_program(actions: Sequence[SparkDeltaAction]) -> str:
     """Run labelled TableBuilder creates in order with one outcome per Table."""
     specification = json.dumps(
         [
@@ -202,6 +202,6 @@ def remote_delta_table_actions_program(actions: Sequence[SparkDeltaAction]) -> s
 
 __all__ = [
     "create_delta_table_in_session",
-    "remote_delta_table_program",
-    "remote_delta_table_actions_program",
+    "fabric_delta_table_program",
+    "fabric_delta_table_actions_program",
 ]

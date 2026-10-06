@@ -107,8 +107,9 @@ class _Resolver:
         self.fail = fail
         self.calls = []
 
-    def start_sql_endpoint_refresh(self, item):
+    def start_sql_endpoint_refresh(self, item, *, tables=None, timeout=None):
         self.calls.append(("start", item.name, self.clock.now))
+        self.asked = {"tables": tables, "timeout": timeout}
         return {
             "lakehouse": item.name,
             "sql_endpoint_id": "endpoint-id",
@@ -183,6 +184,29 @@ def test_a_failed_refresh_is_a_known_failure_that_settles_the_operation():
 
 
 @weaver_test()
+def test_a_refresh_may_outlast_the_allowance_an_action_otherwise_has():
+    """Fabric syncs every table, so a large Lakehouse refreshes for longer."""
+
+    clock = Clock()
+    resolver = _Resolver(clock, polls=200)
+
+    report, _ran = _execute(resolver, clock)
+
+    assert report.succeeded
+    assert resolver.calls[-1][1] > 600
+
+
+@weaver_test()
+def test_a_refresh_past_its_own_allowance_is_uncertain():
+    clock = Clock()
+
+    report, _ran = _execute(_Resolver(clock, polls=1000), clock)
+
+    assert report.by_id["await"].status == "uncertain"
+    assert "deadline expired" in report.by_id["await"].error
+
+
+@weaver_test()
 def test_fabric_refresh_start_returns_a_handle_without_waiting():
     response = SimpleNamespace(
         status_code=202,
@@ -216,7 +240,10 @@ def test_fabric_refresh_start_returns_a_handle_without_waiting():
     ]
     assert refresh == {
         "lakehouse": "Sales",
+        "workspace_id": "workspace-id",
         "sql_endpoint_id": "endpoint-id",
+        "timeout": None,
+        "remaining": [],
         "operation_id": "operation-id",
         "location": "operations/operation-id",
         "retry_after": 7.0,
@@ -242,7 +269,10 @@ def test_fabric_refresh_observation_polls_the_operation_once():
 
     started = {
         "lakehouse": "Sales",
+        "workspace_id": "workspace-id",
         "sql_endpoint_id": "endpoint-id",
+        "timeout": None,
+        "remaining": [],
         "operation_id": "op",
         "location": "operations/op",
         "retry_after": 7.0,
@@ -364,3 +394,124 @@ def test_fabric_client_waits_for_a_long_running_refresh(monkeypatch):
             (200,),
         )
     ]
+
+
+# --- syncing named tables ----------------------------------------------------------
+
+
+class _Fabric:
+    """Fabric's refresh API: each request is accepted, then completes when polled."""
+
+    def __init__(self):
+        self.requests = []
+
+    def request(self, method, path, *, payload=None, expected):
+        self.requests.append(payload)
+        return SimpleNamespace(
+            status_code=202,
+            content=b"",
+            headers={
+                "x-ms-operation-id": f"op-{len(self.requests)}",
+                "Location": f"operations/op-{len(self.requests)}",
+                "Retry-After": "1",
+            },
+        )
+
+    def poll_operation(self, operation):
+        return Operation(
+            location=operation.location,
+            operation_id=operation.operation_id,
+            done=True,
+            body={"status": "Succeeded"},
+        )
+
+
+_ENDPOINT = Item(
+    id="endpoint-id", name="Sales", type=SQL_ENDPOINT, workspace_id="workspace-id"
+)
+
+
+@weaver_test()
+def test_named_tables_are_synced_25_to_a_request_one_request_at_a_time():
+    """Fabric syncs at most 25 tables a request."""
+
+    fabric = _Fabric()
+    tables = [("Sales", f"T{n:02d}") for n in range(28)] + [("Finance", "Ledger")]
+
+    refresh = start_sql_endpoint_refresh(_ENDPOINT, tables=tables, client=fabric)
+
+    assert len(fabric.requests) == 1
+    first = fabric.requests[0]["tables"]
+    assert first[0] == {"schema": "Finance", "tableNames": ["Ledger"]}
+    assert sum(len(each["tableNames"]) for each in first) == 25
+
+    refresh = observe_sql_endpoint_refresh(refresh, client=fabric)
+    assert not refresh["done"]
+    assert fabric.requests[1]["tables"] == [
+        {"schema": "Sales", "tableNames": ["T24", "T25", "T26", "T27"]}
+    ]
+
+    refresh = observe_sql_endpoint_refresh(refresh, client=fabric)
+    assert refresh["done"]
+    assert len(fabric.requests) == 2
+
+
+@weaver_test()
+def test_no_tables_to_sync_asks_fabric_for_nothing():
+    fabric = _Fabric()
+
+    refresh = start_sql_endpoint_refresh(_ENDPOINT, tables=[], client=fabric)
+
+    assert refresh["done"]
+    assert fabric.requests == []
+
+
+@weaver_test()
+def test_fabric_is_given_the_refresh_allowance():
+    """Fabric otherwise cancels a refresh still running after 15 minutes."""
+
+    fabric = _Fabric()
+
+    start_sql_endpoint_refresh(_ENDPOINT, timeout=1800.0, client=fabric)
+
+    assert fabric.requests == [
+        {
+            "recreateTables": False,
+            "timeout": {"timeUnit": "Seconds", "value": 1800},
+        }
+    ]
+
+
+@weaver_test()
+def test_a_scoped_start_syncs_the_tables_its_payload_names():
+    from weaver.build_bundle.executors.sql_endpoint_refresh import (
+        REFRESH_TIMEOUT,
+        START_TABLES_EXECUTOR,
+        tables_payload,
+    )
+    from weaver.mutation.executor import DriverRequest
+
+    clock = Clock()
+    resolver = _Resolver(clock)
+    drivers = endpoint_refresh_drivers(
+        {"sales": _context(resolver)}, outcome=error_outcome, clock=clock
+    )
+    action = MutationAction(
+        id="start",
+        kind=START_TABLES_EXECUTOR,
+        resource_node_id=None,
+        executor=START_TABLES_EXECUTOR,
+        payload="start.endpoint-tables.json",
+        payload_sha256="0" * 64,
+        target_id="sales",
+        depends_on=(),
+    )
+
+    drivers[START_TABLES_EXECUTOR].run(
+        DriverRequest(action=action, payload=tables_payload([("Sales", "Order")]))
+    )
+
+    assert resolver.asked == {
+        "tables": [("Sales", "Order")],
+        "timeout": REFRESH_TIMEOUT,
+    }

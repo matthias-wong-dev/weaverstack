@@ -13,7 +13,7 @@ from abc import ABC, abstractmethod
 from concurrent.futures import Executor, ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Any, Iterator, Sequence
+from typing import Any, Callable, Iterator, Sequence
 
 from ..delta_protocol import (
     DirectDeltaAction,
@@ -43,11 +43,12 @@ def workspace_context(workspace: Workspace) -> tuple:
     )
 
 
-#: Where execution happens relative to this process. Run scope uses this because
-#: deployed modules are imported where Spark is.
+#: Where execution happens relative to this process: in Fabric, or from a client
+#: that reaches Fabric through Livy, TDS, OneLake and REST. Run scope uses this
+#: because deployed modules are imported where Spark is.
 
-IN_SESSION = "in_session"
-ACROSS_BOUNDARY = "across_boundary"
+FABRIC = "fabric"
+CLIENT = "client"
 UNPLACED = "unplaced"
 
 #: The reporting hierarchy: task, step, then physical sub-step. Failures attach
@@ -73,6 +74,10 @@ class ReportingFrame:
     started: float = field(default_factory=time.monotonic)
     elapsed: float | None = None
     failed: bool = False
+    #: Runs beside other frames of its Step, off the frame stack.
+    concurrent: bool = False
+    #: What the work produced, for presentation beside its duration.
+    note: str | None = None
 
     @property
     def age(self) -> float:
@@ -136,6 +141,7 @@ class Session(ABC):
         self._closed = False
         #: True while flushers drain through an otherwise open Session.
         self._draining = False
+        self._observers: list = []
 
     # --- context ------------------------------------------------------------
 
@@ -200,7 +206,7 @@ class Session(ABC):
             self._workflow_id = previous
 
     def position(self, workspace: Workspace | None = None) -> str:
-        """Return whether execution is in-session, across-boundary, or unplaced.
+        """Return whether execution is in Fabric, from a client, or unplaced.
 
         A Session with no workspace is unplaced.
         """
@@ -209,7 +215,7 @@ class Session(ABC):
             self.workspace_or_default(workspace)
         except CommandError:
             return UNPLACED
-        return IN_SESSION if self.executes_here(workspace) else ACROSS_BOUNDARY
+        return FABRIC if self.executes_here(workspace) else CLIENT
 
     @abstractmethod
     def executes_here(self, workspace: Workspace | None = None) -> bool:
@@ -377,9 +383,26 @@ class Session(ABC):
     ) -> Any:
         """Run a Python program in Fabric and return its result.
 
-        A ConsoleSession runs remote source through Livy, where ``emit(...)``
-        returns the result. A NotebookSession calls the in-process form directly.
+        A ConsoleSession runs the program's source in Fabric through Livy, where
+        ``emit(...)`` returns the result. A NotebookSession calls the in-process
+        form directly.
         """
+
+    def execute_run(self, run, *, workspace: Workspace | None = None) -> Any:
+        """Execute a load or test run where its work is.
+
+        A client sends a run with Spark work to Fabric whole, so Fabric
+        schedules every node. Anything else runs here.
+        """
+
+        if run.needs_spark and self.position(workspace) == CLIENT:
+            return self.execute_run_in_fabric(run, workspace=workspace)
+        return run.call(self)
+
+    def execute_run_in_fabric(self, run, *, workspace: Workspace | None = None) -> Any:
+        """Send ``run`` to Fabric and return its report."""
+
+        raise CommandError(f"This Session cannot send a {run.name} to Fabric.")
 
     def execute_spark_sql_actions(
         self,
@@ -399,7 +422,7 @@ class Session(ABC):
         outcomes.
 
         ``timeout`` is the allowance for each action. A host that places several
-        actions in one remote submission preserves the aggregate allowance.
+        actions in one Livy submission preserves the aggregate allowance.
         """
 
         origin = time.monotonic()
@@ -459,7 +482,7 @@ class Session(ABC):
         final query share temporary views and session state.
 
         ``exact_case`` applies to the whole batch because a desktop caller cannot
-        set the remote Spark configuration directly.
+        set Fabric's Spark configuration directly.
 
         The other statements are run for their effect, as they are in a session.
         """
@@ -647,16 +670,15 @@ class Session(ABC):
     ) -> Iterator[ReportingFrame]:
         """A Sub-step that runs beside others of the current Step.
 
-        It is reported and timed like any Sub-step but held off the frame stack,
-        which describes nesting, and the external work inside it is attributed
-        to it in whichever thread runs it.
+        It is timed like any Sub-step but held off the frame stack, which
+        describes nesting, so it is reported when it starts as well as when it
+        ends. The external work inside it is attributed to it in whichever
+        thread runs it.
         """
 
         from dataclasses import replace
 
-        frame = ReportingFrame(
-            kind=SUBSTEP, name=name, detail=detail, depth=len(self._frames)
-        )
+        frame = self.open_concurrent_substep(name, detail)
         context = replace(self.telemetry.capture_context(), substep=name)
         error = None
         try:
@@ -666,11 +688,38 @@ class Session(ABC):
             error = exc
             raise
         finally:
-            frame.elapsed = time.monotonic() - frame.started
-            frame.failed = frame.failed or error is not None
-            with self._concurrent_lock:
-                self.timings.append(frame)
-                self.present(frame, "failed" if frame.failed else "completed", error)
+            self.close_concurrent_substep(frame, error)
+
+    def open_concurrent_substep(
+        self, name: str, detail: str | None = None
+    ) -> ReportingFrame:
+        """Start a concurrent Sub-step whose work no one thread brackets."""
+
+        frame = ReportingFrame(
+            kind=SUBSTEP,
+            name=name,
+            detail=detail,
+            depth=len(self._frames),
+            concurrent=True,
+        )
+        with self._concurrent_lock:
+            self._present(frame, "started")
+        return frame
+
+    def close_concurrent_substep(
+        self,
+        frame: ReportingFrame,
+        error: BaseException | None = None,
+        *,
+        elapsed: float | None = None,
+    ) -> None:
+        """``elapsed`` is the work's own duration where another host timed it."""
+
+        frame.elapsed = time.monotonic() - frame.started if elapsed is None else elapsed
+        frame.failed = frame.failed or error is not None
+        with self._concurrent_lock:
+            self.timings.append(frame)
+            self._present(frame, "failed" if frame.failed else "completed", error)
 
     def _framed(self, kind: str, name: str, detail: str | None):
         if kind == TASK:
@@ -692,7 +741,7 @@ class Session(ABC):
         )
         self._frames.append(frame)
         self.telemetry.set_frames(self._frames)
-        self.present(frame, "started")
+        self._present(frame, "started")
         return frame
 
     def _close(self, frame: ReportingFrame, error: BaseException | None = None) -> None:
@@ -709,7 +758,7 @@ class Session(ABC):
         # Keep failures reported as data when the frame closes normally.
         frame.failed = frame.failed or error is not None
         self.timings.append(frame)
-        self.present(frame, "failed" if frame.failed else "completed", error)
+        self._present(frame, "failed" if frame.failed else "completed", error)
 
     def _exit(
         self, kind: str, name: str | None, error: BaseException | None = None
@@ -730,6 +779,26 @@ class Session(ABC):
         self, frame: ReportingFrame, event: str, error: BaseException | None = None
     ) -> None:
         """Present a reporting event. Silent by default."""
+
+    @contextmanager
+    def observing(self, observer: Callable[[ReportingFrame, str], None]):
+        """Call ``observer(frame, event)`` after each event this Session presents."""
+
+        self._observers.append(observer)
+        try:
+            yield
+        finally:
+            self._observers.remove(observer)
+
+    def _present(
+        self, frame: ReportingFrame, event: str, error: BaseException | None = None
+    ) -> None:
+        self.present(frame, event, error)
+        for observer in list(self._observers):
+            try:
+                observer(frame, event)
+            except Exception:  # noqa: BLE001 - observing never changes an outcome
+                pass
 
     def report(self, lines: Sequence[str]) -> None:
         """Present untimed operator information. Silent by default."""
@@ -993,8 +1062,8 @@ def run_labelled_spark_statements(
 
 
 __all__ = [
-    "ACROSS_BOUNDARY",
-    "IN_SESSION",
+    "CLIENT",
+    "FABRIC",
     "STEP",
     "SUBSTEP",
     "TASK",

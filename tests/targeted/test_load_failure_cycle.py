@@ -35,7 +35,6 @@ from factories import (
     load_estate,
     load_estate_bindings,
 )
-from support.runs import together
 from support.weaver_test import weaver_test
 from support.workspaces import InventoryClient, given_workspace
 
@@ -84,10 +83,12 @@ class Prepared:
     catalogue: Lakehouse / object
     workspace: object
     session: object
+    #: The same workspace reached from a client.
+    client: object = None
 
 
 class Refreshing(FabricResolver):
-    def refresh_sql_endpoint(self, item):
+    def refresh_sql_endpoint(self, item, *, tables=None):
         return None
 
 
@@ -107,13 +108,17 @@ def session(tmp_path):
         base_url=Path(tmp_path).as_posix(),
     )
     store = FilesystemStore()
-    opened = given_session(workspace=workspace, resolver=resolver, store=store)
+    # In Fabric, where a load with Spark work runs.
+    opened = given_session(
+        workspace=workspace, resolver=resolver, store=store, executes_here=True
+    )
     return Prepared(
         # Writing through the Session, so a claim about the statements a run
         # submits still sees them.
         catalogue=installed_catalogue(repository, bindings, session=opened),
         workspace=workspace,
         session=opened,
+        client=given_session(workspace=workspace, resolver=resolver, store=store),
     )
 
 
@@ -133,11 +138,10 @@ def dispatched(monkeypatch):
             raise answer
         return answer
 
-    # The seams a run crosses: one node, or Python nodes starting together.
+    # The seam every node crosses.
     # `run_load` reads them from the package at call time, so patching the
     # names here is what a controlled dispatch does.
     monkeypatch.setattr(module, "dispatch_primitive", dispatch)
-    monkeypatch.setattr(module, "dispatch_python_many", together(dispatch))
     dispatch.answers = answers
     dispatch.calls = calls
     return dispatch
@@ -537,3 +541,115 @@ def test_the_log_is_appended_to_and_never_updated(session, dispatched):
     assert all(statement.startswith("INSERT INTO") for statement in statements)
     assert not any("UPDATE" in statement for statement in statements)
     assert not any("DELETE" in statement for statement in statements)
+
+
+# --- a client sends a load with Spark work to Fabric whole -------------------
+
+
+def _fabric_for(session):
+    """Fabric, in place: the run crosses as data and runs with Fabric's Session."""
+
+    import json
+
+    sent = []
+
+    def in_fabric(run, *, workspace=None):
+        arguments = json.loads(json.dumps(run.arguments()))
+        sent.append(arguments)
+        report = run.entry(
+            session=session.session, workspace=session.workspace, **arguments
+        )
+        return run.decode(json.loads(json.dumps(report)))
+
+    session.client.execute_run_in_fabric = in_fabric
+    return sent
+
+
+def _run_from_client(session, *, targets=(RAW, REPORTING), dry_run=False):
+    return run_load(
+        session.client,
+        workspace=session.workspace,
+        state=RunState(catalogue=session.catalogue),
+        items=targets,
+        dry_run=dry_run,
+    )
+
+
+@weaver_test()
+def test_a_client_sends_a_load_with_spark_work_to_fabric_whole(session, dispatched):
+    """The catalogue the client read and its request cross; Fabric runs every node."""
+
+    sent = _fabric_for(session)
+
+    report = _run_from_client(session)
+
+    assert len(sent) == 1
+    assert sent[0]["request"]["items"] == ["Lakehouse/Raw", "Warehouse/Reporting"]
+    assert report.status == SUCCEEDED
+    assert set(dispatched.calls) == {
+        node.node_id for node in report.nodes if node.executed
+    }
+    assert {ORDER, SUMMARY} <= set(dispatched.calls)
+
+
+@weaver_test()
+def test_fabric_records_the_load_it_was_sent(session, dispatched):
+    _fabric_for(session)
+
+    report = _run_from_client(session)
+
+    assert sorted(_recorded_nodes(session)) == sorted(
+        node.node_id for node in report.nodes
+    )
+
+
+@weaver_test()
+def test_a_warehouse_only_load_runs_on_the_client(session, dispatched):
+    """It has no Spark work, so it starts no Spark session anywhere."""
+
+    sent = _fabric_for(session)
+
+    report = _run_from_client(session, targets=(REPORTING,))
+
+    assert sent == []
+    assert report.status == SUCCEEDED
+    assert SUMMARY in dispatched.calls
+
+
+@weaver_test()
+def test_a_dry_run_is_planned_on_the_client(session, dispatched):
+    sent = _fabric_for(session)
+
+    report = _run_from_client(session, dry_run=True)
+
+    assert sent == []
+    assert dispatched.calls == []
+    assert report.dry_run
+
+
+@weaver_test()
+def test_a_load_for_another_workspace_stages_in_that_workspace_s_lakehouse(
+    session, dispatched
+):
+    """A Session may default to one workspace and load another, as a mirror does."""
+
+    from support.sessions import NOWHERE, given_session
+
+    client = given_session(workspace=NOWHERE)
+    homes = []
+
+    def in_fabric(run, *, workspace=None):
+        homes.append(client.scope(workspace).spark_home)
+        raise RuntimeError("stop here")
+
+    client.execute_run_in_fabric = in_fabric
+
+    with pytest.raises(RuntimeError, match="stop here"):
+        run_load(
+            client,
+            workspace=session.workspace,
+            state=RunState(catalogue=session.catalogue),
+            items=(RAW, REPORTING),
+        )
+
+    assert homes == ["Raw_LH"]

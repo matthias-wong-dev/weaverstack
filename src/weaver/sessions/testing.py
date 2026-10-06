@@ -163,6 +163,17 @@ class TestSession(Session):
             )
         return self._python_answers.pop(0)
 
+    def execute_run_in_fabric(self, run, *, workspace: Workspace | None = None):
+        """Record the run and its arguments, and decode a configured report."""
+
+        self._record("run", {"name": run.name, "arguments": run.arguments()}, workspace)
+        if not self._python_answers:
+            raise CommandError(
+                f"No report is configured for the {run.name} this TestSession sends "
+                "to Fabric. Call answer_python() first."
+            )
+        return run.decode(self._python_answers.pop(0))
+
     def execute_spark_sql_batch(
         self,
         statements: Sequence[str],

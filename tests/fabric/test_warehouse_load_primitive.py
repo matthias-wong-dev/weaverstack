@@ -1536,6 +1536,10 @@ def _reload_run(estate):
     _standalone(estate)
     grown = _latest(_read(estate, "contents", "statistics", "bookmark"))
 
+    # The same source again: the window is empty, so nothing runs past the count.
+    _standalone(estate)
+    idle = _latest(_read(estate, "contents", "statistics"))
+
     # The same source, reloaded. An emptied target makes the body produce all
     # three; a target still holding them would make it produce none.
     _reload(estate)
@@ -1553,6 +1557,7 @@ def _reload_run(estate):
         extra={
             "seeded": seeded,
             "grown": grown,
+            "idle": idle,
             "reloaded": reloaded,
             "refusal": str(raised.value),
             **seen,
@@ -1592,6 +1597,16 @@ def test_the_reload_lifecycle(reload_estate):
     assert grown["statistics"]["read"] == 1
     assert grown["statistics"]["inserted"] == 1
     assert grown["statistics"]["reload"] is False
+
+    # An empty window changes nothing and counts nothing, deletions included.
+    idle = run.extra["idle"]
+    assert idle["contents"] == GROWN
+    assert (
+        idle["statistics"]["read"],
+        idle["statistics"]["inserted"],
+        idle["statistics"]["updated"],
+        idle["statistics"]["deleted"],
+    ) == (0, 0, 0, 0)
 
     # The reload: the body saw an empty target, so it read the whole population
     # and wrote it back.

@@ -93,18 +93,27 @@ class FabricResolver:
             )
         return self._items[key]
 
-    def refresh_sql_endpoint(self, item: ItemRef) -> dict:
-        """Refresh the SQL analytics endpoint paired with a named Lakehouse."""
+    def refresh_sql_endpoint(self, item: ItemRef, *, tables=None) -> dict:
+        """Refresh the SQL analytics endpoint paired with a named Lakehouse.
+
+        ``tables`` names the ``(schema, table)`` pairs to sync; ``None`` syncs
+        every table.
+        """
 
         return refresh_sql_endpoint_metadata(
-            self.resolve(item, item_type=SQL_ENDPOINT), client=self.client
+            self.resolve(item, item_type=SQL_ENDPOINT),
+            tables=tables,
+            client=self.client,
         )
 
-    def start_sql_endpoint_refresh(self, item: ItemRef):
+    def start_sql_endpoint_refresh(self, item: ItemRef, *, tables=None, timeout=None):
         from .resources import start_sql_endpoint_refresh
 
         return start_sql_endpoint_refresh(
-            self.resolve(item, item_type=SQL_ENDPOINT), client=self.client
+            self.resolve(item, item_type=SQL_ENDPOINT),
+            tables=tables,
+            timeout=timeout,
+            client=self.client,
         )
 
     def observe_sql_endpoint_refresh(self, refresh):

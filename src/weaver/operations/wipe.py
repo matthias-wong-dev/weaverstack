@@ -22,10 +22,11 @@ operation emptying one named item without reading it as a catalogue.
 from __future__ import annotations
 
 from contextlib import nullcontext
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, Mapping, Sequence
 
+from ..catalogue.builtin import BUILTIN_ITEM
 from ..errors import CommandError
 from ..locations import Location
 from ..targets import (
@@ -94,6 +95,8 @@ class WipePlan:
     catalogue: str | None
     catalogue_action: str
     unbound: tuple[str, ...] = ()
+    #: Logical items the catalogue records in each target, by target.
+    installed: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
 
     def is_catalogue(self, target: WipeTarget) -> bool:
         return (
@@ -105,13 +108,19 @@ class WipePlan:
     def empties_the_catalogue(self) -> bool:
         return any(self.is_catalogue(target) for target in self.targets)
 
+    def _named(self, target: WipeTarget) -> str:
+        items = [
+            item for item in self.installed.get(str(target), ()) if item != str(target)
+        ]
+        return f"{', '.join(items)} → {target}" if items else str(target)
+
     def describe(self) -> str:
-        names = [str(target) for target in self.targets] + [self.catalogue or ""]
-        width = max(len(name) for name in names)
+        names = [self._named(target) for target in self.targets]
+        width = max(len(name) for name in [*names, self.catalogue or ""])
         lines = [f"Wipe on {self.workspace.workspace}", "", "Empty"]
-        for target in self.targets:
+        for target, name in zip(self.targets, names):
             note = "  catalogue" if self.is_catalogue(target) else ""
-            lines.append(f"  {str(target).ljust(width)}{note}".rstrip())
+            lines.append(f"  {name.ljust(width)}{note}".rstrip())
         lines.append("")
         lines.append("Catalogue")
         lines.append(f"  {self._catalogue_line(width)}")
@@ -131,13 +140,16 @@ class WipePlan:
             return f"{held}  preserved; claims for {claims} unbound"
         return f"{held}  preserved; no claims removed"
 
+    def _target_mapping(self, target: WipeTarget) -> dict:
+        mapping = {"target": str(target), "catalogue": self.is_catalogue(target)}
+        if str(target) in self.installed:
+            mapping["items"] = list(self.installed[str(target)])
+        return mapping
+
     def to_mapping(self) -> dict:
         return {
             "workspace": str(self.workspace.workspace),
-            "targets": [
-                {"target": str(target), "catalogue": self.is_catalogue(target)}
-                for target in self.targets
-            ],
+            "targets": [self._target_mapping(target) for target in self.targets],
             "catalogue": self.catalogue,
             "catalogue_action": self.catalogue_action,
             "unbound": list(self.unbound),
@@ -270,6 +282,7 @@ def plan_wipe(
         selected=selected,
     )
 
+    installed: dict[str, list[str]] = {}
     if selected:
         discovered = selected
     else:
@@ -283,7 +296,12 @@ def plan_wipe(
 
         with use_or_create_session(session, workspace=resolved) as opened:
             with opened.task("Read the installed estate", resolved_catalogue):
-                discovered = _installed_estate(resolved, session=opened)
+                recorded = _installed_estate(resolved, session=opened)
+        _refuse_unconfigured_installations(recorded, resolved)
+        discovered = tuple(dict.fromkeys(target for _item, target in recorded))
+        for item, target in recorded:
+            if item != str(BUILTIN_ITEM):
+                installed.setdefault(str(target), []).append(item)
 
     ordered = _execution_order(discovered, catalogue=resolved_catalogue, action=action)
     unbound = ()
@@ -300,7 +318,43 @@ def plan_wipe(
         catalogue=resolved_catalogue,
         catalogue_action=action,
         unbound=unbound,
+        installed={key: tuple(items) for key, items in installed.items()},
     )
+
+
+def _refuse_unconfigured_installations(recorded, workspace: Workspace) -> None:
+    """Follow the catalogue only where the configuration binds the same targets.
+
+    Without ``targets:``, the catalogue is the only guidance and is followed.
+    """
+
+    if not workspace.targets:
+        return
+    configured = {
+        str(item): declaration.physical
+        for item, declaration in workspace.targets.items()
+    }
+    differ = []
+    for item, target in recorded:
+        if item == str(BUILTIN_ITEM):
+            continue
+        bound = configured.get(item)
+        if bound is None or bound.casefold() != target.physical_name.casefold():
+            said = "not configured" if bound is None else f"configured as {bound}"
+            differ.append(f"  {item}  installed in {target.physical_name}, {said}")
+    if differ:
+        raise CommandError(
+            f"{workspace.catalogue} records installations the workspace "
+            "configuration does not bind:\n"
+            + "\n".join(differ)
+            + "\nName the physical items to empty, for example: weaver wipe "
+            + " ".join(
+                f"{item.item_type}/{declaration.physical}"
+                for item, declaration in sorted(
+                    workspace.targets.items(), key=lambda pair: str(pair[0])
+                )
+            )
+        )
 
 
 def _catalogue_action(
@@ -369,27 +423,36 @@ def _execution_order(
     return rest + (WipeTarget.parse(catalogue),)
 
 
-def _installed_estate(workspace: Workspace, *, session) -> tuple[WipeTarget, ...]:
-    """Read installed physical targets from ``_.Installation``."""
+def _installed_estate(
+    workspace: Workspace, *, session
+) -> tuple[tuple[str, WipeTarget], ...]:
+    """Each logical item ``_.Installation`` records, and its physical target."""
 
     from ..catalogue.connection import catalogue_connection
 
-    return installed_targets(catalogue_connection(session, workspace))
+    return installations(catalogue_connection(session, workspace))
 
 
-def installed_targets(catalogue) -> tuple[WipeTarget, ...]:
-    """The distinct physical targets one catalogue's installations name."""
-
+def installations(catalogue) -> tuple[tuple[str, WipeTarget], ...]:
     from ..catalogue.reader import read_table
     from ..catalogue.tables import INSTALLATION
 
-    found: dict[str, WipeTarget] = {}
+    found = []
     for row in read_table(catalogue, INSTALLATION):
         name = row.get("target_name")
         if not name:
             continue
         # Use the target grammar so invalid catalogue rows are reported precisely.
         target = WipeTarget.parse(f"{row['item_type']}/{str(name).strip()}")
+        found.append((f"{row['item_type']}/{row['item_name']}", target))
+    return tuple(sorted(found, key=lambda pair: (str(pair[1]).casefold(), pair[0])))
+
+
+def installed_targets(catalogue) -> tuple[WipeTarget, ...]:
+    """The distinct physical targets one catalogue's installations name."""
+
+    found: dict[str, WipeTarget] = {}
+    for _item, target in installations(catalogue):
         found.setdefault(str(target).casefold(), target)
     return tuple(found[key] for key in sorted(found))
 

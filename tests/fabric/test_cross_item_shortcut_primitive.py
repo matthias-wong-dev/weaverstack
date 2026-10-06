@@ -14,9 +14,9 @@ asking the workspace proves one exists.
 consumer's next statement failed with "neither a view nor a table" until the
 action learned to wait for a real read to succeed.
 
-**A Lakehouse's SQL analytics endpoint lags its Delta tables**, which is why an
-item that mutated Delta is closed by a refresh. Nothing below a real workspace
-exercises that refresh.
+**A Lakehouse's SQL analytics endpoint lags its Delta tables**, which is why a
+Warehouse reading through it waits for a refresh of the tables it reads.
+Nothing below a real workspace exercises that refresh.
 
 So the bundle is generated here, in pure Python, and **only the shortcut action is
 run** out of it, not the estate around it. Schemas, tables, views, catalogue
@@ -377,12 +377,24 @@ def shortcut_estate(
         session=weaver_session,
     )
     assert readiness_result.status == "succeeded", readiness_result.error_message
-    refresh_result = refresh_from_here(
-        bundle.plan,
-        naming=consumer_item,
-        workspace=fabric_workspace,
-        session=weaver_session,
-    )
+    # Nothing in this estate reads through the consumer's endpoint, so its build
+    # plans no refresh. The request a reader of the shortcut would cause, one
+    # table named, is made directly.
+    planned_refreshes = [
+        action.id
+        for _sequence, _batch, action in bundle.plan.actions()
+        if action.kind.startswith("start_sql_endpoint") and consumer_item in action.id
+    ]
+    try:
+        refresh = {
+            "status": "succeeded",
+            "error": None,
+            "details": resolver.refresh_sql_endpoint(
+                ItemRef(consumer.name), tables=[("DWG", "PortableCustomer")]
+            ),
+        }
+    except Exception as refused:  # noqa: BLE001 - asserted by the test
+        refresh = {"status": "failed", "error": str(refused), "details": None}
 
     shortcut = at["consumer"].qualify("DWG", "PortableCustomer")
     # The readiness action has confirmed both read surfaces, and a single read
@@ -410,11 +422,8 @@ def shortcut_estate(
     return {
         "payload": {
             "seen": seen,
-            "refresh": {
-                "status": refresh_result.status,
-                "error": refresh_result.error_message,
-                "details": refresh_result.details,
-            },
+            "refresh": refresh,
+            "planned_refreshes": planned_refreshes,
         },
         "plan": bundle.plan,
         "repository": repository,
@@ -502,16 +511,17 @@ def test_the_consumers_endpoint_reports_the_shortcuted_table(shortcut_estate):
 
 
 @weaver_test(remote=True)
-def test_each_mutated_lakehouse_had_its_endpoint_refreshed_for_real(shortcut_estate):
-    """That the refresh is planned is pure Python. That it found a real
-    endpoint and did work is not."""
+def test_a_refresh_naming_one_table_syncs_it_for_real(shortcut_estate):
+    """Which tables a refresh names is pure Python. That Fabric accepts the
+    request and completes it against a real endpoint is not."""
 
     refresh = shortcut_estate["payload"]["refresh"]
 
+    assert not shortcut_estate["payload"]["planned_refreshes"]
     assert refresh["status"] == "succeeded", refresh["error"]
     details = refresh["details"] or {}
-    assert "skipped" not in details, "the refresh was skipped in Fabric"
     assert details.get("sql_endpoint_id"), "the refresh found no endpoint"
+    assert details.get("status") == "Succeeded", details
 
 
 @weaver_test(remote=True)
@@ -662,8 +672,8 @@ def test_a_warehouse_shortcut_is_a_view_over_the_bound_lakehouse(
     # table through it, a REST call, made from here.
     #
     # Whether the plan contains that refresh is a claim in its own right: the
-    # stage is only emitted when the item's planned work mutated Delta (see
-    # `weaver.build_bundle.endpoints.lakehouse_endpoint_refresh_stage`). A plan that dropped it
+    # stage is only kept when something in the plan reads through the endpoint
+    # (see `weaver.build_bundle.endpoints.narrow_endpoint_refreshes`). A plan that dropped it
     # would leave the Warehouse reading an endpoint that never caught up, and the
     # shortcut below would fail with "Invalid object name", a symptom that reads
     # like broken shortcut SQL and is nothing of the kind. So the search says so

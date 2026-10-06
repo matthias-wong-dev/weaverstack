@@ -68,7 +68,7 @@ def test_journey_archive_assertion_reads_the_installed_plan(monkeypatch, coverag
         def __init__(self):
             self.archive_mutations = []
 
-        def execute_mutation_remote(self, received, payloads=None, **options):
+        def execute_mutation_in_fabric(self, received, payloads=None, **options):
             assert received is plan
 
     session = Session()
@@ -90,7 +90,7 @@ def test_journey_archive_assertion_reads_the_installed_plan(monkeypatch, coverag
 
     def build(*args, **kwargs):
         if coverage != "fallback":
-            session.execute_mutation_remote(plan)
+            session.execute_mutation_in_fabric(plan)
         identities = {
             "complete": expected,
             "fallback": [],

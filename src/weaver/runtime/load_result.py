@@ -68,15 +68,16 @@ class LoadResult:
     @classmethod
     def from_row(cls, row) -> "LoadResult":
         # A row serialised before the discriminator existed says nothing about
-        # refusal, which is what its absence means.
+        # refusal, which is what its absence means. A failure that settled
+        # before anything was counted carries no counts.
         values = {name: row.get(name) for name in RESULT_COLUMNS}
         return cls(
             succeeded=bool(values["succeeded"]),
-            rows_read=int(values["rows_read"]),
-            rows_inserted=int(values["rows_inserted"]),
-            rows_updated=int(values["rows_updated"]),
-            rows_deleted=int(values["rows_deleted"]),
-            rows_rejected=int(values["rows_rejected"]),
+            rows_read=int(values["rows_read"] or 0),
+            rows_inserted=int(values["rows_inserted"] or 0),
+            rows_updated=int(values["rows_updated"] or 0),
+            rows_deleted=int(values["rows_deleted"] or 0),
+            rows_rejected=int(values["rows_rejected"] or 0),
             error_message=values["error_message"],
             bookmark_datetime=_instant(values["bookmark_datetime"]),
             is_static_skip=bool(values["is_static_skip"]),

@@ -6,12 +6,12 @@ inserts endpoint and publication barriers, and orders their physical dispatch.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import cached_property
 from typing import Mapping, Sequence
 
 from .catalogue.state import Catalogue
-from .declaration.model import WeaverDocumentId, WeaverItemId
+from .declaration.model import OBJECT_SHAPE, WeaverDocumentId, WeaverItemId
 from .errors import GraphError, LoadError
 from .graph import Graph
 from .installed import (
@@ -68,6 +68,9 @@ class LoadNode:
     publication_targets: tuple[OneLakeReadiness, ...] = ()
     #: A publication barrier only. The load node that publishes what it waits for.
     produced_by: str | None = None
+    #: A refresh barrier only. The ``(schema, table)`` pairs read through the
+    #: endpoint, or ``None`` when a read needs every table synced.
+    refresh_tables: tuple[tuple[str, str], ...] | None = ()
 
     @property
     def sort_key(self) -> tuple[str, str, str, str]:
@@ -189,8 +192,6 @@ class _Planner:
         self.nodes: dict[str, LoadNode] = {}
         self.edges: set[tuple[str, str]] = set()
         self.refresh_nodes: dict[str, LoadNode] = {}
-        #: Which physical targets a refresh barrier must wait for, by refresh id.
-        self.refresh_sources: dict[str, PhysicalTargetRef] = {}
 
     # --- planning -------------------------------------------------------------
 
@@ -213,7 +214,6 @@ class _Planner:
             visited: set[str] = set()
             for node in seeds:
                 self._select(node, visited, allowed_items=allowed_items)
-            self._place_refresh_barriers()
         dag = LoadDag(
             nodes=tuple(sorted(self.nodes.values(), key=lambda node: node.sort_key)),
             edges=tuple(sorted(self.edges)),
@@ -323,7 +323,7 @@ class _Planner:
             return node.node_id
         visited.add(installed.node_id)
         self._report_external(installed)
-        for producer, crossed in self._upstream_loadable(
+        for producer, crossed, read in self._upstream_loadable(
             installed, allowed_items=allowed_items
         ):
             upstream_id = self._select(producer, visited, allowed_items=allowed_items)
@@ -338,8 +338,11 @@ class _Planner:
             else:
                 # A shortcut read as SQL: the producer's endpoint has to catch up
                 # before the consumer can see it, so the barrier replaces the
-                # direct edge rather than sitting beside it.
-                refresh_id = self._refresh_node(crossed).node_id
+                # direct edge rather than sitting beside it. The refresh waits
+                # for what is read through it, and other loads in the Lakehouse
+                # run beside it.
+                refresh_id = self._refresh_node(crossed, read).node_id
+                self.edges.add((upstream_id, refresh_id))
                 self.edges.add((refresh_id, node.node_id))
         return node.node_id
 
@@ -389,38 +392,26 @@ class _Planner:
         self.nodes[node_id] = node
         return node
 
-    def _refresh_node(self, target: PhysicalTargetRef) -> LoadNode:
-        """The one refresh barrier for this Lakehouse, made once per run."""
+    def _refresh_node(self, target: PhysicalTargetRef, read: InstalledNode) -> LoadNode:
+        """The one refresh barrier for this Lakehouse, syncing what is read through it."""
 
         node_id = f"refresh:{target}"
-        node = self.refresh_nodes.get(node_id)
-        if node is None:
-            node = LoadNode(
-                node_id=node_id,
-                logical_id=None,
-                physical_target=target,
-                primitive_kind=ENDPOINT_REFRESH,
-            )
-            self.refresh_nodes[node_id] = node
-            self.nodes[node_id] = node
-            self.refresh_sources[node_id] = target
+        node = self.refresh_nodes.get(node_id) or LoadNode(
+            node_id=node_id,
+            logical_id=None,
+            physical_target=target,
+            primitive_kind=ENDPOINT_REFRESH,
+        )
+        table = _endpoint_table(read)
+        tables = (
+            None
+            if node.refresh_tables is None or table is None
+            else tuple(sorted({*node.refresh_tables, table}))
+        )
+        node = replace(node, refresh_tables=tables)
+        self.refresh_nodes[node_id] = node
+        self.nodes[node_id] = node
         return node
-
-    def _place_refresh_barriers(self) -> None:
-        """Every selected load in a refreshed Lakehouse runs before its barrier.
-
-        Broad by necessity: one barrier per affected Lakehouse, behind all of
-        its selected loads rather than only those a shortcut names. A narrower
-        placement would need to know which tables a consumer's query touches,
-        and the catalogue records the shortcut rather than the read.
-        """
-
-        for node_id, target in self.refresh_sources.items():
-            for node in list(self.nodes.values()):
-                if node.primitive_kind in (ENDPOINT_REFRESH, ONELAKE_PUBLICATION):
-                    continue
-                if node.physical_target == target:
-                    self.edges.add((node.node_id, node_id))
 
     # --- dependency traversal --------------------------------------------------
 
@@ -429,8 +420,8 @@ class _Planner:
         installed: InstalledNode,
         *,
         allowed_items: frozenset[WeaverItemId],
-    ) -> tuple[tuple[InstalledNode, object], ...]:
-        """The in-scope loadable ancestors, and where each hop crossed.
+    ) -> tuple[tuple[InstalledNode, object, InstalledNode | None], ...]:
+        """The in-scope loadable ancestors, where each hop crossed, and what it read.
 
         Passing through non-loadable producers is what makes a view a conduit:
         it owns no load work, so it is not a node here, but a consumer still
@@ -439,26 +430,30 @@ class _Planner:
         requested-item boundary even so.
         """
 
-        found: dict[str, tuple[InstalledNode, object]] = {}
+        found: dict[str, tuple[InstalledNode, object, InstalledNode | None]] = {}
         seen: set[tuple[str, object]] = set()
-        frontier: list[tuple[InstalledNode, object]] = [(installed, None)]
+        frontier: list[tuple[InstalledNode, object, InstalledNode | None]] = [
+            (installed, None, None)
+        ]
         while frontier:
-            current, crossing = frontier.pop()
+            current, crossing, read = frontier.pop()
             for producer, hop in self._direct_producers(current):
                 if producer.item not in allowed_items:
                     continue
                 crossed = crossing or hop
+                # What the consumer's engine reads at the crossing.
+                at = read if crossing else (producer if hop else None)
                 if producer.can_load and self._is_chosen(producer):
                     # A closer crossing wins: the barrier belongs to the hop that
                     # actually left the consumer's engine.
                     prior = found.get(producer.node_id)
                     if prior is None or prior[1] is None:
-                        found[producer.node_id] = (producer, crossed)
+                        found[producer.node_id] = (producer, crossed, at)
                     continue
                 if (producer.node_id, crossed) in seen:
                     continue
                 seen.add((producer.node_id, crossed))
-                frontier.append((producer, crossed))
+                frontier.append((producer, crossed, at))
         return tuple(found[node_id] for node_id in sorted(found))
 
     def _direct_producers(
@@ -504,6 +499,20 @@ class _Planner:
                 object=through.object_id.object,
             )
         return None
+
+
+def _endpoint_table(read: InstalledNode | None) -> tuple[str, str] | None:
+    """The ``(schema, table)`` a SQL endpoint read names, or ``None`` if not a table."""
+
+    identity = getattr(read, "identity", None)
+    if (
+        read is None
+        or read.effective_object_type != "table"
+        or getattr(identity, "is_files", True)
+        or getattr(identity, "shape", None) != OBJECT_SHAPE
+    ):
+        return None
+    return (identity.object_id.schema, identity.object_id.object)
 
 
 __all__ = [

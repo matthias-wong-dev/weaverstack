@@ -35,6 +35,7 @@ LOAD_FILE_EXECUTOR = "load_file"
 RUNTIME_STATE_EXECUTOR = "runtime_state"
 LAKEHOUSE_WIPE_EXECUTOR = "lakehouse_wipe"
 COPY_FILES_EXECUTOR = "copy_files"
+ENDPOINT_OBJECTS_EXECUTOR = "await_endpoint_objects"
 #: Executors accepted in a bundle manifest. Batch executors preserve statement
 #: order; target-only executors carry no payload.
 VALID_EXECUTORS = frozenset(
@@ -51,6 +52,7 @@ VALID_EXECUTORS = frozenset(
         RUNTIME_STATE_EXECUTOR,
         LAKEHOUSE_WIPE_EXECUTOR,
         COPY_FILES_EXECUTOR,
+        ENDPOINT_OBJECTS_EXECUTOR,
     }
 )
 #: Required payload extension by executor.
@@ -67,6 +69,7 @@ _EXECUTOR_EXTENSION = {
     LOAD_FILE_EXECUTOR: ".payload",
     RUNTIME_STATE_EXECUTOR: ".runtime-state.json",
     COPY_FILES_EXECUTOR: ".copy-files.json",
+    ENDPOINT_OBJECTS_EXECUTOR: ".endpoint-objects.json",
 }
 _PAYLOADLESS_EXECUTORS = frozenset({FOLDER_EXECUTOR, LAKEHOUSE_WIPE_EXECUTOR})
 #: Payloadless exceptions for executors that otherwise require one.

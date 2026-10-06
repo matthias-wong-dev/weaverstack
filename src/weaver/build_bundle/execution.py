@@ -1,7 +1,7 @@
 """The execution intent a bundle freezes at build time.
 
 A bundle names where it installs: the workload workspace, the catalogue
-Warehouse, the Fabric Environment its remote programs need, and the Lakehouse a
+Warehouse, the Fabric Environment its programs run with, and the Lakehouse a
 Spark session attaches to. Install reads that descriptor; it never takes those
 decisions from the caller's configuration.
 

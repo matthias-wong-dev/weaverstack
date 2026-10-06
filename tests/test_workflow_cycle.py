@@ -518,6 +518,38 @@ def test_the_sequence_stops_at_the_first_failure(tmp_path, recorded, confirmed, 
 
 
 @weaver_test()
+@pytest.mark.parametrize("finding", ["test", "health"])
+def test_findings_do_not_stop_the_sequence_and_fail_it_at_the_end(
+    tmp_path, recorded, confirmed, capsys, finding
+):
+    """A failed test is a finding about the data, and later steps still mean
+    something. The workflow still fails, so a script sees it."""
+
+    calls, parser_factory, _ = recorded
+    path = _write(
+        tmp_path,
+        "workflows:\n  dev:\n    - load Lakehouse/Sales\n"
+        f"    - {finding}\n    - load Lakehouse/Sales\n",
+    )
+
+    def find(parsed):
+        calls.append(parsed)
+        return 1 if parsed.command == finding else 0
+
+    parser = parser_factory()
+    for action in parser._subparsers._group_actions[0].choices.values():
+        action.set_defaults(handler=find)
+
+    status = run_workflow(_Args("dev", file=str(path)), parser_factory=lambda: parser)
+    captured = capsys.readouterr()
+
+    assert status == 1
+    assert len(calls) == 3
+    assert "Workflow stopped" not in captured.err
+    assert f"with findings from [2] {finding}" in captured.err
+
+
+@weaver_test()
 def test_a_raised_weaver_error_stops_the_sequence_too(
     tmp_path, recorded, confirmed, capsys
 ):

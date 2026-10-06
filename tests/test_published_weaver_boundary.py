@@ -5,7 +5,7 @@ an Environment is how a Livy session starts at all; publishing a wheel into it
 is how a submitted body can `import weaver`. Conflating them put a five-minute
 publish in front of a build that submits nothing but Spark SQL.
 
-So the requirement is derived from the work: a `RemoteProgram` is Python that
+So the requirement is derived from the work: a `FabricProgram` is Python that
 imports Weaver where Spark is, and it is the only crossing that asserts the
 install.
 """
@@ -19,7 +19,7 @@ from support.weaver_test import weaver_test
 
 from weaver.errors import CommandError
 from weaver.sessions.console import ConsoleScope, ConsoleSession
-from weaver.sessions.program import RemoteProgram
+from weaver.sessions.program import FabricProgram
 from weaver.workspaces import Workspace
 
 
@@ -81,7 +81,7 @@ def test_a_program_asserts_the_install_before_it_runs(desktop):
     session, livy = desktop
 
     session.execute_python(
-        RemoteProgram(
+        FabricProgram(
             name="dispatch",
             call=lambda: None,
             source="import weaver\nemit(None)\n",
