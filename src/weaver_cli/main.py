@@ -1333,6 +1333,11 @@ def _print_load(report) -> None:
                 prefix = _style(f"{message.severity}:", message_colour)
                 print(f"      {prefix} {message.message}")
     _print_load_summary(report)
+    for message in report.messages:
+        if message.severity != "info":
+            message_colour = _RED if message.severity == "error" else _AMBER
+            prefix = _style(f"{message.severity}:", message_colour)
+            print(f"\n{prefix} {message.message}")
     if report.workflow_id:
         print(f"\n  Workflow: {_style(report.workflow_id, _DIM)}")
 
@@ -1357,6 +1362,9 @@ def _print_load_summary(report) -> None:
 
     if report.dry_run:
         print(f"\nPlan\n  {len(report.nodes):>3} selected")
+        return
+    if not report.nodes:
+        print("\nNothing to load.")
         return
 
     from weaver.load_plan import ENDPOINT_REFRESH, ONELAKE_PUBLICATION

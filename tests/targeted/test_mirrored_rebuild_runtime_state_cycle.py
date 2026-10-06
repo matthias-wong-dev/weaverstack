@@ -347,3 +347,53 @@ def test_the_stale_plan_keeps_the_order_the_rebuilt_objects_depend_in():
     assert edges
     assert (f"{REPORTING}/Sales.Source", f"{REPORTING}/Sales.Aggregate") in edges
     assert (f"{REPORTING}/Sales.Aggregate", f"{REPORTING}/Sales.Report") in edges
+
+
+@weaver_test()
+def test_a_stale_load_names_the_mirrored_objects_it_leaves_behind():
+    """Health calls them stale too, so a load that skips them says why."""
+
+    from test_health_representation import _source
+
+    from weaver.load_report import SEVERITY_WARNING
+    from weaver.operations.load import STALE_MIRRORED, _mirrored_behind
+    from weaver.workspaces import Workspace
+
+    catalogue = (
+        _Estate()
+        .table(f"{REPORTING}/Sales.Customer", loaded=at(1))
+        .mirrors(f"{REPORTING}/Sales.Customer")
+        .table(f"{REPORTING}/Sales.Order", loaded=at(1))
+        .mirrors(f"{REPORTING}/Sales.Order")
+        .catalogue()
+    )
+    source = _source(
+        (f"{REPORTING}/Sales.Customer", "succeeded", at(48)),
+        (f"{REPORTING}/Sales.Order", "succeeded", at(48)),
+    )
+    assessment = assess_load(catalogue, as_of=YESTERDAY, source=source)
+    workspace = Workspace(
+        workspace="Analytics",
+        catalogue="Warehouse/Weaver_Dev",
+        mirror="Warehouse/Weaver",
+    )
+
+    (message,) = _mirrored_behind(assessment, workspace)
+
+    assert assessment.unsettled_identities() == ()
+    assert (message.severity, message.code) == (SEVERITY_WARNING, STALE_MIRRORED)
+    assert message.message == (
+        "2 mirrored objects are behind. They load in Warehouse/Weaver, "
+        "the catalogue this one mirrors."
+    )
+
+
+@weaver_test()
+def test_a_stale_load_with_nothing_mirrored_behind_says_nothing_more():
+    from weaver.operations.load import _mirrored_behind
+    from weaver.workspaces import Workspace
+
+    catalogue = _Estate().table(f"{REPORTING}/Sales.Order", loaded=at(48)).catalogue()
+    assessment = assess_load(catalogue, as_of=YESTERDAY)
+
+    assert _mirrored_behind(assessment, Workspace(workspace="Analytics")) == ()

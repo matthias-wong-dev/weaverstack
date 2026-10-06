@@ -658,13 +658,15 @@ class _LoadHealth:
         if node.is_static:
             return
         if status.completed_at is not None and status.completed_at < self.as_of:
+            # A mirrored object is loaded where it is mirrored from, never here.
+            where = ", in the catalogue this one mirrors" if node.is_mirrored else ""
             yield _finding(
                 LOAD,
                 LOAD_STALE_TIME,
                 AMBER,
                 node,
                 status.result,
-                f"last loaded {_isoformat(status.completed_at)}",
+                f"last loaded {_isoformat(status.completed_at)}{where}",
                 status,
             )
         unestablished = self._unestablished_ancestor(node)

@@ -1381,6 +1381,31 @@ def test_a_mirrored_object_is_still_a_load_subject():
 
 
 @weaver_test()
+def test_a_stale_mirrored_object_says_where_it_is_loaded():
+    """Nothing here loads it, so its age is the catalogue it mirrors' to fix."""
+
+    estate = (
+        _Estate()
+        .table(f"{REPORTING}/Sales.Customer", loaded=at(1))
+        .mirrors(f"{REPORTING}/Sales.Customer")
+        .table(f"{REPORTING}/Sales.Order", loaded=at(48))
+    )
+
+    report = estate.report(
+        source=_source((f"{REPORTING}/Sales.Customer", "succeeded", at(48)))
+    )
+    stale = {
+        finding.object_id: finding.message
+        for finding in about(report.load, LOAD_STALE_TIME)
+    }
+
+    assert stale[f"{REPORTING}/Sales.Customer"].endswith(
+        ", in the catalogue this one mirrors"
+    )
+    assert "mirrors" not in stale[f"{REPORTING}/Sales.Order"]
+
+
+@weaver_test()
 def test_the_sources_state_replaces_the_copy_a_fork_made():
     """A fork copies ``_.LoadStatus``, and the copy describes the fork's moment."""
 

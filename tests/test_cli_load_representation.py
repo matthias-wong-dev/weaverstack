@@ -243,6 +243,39 @@ def test_the_rendered_report_says_a_reload_ran(capsys):
 
 
 @weaver_test()
+def test_a_load_that_ran_nothing_says_so_rather_than_counting_zeros(capsys):
+    _cli_module()._print_load(_report(nodes=()))
+
+    out = capsys.readouterr().out
+    assert "Nothing to load." in out
+    assert "Load summary" not in out
+
+
+@weaver_test()
+def test_a_load_says_what_it_left_and_why(capsys):
+    from weaver.load_report import warning
+
+    left = warning("stale_mirrored", "2 mirrored objects are behind.")
+
+    _cli_module()._print_load(_report(nodes=(), messages=(left,)))
+
+    assert "warning: 2 mirrored objects are behind." in capsys.readouterr().out
+
+
+@weaver_test()
+def test_a_run_level_note_is_not_printed(capsys):
+    """Notes about the plan are for a report reader, not the summary."""
+
+    from weaver.load_report import info
+
+    note = info("dependency_external", "Sales.Customer reads an outside table.")
+
+    _cli_module()._print_load(_report(messages=(note,)))
+
+    assert "outside table" not in capsys.readouterr().out
+
+
+@weaver_test()
 def test_repeated_names_reach_the_api_as_one_exact_selection(recorded):
     main(
         _command(
