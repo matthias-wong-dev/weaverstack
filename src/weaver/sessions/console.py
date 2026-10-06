@@ -51,16 +51,20 @@ def _duration(seconds: float | None) -> str:
     return f"{minutes}m{remainder:02d}s"
 
 
-def _environment_publish_command(workspace: Workspace) -> str:
+def _environment_publish_command(workspace: Workspace, *, dev: bool = False) -> str:
+    """``dev`` publishes this checkout rather than the released package."""
+
     reference = workspace.environment
     if reference is None:
-        return "`weaver fabric environment publish <environment>`"
-    if reference.workspace:
-        return f"`weaver fabric environment publish {reference}`"
-    return (
-        f"`weaver fabric environment publish {reference} "
-        f'--workspace "{workspace.workspace}"`'
-    )
+        command = "weaver fabric environment publish <environment>"
+    elif reference.workspace:
+        command = f"weaver fabric environment publish {reference}"
+    else:
+        command = (
+            f"weaver fabric environment publish {reference} "
+            f'--workspace "{workspace.workspace}"'
+        )
+    return f"`{command} --dev`" if dev else f"`{command}`"
 
 
 @dataclass(frozen=True)
@@ -961,8 +965,9 @@ class ConsoleScope(WorkspaceScope):
                 return
             self._version_checked = True
 
-        from .. import __version__ as local
+        from ..fabric.environment import local_weaver
 
+        local = local_weaver()
         try:
             published = self.livy_run(
                 "import weaver\nemit(weaver.__version__)\n",
@@ -971,11 +976,11 @@ class ConsoleScope(WorkspaceScope):
             )
         except Exception:  # noqa: BLE001 - a version check must never fail work
             return
-        if published and published != local:
+        if published and published != local.version:
             warn(
-                f"Local weaverstack is {local}; {self.name} has {published}. "
-                f"To publish the local version, run "
-                f"{_environment_publish_command(self.workspace)}."
+                f"Local weaverstack is {local.version}; {self.name} has "
+                f"{published}. To publish the local version, run "
+                f"{_environment_publish_command(self.workspace, dev=local.checkout)}."
             )
 
     def livy_run(
@@ -1038,12 +1043,13 @@ class ConsoleScope(WorkspaceScope):
 
         missing = (exc.ename or "") in ("ModuleNotFoundError", "ImportError")
         if missing and "weaver" in (exc.evalue or ""):
-            from .. import __version__
+            from ..fabric.environment import local_weaver
 
+            local = local_weaver()
             return CommandError(
                 f"{name} could not run in {self.name}: {exc.evalue}. "
-                f"Publish weaverstack {__version__} with "
-                f"{_environment_publish_command(self.workspace)}."
+                f"Publish weaverstack {local.version} with "
+                f"{_environment_publish_command(self.workspace, dev=local.checkout)}."
             )
         return exc
 
