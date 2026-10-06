@@ -164,16 +164,22 @@ def test_a_view_has_no_generated_load():
 #: A fingerprint of what each generator currently emits, beside the version that
 #: describes it. See the test below.
 GENERATED_FINGERPRINTS = {
-    "tsql": (21, "c5e7119093f72d925106971c35c914f6f5ba0266c04650cbd12a19bca7be519c"),
+    "tsql": (
+        22,
+        "c5e7119093f72d925106971c35c914f6f5ba0266c04650cbd12a19bca7be519c",
+    ),
     "tsql_append": (
-        21,
-        "1b4ea4c3b9fe98523ca7140c2636e1b88d1ea9a43233e305d919cc32904708f2",
+        22,
+        "029d684dcaf635224ef0e568fd78aa8b95fbdef482cfa120f8b75abf2882f09f",
     ),
     "tsql_append_validated": (
-        21,
-        "ba09cf91762530c401875bbf68d1ddfe349026340ae520fe476c296e5cfee4d7",
+        22,
+        "940beba21590afa6c39d7fe8fc4ea3f598f81da4344759258410b19298276e90",
     ),
-    "spark": (9, "d0cdda197f8619dc2f679b7ef270154e439b76aaaf27f5001c79b489304a6acf"),
+    "spark": (
+        9,
+        "d0cdda197f8619dc2f679b7ef270154e439b76aaaf27f5001c79b489304a6acf",
+    ),
 }
 
 
@@ -1328,3 +1334,22 @@ def test_a_full_load_is_never_skipped_for_reading_nothing():
     """Absence from a full load is a deletion, so reading nothing is work."""
 
     assert "if @weaver_rows_read > 0" not in _body(WAREHOUSE_TABLE)
+
+
+@weaver_test()
+def test_a_skipped_window_counts_no_deletion():
+    """What the target lost is counted inside the gate, with the load it describes.
+
+    Outside it, a skipped body leaves no count of the target from before, and the
+    target's whole size would read as deleted.
+    """
+
+    body = _body(_constrained_source(incremental=True))
+
+    gate = body.index("if @weaver_rows_read > 0\n")
+    counted = body.index("select @weaver_rows_deleted =")
+    assert gate < counted
+    # The count is the gated block's last statement.
+    assert body.index("from [Sales].[Customer];\n    end;", counted) > counted
+    assert body.count("select @weaver_rows_deleted =") == 1
+    assert "-- Counted with the load it describes." in body

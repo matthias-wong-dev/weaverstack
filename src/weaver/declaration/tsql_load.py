@@ -154,8 +154,13 @@ def generate_tsql_load_script(
         load_body = _primary_key_body(names, contract, claims_deletes)
     else:
         load_body = _full_replace_body(names)
+    rows_deleted = _rows_deleted_assignment(contract, names["target"])
     if contract.incremental:
-        load_body = _unless_window_empty(load_body, names, claims_deletes)
+        # Counted inside the gate: a skipped body has no target count to compare.
+        load_body = _unless_window_empty(
+            f"{load_body}\n\n{rows_deleted}", names, claims_deletes
+        )
+        rows_deleted = "-- Counted with the load it describes."
 
     procedure = render_sql_template(
         "load/load_procedure",
@@ -182,9 +187,7 @@ def generate_tsql_load_script(
         target_table=names["target"],
         load_body=_indent(load_body, 4),
         end_artifact_cleanup=_indent(_end_cleanup(names, contract, claims_deletes), 4),
-        rows_deleted_assignment=_indent(
-            _rows_deleted_assignment(contract, names["target"]), 4
-        ),
+        rows_deleted_assignment=_indent(rows_deleted, 4),
     ).rstrip()
 
     return render_sql_template(
