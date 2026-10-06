@@ -191,6 +191,22 @@ def test_public_build_resolves_a_physical_folder_shortcut(public_shortcut_build)
 
 
 @weaver_test()
+def test_a_folder_shortcut_creates_no_schema_under_tables(public_shortcut_build):
+    """A folder shortcut lives under Files, so its schema holds no table.
+
+    An empty schema under Tables is pruned by the next build and created again by
+    the one after, so no build of the project would reach a fixed point.
+    """
+
+    bundle = public_shortcut_build.run()
+    assert not [
+        action.id
+        for _sequence, _batch, action in bundle.plan.actions()
+        if action.kind == "create_schema" and "Lakehouse" in action.id
+    ]
+
+
+@weaver_test()
 def test_public_build_refuses_a_selected_shortcut_without_a_resolved_source(
     public_shortcut_build, monkeypatch
 ):
