@@ -423,7 +423,10 @@ Warehouse and four Python primitives. A node is a few small Spark jobs or T-SQL
 statements, so a load is bound by latency, and more lanes run more of it at
 once. A Warehouse reading a Lakehouse waits for one SQL endpoint refresh, and
 that refresh waits only for the Lakehouse loads read through it.
-Each node is dispatched on its own and frees its lane when it settles. A Python
+Each node is dispatched on its own and frees its lane when it settles. Of the
+nodes ready at once, the one with the longest chain still beneath it starts
+first, so a refresh many loads wait behind is reached early and what follows it
+overlaps the rest. A Python
 primitive that starts beside others runs in a Spark session of its own within
 the one Spark application, so settings and temporary views stay its own. Every
 node is decided as a serial run decides it, in graph order once its upstream has

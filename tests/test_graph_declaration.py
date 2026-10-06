@@ -297,3 +297,10 @@ def test_a_subgraph_can_pull_in_what_depends_on_it():
 @weaver_test()
 def test_a_subgraph_of_one_isolated_node():
     assert diamond().subgraph(["B"]).edges == ()
+
+
+@weaver_test()
+def test_a_height_is_the_longest_chain_from_a_node_to_a_leaf():
+    graph = Graph(["a", "b", "c", "d"], [("a", "b"), ("b", "c"), ("a", "d")])
+
+    assert graph.heights() == {"a": 3, "b": 2, "c": 1, "d": 1}

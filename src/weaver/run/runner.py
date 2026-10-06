@@ -471,10 +471,12 @@ class Runner:
     ) -> None:
         """Dispatch every node whose upstream has settled, within ``lanes``.
 
-        Each node is decided as the serial run decides it, in graph order, once
-        its upstream has settled. A failure without fault tolerance starts
-        nothing more: what is running finishes and settles, and what had not
-        started is left pending.
+        Each node is decided as the serial run decides it, once its upstream has
+        settled. Of the nodes ready at once, the one with the longest chain still
+        beneath it starts first, so a barrier such as an endpoint refresh is
+        reached early and the work behind it overlaps the rest; ties keep graph
+        order. A failure without fault tolerance starts nothing more: what is
+        running finishes and settles, and what had not started is left pending.
         """
 
         from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
@@ -482,7 +484,8 @@ class Runner:
         # Made here, once, rather than by whichever worker first asks.
         self.publication
         self.runtime_scope(session)
-        waiting = list(ordered)
+        heights = self.graph.topology.heights()
+        waiting = sorted(ordered, key=lambda node: -heights[node.node_id])
         decided: set[str] = set()
         running: dict = {}
         occupied: dict = {}

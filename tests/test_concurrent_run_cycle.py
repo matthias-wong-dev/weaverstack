@@ -245,3 +245,21 @@ def test_a_python_load_that_starts_alone_shares_the_host_spark_session():
     assert gate.isolated == {"a": False, "b": False}
     assert gate.started == ["a", "b"]
     assert set(statuses(result).values()) == {SUCCEEDED}
+
+
+@weaver_test()
+def test_of_the_nodes_ready_at_once_the_longest_chain_starts_first():
+    """A refresh many loads wait behind is reached early rather than last.
+
+    "a" sorts first but nothing waits on it; "z" has a chain beneath it.
+    """
+
+    gate = Gate()
+    made = runner(
+        nodes=[node("a"), node("z"), procedure("y"), procedure("x")],
+        edges=[("z", "y"), ("y", "x")],
+    )
+
+    run(made, gate, lanes=Lanes(spark=1))
+
+    assert gate.started.index("z") < gate.started.index("a")
