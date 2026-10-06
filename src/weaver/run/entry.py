@@ -21,9 +21,12 @@ def run_staged(entry, *, session, workspace, stage: str, workflow_id=None) -> di
     from contextlib import nullcontext
 
     from ..fabric.store import FabricStore
+    from ..lakehouse import release_mounts
     from ..locations import Location
     from ..sessions.run_in_fabric import PROGRESS, REQUEST, RESULT, progress_written
 
+    # The interpreter outlives the run; an earlier run's mounts can be stale.
+    release_mounts()
     store = FabricStore()
     root = Location(stage)
     arguments = json.loads(store.read(root / REQUEST))

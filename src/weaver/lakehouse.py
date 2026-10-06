@@ -258,6 +258,25 @@ def _notebook_utils() -> Any:
     return None
 
 
+def release_mounts() -> None:
+    """Unmount every Files mount this process made.
+
+    The host keeps a mount for the life of the process, and its listings can
+    still show a file deleted through OneLake. A run in a long-lived
+    interpreter starts with none, so it lists what storage holds.
+    """
+
+    utils = _notebook_utils()
+    with _MOUNTING:
+        for spark_root in list(_MOUNTS):
+            if utils is not None:
+                try:
+                    utils.fs.unmount(_MOUNT_POINT.format(item=_item_of(spark_root)))
+                except Exception:  # noqa: BLE001 - the next mount reports a failure
+                    pass
+            del _MOUNTS[spark_root]
+
+
 def _item_of(spark_root: str) -> str:
     return spark_root.rstrip("/").rsplit("/", 1)[-1]
 

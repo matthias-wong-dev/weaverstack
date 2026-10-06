@@ -471,3 +471,42 @@ def test_runs_sent_from_one_workflow_record_that_workflow_in_fabric(monkeypatch)
     assert load["workflow_id"] == test["workflow_id"] == "workflow-1"
     assert alone["workflow_id"] not in ("workflow-1", None)
     assert sum("workflow-1" in statement for statement in client.written) == 2
+
+
+@weaver_test()
+def test_a_run_in_fabric_starts_without_an_earlier_runs_mounts(monkeypatch):
+    """The host's mount outlives the run that made it, and can still list a
+    file deleted through OneLake since."""
+
+    from types import SimpleNamespace
+
+    from weaver import lakehouse
+    from weaver.run import entry
+
+    landing = "abfss://ws@onelake.dfs.fabric.microsoft.com/Landing"
+    unmounted = []
+    monkeypatch.setattr(
+        lakehouse,
+        "_notebook_utils",
+        lambda: SimpleNamespace(fs=SimpleNamespace(unmount=unmounted.append)),
+    )
+    monkeypatch.setitem(lakehouse._MOUNTS, landing, "/synfs/weaver/Landing")
+    store = Store()
+    root = Location(FILES) / "run"
+    store.write(root / REQUEST, b"{}")
+    monkeypatch.setattr("weaver.fabric.store.FabricStore", lambda: store)
+    seen = []
+
+    def listing(*, session, workspace):
+        seen.append(dict(lakehouse._MOUNTS))
+        return {}
+
+    entry.run_staged(
+        listing,
+        session=TestSession(workspace=WORKSPACE, executes_here=True),
+        workspace=WORKSPACE,
+        stage=root.value,
+    )
+
+    assert unmounted == ["/weaver/Landing"]
+    assert seen == [{}]
