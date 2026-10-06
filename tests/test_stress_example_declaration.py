@@ -136,8 +136,8 @@ def test_only_the_largest_fact_and_its_copy_have_no_primary_key():
 
 
 @weaver_test()
-def test_a_bookmark_is_read_only_against_a_delta_stamp():
-    """A Warehouse stamps rows with no time zone, so its readers compare Epochs."""
+def test_a_landing_table_reads_its_sources_utc_stamp_past_its_bookmark():
+    """Every stamp is UTC; each engine names it its own way."""
 
     generator = _generator()
     options = generator.Options()
@@ -157,6 +157,5 @@ def test_a_bookmark_is_read_only_against_a_delta_stamp():
         by_item[generator.SOURCE_WAREHOUSE], "SourceWarehouse"
     )
 
-    assert "self.bookmark()" in lake
-    assert "self.bookmark()" not in warehouse
-    assert "high_water(self)" in warehouse
+    assert 'rows["row_update_datetime"] > self.bookmark()' in lake
+    assert 'rows["Row update datetime"] > self.bookmark()' in warehouse

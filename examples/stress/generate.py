@@ -979,20 +979,22 @@ def high_water(table) -> int:
 '''
 
 
-def _python_read(behaviour: str, read: str, *, bookmarked: bool) -> str:
+#: The UTC change stamp each load writes, as each engine names it.
+DELTA_STAMP = "row_update_datetime"
+WAREHOUSE_STAMP = "Row update datetime"
+
+
+def _python_read(behaviour: str, read: str, *, stamp: str | None) -> str:
     """A read() body. A table parent is read past this table's bookmark.
 
-    Each load of a parent table stamps what it changed with a
-    ``row_update_datetime``, so a child reads only what changed since its own
-    last clean load began, and Delta skips every file older than that. A view
-    carries no audit column, so a reader of one, like a reader of a Warehouse,
-    uses the newest Epoch it holds.
+    Each load of a parent table stamps what it changed in UTC, so a child reads
+    only what changed since its own last clean load began, and Delta skips every
+    file older than that. A view carries no stamp, so a reader of one uses the
+    newest Epoch it holds.
     """
 
-    if bookmarked:
-        newer = (
-            "rows.where(rows.row_update_datetime > self.bookmark()).select(*COLUMNS)"
-        )
+    if stamp is not None:
+        newer = f'rows.where(rows["{stamp}"] > self.bookmark()).select(*COLUMNS)'
         rows = read
     else:
         newer = "rows.where(rows.Epoch > high_water(self))"
@@ -1018,11 +1020,8 @@ def _python_read(behaviour: str, read: str, *, bookmarked: bool) -> str:
 def _python_landing(node: Node, shortcut: str) -> str:
     source = node.source
     read = f"{shortcut}(self).{source.name}.dataframe()"
-    # A Warehouse stamps a row with a time of no zone, so a reader compares
-    # Epochs rather than read it against a bookmark through Spark's time zone.
-    body = _python_read(
-        node.behaviour, read, bookmarked=source.item != SOURCE_WAREHOUSE
-    )
+    stamp = WAREHOUSE_STAMP if source.item == SOURCE_WAREHOUSE else DELTA_STAMP
+    body = _python_read(node.behaviour, read, stamp=stamp)
     imported = "COLUMNS, high_water" if "high_water" in body else "COLUMNS"
     return f'''"""
 Table ID: {node.id}
@@ -1052,7 +1051,9 @@ def _python_table(node: Node) -> str:
     read = (
         f'self.spark.table(self.lakehouse.qualify("{parent.schema}", "{parent.name}"))'
     )
-    body = _python_read(node.behaviour, read, bookmarked=parent.table)
+    body = _python_read(
+        node.behaviour, read, stamp=DELTA_STAMP if parent.table else None
+    )
     imported = "COLUMNS, high_water" if "high_water" in body else "COLUMNS"
     return f'''"""
 Table ID: {node.id}

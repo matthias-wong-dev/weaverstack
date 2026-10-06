@@ -61,10 +61,11 @@ the whole of what they read. Each item carries one Test per behaviour, which
 compares a small table with what its parent says it should hold.
 
 A Lakehouse table reads what its parent changed since its own last clean load
-began: each load stamps the rows it changes with `row_update_datetime`, and
-`self.bookmark()` is when this table last loaded cleanly, so Delta skips every
-file older than that. A view carries no audit column, so a table reading one
-reads the newest `Epoch` it already holds. A T-SQL table does the same, reading
+began: each load stamps the rows it changes in UTC, as `row_update_datetime` in
+Delta and `Row update datetime` in a Warehouse, and `self.bookmark()` is when
+this table last loaded cleanly, so Delta skips every file older than that. A
+view carries no audit column, so a table reading one reads the newest `Epoch` it
+already holds. A T-SQL table does the same, reading
 its own table inside `if object_id(...) is not null`, because a build runs its
 query to shape the table before the table exists and Fabric resolves a name
 inside `if` only when the block runs.
