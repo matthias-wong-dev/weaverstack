@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import threading
+from contextlib import contextmanager
+
 from .resolution import (
     ENDPOINT_REFRESH,
     ONELAKE_PUBLICATION,
@@ -266,6 +269,36 @@ def isolated_spark(spark, inherited=None):
         except Exception:  # noqa: BLE001 - a static setting is shared already
             pass
     return session
+
+
+#: The thread-local property naming the fair-scheduler pool a thread's jobs join.
+_POOL = "spark.scheduler.pool"
+
+
+@contextmanager
+def own_pool(spark):
+    """Run this thread's Spark jobs in a fair-scheduler pool of its own.
+
+    Fabric schedules an application's pools fairly, but jobs that name no pool
+    share the default pool, which runs them first come first served. A small
+    load that started beside a large merge would wait for every task of it.
+    A pool per worker thread bounds the pools at the run's lanes.
+    """
+
+    try:
+        context = spark.sparkContext
+        previous = context.getLocalProperty(_POOL)
+        context.setLocalProperty(_POOL, f"weaver-{threading.current_thread().name}")
+    except Exception:  # noqa: BLE001 - scheduling is never worth a failed load
+        yield
+        return
+    try:
+        yield
+    finally:
+        try:
+            context.setLocalProperty(_POOL, previous)
+        except Exception:  # noqa: BLE001 - see above
+            pass
 
 
 #: Settings a load holds only while one statement runs, so a parent caught

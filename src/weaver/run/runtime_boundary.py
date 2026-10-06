@@ -71,6 +71,32 @@ class DirectRunScope:
         ignore_stability_threshold: bool = False,
         isolated: bool = False,
     ):
+        from .dispatch import own_pool
+
+        spark = self._spark(isolated)
+        with own_pool(spark or self._parent()):
+            return self._python(
+                node,
+                expected_class=expected_class,
+                fault_tolerant=fault_tolerant,
+                reload=reload,
+                ignore_stability_threshold=ignore_stability_threshold,
+                spark=spark,
+            )
+
+    def _parent(self):
+        return None if self._session is None else self._session.spark(self._workspace)
+
+    def _python(
+        self,
+        node,
+        *,
+        expected_class,
+        fault_tolerant,
+        reload,
+        ignore_stability_threshold,
+        spark,
+    ):
         from .dispatch import python_primitive
 
         return python_primitive(
@@ -88,20 +114,23 @@ class DirectRunScope:
             workspace=self._workspace,
             catalogue=self._catalogue,
             node_identity=node.logical_id,
-            spark=self._spark(isolated),
+            spark=spark,
         ).as_row()
 
     def dispatch_validation(self, installed, *, collect: bool, isolated: bool = False):
         from ..test_execution import run_installed_validation
+        from .dispatch import own_pool
 
-        return run_installed_validation(
-            installed,
-            session=self._session,
-            workspace=self._workspace,
-            runtime_scope=self.runtime_scope,
-            collect_diagnostics=collect,
-            spark=self._spark(isolated),
-        )
+        spark = self._spark(isolated)
+        with own_pool(spark or self._parent()):
+            return run_installed_validation(
+                installed,
+                session=self._session,
+                workspace=self._workspace,
+                runtime_scope=self.runtime_scope,
+                collect_diagnostics=collect,
+                spark=spark,
+            )
 
     def close(self) -> None:
         self.runtime_scope.close()
