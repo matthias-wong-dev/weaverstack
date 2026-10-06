@@ -313,18 +313,22 @@ dependencies:
 decertify → reset runtime state → every physical root
 schema ─→ table ─→ dependent view          drop consumer ─→ drop producer ─→ rebuild
 shortcut create ─→ readiness ─→ consumer   source object ─→ shortcut create
-Lakehouse mutations ··→ refresh start ─→ refresh await ─→ listed ─→ endpoint readers
+read table mutations ··→ refresh start ─→ refresh await ─→ listed ─→ endpoint readers
 folder ─→ runtime file                     object ─→ Warehouse procedure
 every physical success sink ─→ physical gate ─→ catalogue publication ─→ Registry
 ```
 
-`··→` is `settle_after`: a refresh reflects whatever the mutations left. A
-completed refresh does not mean the endpoint lists a new table yet, so a
-Warehouse waits until it lists every Lakehouse table it reads.
+`··→` is `settle_after`: a refresh reflects whatever the mutations left. Fabric
+syncs each changed table in turn, about half a second apiece, so a refresh
+names the tables the plan reads through the endpoint, 25 to a request, and
+follows only their mutations. A Lakehouse nothing in the plan reads through is
+not refreshed; the next load or build syncs what it reads. A schema read
+through the endpoint syncs every table. A completed refresh does not mean the
+endpoint lists a new table yet, so a Warehouse waits until it lists every
+Lakehouse table it reads, asking Fabric to sync what is missing.
 Publication certifies objects, not endpoint metadata, so the physical gate
-excludes refreshes and publication runs beside them. The Build completes only
-once every refresh it started is current, so the next operation reads a current
-endpoint. A known
+excludes refreshes. The Build completes only once every refresh it started is
+current. A known
 failure blocks only its dependents; independent branches continue, and
 publication, which needs every physical success, does not run. The final gate
 over every success sink is the required completion.
@@ -422,7 +426,8 @@ lanes the Workspace's `execution.run` sets: by default four procedures per
 Warehouse and four Python primitives. A node is a few small Spark jobs or T-SQL
 statements, so a load is bound by latency, and more lanes run more of it at
 once. A Warehouse reading a Lakehouse waits for one SQL endpoint refresh, and
-that refresh waits only for the Lakehouse loads read through it.
+that refresh waits only for the Lakehouse loads read through it and syncs only
+the tables read through it.
 Each node is dispatched on its own and frees its lane when it settles. Of the
 nodes ready at once, the one with the longest chain still beneath it starts
 first, so a refresh many loads wait behind is reached early and what follows it

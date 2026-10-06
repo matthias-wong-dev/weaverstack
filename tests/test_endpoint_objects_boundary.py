@@ -37,8 +37,8 @@ class _Resolver:
     def __init__(self):
         self.refreshed = []
 
-    def start_sql_endpoint_refresh(self, item):
-        self.refreshed.append(item.name)
+    def start_sql_endpoint_refresh(self, item, *, tables=None):
+        self.refreshed.append((item.name, tables))
 
 
 def _context(sql, resolver=None):
@@ -65,7 +65,7 @@ def test_the_wait_ends_once_every_object_is_listed():
 
 
 @weaver_test()
-def test_a_missing_object_asks_fabric_to_refresh_again(monkeypatch):
+def test_a_missing_object_asks_fabric_to_sync_it_again(monkeypatch):
     resolver = _Resolver()
     context = _context(_Endpoint(), resolver)
     executor = EndpointObjectsExecutor()
@@ -73,7 +73,9 @@ def test_a_missing_object_asks_fabric_to_refresh_again(monkeypatch):
 
     executor.execute(None, PAYLOAD, context)
 
-    assert resolver.refreshed == ["Input_Dev"]
+    assert resolver.refreshed == [
+        ("Input_Dev", [("Sales", "Customer"), ("Sales", "Order")])
+    ]
 
 
 @weaver_test()

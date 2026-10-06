@@ -470,6 +470,15 @@ def test_load_dag_places_the_barrier_after_only_what_is_read_through_it(estate):
     )
 
 
+@weaver_test()
+def test_load_dag_refresh_syncs_only_the_tables_read_through_it(estate):
+    """Fabric syncs each changed table in turn, so the barrier names its tables."""
+
+    dag = load_dag(estate, items=(PRODUCER, CONSUMER))
+
+    assert dag.by_id["refresh:Lakehouse/Raw_LH"].refresh_tables == (("Sales", "Order"),)
+
+
 #: The consumer's two bound references to the producer, on the surface a
 #: Warehouse declares them.
 _CONSUMER_REFERENCES = logical_shortcuts(
@@ -517,6 +526,7 @@ def test_load_dag_coalesces_one_endpoint_refresh_per_lakehouse(tmp_path):
         "load:Lakehouse/Raw_LH/Tables/Sales.Order",
         "load:Lakehouse/Raw_LH/Tables/Sales.Customer",
     }
+    assert refreshes[0].refresh_tables == (("Sales", "Customer"), ("Sales", "Order"))
 
 
 @weaver_test()

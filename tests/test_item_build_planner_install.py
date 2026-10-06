@@ -12,7 +12,7 @@ from support.sessions import given_installer
 from support.weaver_test import weaver_test
 from support.workspaces import WORKSPACE
 from test_item_dependencies_declaration import _dependency_estate
-from test_item_repository_declaration import _estate, _folder, _schema, _write
+from test_item_repository_declaration import _estate, _write
 
 from weaver.build_bundle import (
     ItemBinding,
@@ -850,20 +850,55 @@ def _refreshed(bundle):
     }
 
 
-@weaver_test()
-def test_a_lakehouse_item_that_mutated_delta_is_closed_by_a_refresh(tmp_path):
-    repository = _repository(_estate(tmp_path))
-    bundle = generate_item_build_bundle(
-        repository,
-        bindings=ItemBindings((_binding("Lakehouse/Raw", "Raw_Dev"),)),
+def _bundle(tmp_path, root, *items, **options):
+    return generate_item_build_bundle(
+        _repository(root),
+        bindings=ItemBindings(
+            tuple(_binding(item, f"{item.split('/')[1]}_Dev") for item in items)
+        ),
         output=Location(str(tmp_path / "bundle")),
         store=FilesystemStore(),
+        **options,
+    )
+
+
+@weaver_test()
+def test_a_lakehouse_a_warehouse_reads_syncs_what_it_reads(tmp_path):
+    """Fabric syncs each changed table in turn, so the refresh names its tables."""
+
+    bundle = _bundle(
+        tmp_path,
+        _dependency_estate(tmp_path),
+        "Lakehouse/Curated",
+        "Warehouse/Reporting",
     )
 
     refresh = _stage(bundle, "refresh mutated Lakehouse SQL endpoints")
     build = _stage(bundle, "build dependency layer")
     assert refresh.number > build.number
-    assert _refreshed(bundle) >= {"Lakehouse-Raw--lakehouse-Raw_Dev"}
+    assert _refreshed(bundle) == {"Lakehouse-Curated--lakehouse-Curated_Dev"}
+    start = next(
+        action
+        for _s, _b, action in bundle.plan.actions()
+        if action.kind == "start_sql_endpoint_refresh"
+    )
+    assert start.executor == "start_sql_endpoint_table_refresh"
+    payload = FilesystemStore().read(bundle.location.join(*start.payload.split("/")))
+    assert json.loads(payload) == {"tables": [["Sales", "Customer"]]}
+
+
+@weaver_test()
+def test_a_lakehouse_nothing_reads_through_its_endpoint_is_not_refreshed(tmp_path):
+    """A later load or build syncs what it reads before reading it."""
+
+    bundle = _bundle(tmp_path, _estate(tmp_path), "Lakehouse/Raw")
+
+    assert _refreshed(bundle) == set()
+    assert any(
+        action.kind == "build_table"
+        for _s, _b, action in bundle.plan.actions()
+        if action.executor != "completion_gate"
+    )
 
 
 @weaver_test()
@@ -879,29 +914,6 @@ def test_a_warehouse_item_has_no_endpoint_of_its_own_to_refresh(tmp_path):
     # Nothing at all: a Warehouse has no analytics endpoint of its own, and the
     # catalogue is written over TDS into the Warehouse that holds it.
     assert _refreshed(bundle) == set()
-
-
-@weaver_test()
-def test_an_item_whose_only_work_is_folders_needs_no_refresh(tmp_path):
-    """A first loadable Folder also installs runtime table shortcuts."""
-
-    root = tmp_path / "Estate"
-    _write(root, "Lakehouse/Raw/schemas/Sales.yml", _schema("Sales"))
-    _write(root, "Lakehouse/Raw/Files/Sales__Landing.py", _folder("Sales.Landing"))
-    repository = _repository(root)
-    bundle = generate_item_build_bundle(
-        repository,
-        bindings=ItemBindings((_binding("Lakehouse/Raw", "Raw_Dev"),)),
-        output=Location(str(tmp_path / "bundle")),
-        store=FilesystemStore(),
-    )
-
-    assert _refreshed(bundle) == {"Lakehouse-Raw--lakehouse-Raw_Dev"}
-    assert any(
-        action.kind == "build_folder"
-        for _s, _b, action in bundle.plan.actions()
-        if action.executor != "completion_gate"
-    )
 
 
 class _WarehouseInventory:
@@ -996,63 +1008,48 @@ def test_catalogue_tail_is_item_scoped_and_registry_is_last(tmp_path):
 
 
 @weaver_test()
-def test_each_affected_lakehouse_refreshes_once_before_the_build_completes(tmp_path):
-    """Each mutated Lakehouse refreshes after its own mutations.
+def test_a_refresh_waits_only_for_what_its_readers_read(tmp_path):
+    """The refresh follows the mutations of the tables read through it.
 
     A consumer reading through the endpoint waits for that Lakehouse's refresh,
     and the Build completes only once every refresh is current.
     """
 
-    repository = _repository(_estate(tmp_path))
-    bundle = generate_item_build_bundle(
-        repository,
-        bindings=ItemBindings(
-            (
-                _binding("Lakehouse/Raw", "Raw_Dev"),
-                _binding("Lakehouse/Curated", "Curated_Dev"),
-                _binding("Warehouse/Audit", "Audit_Dev"),
-            )
-        ),
-        output=Location(str(tmp_path / "bundle")),
-        store=FilesystemStore(),
+    bundle = _bundle(
+        tmp_path,
+        _dependency_estate(tmp_path),
+        "Lakehouse/Raw",
+        "Lakehouse/Curated",
+        "Warehouse/Reporting",
     )
 
-    refreshed = {
-        batch.target_id
-        for _sequence, batch, action in bundle.plan.actions()
-        if action.executor != "completion_gate"
-        if action.kind == "start_sql_endpoint_refresh"
-    }
-    # Both Lakehouses, and nothing else. A Warehouse is reached over SQL and has
-    # no endpoint of its own to sync, and neither has the catalogue, which is a
-    # Warehouse too.
-    assert refreshed == {
-        "Lakehouse-Raw--lakehouse-Raw_Dev",
-        "Lakehouse-Curated--lakehouse-Curated_Dev",
-    }
-
+    # Reporting reads Curated, and nothing reads Raw through its endpoint.
+    assert _refreshed(bundle) == {"Lakehouse-Curated--lakehouse-Curated_Dev"}
     assert runs_before(
         bundle.plan,
-        "object-Lakehouse--Raw--Tables--Sales.Customer",
-        "start-sql-endpoint-refresh-Lakehouse--Raw",
+        "object-Lakehouse--Curated--Tables--Sales.Customer",
+        "start-sql-endpoint-refresh-Lakehouse--Curated",
     )
-    # Publication runs beside the refresh; the Build completes after it.
     assert not runs_before(
-        bundle.plan, "await-sql-endpoint-refresh-Lakehouse--Raw", "publish-registry"
+        bundle.plan,
+        "object-Lakehouse--Raw--Tables--Sales.Customer",
+        "start-sql-endpoint-refresh-Lakehouse--Curated",
     )
     assert runs_before(
-        bundle.plan, "await-sql-endpoint-refresh-Lakehouse--Raw", "complete-build"
+        bundle.plan,
+        "await-sql-endpoint-refresh-Lakehouse--Curated",
+        "complete-build",
     )
 
 
 @weaver_test()
 def test_a_lakehouse_without_delta_mutations_gets_no_refresh(tmp_path):
-    root = _estate(tmp_path)
+    root = _dependency_estate(tmp_path)
     repository = _repository(root)
     bindings = ItemBindings(
         (
-            _binding("Lakehouse/Raw", "Raw_Dev"),
             _binding("Lakehouse/Curated", "Curated_Dev"),
+            _binding("Warehouse/Reporting", "Reporting_Dev"),
         )
     )
     # Curated's estate is already correct: its target holds everything it
@@ -1083,13 +1080,7 @@ def test_a_lakehouse_without_delta_mutations_gets_no_refresh(tmp_path):
         catalogue=catalogue,
     )
 
-    refreshed = {
-        batch.target_id
-        for _sequence, batch, action in bundle.plan.actions()
-        if action.executor != "completion_gate"
-        if action.kind == "start_sql_endpoint_refresh"
-    }
-    assert refreshed == {"Lakehouse-Raw--lakehouse-Raw_Dev"}
+    assert _refreshed(bundle) == set()
 
 
 @weaver_test()

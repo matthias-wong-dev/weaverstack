@@ -66,7 +66,7 @@ class Prepared:
 
 
 class Refreshing(FabricResolver):
-    def refresh_sql_endpoint(self, item):
+    def refresh_sql_endpoint(self, item, *, tables=None):
         raise AssertionError("a dry run must not refresh an endpoint")
 
 

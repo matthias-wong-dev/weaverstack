@@ -264,7 +264,7 @@ def test_installer_does_not_infer_refreshes_absent_from_the_bundle(tmp_path):
         def spark_destination(self, _item):
             return None
 
-        def refresh_sql_endpoint(self, _item):
+        def refresh_sql_endpoint(self, _item, *, tables=None):
             pytest.fail("the installer must not infer an endpoint refresh")
 
     location, store = _bundle(tmp_path)

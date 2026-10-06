@@ -412,7 +412,9 @@ def _endpoint_refresh(node, session, workspace):
             f"Cannot refresh the SQL endpoint for {node.physical_target}: this "
             "Session does not support endpoint refresh"
         )
-    refresh(ItemRef(node.physical_target.name))
+    # A barrier that names no table syncs every table.
+    tables = getattr(node, "refresh_tables", None)
+    refresh(ItemRef(node.physical_target.name), tables=list(tables) if tables else None)
     return LoadResult(succeeded=True)
 
 

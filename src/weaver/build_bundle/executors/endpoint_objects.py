@@ -49,7 +49,7 @@ class EndpointObjectsExecutor:
                 + f" within {int(TIMEOUT)}s"
             )
         if time.monotonic() - state["refreshed"] >= REFRESH_INTERVAL:
-            _refresh(context, {database for database, _s, _o in missing})
+            _refresh(context, missing)
             state = {**state, "refreshed": time.monotonic()}
         return Waiting({**state, "objects": missing}, POLL_INTERVAL)
 
@@ -75,15 +75,16 @@ def _missing(sql, objects) -> list[list[str]]:
     return missing
 
 
-def _refresh(context, databases) -> None:
+def _refresh(context, missing) -> None:
     from ...targets import ItemRef
 
     begin = getattr(context.resolver, "start_sql_endpoint_refresh", None)
     if begin is None:
         return
-    for database in sorted(databases):
+    for database in sorted({each[0] for each in missing}):
+        tables = [(schema, name) for one, schema, name in missing if one == database]
         try:
-            begin(ItemRef(database))
+            begin(ItemRef(database), tables=tables)
         except WeaverError:
             # One already running answers for this one.
             pass

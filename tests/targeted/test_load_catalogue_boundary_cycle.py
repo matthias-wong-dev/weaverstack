@@ -30,7 +30,7 @@ VIEWS = WeaverItemId.parse(ITEM)
 
 
 class Refreshing(FabricResolver):
-    def refresh_sql_endpoint(self, item):
+    def refresh_sql_endpoint(self, item, *, tables=None):
         return None
 
 

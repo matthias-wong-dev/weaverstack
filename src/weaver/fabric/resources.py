@@ -183,13 +183,17 @@ def delete_item(item: Item, *, client: FabricClient | None = None) -> None:
     )
 
 
+#: The most tables Fabric syncs for one refresh request.
+TABLES_PER_REFRESH = 25
+
+
 def refresh_sql_endpoint_metadata(
-    endpoint: Item, *, client: FabricClient | None = None
+    endpoint: Item, *, tables=None, client: FabricClient | None = None
 ) -> dict:
-    """Refresh every table in one SQL analytics endpoint and await completion."""
+    """Refresh one SQL analytics endpoint and await completion."""
 
     client = client or FabricClient()
-    refresh = start_sql_endpoint_refresh(endpoint, client=client)
+    refresh = start_sql_endpoint_refresh(endpoint, tables=tables, client=client)
     while not refresh["done"]:
         time.sleep(refresh["retry_after"])
         refresh = observe_sql_endpoint_refresh(refresh, client=client)
@@ -197,40 +201,105 @@ def refresh_sql_endpoint_metadata(
 
 
 def start_sql_endpoint_refresh(
-    endpoint: Item, *, client: FabricClient | None = None
+    endpoint: Item,
+    *,
+    tables=None,
+    timeout: float | None = None,
+    client: FabricClient | None = None,
 ) -> dict:
-    """Ask Fabric to refresh an endpoint and return the plain-data handle."""
+    """Ask Fabric to refresh an endpoint and return the plain-data handle.
+
+    ``tables`` names the ``(schema, table)`` pairs to sync, and ``None`` syncs
+    every table. Fabric syncs 25 tables a request, so the handle keeps the rest
+    and observation asks for each batch once the one before it completes.
+    Fabric cancels a request still running after ``timeout`` seconds, 15
+    minutes when it is omitted.
+    """
 
     if endpoint.type != SQL_ENDPOINT:
         raise CommandError(
             f"SQL endpoint refresh requires a {SQL_ENDPOINT} item. Received {endpoint.type!r}."
         )
-    from .client import accepted_operation
-
-    client = client or FabricClient()
-    response = client.request(
-        "POST",
-        f"workspaces/{endpoint.workspace_id}/sqlEndpoints/{endpoint.id}/refreshMetadata",
-        payload={"recreateTables": False},
-        expected=(200, 202),
-    )
+    batches = None if tables is None else _batches(tables)
     handle = {
         "lakehouse": endpoint.name,
+        "workspace_id": endpoint.workspace_id,
         "sql_endpoint_id": endpoint.id,
+        "timeout": timeout,
+        "remaining": batches[1:] if batches else [],
+    }
+    if batches == []:
+        return {
+            **handle,
+            "operation_id": None,
+            "location": None,
+            "retry_after": 0.0,
+            "done": True,
+            "status": "Succeeded",
+        }
+    return _request(
+        handle, None if batches is None else batches[0], client or FabricClient()
+    )
+
+
+def _batches(tables) -> list[list[dict]]:
+    """Fabric's table definitions, at most 25 tables to a request."""
+
+    pairs = sorted(dict.fromkeys((str(schema), str(table)) for schema, table in tables))
+    batches = []
+    for first in range(0, len(pairs), TABLES_PER_REFRESH):
+        by_schema: dict[str, list[str]] = {}
+        for schema, table in pairs[first : first + TABLES_PER_REFRESH]:
+            by_schema.setdefault(schema, []).append(table)
+        batches.append(
+            [
+                {"schema": schema, "tableNames": names}
+                for schema, names in by_schema.items()
+            ]
+        )
+    return batches
+
+
+def _request(handle: dict, batch, client: FabricClient) -> dict:
+    from .client import accepted_operation
+
+    payload: dict = {"recreateTables": False}
+    if batch is not None:
+        payload["tables"] = batch
+    if handle["timeout"] is not None:
+        payload["timeout"] = {"timeUnit": "Seconds", "value": int(handle["timeout"])}
+    response = client.request(
+        "POST",
+        f"workspaces/{handle['workspace_id']}/sqlEndpoints/"
+        f"{handle['sql_endpoint_id']}/refreshMetadata",
+        payload=payload,
+        expected=(200, 202),
+    )
+    started = {
+        **handle,
         "operation_id": response.headers.get("x-ms-operation-id"),
         "location": None,
         "retry_after": 0.0,
         "done": response.status_code != 202,
         "status": "Running",
     }
-    if handle["done"]:
-        return {**handle, "status": _refresh_status(response)}
+    if started["done"]:
+        return _next({**started, "status": _refresh_status(response)}, client)
     operation = accepted_operation(response)
     return {
-        **handle,
+        **started,
         "location": operation.location,
         "retry_after": operation.retry_after,
     }
+
+
+def _next(refresh: dict, client: FabricClient) -> dict:
+    """Ask for the next batch once the one before it has completed."""
+
+    if not refresh["remaining"]:
+        return refresh
+    batch, *rest = refresh["remaining"]
+    return _request({**refresh, "remaining": rest}, batch, client)
 
 
 def observe_sql_endpoint_refresh(
@@ -246,7 +315,7 @@ def observe_sql_endpoint_refresh(
     operation = client.poll_operation(
         Operation(location=refresh["location"], operation_id=refresh["operation_id"])
     )
-    return {
+    observed = {
         **refresh,
         "location": operation.location,
         "retry_after": operation.retry_after,
@@ -255,6 +324,7 @@ def observe_sql_endpoint_refresh(
         if operation.done and isinstance(operation.body, dict)
         else "Running",
     }
+    return _next(observed, client) if operation.done else observed
 
 
 def refresh_details(refresh: dict) -> dict:
