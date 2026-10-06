@@ -89,6 +89,10 @@ LARGE = 10_000_000
 #: Spark lanes than at 4.
 SPARK_CONCURRENCY = 24
 WAREHOUSE_CONCURRENCY = 12
+#: Actions a build runs at once, by capability.
+BUILD_SPARK_CONCURRENCY = 16
+BUILD_WAREHOUSE_CONCURRENCY = 8
+BUILD_ONELAKE_CONCURRENCY = 16
 
 #: The largest table that compares its whole source on every load.
 UPSERT_ROWS = 100_000
@@ -1374,6 +1378,10 @@ def render_configuration(out: Path, names: dict) -> None:
             f"catalogue: Warehouse/{catalogue}\n\n"
             f"targets:\n{bound}\n"
             "execution:\n"
+            "  build:\n"
+            f"    spark_concurrency: {BUILD_SPARK_CONCURRENCY}\n"
+            f"    warehouse_concurrency: {BUILD_WAREHOUSE_CONCURRENCY}\n"
+            f"    onelake_concurrency: {BUILD_ONELAKE_CONCURRENCY}\n"
             "  run:\n"
             f"    spark_concurrency: {SPARK_CONCURRENCY}\n"
             f"    warehouse_concurrency: {WAREHOUSE_CONCURRENCY}\n"

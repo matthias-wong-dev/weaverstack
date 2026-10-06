@@ -313,6 +313,30 @@ class _Invocation:
                     self.children[parent].append((key, False))
             if not self.remaining[key]:
                 self.ready.add(key)
+        self.height = self._heights()
+
+    def _heights(self):
+        """How many actions the longest chain from each action onwards holds.
+
+        Ready actions start longest chain first, so an endpoint refresh that the
+        Warehouse objects wait behind is reached as early as it can be.
+        """
+
+        waiting = dict(self.remaining)
+        frontier = [key for key, count in waiting.items() if not count]
+        ordered = []
+        while frontier:
+            key = frontier.pop()
+            ordered.append(key)
+            for child, _required in self.children[key]:
+                waiting[child] -= 1
+                if not waiting[child]:
+                    frontier.append(child)
+        height = {}
+        for key in reversed(ordered):
+            below = (height[child] for child, _required in self.children[key])
+            height[key] = 1 + max(below, default=0)
+        return height
 
     def now(self):
         return self.executor.clock.monotonic()
@@ -498,7 +522,9 @@ class _Invocation:
         )
 
     def dispatch(self, pool):
-        for key in sorted(self.ready, key=self.order.get):
+        for key in sorted(
+            self.ready, key=lambda key: (-self.height[key], self.order[key])
+        ):
             if len(self.running) >= self.executor.workers:
                 break
             state = self.states[key]
