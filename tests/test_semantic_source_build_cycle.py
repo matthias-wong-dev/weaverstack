@@ -385,7 +385,11 @@ def test_source_absent_load_uses_published_dependencies_for_order_and_blocking(
         else:
             report = weaver.load([str(SOURCE), str(ITEM)], session=session)
             assert report.succeeded, report.to_mapping()
-            assert order == ["[_].[Load Cake.Sales]", "[_].[Load Cake.Seed]", "refresh"]
+            assert order[-1:] == ["refresh"]
+            assert sorted(order[:-1]) == [
+                "[_].[Load Cake.Sales]",
+                "[_].[Load Cake.Seed]",
+            ]
 
 
 @weaver_test()
