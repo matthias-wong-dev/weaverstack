@@ -429,8 +429,8 @@ first, so a refresh many loads wait behind is reached early and what follows it
 overlaps the rest. A Python
 primitive that starts beside others runs in a Spark session of its own within
 the one Spark application, so settings and temporary views stay its own. Every
-node is decided as a serial run decides it, in graph order once its upstream has
-settled, and every settlement and catalogue write happens in the thread running
+node is decided as a serial run decides it, once its upstream has settled, and
+every settlement and catalogue write happens in the thread running
 the run. Without fault tolerance a failure starts nothing more: running nodes
 finish and settle, and nodes not yet started stay pending. Two concurrent load
 commands are separate writers of the same catalogue tables, which a Warehouse
