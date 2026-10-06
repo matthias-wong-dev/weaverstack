@@ -361,6 +361,40 @@ def test_the_column_never_narrows_below_its_floor(monkeypatch):
 
 
 @weaver_test()
+def test_the_live_line_fits_a_narrow_terminal(monkeypatch):
+    """A carriage return reaches back only to the start of its row.
+
+    A live line wider than the terminal wraps, and every repaint then leaves
+    the rows above it behind: the screen fills with copies of one line.
+    """
+
+    import shutil
+    import time
+
+    monkeypatch.setattr(
+        shutil, "get_terminal_size", lambda *a: os.terminal_size((40, 24))
+    )
+    out = _Tty()
+    with ConsoleSession(progress=out) as session:
+        session.PROGRESS_TICK = 0.05
+        with session.task("Publish Environment"):
+            with session.step("Stage the Weaver libraries for publication"):
+                time.sleep(0.2)
+
+    painted = [
+        part
+        for chunk in _plain(out.getvalue()).split("\n")
+        for part in chunk.split("\r")
+        if part.startswith("⋯")
+    ]
+    assert len(painted) > 1
+    assert max(len(part) for part in painted) < 40
+    assert any(
+        part.startswith("⋯ Stage the Weaver libraries for… ") for part in painted
+    )
+
+
+@weaver_test()
 def test_the_elapsed_figure_moves_while_nothing_else_happens():
     """Without a ticker the line is painted only when some other frame opens or
     closes, which, for the long waits that most need it, is never."""

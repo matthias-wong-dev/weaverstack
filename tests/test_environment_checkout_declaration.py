@@ -166,3 +166,44 @@ def test_a_rejected_candidate_never_starts_a_build(tmp_path, monkeypatch):
         )
 
     assert started == [], "a build backend ran against an unidentified project"
+
+
+# --- the version a checkout publishes -------------------------------------------
+
+
+@weaver_test()
+def test_a_checkout_reports_the_version_its_wheel_would_carry():
+    """Its installation metadata is fixed when installed and goes stale."""
+
+    import importlib.util
+
+    root = project_root()
+    spec = importlib.util.spec_from_file_location("build", root / "hatch_build.py")
+    build = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(build)
+
+    local = env_mod.local_weaver()
+
+    assert local == env_mod.LocalWeaver(build.compute_version(), checkout=True)
+
+
+@weaver_test()
+def test_an_installed_wheel_reports_its_own_version(tmp_path):
+    from weaver import __version__
+
+    local = env_mod.local_weaver(_installed(tmp_path / "venv"))
+
+    assert local == env_mod.LocalWeaver(__version__, checkout=False)
+
+
+@weaver_test()
+def test_a_wheel_installed_in_a_checkouts_venv_is_not_the_checkout(tmp_path):
+    """Its ``pyproject.toml`` is above the module, and its source is not."""
+
+    from weaver import __version__
+
+    checkout = _project(tmp_path / "weaverstack", WEAVER_PROJECT)
+
+    local = env_mod.local_weaver(_installed(checkout / ".venv"))
+
+    assert local == env_mod.LocalWeaver(__version__, checkout=False)

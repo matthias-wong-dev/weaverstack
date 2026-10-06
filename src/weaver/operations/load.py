@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Sequence
@@ -23,12 +24,16 @@ from ..load_report import (
     SUCCEEDED_WITH_REJECTS,
     LoadNodeReport,
     LoadRunReport,
+    warning,
 )
 from ..targets import lakehouse_names
 from .items import requested_items, run_context_lines, run_scope
 
 #: Kept local to avoid importing ``weaver.run`` eagerly; must match ``LOAD_TASK``.
 TASK_TYPE = "load"
+
+#: Stale objects a load here does not run, because they are mirrored.
+STALE_MIRRORED = "stale_mirrored"
 
 
 def load(
@@ -177,6 +182,7 @@ def run_load(
     session.report(run_context_lines(workspace, items, installed))
 
     selected = None
+    left = ()
     if stale:
         from .mirror import mirrored_source
 
@@ -189,12 +195,14 @@ def run_load(
             operation="load --stale",
             tables=(LOAD_STATUS,),
         )
-        selected = assess_load(
+        assessment = assess_load(
             catalogue,
             as_of=as_of if as_of is not None else resolve_as_of(None, started=started),
             items=items,
             source=source,
-        ).unsettled_identities()
+        )
+        selected = assessment.unsettled_identities()
+        left = _mirrored_behind(assessment, workspace)
 
     # Fabric requires a Lakehouse attachment before Spark starts.
     session.offer_spark_home(lakehouse_names(installed.values()), workspace=workspace)
@@ -231,9 +239,27 @@ def run_load(
         decode=LoadRunReport.from_mapping,
     )
     report = session.execute_run(run, workspace=workspace)
+    if left:
+        report = replace(report, messages=(*report.messages, *left))
     if not fault_tolerant and not dry_run:
         _raise_for_failure(report)
     return report
+
+
+def _mirrored_behind(assessment, workspace) -> tuple:
+    """Say which stale objects a load here leaves, because they are mirrored."""
+
+    behind = [subject for subject in assessment.unsettled() if subject.node.is_mirrored]
+    if not behind:
+        return ()
+    count = len(behind)
+    noun = "object is" if count == 1 else "objects are"
+    return (
+        warning(
+            STALE_MIRRORED,
+            f"{count} mirrored {noun} behind in {workspace.mirror}.",
+        ),
+    )
 
 
 def load_runner(session, workspace, state, request):

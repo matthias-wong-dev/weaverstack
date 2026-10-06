@@ -344,6 +344,7 @@ def test_the_slowest_loads_and_the_rows_that_moved_are_shown(captured, capsys):
 
     assert "Slowest loads" in printed
     assert "31.2s" in printed
+    assert "Largest changes" in printed
     assert "read 5,412  +12 ~3 -0 !0" in printed
 
 

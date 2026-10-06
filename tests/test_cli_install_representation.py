@@ -111,11 +111,27 @@ def test_bundle_install_hands_core_the_bundle_and_an_unplaced_session(
     assert "Bundle  bundle" in output
 
 
-class _Result:
-    workspace_name = "Sales"
+def _Result(**changes):
+    from dataclasses import replace
 
-    def as_dict(self):
-        return {"environment_name": "Runtime", "published": True, "timings": {}}
+    from weaver.fabric.environment import EnvironmentPublishResult
+
+    published = EnvironmentPublishResult(
+        workspace_name="Sales",
+        workspace_id="w-1",
+        environment_name="Runtime",
+        environment_id="e-1",
+        source_path=None,
+        mode="dev",
+        weaver_requirement=None,
+        wheel_filename="weaverstack-0.9.0.dev2-py3-none-any.whl",
+        removed_wheels=("weaverstack-0.9.0.dev1-py3-none-any.whl",),
+        action="updated",
+        published=True,
+        publish_status="Success",
+        timings={"publish": 1.0},
+    )
+    return replace(published, **changes)
 
 
 @weaver_test()
@@ -182,7 +198,61 @@ def test_environment_publish_prints_its_result(monkeypatch, capsys):
         ["fabric", "environment", "publish", "Runtime", "--workspace", "Sales"]
     )
     assert handle_environment_publish(args) == 0
+    out = capsys.readouterr().out
+    assert "Published Runtime in Sales" in out
+    assert (
+        "Weaver   weaverstack-0.9.0.dev2-py3-none-any.whl, built from this checkout"
+        in out
+    )
+    assert "Removed  weaverstack-0.9.0.dev1-py3-none-any.whl" in out
+    assert "{" not in out
+
+    args = build_parser().parse_args(
+        ["fabric", "environment", "publish", "Runtime", "--json"]
+    )
+    assert handle_environment_publish(args) == 0
     assert '"published": true' in capsys.readouterr().out
+
+
+@weaver_test()
+def test_an_unchanged_environment_says_nothing_was_published(capsys):
+    cli = import_module("weaver_cli.main")
+
+    cli._print_publish(_Result(published=False, action="unchanged", removed_wheels=()))
+
+    assert capsys.readouterr().out.strip() == (
+        "Runtime in Sales already holds weaverstack-0.9.0.dev2-py3-none-any.whl, "
+        "built from this checkout. Nothing was published."
+    )
+
+
+@weaver_test()
+def test_the_configured_environment_is_published_when_none_is_named(
+    monkeypatch, capsys
+):
+    """The workspace configuration names the Environment its runs attach."""
+
+    cli = import_module("weaver_cli.main")
+    from weaver.workspaces import Workspace
+
+    workspace = Workspace(workspace="Sales", environment="Runtime")
+    monkeypatch.setattr(cli, "_resolve_workspace", lambda args: workspace)
+    monkeypatch.setattr(cli, "_prefer_desktop_credential", lambda *_args: None)
+    monkeypatch.setattr(cli, "_session", lambda args: _RecordingSession())
+    seen = {}
+
+    import weaver.fabric as fabric
+
+    def publish(workspace_name, environment=None, **keywords):
+        seen.update(workspace_name=workspace_name, environment=environment)
+        return _Result()
+
+    monkeypatch.setattr(fabric, "publish_environment", publish)
+
+    args = build_parser().parse_args(["fabric", "environment", "publish", "--dev"])
+
+    assert handle_environment_publish(args) == 0
+    assert seen == {"workspace_name": "Sales", "environment": workspace.environment}
 
 
 @weaver_test()
@@ -227,13 +297,18 @@ def test_a_path_and_a_named_environment_are_not_both_given(monkeypatch):
 
 
 @weaver_test()
-def test_publishing_needs_a_name_or_a_path():
+def test_publishing_needs_a_name_a_path_or_a_configured_environment(monkeypatch):
+    cli = import_module("weaver_cli.main")
     from weaver.errors import CommandError
+    from weaver.workspaces import Workspace
     from weaver_cli.main import build_parser, handle_environment_publish
 
+    monkeypatch.setattr(
+        cli, "_resolve_workspace", lambda args: Workspace(workspace="Sales")
+    )
     args = build_parser().parse_args(["fabric", "environment", "publish"])
 
-    with pytest.raises(CommandError, match="or pass --path"):
+    with pytest.raises(CommandError, match="or set environment: in the workspace"):
         handle_environment_publish(args)
 
 
