@@ -1641,7 +1641,7 @@ def _health_activity(report) -> list[str]:
         lines.append("")
     moved = report.moved()
     if moved:
-        lines.append("Recent activity")
+        lines.append("Largest changes")
         lines.extend(
             _health_row(
                 each.object_id,
