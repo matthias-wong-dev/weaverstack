@@ -11,7 +11,8 @@ rows. Execution then reads nothing it did not plan:
     wipe item B ─→ reconstruct item B ─────────────────────┴→ fork, record, bind
 
 A reconstructed Lakehouse's SQL endpoint is refreshed, and a Warehouse view
-that reads it through the endpoint waits until it is current.
+that reads it through the endpoint waits until it is current. Anything reading
+another mirrored item otherwise waits for that item's reconstruction.
 
 The fork, the record of what each item borrows and the binding of each item to
 its mirror are one transaction, after every reconstruction. Until it commits
@@ -183,6 +184,7 @@ def mirror_mutation_plan(resolved, *, session) -> tuple[MutationPlan, dict, dict
         compiling, resolved, catalogue=catalogue, after=finishing(wipe)
     )
 
+    kinds = {str(each.item): each.kind for each in resolved.items}
     reconstructed: dict[str, tuple[str, ...]] = {}
     #: What a reader through each Lakehouse's SQL endpoint waits for.
     current: dict[str, tuple[str, ...]] = {}
@@ -195,13 +197,16 @@ def mirror_mutation_plan(resolved, *, session) -> tuple[MutationPlan, dict, dict
         )
         compiling.payloads.update(written)
         compiling.stage(f"empty {each.target}", destination, cleared)
-        # A Lakehouse reads its producers through OneLake; a Warehouse reads
-        # them through their SQL endpoints.
-        produced = reconstructed if each.kind == LAKEHOUSE else current
+        # A Warehouse reads a Lakehouse through its SQL endpoint, so it waits
+        # for the refresh. Anything else reads what the producer reconstructed.
         producers = tuple(
             action
             for item in _producers(each, resolved)
-            for action in produced.get(item, ())
+            for action in (
+                current
+                if each.kind != LAKEHOUSE and kinds[item] == LAKEHOUSE
+                else reconstructed
+            ).get(item, ())
         )
         if each.kind == LAKEHOUSE:
             actions, summary[str(each.item)] = _lakehouse(

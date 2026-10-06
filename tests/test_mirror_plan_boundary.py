@@ -482,3 +482,66 @@ def test_a_wide_lakehouse_mirror_spreads_its_views_and_waits_across_actions(tmp_
     for each in (*views, *waits):
         assert runs_before(plan, each, PUBLISH)
     assert not any(runs_before(plan, a, b) for a in views for b in views if a != b)
+
+
+@weaver_test()
+def test_a_warehouse_reading_another_mirrored_warehouse_waits_for_its_reconstruction():
+    """Both destinations are emptied and rebuilt at once, so a view over the
+    other Warehouse's table needs that table rebuilt first."""
+
+    from dataclasses import replace
+
+    from weaver.installed import InstalledShortcut
+
+    def warehouse(item, *relations):
+        return _resolved(
+            item,
+            "Warehouse",
+            relations=tuple(
+                Borrowed(WeaverDocumentId.parse(relation), "table", "view")
+                for relation in relations
+            ),
+        )
+
+    core = warehouse("Core", "Warehouse/Core/Sales.Customer")
+    finance = warehouse("Finance", "Warehouse/Finance/Ledger.Entry")
+    mart_item = WeaverItemId.parse("Warehouse/Mart")
+    mart = MirrorItem(
+        item=mart_item,
+        source_target="Mart",
+        destination="Mart_Dev",
+        shortcuts=(
+            InstalledShortcut(
+                destination=WeaverDocumentId.parse("Warehouse/Mart/Sales.CustomerView"),
+                source=WeaverDocumentId.parse("Warehouse/Core/Sales.Customer"),
+                shortcut_type="view",
+                target_type="logical",
+                target_item=WeaverItemId.parse("Warehouse/Core"),
+                target_schema="Sales",
+                target_object="Customer",
+            ),
+        ),
+    )
+    resolved = replace(
+        core,
+        items=(*core.items, *finance.items, mart),
+        bindings={**core.bindings, **finance.bindings, mart_item: "Mart_Dev"},
+        installations={
+            **core.installations,
+            **finance.installations,
+            mart_item: {},
+        },
+    )
+
+    plan, _payloads, _summary = mirror_mutation_plan(resolved, session=_Session())
+
+    actions = _actions(plan)
+    produced = "mirror-relations-warehouse-Core_Dev-000"
+    view = "mirror-pointers-warehouse-Mart_Dev-000"
+    assert produced in actions[view].depends_on
+    assert runs_before(plan, produced, view)
+    # Finance is neither read nor reading, so nothing orders it against them.
+    unrelated = "mirror-relations-warehouse-Finance_Dev-000"
+    for other in (produced, view):
+        assert not runs_before(plan, unrelated, other)
+        assert not runs_before(plan, other, unrelated)
