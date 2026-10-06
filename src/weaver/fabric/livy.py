@@ -320,8 +320,9 @@ class LivySession:
         self.weaver_bootstrap = weaver_bootstrap
         self.session_url: str | None = None
         self._weaver_asserted = False
+        #: Held while a replacement starts, so callers that find the session
+        #: ended wait for the one replacement rather than each starting one.
         self._restarting = threading.Lock()
-        self._replacing = threading.local()
         #: Called after Fabric's ended session has been replaced.
         self.restarted = None
 
@@ -383,16 +384,17 @@ class LivySession:
 
         if self._weaver_asserted:
             return
+        self.run(self._weaver_source())
+        self._weaver_asserted = True
+
+    def _weaver_source(self) -> str:
         if self.weaver_bootstrap is not None:
-            self.run(self.weaver_bootstrap)
-            self._weaver_asserted = True
-            return
+            return self.weaver_bootstrap
         if not self.environment_id:
             from ..errors import CommandError
 
             raise CommandError(missing_environment())
-        self.run(environment_bootstrap())
-        self._weaver_asserted = True
+        return environment_bootstrap()
 
     def __enter__(self) -> "LivySession":
         self.start()
@@ -404,6 +406,15 @@ class LivySession:
 
     def start(self, *, timeout: float = DEFAULT_SESSION_TIMEOUT) -> None:
         self._weaver_asserted = False
+        self.session_url = self._started(timeout=timeout)
+
+    def _started(self, *, timeout: float) -> str:
+        """Create a session, wait until it is idle and bootstrap it.
+
+        Returns its URL without publishing it, so no caller submits into a
+        session that is not ready.
+        """
+
         payload: dict[str, Any] = {"name": "weaver"}
         if self.environment_id:
             # Fabric attaches published Environment libraries through Spark
@@ -418,8 +429,8 @@ class LivySession:
             session_id = created.get("id") or created.get("livyId")
             if session_id is None:
                 raise LivyError(f"Livy did not return a session id: {created}")
-            self.session_url = f"{self.base}/{session_id}"
-            self._await("idle", timeout=timeout)
+            url = f"{self.base}/{session_id}"
+            self._await(url, "idle", timeout=timeout)
         except LivyError as exc:
             if self.environment_reference and self.workspace_name:
                 raise LivyError(
@@ -428,12 +439,13 @@ class LivySession:
                 ) from exc
             raise
         if self.bootstrap:
-            self.run(self.bootstrap)
+            self._run_on(url, self.bootstrap)
+        return url
 
-    def _await(self, wanted: str, *, timeout: float) -> dict:
+    def _await(self, url: str, wanted: str, *, timeout: float) -> dict:
         deadline = time.time() + timeout
         while time.time() < deadline:
-            state = _call("GET", self.session_url, self.token, expected=(200,))
+            state = _call("GET", url, self.token, expected=(200,))
             current = (state.get("state") or "").lower()
             if current == wanted:
                 return state
@@ -465,18 +477,30 @@ class LivySession:
         :class:`LivyOutcomeUnknown`.
         """
 
-        if self.session_url is None:
+        url = self.session_url
+        if url is None:
             raise LivyError("The Livy session has not been started.")
-
-        submitted_to = self.session_url
         try:
-            statement_url = self._submit(code, retry_submission=retry_submission)
+            statement_url = self._submit(url, code, retry_submission=retry_submission)
         except LivySessionEnded:
-            # The new session's own start-up statements are not replaced again.
-            if getattr(self._replacing, "active", False):
-                raise
-            self._replace(submitted_to)
-            statement_url = self._submit(code, retry_submission=retry_submission)
+            self._replace(url)
+            url = self.session_url
+            if url is None:
+                raise LivyError("The Livy session was closed.") from None
+            statement_url = self._submit(url, code, retry_submission=retry_submission)
+        return self._follow(statement_url, timeout=timeout)
+
+    def _run_on(
+        self, url: str, code: str, *, timeout: float = DEFAULT_STATEMENT_TIMEOUT
+    ) -> StatementResult:
+        """Run a statement on one session, never a replacement."""
+
+        return self._follow(
+            self._submit(url, code, retry_submission=True), timeout=timeout
+        )
+
+    def _follow(self, statement_url: str, *, timeout: float) -> StatementResult:
+        """Poll an accepted statement on the session that accepted it."""
 
         deadline = time.time() + timeout
         wait = min(FIRST_STATEMENT_POLL, self.poll_interval)
@@ -502,30 +526,32 @@ class LivySession:
             f"Livy statement did not finish within {int(timeout)}s"
         )
 
-    def _submit(self, code: str, *, retry_submission: bool) -> str:
+    def _submit(self, url: str, code: str, *, retry_submission: bool) -> str:
+        """Submit to one session; the statement is followed there and nowhere else."""
+
         submitted = _call(
             "POST",
-            f"{self.session_url}/statements",
+            f"{url}/statements",
             self.token,
             {"code": code, "kind": "pyspark"},
             retry_transient=retry_submission,
         )
-        return f"{self.session_url}/statements/{submitted['id']}"
+        return f"{url}/statements/{submitted['id']}"
 
     def _replace(self, ended: str) -> None:
-        """Start a new session unless a concurrent caller already has."""
+        """Start a new session unless a concurrent caller already has.
+
+        The replacement is published only once it is idle and bootstrapped as
+        the ended one was.
+        """
 
         with self._restarting:
             if self.session_url != ended:
                 return
-            asserted = self._weaver_asserted
-            self._replacing.active = True
-            try:
-                self.start()
-                if asserted:
-                    self.ensure_weaver()
-            finally:
-                self._replacing.active = False
+            url = self._started(timeout=DEFAULT_SESSION_TIMEOUT)
+            if self._weaver_asserted:
+                self._run_on(url, self._weaver_source())
+            self.session_url = url
         if self.restarted is not None:
             self.restarted()
 
