@@ -32,8 +32,10 @@ so the estate measures Weaver rather than capacity:
 | folders | 40 | a file per change | a new file |
 
 Sources of 10M rows or more deliver only what changed. Smaller sources hold
-their whole contents, with each row stamped by the load that last changed it. A source changes every 1 to 20 days according to its
-size, so a typical day changes about one source in seven.
+their whole contents, with each row stamped by the load that last changed it.
+A source changes every 1 to 20 days according to its size, so a typical day
+changes about one source in seven. Updates and deletions fall in the newest
+tenth of a source's rows, as real changes cluster in recent records.
 
 The estate reads them through four layers in each of three items:
 

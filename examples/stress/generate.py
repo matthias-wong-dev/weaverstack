@@ -84,6 +84,10 @@ DIMENSION_ROWS = 1000
 
 LARGE = 10_000_000
 
+#: Updates and deletions fall in the newest ``1 / RECENT`` of a source's first
+#: rows and everything inserted since, as real changes cluster in recent rows.
+RECENT = 10
+
 #: Nodes a load runs at once. Loads are latency-bound rather than
 #: compute-bound: on an F64, 60 Lakehouse loads ran 3.5 times faster at 24
 #: Spark lanes than at 4.
@@ -585,16 +589,34 @@ def _description(node: Node) -> str:
 SOURCE_LIBRARY = '''"""Deterministic source rows, from a source's parameters and the day.
 
 A source holds ids ``[0, rows + epoch * inserts)``. Each epoch it inserts
-``inserts`` rows, updates the rows whose id is congruent to the epoch modulo
-``updates``, and marks deleted the rows congruent to it modulo ``deletes``. A
-row's Epoch is when it last changed, so a reader takes only what is newer than
-what it holds.
+``inserts`` rows. Changes fall in its recent rows, the newest tenth of its
+first ``rows`` and everything inserted since, as real updates and
+cancellations do. Each epoch updates one recent row in ``updates // RECENT``,
+those congruent to the epoch, and marks one in ``deletes // RECENT`` deleted,
+so the daily volume is what one row in ``updates`` and ``deletes`` of the whole
+source would be. A row's Epoch is when it last changed, so a reader takes only
+what is newer than what it holds.
 """
 
 from pyspark.sql import functions as F
 
 #: Ids are generated in partitions of about this many rows.
 PARTITION_ROWS = 4_000_000
+
+#: Changes fall in the newest ``1 / RECENT`` of a source's first rows.
+RECENT = 10
+
+
+def recent(rows: int) -> int:
+    """The first id that changes."""
+
+    return rows - rows // RECENT
+
+
+def stride(every: int) -> int:
+    """One changing row in this many, among the recent rows."""
+
+    return max(1, every // RECENT)
 
 
 def today(clock) -> int:
@@ -620,16 +642,25 @@ def _state(ids, epoch: int, rows: int, inserts: int, updates: int, deletes: int)
     frame = ids.withColumn(
         "birth", F.expr(f"case when id < {rows} then 0 else 1 + (id - {rows}) div {inserts} end")
     )
+    first = recent(rows)
     if updates:
         frame = frame.withColumn(
-            "r", F.expr(f"{epoch} - pmod({epoch} - id, {updates})")
+            "r",
+            F.expr(
+                f"case when id >= {first} "
+                f"then {epoch} - pmod({epoch} - id, {stride(updates)}) end"
+            ),
         ).withColumn("u", F.expr("case when r >= 1 and r > birth then r else birth end"))
     else:
         frame = frame.withColumn("u", F.col("birth"))
     if deletes:
         frame = frame.withColumn(
-            "m", F.expr(f"birth + 1 + pmod(id - birth - 1, {deletes})")
-        ).withColumn("gone", F.expr(f"m <= {epoch}"))
+            "m",
+            F.expr(
+                f"case when id >= {first} "
+                f"then birth + 1 + pmod(id - birth - 1, {stride(deletes)}) end"
+            ),
+        ).withColumn("gone", F.expr(f"coalesce(m <= {epoch}, false)"))
     else:
         frame = frame.withColumn("m", F.lit(0)).withColumn("gone", F.lit(False))
     return frame.selectExpr(
@@ -671,11 +702,11 @@ def feed(table, clock, *, rows, inserts, period, phase, updates, deletes):
         ids = _ids(spark, 0, rows + current * inserts)
     else:
         ids = _ids(spark, rows + high * inserts, rows + current * inserts)
+        first = recent(rows)
         windows = [
-            _ids(spark, day % every, rows + (day - 1) * inserts, every)
+            _ids(spark, first + (day - first) % every, rows + (day - 1) * inserts, every)
             for day in range(high + 1, current + 1)
-            for every in (updates, deletes)
-            if every
+            for every in (stride(one) for one in (updates, deletes) if one)
         ]
         for window in windows:
             ids = ids.unionByName(window)
@@ -830,9 +861,22 @@ class {source.schema}__{source.name}(Folder):
 '''
 
 
+def _recent(rows: int) -> int:
+    """The first id that changes, as the source library's ``recent``."""
+
+    return rows - rows // RECENT
+
+
+def _stride(every: int) -> int:
+    """As the source library's ``stride``: zero for a source that never changes."""
+
+    return max(1, every // RECENT) if every else 0
+
+
 def _tsql_source(source: Source) -> str:
     rows, inserts = source.rows, source.inserts
-    updates, deletes = source.updates, source.deletes
+    updates, deletes = _stride(source.updates), _stride(source.deletes)
+    first = _recent(rows)
     total = f"cast({rows} as bigint) + today.e * cast({inserts} as bigint) - 1"
     clock = (
         f"    select (coalesce(max([Day]), 0) + {source.phase}) / {source.period} as e\n"
@@ -856,7 +900,8 @@ def _tsql_source(source: Source) -> str:
                     "    from today cross join held\n"
                     "    cross apply generate_series(held.h + 1, today.e, 1) as d\n"
                     "    cross apply generate_series(\n"
-                    f"        cast(d.value % {every} as bigint),\n"
+                    f"        cast({first} + ((d.value - {first}) % {every} + {every})"
+                    f" % {every} as bigint),\n"
                     f"        cast({rows} as bigint)"
                     f" + cast(d.value - 1 as bigint) * cast({inserts} as bigint) - 1,\n"
                     f"        cast({every} as bigint)) as g\n"
@@ -883,12 +928,14 @@ def _tsql_source(source: Source) -> str:
         window = ""
         preamble = ""
     update = (
-        f"today.e - (((today.e - i.Id) % {updates}) + {updates}) % {updates}"
+        f"case when i.Id >= {first} "
+        f"then today.e - (((today.e - i.Id) % {updates}) + {updates}) % {updates} end"
         if updates
         else "cast(0 as bigint)"
     )
     delete = (
-        f"b.birth + 1 + (((i.Id - b.birth - 1) % {deletes}) + {deletes}) % {deletes}"
+        f"case when i.Id >= {first} "
+        f"then b.birth + 1 + (((i.Id - b.birth - 1) % {deletes}) + {deletes}) % {deletes} end"
         if deletes
         else "cast(9223372036854775807 as bigint)"
     )
