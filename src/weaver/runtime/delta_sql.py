@@ -29,6 +29,23 @@ _CANONICAL_TEXT = {
 
 _CANONICAL_FALLBACK = "CAST({column} AS STRING)"
 
+#: Nested values as JSON. Spark's own text for them neither quotes nor escapes
+#: elements, so ``["a, b"]`` and ``["a", "b"]`` read the same, as do ``[null]``
+#: and ``["null"]``. Nested timestamps are written in UTC to the microsecond.
+_NESTED_TEXT = (
+    "to_json({column}, map('timeZone', 'UTC', "
+    "'timestampFormat', 'yyyy-MM-dd HH:mm:ss.SSSSSS', "
+    "'timestampNTZFormat', 'yyyy-MM-dd HH:mm:ss.SSSSSS', "
+    "'ignoreNullFields', 'false'))"
+)
+_NESTED_TYPES = ("array<", "map<", "struct<")
+
+
+def _canonical_text(kind: str) -> str:
+    if kind.startswith(_NESTED_TYPES):
+        return _NESTED_TEXT
+    return _CANONICAL_TEXT.get(kind, _CANONICAL_FALLBACK)
+
 
 def delta_audit_names() -> tuple[str, str, str]:
     return tuple(audit_column_name(logical, PYTHON) for logical in AUDIT_COLUMNS)
@@ -60,8 +77,7 @@ def row_signature(alias: str, columns, types) -> str:
     pieces = []
     for column in columns:
         reference = f"{prefix}`{column}`"
-        template = _CANONICAL_TEXT.get(types.get(column, ""), _CANONICAL_FALLBACK)
-        text = template.format(column=reference)
+        text = _canonical_text(types.get(column, "")).format(column=reference)
         pieces.append(
             f"CASE WHEN {reference} IS NULL THEN '{NULL_MARKER}'"
             f" ELSE concat(CAST(length({text}) AS STRING), ':', {text}) END"
