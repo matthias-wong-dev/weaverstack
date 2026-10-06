@@ -737,6 +737,9 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Supply Weaver as a wheel built from this checkout.",
     )
+    environment_publish.add_argument(
+        "--json", action="store_true", help="Emit the result as JSON."
+    )
     add_non_interactive(environment_publish)
     _add_workspace_args(
         environment_publish, include_catalogue=False, include_environment=False
@@ -864,10 +867,7 @@ def handle_notebook_run(args: argparse.Namespace) -> int:
 
 
 def handle_environment_publish(args: argparse.Namespace) -> int:
-    """Publish Weaver to an Environment for notebooks and Livy sessions.
-
-    Output is always JSON on stdout; progress goes to stderr.
-    """
+    """Publish Weaver to an Environment for notebooks and Livy sessions."""
 
     import json
     from dataclasses import replace
@@ -882,18 +882,24 @@ def handle_environment_publish(args: argparse.Namespace) -> int:
             "--path and ENVIRONMENT cannot be used together; the directory names "
             "the Environment."
         )
-    if args.path is None and args.environment_ref is None:
-        raise CommandError(
-            "Name a Fabric Environment, or pass --path to publish a local "
-            "<Name>.Environment definition."
-        )
-
     if args.path is not None:
         # The directory names the Environment. Workspace configuration may name
         # a different one, and it is not consulted here.
         workspace = _resolve_workspace(args)
         label = environment_name_from_path(args.path)
         environment = None
+    elif args.environment_ref is None:
+        # The workspace configuration names the Environment its runs attach.
+        workspace = _resolve_workspace(args)
+        environment = workspace.environment
+        if environment is None:
+            raise CommandError(
+                "Name a Fabric Environment, pass --path to publish a local "
+                "<Name>.Environment definition, or set environment: in the "
+                "workspace configuration."
+            )
+        resolve_environment_owner(workspace.workspace, environment)
+        label = str(environment)
     else:
         environment = EnvironmentRef.parse(args.environment_ref)
         if (
@@ -924,10 +930,30 @@ def handle_environment_publish(args: argparse.Namespace) -> int:
             )
     total = time.perf_counter() - started
 
-    payload = result.as_dict()
-    payload["timings"]["total"] = round(total, 2)
-    print(json.dumps(payload, indent=2))
+    if args.json:
+        payload = result.as_dict()
+        payload["timings"]["total"] = round(total, 2)
+        print(json.dumps(payload, indent=2))
+    else:
+        _print_publish(result)
     return 0
+
+
+def _print_publish(result) -> None:
+    from weaver.fabric.environment import DEVELOPMENT
+
+    where = f"{result.environment_name} in {result.workspace_name}"
+    if result.mode == DEVELOPMENT:
+        supplied = f"{result.wheel_filename}, built from this checkout"
+    else:
+        supplied = result.weaver_requirement or result.source_path or "its definition"
+    if not result.published:
+        print(f"\n{where} already holds {supplied}. Nothing was published.")
+        return
+    print(f"\nPublished {where}")
+    print(f"  Weaver   {supplied}")
+    for wheel in result.removed_wheels:
+        print(f"  Removed  {wheel}")
 
 
 def handle_install(args: argparse.Namespace) -> int:
