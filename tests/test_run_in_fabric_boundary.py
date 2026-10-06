@@ -352,3 +352,122 @@ def test_a_node_that_failed_before_counting_anything_crosses_back():
     assert node.status == FAILED
     assert node.result.error_message == "no result"
     assert node.result.rows_read == 0
+
+
+# --- one Livy interpreter, many runs -------------------------------------------
+
+#: The Sessions each program opened, in the order it opened them.
+OPENED: list = []
+
+
+def _recording_entry(*, session, workspace, fail=False):
+    """Records a Log row as a run does, through a Session-owned flusher."""
+
+    from weaver.catalogue.tables import LOG
+    from weaver.run.record import open_run_record
+
+    OPENED.append(session)
+    record = open_run_record(None, task_type="load", session=session)
+    session.flusher(LOG, warehouse="Weaver").submit({"workflow_id": record.workflow_id})
+    if fail:
+        raise RuntimeError("the run failed")
+    return {"workflow_id": record.workflow_id}
+
+
+class Interpreter(Fabric):
+    """A client whose statement runs the generated program in this process.
+
+    One Livy interpreter runs every statement a client sends, so what one program
+    leaves behind is still there for the next.
+    """
+
+    def __init__(self, monkeypatch):
+        super().__init__()
+        self.written: list[str] = []
+        store = self.scope(WORKSPACE).store
+        monkeypatch.setattr("weaver.fabric.store.FabricStore", lambda: store)
+        monkeypatch.setattr(
+            "weaver.sessions.notebook.NotebookSession.execute_tsql",
+            lambda session, statement, **kwargs: self.written.append(statement),
+        )
+
+    def execute_python(self, program, *, workspace=None, timeout=None):
+        self.programs.append(program)
+        emitted: list = []
+        exec(program.source, {"spark": object(), "emit": emitted.append})  # noqa: S102
+        return emitted[0]
+
+
+def _recorded(**arguments):
+    return FabricRun(
+        name="load",
+        needs_spark=True,
+        call=lambda here: "here",
+        entry=_recording_entry,
+        arguments=lambda: arguments,
+        decode=lambda carried: carried,
+    )
+
+
+def _workers() -> set:
+    """Weaver's worker threads alive in this process, whoever started them."""
+
+    import threading
+
+    return {
+        thread
+        for thread in threading.enumerate()
+        if thread.name.startswith(("weaver-flusher", "weaver-progress"))
+    }
+
+
+@weaver_test()
+def test_each_run_closes_the_session_it_opened_in_fabric(monkeypatch):
+    """A Session left open keeps its flushers' workers alive in the interpreter."""
+
+    OPENED.clear()
+    client = Interpreter(monkeypatch)
+
+    from weaver.sessions.run_in_fabric import send
+
+    for _ in range(3):
+        before = _workers()
+        assert send(client, _recorded(), workspace=WORKSPACE)["workflow_id"]
+        assert not _workers() - before
+
+    assert len(OPENED) == 3 and all(session.closed for session in OPENED)
+    assert len(client.written) == 3
+
+
+@weaver_test()
+def test_a_run_that_fails_in_fabric_still_closes_its_session(monkeypatch):
+    from weaver.sessions.run_in_fabric import send
+
+    OPENED.clear()
+    client = Interpreter(monkeypatch)
+    before = _workers()
+
+    with pytest.raises(RuntimeError, match="the run failed"):
+        send(client, _recorded(fail=True), workspace=WORKSPACE)
+
+    (session,) = OPENED
+    assert session.closed
+    assert not _workers() - before
+    # What the run recorded before it failed was still written.
+    assert len(client.written) == 1
+
+
+@weaver_test()
+def test_runs_sent_from_one_workflow_record_that_workflow_in_fabric(monkeypatch):
+    from weaver.sessions.run_in_fabric import send
+
+    client = Interpreter(monkeypatch)
+
+    with client.workflow("workflow-1"):
+        load = send(client, _recorded(), workspace=WORKSPACE)
+        test = send(client, _recorded(), workspace=WORKSPACE)
+    alone = send(client, _recorded(), workspace=WORKSPACE)
+
+    assert load["workflow_id"] == test["workflow_id"] == "workflow-1"
+    assert alone["workflow_id"] not in ("workflow-1", None)
+    assert sum("workflow-1" in statement for statement in client.written) == 2

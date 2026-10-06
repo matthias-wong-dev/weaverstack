@@ -9,14 +9,16 @@ from __future__ import annotations
 from ..runtime.session_scopes import get_scope
 
 
-def run_staged(entry, *, session, workspace, stage: str) -> dict:
+def run_staged(entry, *, session, workspace, stage: str, workflow_id=None) -> dict:
     """Run ``entry`` with the arguments a client staged, writing its progress.
 
     The report is left in the stage. Its size and hash are what cross back.
+    ``workflow_id`` is the client's workflow, if it runs in one.
     """
 
     import hashlib
     import json
+    from contextlib import nullcontext
 
     from ..fabric.store import FabricStore
     from ..locations import Location
@@ -25,7 +27,8 @@ def run_staged(entry, *, session, workspace, stage: str) -> dict:
     store = FabricStore()
     root = Location(stage)
     arguments = json.loads(store.read(root / REQUEST))
-    with progress_written(session, store, root / PROGRESS):
+    within = session.workflow(workflow_id) if workflow_id else nullcontext()
+    with within, progress_written(session, store, root / PROGRESS):
         report = entry(session=session, workspace=workspace, **arguments)
     data = json.dumps({"report": report, "warnings": list(session.warnings)})
     store.write(root / RESULT, data.encode("utf-8"))

@@ -59,7 +59,9 @@ def send(session, run, *, workspace=None):
     store.make_directory(stage)
     try:
         store.write(stage / REQUEST, json.dumps(run.arguments()).encode("utf-8"))
-        program = _program(run, scope.workspace, abfss_path(stage))
+        program = _program(
+            run, scope.workspace, abfss_path(stage), workflow_id=session.workflow_id
+        )
         following = _Following(session, store, stage / PROGRESS)
         try:
             receipt = session.execute_python(program, workspace=workspace)
@@ -83,7 +85,13 @@ def send(session, run, *, workspace=None):
     return run.decode(carried["report"])
 
 
-def _program(run, workspace, stage: str) -> FabricProgram:
+def _program(run, workspace, stage: str, *, workflow_id=None) -> FabricProgram:
+    """The statement Fabric runs.
+
+    The Livy interpreter outlives it, so the Session it opens is closed with it.
+    ``workflow_id`` is the client's workflow, which the run records under.
+    """
+
     from ..run.runtime_boundary import _workspace_literal
 
     entry = run.entry
@@ -93,9 +101,10 @@ def _program(run, workspace, stage: str) -> FabricProgram:
         "from weaver.run.entry import run_staged\n"
         f"from {entry.__module__} import {entry.__name__}\n"
         f"workspace = {_workspace_literal(workspace)}\n"
-        "session = NotebookSession(workspace=workspace, spark=spark)\n"
-        f"emit(run_staged({entry.__name__}, session=session, "
-        f"workspace=workspace, stage={stage!r}))\n"
+        "with NotebookSession(workspace=workspace, spark=spark) as session:\n"
+        f"    receipt = run_staged({entry.__name__}, session=session, "
+        f"workspace=workspace, stage={stage!r}, workflow_id={workflow_id!r})\n"
+        "emit(receipt)\n"
     )
 
     def call():
