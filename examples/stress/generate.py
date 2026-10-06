@@ -77,7 +77,99 @@ COLUMNS = (
     ("Status", "string", "varchar(8)"),
     ("Ref", "bigint", "bigint"),
 )
+
+#: Twenty attributes after those, so a table is as wide as a typical one rather
+#: than a key and a few measures: name, kind, T-SQL type, and the multiplier of
+#: Id, of Epoch and the modulus that give the value. A column whose Epoch
+#: multiplier is zero keeps its value when the row is updated.
+ATTRIBUTES = (
+    ("CustomerName", "text", "varchar(48)", 7, 0, 250_000),
+    ("AddressLine", "text", "varchar(64)", 13, 0, 900_000),
+    ("City", "text", "varchar(32)", 17, 0, 2_000),
+    ("Region", "text", "varchar(24)", 19, 0, 60),
+    ("Country", "text", "varchar(24)", 23, 0, 40),
+    ("Segment", "text", "varchar(24)", 29, 3, 12),
+    ("Channel", "text", "varchar(24)", 31, 5, 8),
+    ("ProductName", "text", "varchar(48)", 37, 0, 40_000),
+    ("SalesRep", "text", "varchar(32)", 41, 7, 600),
+    ("Reference", "text", "varchar(32)", 43, 11, 5_000_000),
+    ("Currency", "text", "varchar(16)", 47, 0, 12),
+    ("UnitPrice", "amount", "decimal(18,2)", 53, 0, 500_000),
+    ("Discount", "amount", "decimal(18,2)", 59, 13, 5_000),
+    ("Tax", "amount", "decimal(18,2)", 61, 17, 90_000),
+    ("Total", "amount", "decimal(18,2)", 67, 19, 9_000_000),
+    ("Priority", "number", "int", 71, 23, 5),
+    ("Version", "number", "int", 1, 1, 1_000_000),
+    ("Units", "number", "int", 73, 29, 10_000),
+    ("DueDate", "date", "date", 79, 31, 3_000),
+    ("ShipDate", "date", "date", 83, 37, 3_000),
+)
+_DELTA = {
+    "text": "string",
+    "amount": "decimal(18,2)",
+    "number": "integer",
+    "date": "date",
+}
+COLUMNS += tuple((name, _DELTA[kind], tsql) for name, kind, tsql, *_ in ATTRIBUTES)
 NAMES = tuple(name for name, _delta, _tsql in COLUMNS)
+
+
+def _attribute_value(kind: str, a: int, b: int, m: int, id: str, epoch: str) -> str:
+    return f"(({id} * {a} + {epoch} * {b}) % {m})"
+
+
+def spark_attributes() -> list[str]:
+    """The attribute columns as Spark SQL expressions over Id and Epoch."""
+
+    rendered = []
+    for name, kind, _tsql, a, b, m in ATTRIBUTES:
+        value = _attribute_value(kind, a, b, m, "Id", "Epoch")
+        rendered.append(
+            {
+                "text": f"concat('{name} ', cast({value} as string))",
+                "amount": f"cast({value} / 100.0 as decimal(18,2))",
+                "number": f"cast({value} as int)",
+                "date": f"date_add(date'2020-01-01', cast({value} as int))",
+            }[kind]
+            + f" as {name}"
+        )
+    return rendered
+
+
+def tsql_attributes() -> list[str]:
+    """The attribute columns as T-SQL expressions over x.Id and x.Epoch."""
+
+    rendered = []
+    for name, kind, tsql, a, b, m in ATTRIBUTES:
+        value = _attribute_value(kind, a, b, m, "x.Id", "x.Epoch")
+        rendered.append(
+            {
+                "text": f"cast(concat('{name} ', {value}) as {tsql})",
+                "amount": f"cast({value} / 100.0 as decimal(18,2))",
+                "number": f"cast({value} as int)",
+                "date": f"dateadd(day, cast({value} as int), cast('2020-01-01' as date))",
+            }[kind]
+            + f" as [{name}]"
+        )
+    return rendered
+
+
+def python_attributes() -> str:
+    """The attribute columns as one f-string fragment over id and epoch, for CSV."""
+
+    rendered = []
+    for name, kind, _tsql, a, b, m in ATTRIBUTES:
+        value = f"((id * {a} + epoch * {b}) % {m})"
+        rendered.append(
+            {
+                "text": f"{name} {{{value}}}",
+                "amount": f"{{{value} / 100:.2f}}",
+                "number": f"{{{value}}}",
+                "date": f"{{date(2020, 1, 1) + timedelta(days={value})}}",
+            }[kind]
+        )
+    return ",".join(rendered)
+
 
 #: A dimension holds this many rows at every scale, so every Category joins.
 DIMENSION_ROWS = 1000
@@ -195,6 +287,9 @@ class Node:
     parent: "Node | None" = None
     source: Source | None = None
     dimension: "Node | None" = None
+    #: Tables it declares as dependencies without reading, as a model that
+    #: joins them would wait for them.
+    joins: list = field(default_factory=list)
     #: Holds only the rows not marked deleted.
     live: bool = False
     children: list = field(default_factory=list)
@@ -486,7 +581,54 @@ def plan_estate(sources: list[Source], options: Options) -> list[Node]:
             made.append(node)
         layers[name] = made
         nodes += made
+    _fan_in(nodes, layers, options)
     return nodes
+
+
+#: How many lower tables a table above landing waits for besides its parent,
+#: as a star schema's joins make it: (share of tables, fewest, most).
+FAN_IN = ((0.30, 0, 0), (0.40, 1, 2), (0.25, 3, 5), (0.05, 6, 10))
+#: Share of those a table takes from the dimensions below it, when there are any.
+DIMENSION_JOINS = 0.6
+
+
+def _fan_in(nodes: list[Node], layers: dict[str, list[Node]], options: Options):
+    """Declare joins from the layers a table may read, so the graph fans in.
+
+    Drawn from a stream of their own, so the estate's objects and parents are the
+    same with or without them.
+    """
+
+    rng = random.Random(options.seed + 2)
+    readable = {name: parents for name, _item, _language, _share, parents in LAYERS}
+    for node in nodes:
+        # A table parsing a folder takes its dependency from what it imports.
+        if (
+            node.layer not in readable
+            or not node.table
+            or node.parent.behaviour == FOLDER
+        ):
+            continue
+        pool = [
+            table
+            for layer in readable[node.layer]
+            for table in layers.get(layer, ())
+            if table.table and table is not node.parent
+        ]
+        drawn = rng.random()
+        for share, fewest, most in FAN_IN:
+            if drawn < share:
+                break
+            drawn -= share
+        wanted = min(rng.randint(fewest, most), len(pool))
+        dimensions = [table for table in pool if table.rows == DIMENSION_ROWS]
+        while len(node.joins) < wanted:
+            choices = (
+                dimensions if dimensions and rng.random() < DIMENSION_JOINS else pool
+            )
+            table = rng.choice(choices)
+            if table not in node.joins:
+                node.joins.append(table)
 
 
 def _quotas(total: int) -> dict[str, int]:
@@ -606,6 +748,9 @@ PARTITION_ROWS = 4_000_000
 #: Changes fall in the newest ``1 / RECENT`` of a source's first rows.
 RECENT = 10
 
+#: The attribute columns after Ref, as Spark SQL over Id and Epoch.
+ATTRIBUTES = __ATTRIBUTES__
+
 
 def recent(rows: int) -> int:
     """The first id that changes."""
@@ -679,6 +824,7 @@ def _state(ids, epoch: int, rows: int, inserts: int, updates: int, deletes: int)
         "case (Id + Epoch) % 4 when 0 then 'open' when 1 then 'closed' "
         "when 2 then 'pending' else 'void' end as Status",
         "Id * 3 + Epoch as Ref",
+        *ATTRIBUTES,
     )
 
 
@@ -824,6 +970,8 @@ File key: "*.csv"
 Incremental: true
 """
 
+from datetime import date, timedelta
+
 from Files.Clock__Days import Clock__Days
 
 from weaver import Folder
@@ -840,7 +988,8 @@ def _row(epoch: int, offset: int) -> str:
     amount = ((id * 37 + epoch * 101) % 1000000) / 100
     return (
         f"{{id}},{{epoch}},false,{{id % 1000}},C{{id % 100000}},{{amount:.2f}},"
-        f"{{(id + epoch) % 500}},2020-01-01,{{STATUS[(id + epoch) % 4]}},{{id * 3 + epoch}}"
+        f"{{(id + epoch) % 500}},2020-01-01,{{STATUS[(id + epoch) % 4]}},{{id * 3 + epoch}},"
+        f"{python_attributes()}"
     )
 
 
@@ -940,6 +1089,7 @@ def _tsql_source(source: Source) -> str:
         else "cast(9223372036854775807 as bigint)"
     )
     kind = "feed" if source.feed else "snapshot"
+    attributes = "\n     , ".join(tsql_attributes())
     return f"""/*
 Table ID: {source.id}
 
@@ -967,6 +1117,7 @@ select x.Id
      , cast(case (x.Id + x.Epoch) % 4 when 0 then 'open' when 1 then 'closed'
             when 2 then 'pending' else 'void' end as varchar(8)) as Status
      , x.Id * 3 + x.Epoch as Ref
+     , {attributes}
 from (
     select i.Id
          , cast(case when m.m <= today.e then m.m
@@ -986,7 +1137,10 @@ from (
 def render_source(root: Path, sources: list[Source]) -> None:
     lakehouse = root / SOURCE_LAKEHOUSE
     warehouse = root / SOURCE_WAREHOUSE
-    _write(lakehouse / "lib" / "stress.py", SOURCE_LIBRARY)
+    _write(
+        lakehouse / "lib" / "stress.py",
+        SOURCE_LIBRARY.replace("__ATTRIBUTES__", repr(spark_attributes())),
+    )
     _write(lakehouse / "Files" / "Clock__Days.py", CLOCK_FOLDER)
     _write(lakehouse / "Tables" / "Clock__Day.py", CLOCK_TABLE)
     _schema_document(root, SOURCE_LAKEHOUSE, "Clock", "The source project's day.")
@@ -1110,7 +1264,7 @@ Description: {_description(node)}
 Lineage: Copied from {parent.id}.
 
 {_keys(node.behaviour)}Dependencies:
-  - {parent.id}
+{_dependencies(node)}
 
 Schema:
 {_delta_schema()}
@@ -1233,12 +1387,16 @@ Description: {_description(node)}
 Lineage: Copied from {node.parent.id}.
 
 {_keys(behaviour)}Dependencies:
-  - {node.parent.id}
+{_dependencies(node)}
 
 Schema:
 {_tsql_schema() if tsql else _delta_schema()}
 */
 {body}"""
+
+
+def _dependencies(node: Node) -> str:
+    return "\n".join(f"  - {table.id}" for table in (node.parent, *node.joins))
 
 
 def _sql_view(node: Node, parent: str, dimension: str | None, *, tsql: bool) -> str:
@@ -1334,7 +1492,7 @@ def render_estate(root: Path, nodes: list[Node], names: dict) -> None:
             _write(path, text)
             continue
         # A Warehouse reads another item through a view of the same name.
-        for upstream in filter(None, (node.parent, node.dimension)):
+        for upstream in filter(None, (node.parent, node.dimension, *node.joins)):
             if upstream.item != node.item:
                 area = "Tables/" if upstream.item == LAKE else ""
                 view_shortcuts[node.item][f"{node.item}/{upstream.id}"] = (

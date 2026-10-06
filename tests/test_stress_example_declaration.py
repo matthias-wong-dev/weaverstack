@@ -159,3 +159,41 @@ def test_a_landing_table_reads_its_sources_utc_stamp_past_its_bookmark():
 
     assert 'rows["row_update_datetime"] > self.bookmark()' in lake
     assert 'rows["Row update datetime"] > self.bookmark()' in warehouse
+
+
+@weaver_test()
+def test_every_text_attribute_fits_its_warehouse_column():
+    """A Warehouse truncates on cast but refuses an insert that does not fit."""
+
+    generator = _generator()
+
+    too_long = [
+        name
+        for name, kind, tsql, _a, _b, modulus in generator.ATTRIBUTES
+        if kind == "text"
+        and len(f"{name} {modulus - 1}") > int(tsql.removeprefix("varchar(")[:-1])
+    ]
+    assert not too_long
+
+
+@weaver_test()
+def test_tables_wait_for_lower_tables_they_join_without_reading_them():
+    generator = _generator()
+    options = generator.Options()
+    nodes = generator.plan_estate(generator.plan_sources(options), options)
+    order = {name: index for index, (name, *_rest) in enumerate(generator.LAYERS)}
+    order["landing"] = -1
+    joining = [node for node in nodes if node.joins]
+
+    assert len(joining) > len([n for n in nodes if n.table and n.parent]) / 2
+    assert all(
+        join.table
+        and join is not node.parent
+        and order[join.layer] < order[node.layer]
+        and len(set(map(id, node.joins))) == len(node.joins)
+        for node in joining
+        for join in node.joins
+    )
+    warehouse = next(node for node in joining if node.language == "tsql")
+    rendered = generator._sql_table(warehouse, "[Sales].[Order]", tsql=True)
+    assert all(f"  - {join.id}\n" in rendered for join in warehouse.joins)

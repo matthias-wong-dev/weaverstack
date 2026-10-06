@@ -45,6 +45,13 @@ The estate reads them through four layers in each of three items:
 | `Warehouse/Core` | core, conformed | T-SQL tables and views |
 | `Warehouse/Mart` | mart, serving | T-SQL tables and views |
 
+Every table and view carries 30 business columns: a key, a change stamp, a
+deletion flag and 27 attributes of mixed types. Each table reads one parent.
+Above landing, most tables also list up to ten lower tables under
+`Dependencies:` without reading them, as a star schema's joins would make them
+wait: 30% list none, 40% one or two, 25% three to five and 5% six to ten,
+mostly dimensions.
+
 Every table loads one of Weaver's ways:
 
 | Behaviour | Declared as | Reads | Tables |
