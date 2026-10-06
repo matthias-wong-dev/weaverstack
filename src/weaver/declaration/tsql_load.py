@@ -125,6 +125,12 @@ _CANONICAL_FALLBACK = "cast({column} as varchar(max))"
 #: Present values start with their byte length, so this cannot collide with one.
 _NULL_MARKER = "~"
 
+#: Column types a staged value is converted to before it is written, as storing
+#: it converts it. The staged value's own text can lose what the column keeps: a
+#: float staged for a decimal column is written to six significant digits.
+_STORED_INTEGER_TYPES = ("bigint", "bit", "int", "smallint", "tinyint")
+_STORED_DECIMAL_TYPES = ("decimal", "numeric")
+
 
 def generate_tsql_load_script(
     document: SesDocument, body: str, *, procedure_name: str, item
@@ -1178,6 +1184,8 @@ def _signature_payload_select(
         for type_name in sorted(_CANONICAL_TEXT)
     )
     fallback = _sql_literal(_CANONICAL_FALLBACK.format(column="__COLUMN__"))
+    integers = ", ".join(f"'{name}'" for name in _STORED_INTEGER_TYPES)
+    decimals = ", ".join(f"'{name}'" for name in _STORED_DECIMAL_TYPES)
     return (
         ";with comparison_columns as (\n"
         "    select\n"
@@ -1189,7 +1197,15 @@ def _signature_payload_select(
         f"                else {fallback}\n"
         "            end,\n"
         "            N'__COLUMN__',\n"
-        "            N's.' + quotename(c.name)\n"
+        "            case\n"
+        f"                when lower(t.name) in ({decimals}) then N'cast(s.'\n"
+        "                    + quotename(c.name) + N' as ' + t.name + N'('\n"
+        "                    + cast(c.precision as nvarchar(3)) + N', '\n"
+        "                    + cast(c.scale as nvarchar(3)) + N'))'\n"
+        f"                when lower(t.name) in ({integers}) then N'cast(s.'\n"
+        "                    + quotename(c.name) + N' as ' + t.name + N')'\n"
+        "                else N's.' + quotename(c.name)\n"
+        "            end\n"
         "        ) as canonical_text\n"
         "    from sys.columns as c\n"
         "    inner join sys.types as t on t.user_type_id = c.user_type_id\n"

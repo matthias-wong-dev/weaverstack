@@ -165,16 +165,16 @@ def test_a_view_has_no_generated_load():
 #: describes it. See the test below.
 GENERATED_FINGERPRINTS = {
     "tsql": (
-        22,
-        "c5e7119093f72d925106971c35c914f6f5ba0266c04650cbd12a19bca7be519c",
+        23,
+        "45d4c3a35c71a531e1b0c24c04cf917cea5b73cacf1bf17a65e34aa6c2086169",
     ),
     "tsql_append": (
-        22,
+        23,
         "029d684dcaf635224ef0e568fd78aa8b95fbdef482cfa120f8b75abf2882f09f",
     ),
     "tsql_append_validated": (
-        22,
-        "940beba21590afa6c39d7fe8fc4ea3f598f81da4344759258410b19298276e90",
+        23,
+        "0b0aeda651bcc9f3a853921958763c57e2c998238bf915fb1a84279d69473434",
     ),
     "spark": (
         9,

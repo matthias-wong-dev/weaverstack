@@ -314,3 +314,43 @@ def test_the_two_engines_agree_on_the_payload_and_not_on_the_bytes():
 def test_the_expression_is_the_same_every_time_it_is_rendered():
     assert _delta() == _delta()
     assert _warehouse_installer() == _warehouse_installer()
+
+
+@weaver_test()
+def test_a_nested_value_is_written_as_json():
+    """Spark's own text for a nested value neither quotes nor escapes elements.
+
+    ``["a, b"]`` and ``["a", "b"]`` both read ``[a, b]``, and ``[null]`` reads
+    the same as ``["null"]``, so a change between them would never be noticed.
+    """
+
+    nested = {
+        "Tags": "array<string>",
+        "Attrs": "map<string,string>",
+        "Point": "struct<a:string,b:string>",
+    }
+    delta = row_signature("s", tuple(nested), nested)
+
+    for column in nested:
+        assert f"to_json(s.`{column}`, map('timeZone', 'UTC'" in delta
+        assert f"CAST(s.`{column}` AS STRING)" not in delta
+    assert "'ignoreNullFields', 'false'" in delta
+    assert "'timestampFormat', 'yyyy-MM-dd HH:mm:ss.SSSSSS'" in delta
+
+
+@weaver_test()
+def test_the_warehouse_writes_a_staged_number_as_its_column_stores_it():
+    """Staged as a float for a decimal column, a value's own text has six digits.
+
+    So 1234567.1234 and 1234567.1235 read the same. Converted to the column's
+    type first, the payload says what the row will hold.
+    """
+
+    installer = _warehouse_installer()
+
+    assert "when lower(t.name) in ('decimal', 'numeric') then N'cast(s.'" in installer
+    assert "cast(c.precision as nvarchar(3))" in installer
+    assert (
+        "when lower(t.name) in ('bigint', 'bit', 'int', 'smallint', 'tinyint') "
+        "then N'cast(s.'" in installer
+    )
