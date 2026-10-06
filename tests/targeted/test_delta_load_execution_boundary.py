@@ -148,6 +148,8 @@ class _Spark:
     """
 
     counts: dict = field(default_factory=dict)
+    #: Evidence tables an earlier faulted run left behind.
+    evidence: list = field(default_factory=list)
     target_columns: tuple = TARGET_COLUMNS
     #: A statement carrying this text fails, standing for an engine error the
     #: load has no outcome for. Raised before the statement is recorded, so what
@@ -219,6 +221,9 @@ class _Spark:
         return _Frame(self, text)
 
     def answer(self, text: str):
+        if text.startswith("SHOW TABLES"):
+            # The evidence an earlier faulted run left, as the catalogue lists it.
+            return [_Row(tableName=name.lower()) for name in self.evidence]
         if text.startswith("DESCRIBE DETAIL"):
             # A target holding rows unless a test empties it.
             return [_Row(numFiles=self.counts.get("files", 1))]
@@ -365,6 +370,9 @@ class _Staged:
 
 
 class _Lakehouse:
+    def qualified_schema(self, schema: str) -> str:
+        return f"`lh`.`{schema}`"
+
     def qualify(self, schema: str, name: str) -> str:
         return f"`lh`.`{schema}`.`{name}`"
 
@@ -547,14 +555,28 @@ def test_a_full_replace_shuffles_the_staging_it_writes():
 
 @weaver_test()
 def test_a_clean_load_still_clears_an_earlier_runs_evidence():
-    """Stale evidence would read as evidence about the run that just succeeded.
+    """Stale evidence would read as evidence about the run that just succeeded."""
 
-    Attempted rather than looked up: a missing table is the ordinary case.
-    """
+    spark = _Spark(counts=NO_OP, evidence=["Customer_Reject", "Customer_Staging"])
+    load_table(
+        spark, contract=_contract(), lakehouse=_Lakehouse(), staging_frame=_Staged()
+    )
+
+    assert spark.dropped == ["Customer_Reject", "Customer_Staging"]
+
+
+@weaver_test()
+def test_one_listing_finds_that_there_is_no_evidence_to_clear():
+    """The ordinary case: each drop would be a catalogue call for nothing."""
 
     spark, _result = _load(NO_OP)
 
-    assert spark.dropped == ["Customer_Reject", "Customer_Delete", "Customer_Staging"]
+    (listing,) = [one for one in spark.statements if one.startswith("SHOW TABLES")]
+    assert listing == (
+        "SHOW TABLES IN `lh`.`DWG` "
+        "LIKE 'customer_reject|customer_delete|customer_staging'"
+    )
+    assert spark.dropped == []
 
 
 # --- a phase with nothing to do submits nothing -------------------------------
@@ -979,9 +1001,6 @@ def test_mixed_case_runtime_tables_are_created_in_an_exact_case_scope():
     )
 
     assert spark.identifier_case == [
-        ("CustomerOrder_Reject", "false"),
-        ("CustomerOrder_Delete", "false"),
-        ("CustomerOrder_Staging", "false"),
         ("CustomerOrder_Staging", "true"),
         ("CustomerOrder_Reject", "true"),
         ("CustomerOrder_Delete", "true"),
@@ -1004,9 +1023,9 @@ def test_every_statement_runs_with_fabrics_cte_cache_off_and_it_is_restored():
         fault_tolerant=True,
     )
 
-    # The evidence drops come before the hold; everything that reads staging after.
-    assert spark.cte_cache[:3] == ["true"] * 3
-    assert set(spark.cte_cache[3:]) == {"false"}
+    # The evidence listing comes before the hold; everything that reads staging after.
+    assert spark.cte_cache[:1] == ["true"]
+    assert set(spark.cte_cache[1:]) == {"false"}
     assert spark.conf.get(CTE_CACHE) == "true"
 
 

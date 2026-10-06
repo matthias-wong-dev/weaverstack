@@ -6,6 +6,7 @@ Delta tables are reserved for failure evidence.
 
 from __future__ import annotations
 
+import re
 import threading
 from contextlib import contextmanager
 
@@ -202,7 +203,7 @@ def load_table(
     # Evidence an earlier faulted run left, dropped before this run can write any
     # of its own. Otherwise the last failure's reject table stands beside a load
     # that has just succeeded and reads as evidence about it.
-    _drop_evidence(spark, names)
+    _drop_evidence(spark, names, lakehouse.qualified_schema(schema), name)
 
     held: list = []
     # What the load has settled so far, and which of it has already been written
@@ -1144,11 +1145,29 @@ def _give_back(spark, frame, view: str) -> None:
 # --- evidence ----------------------------------------------------------------
 
 
-def _drop_evidence(spark, names) -> None:
-    """Remove evidence from the preceding faulted load before this run writes."""
+def _drop_evidence(spark, names, schema: str, name: str) -> None:
+    """Remove evidence from the preceding faulted load before this run writes.
 
-    for role in ("reject", "delete", "staging"):
-        spark.sql(f"DROP TABLE IF EXISTS {names[role]}")
+    Evidence is rare and each drop is a catalogue call, so one listing finds it.
+    The listing's pattern is a regular expression apart from ``*`` and ``|``,
+    written inside a SQL string, so each name is escaped for both.
+    """
+
+    roles = {
+        (name + suffix).casefold(): role
+        for role, suffix in (
+            ("reject", REJECT_SUFFIX),
+            ("delete", DELETE_SUFFIX),
+            ("staging", STAGING_SUFFIX),
+        )
+    }
+    pattern = "|".join(
+        re.escape(table).replace("\\", "\\\\").replace("'", "\\'") for table in roles
+    )
+    for row in spark.sql(f"SHOW TABLES IN {schema} LIKE '{pattern}'").collect():
+        role = roles.get(str(row["tableName"]).casefold())
+        if role is not None:
+            spark.sql(f"DROP TABLE IF EXISTS {names[role]}")
 
 
 def _keep_evidence(spark, names, kept: set, **relations) -> None:

@@ -81,16 +81,24 @@ class Lakehouse:
 
         return self.location.folder_path(schema, name)
 
+    def qualified_schema(self, schema: str) -> str:
+        """One schema, as a statement in this session must name it."""
+
+        return self._destination().qualified_schema(schema)
+
     def qualify(self, schema: str, name: str) -> str:
         """One object, as a statement in this session must name it."""
 
+        return self._destination().qualify(schema, name)
+
+    def _destination(self):
         if self.destination is None:
             raise LoadError(
                 f"Lakehouse {self.name!r} was resolved without a Spark destination, so "
                 "a statement cannot name its objects. Resolve it with "
                 "weaver.lakehouse_for(resolver, item), which supplies one"
             )
-        return self.destination.qualify(schema, name)
+        return self.destination
 
     def __str__(self) -> str:
         return f"{self.name} ({self.spark_root})"
