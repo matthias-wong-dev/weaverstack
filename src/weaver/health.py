@@ -659,7 +659,7 @@ class _LoadHealth:
             return
         if status.completed_at is not None and status.completed_at < self.as_of:
             # A mirrored object is loaded where it is mirrored from, never here.
-            where = ", in the catalogue this one mirrors" if node.is_mirrored else ""
+            where = " in the mirrored catalogue" if node.is_mirrored else ""
             yield _finding(
                 LOAD,
                 LOAD_STALE_TIME,

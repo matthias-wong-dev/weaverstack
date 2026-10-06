@@ -1399,9 +1399,7 @@ def test_a_stale_mirrored_object_says_where_it_is_loaded():
         for finding in about(report.load, LOAD_STALE_TIME)
     }
 
-    assert stale[f"{REPORTING}/Sales.Customer"].endswith(
-        ", in the catalogue this one mirrors"
-    )
+    assert stale[f"{REPORTING}/Sales.Customer"].endswith(" in the mirrored catalogue")
     assert "mirrors" not in stale[f"{REPORTING}/Sales.Order"]
 
 

@@ -382,10 +382,7 @@ def test_a_stale_load_names_the_mirrored_objects_it_leaves_behind():
 
     assert assessment.unsettled_identities() == ()
     assert (message.severity, message.code) == (SEVERITY_WARNING, STALE_MIRRORED)
-    assert message.message == (
-        "2 mirrored objects are behind. They load in Warehouse/Weaver, "
-        "the catalogue this one mirrors."
-    )
+    assert message.message == "2 mirrored objects are behind in Warehouse/Weaver."
 
 
 @weaver_test()

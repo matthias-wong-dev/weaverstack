@@ -257,8 +257,7 @@ def _mirrored_behind(assessment, workspace) -> tuple:
     return (
         warning(
             STALE_MIRRORED,
-            f"{count} mirrored {noun} behind. They load in {workspace.mirror}, "
-            "the catalogue this one mirrors.",
+            f"{count} mirrored {noun} behind in {workspace.mirror}.",
         ),
     )
 
