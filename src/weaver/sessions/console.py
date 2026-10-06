@@ -250,18 +250,34 @@ class ConsoleSession(Session):
         frame = self._innermost()
         if frame is None:
             return
-        text = (
-            f"⋯ {self._named(frame):<{self._width() - 2}}"
-            f"{_duration(frame.age):>{self.DURATION_WIDTH}}"
-        )
-        label = f"{self._named(frame):<{self._width() - 2}}"
-        duration = f"{_duration(frame.age):>{self.DURATION_WIDTH}}"
+        label, duration = self._fitted(self._named(frame), _duration(frame.age))
         rendered = (
             f"{_styled('⋯', DIM, stream)} {label}{_styled(duration, DIM, stream)}"
         )
         stream.write("\r" + rendered)
         stream.flush()
-        self._painted = len(text)
+        self._painted = len(f"⋯ {label}{duration}")
+
+    def _fitted(self, name: str, elapsed: str) -> tuple[str, str]:
+        """The live line's label and duration, within one terminal row.
+
+        A carriage return reaches back only to the start of the row it is on,
+        so a live line that wraps leaves a copy behind every time it is
+        repainted. A completed line is printed once and may wrap.
+        """
+
+        import shutil
+
+        label = f"{name:<{self._width() - 2}}"
+        duration = f"{elapsed:>{self.DURATION_WIDTH}}"
+        room = shutil.get_terminal_size().columns - 1
+        if len(label) + len(duration) + 2 <= room:
+            return label, duration
+        duration = f" {elapsed}"
+        fits = max(room - 2 - len(duration), 1)
+        if len(name) > fits:
+            name = name[: fits - 1].rstrip() + "…"
+        return name, duration
 
     def _erase(self, stream) -> None:
         if not self._painted:
