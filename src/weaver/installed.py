@@ -125,6 +125,8 @@ class InstalledNode:
     #: A semantic validation's installed definition: the JSON its
     #: ``_.SemanticModelTest`` row holds. It compiles to no artefact.
     definition: str | None = None
+    #: Where a semantic Test's Expected SQL runs, from ``_.Installation``.
+    expected_target: PhysicalTargetRef | None = None
 
     @property
     def node_id(self) -> str:
@@ -698,7 +700,12 @@ def _validations(catalogue: Catalogue, installations):
                 )
             if item.item_type == SEMANTIC_MODEL:
                 found[logical] = _semantic_validation(
-                    tables, row, logical, kind=kind, target=target
+                    tables,
+                    row,
+                    logical,
+                    kind=kind,
+                    target=target,
+                    installations=installations,
                 )
                 continue
             artefact = validation_artefact_id(item, kind, logical.object_id)
@@ -716,8 +723,12 @@ def _validations(catalogue: Catalogue, installations):
     return found
 
 
-def _semantic_validation(tables, row, logical, *, kind, target) -> InstalledNode:
+def _semantic_validation(
+    tables, row, logical, *, kind, target, installations
+) -> InstalledNode:
     """A validation installed when its definition matches its declaration."""
+
+    import json
 
     from .fabric.resources import Item
 
@@ -732,6 +743,7 @@ def _semantic_validation(tables, row, logical, *, kind, target) -> InstalledNode
         None,
     )
     installation = tables.get(INSTALLATION.name, ({},))[0]
+    source = json.loads(definition).get("expectedSource") if definition else None
     return InstalledNode(
         identity=logical,
         target=target,
@@ -740,6 +752,9 @@ def _semantic_validation(tables, row, logical, *, kind, target) -> InstalledNode
         primary_key=_column_set(row.get("primary_key")),
         description=_text(row.get("description")),
         definition=definition,
+        expected_target=installations.get(WeaverItemId.parse(source))
+        if source
+        else None,
         bound_item=Item(
             id=installation.get("item_id"),
             workspace_id=installation.get("workspace_id"),
