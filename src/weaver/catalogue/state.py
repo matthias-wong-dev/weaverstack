@@ -987,7 +987,10 @@ def reconcile_catalogue_state(
                     continue
                 schema_name, object_name = catalogue_columns(identity)
                 expected = state.effective_physical_type(identity)
-                rebound = expected == "semantic_model" and not _same_semantic_binding(
+                rebound = expected in {
+                    "semantic_model",
+                    "report",
+                } and not _same_semantic_binding(
                     tables.get(INSTALLATION.name, ()), inventory
                 )
                 if rebound or not inventory.has_object(

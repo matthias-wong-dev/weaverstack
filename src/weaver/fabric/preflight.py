@@ -29,6 +29,7 @@ _ITEM_TYPE_FOR_BINDING = {
     LAKEHOUSE_TARGET: LAKEHOUSE,
     WAREHOUSE_TARGET: WAREHOUSE,
     SEMANTIC_MODEL_TARGET: "SemanticModel",
+    "report": "Report",
 }
 
 
