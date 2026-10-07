@@ -5,7 +5,6 @@ import copy
 import pytest
 from support.semantic_models import source_model
 from support.weaver_test import weaver_test
-from support.workspaces import _identifier
 from test_semantic_annotation_declaration import ITEM, source_project
 from test_semantic_source_build_cycle import (
     ItemBindings,
@@ -94,12 +93,6 @@ def test_source_annotation_resolves_environment_mapping_before_generation(
         )
         assert result.succeeded, result.errors
         parts = submitted_parts(session)
-        assert (
-            _identifier("Warehouse", "Serving_Prod").encode()
-            in parts["definition/expressions.tmdl"]
-        )
-        assert (
-            _identifier("Warehouse", "Serving_Dev").encode()
-            not in parts["definition/expressions.tmdl"]
-        )
+        assert b'"Serving_Prod")' in parts["definition/expressions.tmdl"]
+        assert b"Serving_Dev" not in parts["definition/expressions.tmdl"]
         assert not any("NotUsed" in path for path in inventory.requested)

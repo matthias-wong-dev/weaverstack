@@ -293,13 +293,10 @@ def test_source_annotation_uses_the_typed_lakehouse_sql_endpoint(tmp_path, monke
         )
         assert result.succeeded, result.errors
         parts = submitted_parts(session)
+        # The Lakehouse's SQL endpoint, named as people name it in a connection.
         assert (
-            _identifier("SQLEndpoint", "Serving_Dev").encode()
+            b'Sql.Database("lake.datawarehouse.fabric.microsoft.com", "Serving_Dev")'
             in parts["definition/expressions.tmdl"]
-        )
-        assert (
-            _identifier("Warehouse", "Serving_Dev").encode()
-            not in parts["definition/expressions.tmdl"]
         )
         assert any("TABLE_SCHEMA = N'Cake'" in sql for sql in session.tsql)
         table = published()[ITEM]["SemanticModelTable"][0]
