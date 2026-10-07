@@ -10,6 +10,48 @@ from weaver.catalogue.tables import INSTALLATION
 
 
 @weaver_test()
+def test_semantic_key_upgrade_delivers_warehouse_compatible_transactions(tmp_path):
+    import json
+    from types import SimpleNamespace
+
+    from weaver.build_bundle.catalogue_actions import render_catalogue_upgrade
+    from weaver.build_bundle.executors.base import InstallationContext
+    from weaver.build_bundle.executors.tsql import TSqlBatchExecutor
+    from weaver.catalogue.tables import SEMANTIC_TABLES
+
+    catalogue = Catalogue(
+        {},
+        schema_removals=tuple(
+            (table.name, column)
+            for table in SEMANTIC_TABLES
+            for column in ("Schema name", "Object name")
+        ),
+    )
+    stage = render_catalogue_upgrade(
+        catalogue, catalogue_target=SimpleNamespace(id="catalogue")
+    )
+    (batch,) = stage.batches
+    (action,) = batch.actions
+    payload = stage.payloads[action.payload]
+    scripts = []
+    context = InstallationContext(
+        resolver=None,
+        store=None,
+        target=None,
+        sql=SimpleNamespace(execute_script=scripts.append),
+    )
+    details = TSqlBatchExecutor().execute(action, payload, context)
+    assert scripts == json.loads(payload)
+    assert details == {"statements": 5}
+    assert len(scripts) == len(SEMANTIC_TABLES)
+    for script in scripts:
+        assert "SET XACT_ABORT" not in script
+        assert "EXEC(N'BEGIN TRY\nBEGIN TRANSACTION;\n" in script
+        assert "\nCOMMIT;\nEND TRY\nBEGIN CATCH\n" in script
+        assert "IF @@TRANCOUNT > 0 ROLLBACK;\nTHROW;\nEND CATCH;" in script
+
+
+@weaver_test()
 def test_old_catalogue_identity_columns_are_added_before_publication(tmp_path):
     _, repository, bindings, session, state = prepared(tmp_path)
     shape_sql = "SELECT TABLE_NAME, COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = N'_'"

@@ -195,7 +195,7 @@ def render_catalogue_upgrade(catalogue, *, catalogue_target):
         # The schema change preserves every installation's rows and audit values.
         # The executor sends each statement intact on one TDS connection.
         body = (
-            "SET XACT_ABORT ON;\nBEGIN TRY\nBEGIN TRANSACTION;\n"
+            "BEGIN TRY\nBEGIN TRANSACTION;\n"
             + "\n".join(steps)
             + "\nCOMMIT;\nEND TRY\nBEGIN CATCH\nIF @@TRANCOUNT > 0 ROLLBACK;\nTHROW;\nEND CATCH;"
         )

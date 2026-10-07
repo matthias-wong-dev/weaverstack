@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import posixpath
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from typing import Mapping
 
 from ..errors import ConfigError
