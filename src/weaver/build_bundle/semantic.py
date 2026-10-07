@@ -43,6 +43,7 @@ def semantic_stage(repository, item, target, *, catalogue_target=None):
                 "source_references": dict(contribution.source_references),
                 "source_bindings": dict(contribution.source_bindings),
                 "expression_sources": dict(contribution.expression_sources),
+                "table_order": contribution.table_names,
                 "signature": contribution.signature,
                 "target_id": target.id,
                 "item": str(item),

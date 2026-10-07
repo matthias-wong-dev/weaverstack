@@ -1021,7 +1021,9 @@ def compose_repository(
             WeaverItem(
                 item_id,
                 schemas=schemas,
-                documents=tuple(documents),
+                documents=(WeaverDocumentId.report_root(item_id),)
+                if item_id in merged.reports
+                else tuple(documents),
                 validations=tuple(validations),
                 programmables=programmables,
             )
@@ -1032,6 +1034,8 @@ def compose_repository(
             model,
             signature=merged.semantic_models[model.identity].signature
             if model.identity in merged.semantic_models
+            else merged.reports[model.identity].signature
+            if model.identity in merged.reports
             else _item_signature(
                 model,
                 source_documents=source_documents,

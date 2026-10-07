@@ -137,10 +137,18 @@ CATALOGUE_CLAIMS_BY_OBJECT_TYPE: Mapping[str, tuple[CatalogueClaimRule, ...]] = 
     # Schema shortcuts certify a namespace owned by their source item.
     "schema": (CatalogueClaimRule(REGISTRY),),
     "semantic_model": (
-        CatalogueClaimRule(REGISTRY),
-        *(CatalogueClaimRule(table) for table in SEMANTIC_TABLES),
+        CatalogueClaimRule(REGISTRY, predicate_columns=()),
+        *(CatalogueClaimRule(table, predicate_columns=()) for table in SEMANTIC_TABLES),
         CatalogueClaimRule(DEPENDENCY, predicate_columns=("referencing_schema_name",)),
     ),
+    "report": (
+        CatalogueClaimRule(REGISTRY, predicate_columns=()),
+        CatalogueClaimRule(
+            DEPENDENCY,
+            predicate_columns=("referencing_schema_name", "referencing_object_name"),
+        ),
+    ),
+    "source_artifact": (CatalogueClaimRule(REGISTRY),),
 }
 
 
