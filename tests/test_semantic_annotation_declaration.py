@@ -58,10 +58,10 @@ def test_source_annotation_declares_the_managed_relation_in_each_layer(
     tmp_path, origin
 ):
     root = source_project(tmp_path, origin=origin)
-    semantic = compile_source(root)
+    semantic = parse_item_repository(Location(root.as_posix())).semantic_models[ITEM]
     assert semantic.source_references == {"Sales": "Warehouse/Serving/Cake.Sales"}
     assert any(
-        b"annotation 'Weaver.Source' = Warehouse/Serving/Cake.Sales" in value
+        b"annotation Weaver.Source = Warehouse/Serving/Cake.Sales" in value
         for value in semantic.parts.values()
     )
     assert ("Sales", "Warehouse/Serving/Cake.Sales") in semantic.dependencies
@@ -125,7 +125,7 @@ def test_source_annotation_requires_the_canonical_external_identity(
 @weaver_test()
 def test_source_annotation_keeps_the_lakehouse_tables_area(tmp_path):
     root = source_project(tmp_path, value="Lakehouse/Curated/Tables/CRM.Customer")
-    semantic = compile_source(root)
+    semantic = parse_item_repository(Location(root.as_posix())).semantic_models[ITEM]
     assert semantic.source_references == {
         "Sales": "Lakehouse/Curated/Tables/CRM.Customer"
     }

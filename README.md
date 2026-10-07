@@ -123,7 +123,8 @@ assert result.succeeded, result.errors
 Build sends the effective TMDL package to Fabric. After deployment it reads
 TMSL back from Fabric, verifies requested edits and publishes the observed model
 to the five semantic catalogue tables. Failed updates or readback checks leave
-the selected model uncertified. An unchanged effective package plans zero actions.
+the selected model uncertified. Every selected model compiles and deploys, even
+when its effective signature matches the installed model.
 
 ### Shared data sources
 
@@ -168,15 +169,15 @@ Weaver's own annotations are
 [`semantic_models/builtin_annotations.py`](src/weaver/semantic_models/builtin_annotations.py):
 
 - `Weaver.Source` on a table names `Warehouse/<item>/<schema>.<object>` or
-  `Lakehouse/<item>/Tables/<schema>.<object>`. It generates SQL-source partitions
-  and copies available table and column descriptions from the catalogue. A table
-  without an authored partition takes every source column; an authored column
-  refines the source column it names, so `column Code` with `isHidden` hides one
-  column and keeps the rest. With an authored partition, it preserves partitions,
-  expressions, columns and types and enriches missing descriptions by source column.
-  Consuming tables share one M expression for a logical source. Workspace and CLI
-  source overrides must resolve to the selected or installed managed target;
-  build the source into its new target before changing that binding.
+  `Lakehouse/<item>/Tables/<schema>.<object>`. It declares logical lineage and
+  associates available catalogue metadata. Authored partitions, source expressions,
+  modes, columns, types and mappings remain intact. Only missing descriptions are
+  enriched, matching columns by `sourceColumn`, or by name when absent.
+  A table without a partition generates its source and takes every source column;
+  authored columns refine the source columns they name. Generated tables share one
+  M expression per logical source. Their workspace and CLI source overrides must
+  resolve to the selected or installed managed target; build the source into its
+  new target before changing that binding.
 - `Weaver.MeasureTable = true` on a table generates a calculated partition over
   `INFO.VIEW.MEASURES()` with the columns Measure name, Expression, Format
   string definition, Description, Display folder, Table and Data category. Native `isHidden` controls visibility.
@@ -265,15 +266,20 @@ diagnostic; source resolution occurs once.
 
 Annotation files are trusted code: Build executes them while it compiles each
 semantic definition. A file may import installed packages such as `weaver`, but
-not other project files. Changing one recompiles every model; a model whose
-effective TMDL is unchanged still plans zero actions.
+not other project files. Each selected model executes annotations once after
+native, policy and target layers merge, then resolves source metadata and generation.
+Its final effective package determines the persisted signature. Every selected
+model deploys; selected consuming Reports redeploy with it. Report-only Build
+retains independent change detection.
 
 Generated source tables follow the model's `defaultMode`: `import` reads the
 shared source through M navigation, and otherwise they use Direct Lake through
 their typed SQL endpoint.
-Authored partitions retain their expressions and storage mode. Source-generated
-columns receive built-in and custom transformations after inference; exclusions remain removed. This
-compilation uses the ordinary Build, catalogue and installed dependency graph.
+Authored data definitions remain intact, including transformed M and calculated
+partitions. Source-generated columns receive declared hiding policies after
+inference; exclusions remain removed. This compilation uses the ordinary Build,
+catalogue and installed dependency graph. Ordinary PBIP adoption can start with
+logical source annotations and add generation only for tables without partitions.
 
 ### Without a catalogue
 
@@ -285,9 +291,9 @@ weaver load SemanticModel/Reporting --workspace Analytics
 ```
 
 Build deploys each selected model and verifies its readback. With no catalogue
-there is no record of what is installed, so every Build redeploys, and Load
-records nothing. Lakehouse and Warehouse items, `Weaver.Source`, lineage and
-`load --stale`, `--name` or `--reload` need a catalogue.
+Load records nothing. Authored tables can retain logical `Weaver.Source` annotations
+without catalogue metadata. Source generation, Lakehouse and Warehouse operations,
+installed lineage and `load --stale`, `--name` or `--reload` need a catalogue.
 
 ### Load and connections
 
@@ -297,9 +303,9 @@ weaver load SemanticModel/Reporting --workspace Analytics --catalogue Warehouse/
 
 Load uses the installed catalogue, so it needs no source checkout. It refreshes
 the model and records request ID, outcome and timing in LoadStatus and Log.
-Changed Build permits required clearing of processed semantic data and leaves
+Every model Build permits required clearing of processed semantic data and leaves
 LoadStatus Pending. It does not delete Warehouse or Lakehouse source data.
-Unchanged Build preserves LoadStatus. Semantic-only Build and Load use REST/TDS
+Report-only Build preserves model LoadStatus. Semantic-only Build and Load use REST/TDS
 and start no Spark session.
 
 Source mapping changes the definition, naming each source by its Warehouse or

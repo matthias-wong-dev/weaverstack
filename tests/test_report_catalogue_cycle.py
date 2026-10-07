@@ -106,11 +106,30 @@ def test_bound_project_catalogue_fixed_point_report_edit_and_eager_model_impact(
         bound, bindings, engine_model(repository), state.target_inventories
     )
     fixed = bundle_for(tmp_path, repository, bindings, installed, "fixed")
-    assert list(fixed.plan.actions()) == []
+    assert {
+        a.executor
+        for _, _, a in fixed.plan.actions()
+        if a.executor.startswith(("report_", "semantic_"))
+    } == {
+        "semantic_model",
+        "semantic_readback",
+        "semantic_catalogue",
+        "report_definition",
+        "report_readback",
+    }
+    report_bindings = ItemBindings(
+        (parse_build_item("Report/Executive=Report/Executive_Dev"),)
+    )
+    report_fixed = bundle_for(
+        tmp_path, repository, report_bindings, installed, "report-fixed"
+    )
+    assert list(report_fixed.plan.actions()) == []
     page = root / "PowerBI/Reporting/Executive.Report/definition/report.json"
     page.write_text('{"displayName":"Edited"}')
     changed = parse_item_repository(Location(root.as_posix()))
-    report_only = bundle_for(tmp_path, changed, bindings, installed, "report-only")
+    report_only = bundle_for(
+        tmp_path, changed, report_bindings, installed, "report-only"
+    )
     assert {
         a.executor
         for _, _, a in report_only.plan.actions()
