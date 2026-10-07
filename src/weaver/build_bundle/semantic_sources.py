@@ -4,7 +4,7 @@ from ..catalogue.claims import catalogue_columns
 from ..declaration.metadata import TABLE, VIEW
 from ..declaration.model import WeaverItemId
 from ..errors import BuildError
-from ..semantic_models.fragments import source_table
+from ..semantic_models.fragments import needs_source_columns, source_table
 from ..semantic_models.references import source_identity
 from ..targets import physical_item
 
@@ -23,8 +23,8 @@ def read_semantic_sources(repository, bindings, catalogue, *, session, workspace
             logical = str(source_identity(reference).item)
             if mapping := contribution.expression_sources.get(logical):
                 mappings[reference] = WeaverItemId.parse(mapping["target"])
-            wanted[reference] = wanted.get(reference, False) or not tables[table].get(
-                "columns"
+            wanted[reference] = wanted.get(reference, False) or needs_source_columns(
+                tables[table]
             )
     observed = {}
     for reference, needs_columns in sorted(wanted.items()):

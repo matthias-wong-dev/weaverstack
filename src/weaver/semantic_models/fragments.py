@@ -65,14 +65,15 @@ def source_table(parts, name):
         result.update(properties(document, table, {"description"}))
         for node in table.children:
             if node.kind == "column":
-                result.setdefault("columns", []).append(
-                    {
-                        "name": node.name,
-                        **properties(
-                            document, node, {"description", "dataType", "sourceColumn"}
-                        ),
-                    }
-                )
+                column = {
+                    "name": node.name,
+                    **properties(
+                        document, node, {"description", "dataType", "sourceColumn"}
+                    ),
+                }
+                if node.value:
+                    column["expression"] = node.value
+                result.setdefault("columns", []).append(column)
             elif node.kind == "partition":
                 source = {"type": node.value}
                 member = {
@@ -94,6 +95,12 @@ def source_table(parts, name):
                             source["expression"] = expression_text(document, child)
                 result.setdefault("partitions", []).append(member)
     return result
+
+
+def needs_source_columns(table):
+    """A table whose partition Weaver generates takes every source column."""
+
+    return not table.get("partitions") or not table.get("columns")
 
 
 def source_context(parts, table):

@@ -149,6 +149,40 @@ def test_source_generated_columns_receive_auto_hide_policy(tmp_path, scope):
         assert b"isHidden" in submitted_parts(session)["definition/tables/Sales.tmdl"]
 
 
+@weaver_test()
+def test_authored_columns_refine_the_columns_a_source_generates(tmp_path):
+    root = source_project(tmp_path)
+    path = root / str(ITEM) / "extension.tmdl"
+    path.write_text(
+        path.read_text() + "\n\tcolumn Label\n\t\tisHidden\n\t\tsortByColumn: Id\n"
+    )
+    observed = source_model(relations={"Sales": "Sales"})
+    sales = observed["model"]["tables"][0]
+    sales["annotations"] = [
+        {"name": "Weaver.Source", "value": "Warehouse/Serving/Cake.Sales"}
+    ]
+    sales["columns"][1].update(isHidden=True, sortByColumn="Id")
+    with source_session() as session:
+        session.answer_semantic_model(
+            "Demo", "Reporting_Dev", SubmittedDefinition(observed)
+        )
+        answer_catalogue(session, source_catalogue(), read_bindings())
+        result = weaver.build(
+            root, items=f"{ITEM}=SemanticModel/Reporting_Dev", session=session
+        )
+        assert result.succeeded, result.errors
+    from weaver.semantic_models import TmdlDefinition
+
+    columns = TmdlDefinition(submitted_parts(session)).model.tables["Sales"].columns
+    assert [
+        (c.name, c.sourceColumn, c.dataType, c.isHidden, c.sortByColumn)
+        for c in columns
+    ] == [
+        ("Label", "Label", "string", True, "Id"),
+        ("Id", "Id", "int64", None, None),
+    ]
+
+
 @pytest.mark.parametrize(
     "failure, diagnostic",
     [
@@ -157,6 +191,7 @@ def test_source_generated_columns_receive_auto_hide_policy(tmp_path, scope):
         ("unsupported_type", "unsupported type"),
         ("transformed_m", "unsupported M source"),
         ("calculated_partition", "unsupported authored partition form"),
+        ("missing_column", "Cake.Sales has no column Missing"),
     ],
 )
 @weaver_test()
@@ -176,6 +211,8 @@ def test_source_annotation_refuses_unresolved_generation_before_mutation(
             else '\tpartition Sales = calculated\n\t\tsource = ROW("Id", 1)\n'
         )
         path.write_text(path.read_text() + body)
+    elif failure == "missing_column":
+        path.write_text(path.read_text() + "\n\tcolumn Missing\n\t\tisHidden\n")
     with source_session() as session:
         answer_catalogue(session, source_catalogue(), read_bindings())
         if failure == "missing_columns":

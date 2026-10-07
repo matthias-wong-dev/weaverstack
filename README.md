@@ -128,9 +128,12 @@ Weaver's own annotations are
 [`semantic_models/builtin_annotations.py`](src/weaver/semantic_models/builtin_annotations.py):
 
 - `Weaver.Source` on a table names `Warehouse/<item>/<schema>.<object>` or
-  `Lakehouse/<item>/Tables/<schema>.<object>`. It generates SQL-source partitions,
-  infers compatible columns when none are authored and copies available table and
-  column descriptions from the catalogue. Authored descriptions take precedence.
+  `Lakehouse/<item>/Tables/<schema>.<object>`. It generates SQL-source partitions
+  and copies available table and column descriptions from the catalogue. A table
+  without an authored partition takes every source column; an authored column
+  refines the source column it names, so `column Code` with `isHidden` hides one
+  column and keeps the rest. A table with an authored partition infers columns
+  only when none are authored. Authored properties take precedence.
   Consuming tables share one M expression for a logical source. Workspace and CLI
   source overrides must resolve to the selected or installed managed target;
   build the source into its new target before changing that binding.

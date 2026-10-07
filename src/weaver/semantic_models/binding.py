@@ -6,7 +6,7 @@ from dataclasses import replace
 
 from ..errors import BuildError
 from .compiler import _NAMED_COLLECTIONS, _merge, escape, leaf_properties
-from .fragments import source_context, source_table
+from .fragments import needs_source_columns, source_context, source_table
 from .patching import _patch_object
 from .references import source_identity
 from .tmdl import PackageEditor
@@ -220,6 +220,31 @@ def _changes(before, after, key=""):
     return copy.deepcopy(after)
 
 
+def _source_columns(table, authored, source, reference):
+    """Every source column, refined by the authored column it names.
+
+    An authored column matches by ``sourceColumn``, else by name. One that matches
+    nothing must be calculated.
+    """
+
+    by_source = {str(c.get("sourceColumn", c["name"])).casefold(): c for c in authored}
+    columns = []
+    for c in source["source_columns"]:
+        name = c["column_name"]
+        column = by_source.pop(name.casefold(), {"name": name})
+        column.setdefault("sourceColumn", name)
+        column.setdefault("dataType", semantic_type(c["data_type"], reference, name))
+        columns.append(column)
+    for column in by_source.values():
+        if not column.get("expression"):
+            raise BuildError(
+                f"tables/{table}/columns/{column['name']}: {reference} has no column "
+                f"{column.get('sourceColumn', column['name'])}"
+            )
+        columns.append(column)
+    return columns
+
+
 def bind_semantic_sources(repository, observed, selected):
     from .annotation import apply_annotations
 
@@ -243,18 +268,12 @@ def bind_semantic_sources(repository, observed, selected):
                 )
             source = copy.deepcopy(observed[reference])
             before = leaf_properties({"model": {"tables": [table]}})
+            generated = needs_source_columns(table)
             mode = _bind_partition(context, table, source)
-            if not table.get("columns"):
-                table["columns"] = [
-                    {
-                        "name": c["column_name"],
-                        "sourceColumn": c["column_name"],
-                        "dataType": semantic_type(
-                            c["data_type"], reference, c["column_name"]
-                        ),
-                    }
-                    for c in source["source_columns"]
-                ]
+            if generated:
+                table["columns"] = _source_columns(
+                    table["name"], table.get("columns", []), source, reference
+                )
             if source.get("description"):
                 table.setdefault("description", source["description"])
             for column in table["columns"]:
