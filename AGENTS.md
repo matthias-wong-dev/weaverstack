@@ -262,7 +262,16 @@ on SQL. Views use the native DirectQuery fallback; Weaver retains `directLake`.
 and `_.SemanticModelColumn` expose typed child metadata read back after
 deployment. Models, tables, measures and columns include native descriptions.
 These rows are logical and identical across environments: only `_.Installation`
-names a physical item. `SemanticModelTable` records each managed source's mode
+names a physical item.
+
+A semantic model's Tests and Assumptions are DAX validation documents. They
+compile to nothing: `_.SemanticModelTest` holds each installed definition, with
+its logical Expected source, and no Registry row claims it. A validation is
+installed when that row matches its `_.TestDictionary` signature; a changed
+definition resets its TestStatus without updating the model. The installed graph
+adds its dependency on the model, so a refresh makes a pass stale. A run resolves
+the Expected source through `_.Installation` and compares the two sides in
+`runtime/relation_compare.py`, which keeps `runtime/test_compare.py`'s contract. `SemanticModelTable` records each managed source's mode
 and access. Join its item identity and Table name to Dependency item identity
 and Referencing object name. Each semantic
 table publishes its exact producer in `_.Dependency`; two consuming tables keep
