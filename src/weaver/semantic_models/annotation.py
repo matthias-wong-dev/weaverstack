@@ -427,8 +427,9 @@ class _Compilation:
                         "post_schema introduces a source dependency; declare phase = 'schema'"
                     )
         _quote_names(self.editor, dispatched)
-        return replace(
+        compiled = replace(
             self.contribution,
+            table_order=None,
             parts=self.editor.parts,
             requested=self.requested,
             owned=tuple(sorted(self.owned)),
@@ -439,6 +440,7 @@ class _Compilation:
             annotations=self.registry,
             compilation=self if phase == "schema" else None,
         )
+        return replace(compiled, table_order=compiled.table_names) if phase == "post_schema" else compiled
 
 
 def _quote_names(editor, names):
@@ -463,6 +465,7 @@ def prepare_annotations(contribution, registry=None):
     """Validate annotations and collect sources without executing handlers."""
 
     registry = registry or contribution.annotations or builtin_registry()
+
     references = {}
     editor = PackageEditor(contribution.parts)
     for document in editor.documents():
@@ -504,3 +507,4 @@ def apply_annotations(contribution, registry=None):
 
     contribution = begin_annotations(contribution, registry)
     return contribution.compilation.run("post_schema")
+
