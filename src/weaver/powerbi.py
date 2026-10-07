@@ -24,6 +24,7 @@ class ReportContribution:
     path: str
     model: WeaverItemId
     parts: Mapping[str, bytes]
+    binding: Mapping[str, str] | None = None
 
     @property
     def source_signature(self):
@@ -53,7 +54,7 @@ class ReportContribution:
 
     @property
     def signature(self):
-        return self.effective_signature()
+        return self.effective_signature(binding=self.binding)
 
 
 def artifact_paths(paths, suffix):
