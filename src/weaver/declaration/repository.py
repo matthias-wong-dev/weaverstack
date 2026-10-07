@@ -19,6 +19,8 @@ from typing import Iterable, Mapping, TypeVar
 
 from ..errors import DiscoveryError
 from ..locations import Location
+from ..semantic_models.annotation import DIRECTORY as ANNOTATION_DIRECTORY
+from ..semantic_models.annotation import discover_annotations
 from ..semantic_models.source import SemanticContribution, read_semantic_contribution
 from ..sql_statements import sql_parse_cache
 from ..store import FilesystemStore, Store
@@ -542,10 +544,13 @@ def _read_authored_repository(root: Location, store: Store) -> RepositoryPart:
     # surrounding project and does not participate in discovery or signatures.
     entries = [entry for entry in discovered if entry[0].split("/", 1)[0] in ITEM_TYPES]
 
+    # SemanticModel/annotations holds the project's annotation classes, not a model.
     item_ids = {
         WeaverItemId(*relative.split("/"))
         for relative, is_directory in entries
-        if is_directory and len(relative.split("/")) == 2
+        if is_directory
+        and len(relative.split("/")) == 2
+        and relative != ANNOTATION_DIRECTORY
     }
 
     for relative, is_directory in entries:
@@ -604,15 +609,16 @@ def _read_authored_repository(root: Location, store: Store) -> RepositoryPart:
         if not is_directory:
             files.append(relative)
 
+    file_paths = {p for p, directory in entries if not directory}
+    semantic_items = sorted(i for i in item_ids if i.item_type == SEMANTIC_MODEL)
+    annotations = (
+        discover_annotations(root, store, file_paths) if semantic_items else None
+    )
     semantic_models = {
         item: read_semantic_contribution(
-            item,
-            root=root,
-            store=store,
-            paths={p for p, directory in entries if not directory},
+            item, root=root, store=store, paths=file_paths, annotations=annotations
         )
-        for item in sorted(item_ids)
-        if item.item_type == SEMANTIC_MODEL
+        for item in semantic_items
     }
     source_documents: dict[WeaverDocumentId, SourceDocument] = {}
     schema_documents: dict[WeaverSchemaId, SchemaSes] = {}
@@ -818,6 +824,7 @@ def _read_authored_repository(root: Location, store: Store) -> RepositoryPart:
             sorted(
                 {p for p in files if not p.startswith(SEMANTIC_MODEL + "/")}
                 | {p for semantic in semantic_models.values() for p in semantic.sources}
+                | set(annotations.sources if annotations else ())
             )
         ),
         semantic_models=semantic_models,

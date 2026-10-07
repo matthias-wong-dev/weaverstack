@@ -78,7 +78,16 @@ def verify_requested(requested, actual, *, owned=(), absent=()):
     for path in absent:
         node = actual["model"]
         for kind, name in path:
-            collection = {"table": "tables", "column": "columns"}[kind]
+            collection = {
+                "table": "tables",
+                "column": "columns",
+                "measure": "measures",
+                "partition": "partitions",
+                "relationship": "relationships",
+                "expression": "expressions",
+            }.get(kind.casefold())
+            if collection is None:
+                break
             node = next(
                 (
                     member

@@ -585,7 +585,10 @@ Enforced by `tests/test_core_boundary.py`:
 
 Enforceable as the corresponding code lands:
 
-- **Static discovery.** Discovery never imports object modules.
+- **Static discovery.** Discovery never imports object modules. The one
+  exception is `SemanticModel/annotations/*.py`: trusted compiler extensions
+  executed when the repository is parsed, each loaded for that repository only
+  and never registered in a process-wide table.
 - **Objects never mutate the target.** `read()` proposes. Weaver owns mutation,
   CRUD accounting, staging and logging.
 - **A runtime artefact is known by its role.** Planning reads `object_role` from

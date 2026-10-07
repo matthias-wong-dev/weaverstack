@@ -124,8 +124,8 @@ annotation identifiers are quoted, such as `annotation 'Weaver.Source' = ...`.
 Weaver quotes supported bare identifiers in the effective package while retaining
 their full names and values.
 
-The public registry is
-[`semantic_models/annotation.py`](src/weaver/semantic_models/annotation.py):
+Weaver's own annotations are
+[`semantic_models/builtin_annotations.py`](src/weaver/semantic_models/builtin_annotations.py):
 
 - `Weaver.Source` on a table names `Warehouse/<item>/<schema>.<object>` or
   `Lakehouse/<item>/Tables/<schema>.<object>`. It generates SQL-source partitions,
@@ -178,6 +178,45 @@ table Metric
             Sales[Units]
             ```
 ```
+
+### Project annotations
+
+A project adds annotations of its own, one class per file, in
+`SemanticModel/annotations/`. They apply to every semantic model in the
+project and use the same live TMDL objects as Weaver's annotations:
+
+```python
+# SemanticModel/annotations/DWG__HideIntegerColumns.py
+from weaver.semantic_models import Annotation
+
+
+class DWG__HideIntegerColumns(Annotation):
+    scopes = {"model", "table"}
+
+    def apply(self, target):
+        tables = target.tables if target.parent is None else [target]
+        for table in tables:
+            for column in table.columns:
+                if column.dataType == "int64":
+                    column.isHidden = True
+```
+
+```tmdl
+model Model
+    annotation DWG.HideIntegerColumns = true
+```
+
+The class name is the annotation name with `__` for `.`, and the file is named
+after the class. `scopes` lists the TMDL object kinds it may annotate.
+`self.value`, `self.lines()` and `self.boolean()` read the declared value, and
+`self.error()` fails Build at the declaration. Once a project defines a
+namespace, an undefined annotation in it is an error. The `Weaver` namespace is
+reserved.
+
+Annotation files are trusted code: Build executes them while it compiles each
+semantic definition. A file may import installed packages such as `weaver`, but
+not other project files. Changing one recompiles every model; a model whose
+effective TMDL is unchanged still plans zero actions.
 
 Generated source tables default to Direct Lake through their typed SQL endpoint.
 Supported authored M and entity partitions retain their storage mode. Transformed
@@ -244,8 +283,7 @@ Each edit changes only the TMDL lines it addresses.
 
 The former `addon.yml`, `.dax` and `.source` authoring syntax is removed.
 Semantic wipe and DAX Test/TestStatus/Health are separate follow-ups. Native TMDL
-expresses relationships and calculated tables. Polling and relationship shorthand
-are outside the annotation registry.
+expresses relationships and calculated tables.
 Delegated-user Azure CLI/browser access remains a separate user validation.
 
 ## Documentation

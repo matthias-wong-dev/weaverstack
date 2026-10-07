@@ -24,6 +24,8 @@ class SemanticContribution:
     expression_sources: Mapping[str, dict] = field(default_factory=dict)
     #: Bind data sources to their connections once the definition is deployed.
     bind_data_sources: bool = False
+    #: The annotation classes this contribution compiles with; not desired state.
+    annotations: object = field(default=None, compare=False, repr=False)
 
     @property
     def dependencies(self):
@@ -51,7 +53,7 @@ class SemanticContribution:
         return content_signature(value)
 
 
-def read_semantic_contribution(item, *, root, store, paths):
+def read_semantic_contribution(item, *, root, store, paths, annotations=None):
     prefix = str(item) + "/"
     available = {p for p in paths if p.startswith(prefix)}
     sources = {}
@@ -176,4 +178,4 @@ def read_semantic_contribution(item, *, root, store, paths):
         contribution = apply_extensions(contribution, item.item_name, extensions)
     from .annotation import apply_annotations
 
-    return apply_annotations(contribution)
+    return apply_annotations(contribution, annotations)

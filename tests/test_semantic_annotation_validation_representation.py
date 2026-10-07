@@ -7,7 +7,6 @@ from test_semantic_annotation_origins_representation import NAMES
 from test_semantic_annotation_representation import extension_model, switch_model
 
 from weaver.errors import ConfigError
-from weaver.semantic_models import annotation
 
 
 @weaver_test()
@@ -35,14 +34,6 @@ def test_measure_table_does_not_silently_add_to_an_authored_partition(tmp_path):
     )
     with pytest.raises(ConfigError, match="(?i)MeasureTable.*partition"):
         compile_source(root)
-
-
-@weaver_test()
-def test_annotation_registry_and_public_header_cover_the_six_supported_names():
-    assert set(annotation.SUPPORTED_ANNOTATIONS) == set(NAMES)
-    for name, definition in annotation.SUPPORTED_ANNOTATIONS.items():
-        assert name in annotation.__doc__
-        assert definition.scopes and definition.grammar and callable(definition.handler)
 
 
 @pytest.mark.parametrize(
