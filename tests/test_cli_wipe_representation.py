@@ -91,19 +91,6 @@ def test_removed_target_switches_are_rejected():
 
 
 @weaver_test()
-def test_unbinding_is_reached_through_wipe_and_not_a_command_of_its_own():
-    """Removing catalogue claims is part of clearing a target, not a verb.
-
-    ``unbind_catalogue_claims`` is still the operation, and ``--unbind``
-    selects it. What is gone is a separate command that removed claims for a
-    target it never looked at.
-    """
-
-    with pytest.raises(SystemExit):
-        build_parser().parse_args(["unbind", "Lakehouse/Sales"])
-
-
-@weaver_test()
 def test_the_catalogue_to_unbind_from_is_the_one_the_command_resolved():
     """``--unbind-from`` named a second catalogue for one command to reach.
 

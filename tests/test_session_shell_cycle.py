@@ -244,6 +244,7 @@ def test_the_available_commands_come_from_the_parser(recorded, capsys):
         "load",
         "mirror",
         "test",
+        "unbind",
         "wipe",
         "workflow",
     }
@@ -258,7 +259,7 @@ def test_the_banner_reads_in_lifecycle_order(recorded):
     from weaver_cli.shell import _available
 
     assert _available(build_parser()) == (
-        "mirror, build, load, test, wipe, workflow, health"
+        "mirror, build, load, test, wipe, unbind, workflow, health"
     )
 
 
