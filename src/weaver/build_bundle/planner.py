@@ -64,6 +64,7 @@ from .prune import TargetInventory, lakehouse_prune_stage, warehouse_prune_stage
 from .runtime import item_runtime_removals, item_runtime_stages
 from .runtime_tables import (
     VIEW_STATE_SLUG,
+    changed_semantic_validations,
     render_runtime_state_reconciliation,
     runtime_state_establishment,
     runtime_state_invalidation,
@@ -234,7 +235,8 @@ def generate_item_build_bundle(
     established_state = runtime_state_establishment(
         repository,
         items=tuple(target_by_item),
-        selected_for_build=selected_for_build,
+        selected_for_build=selected_for_build
+        | changed_semantic_validations(repository, catalogue, items=target_by_item),
         holds_table=_catalogue_holds(inventories),
     )
     reconciliation = render_runtime_state_reconciliation(
