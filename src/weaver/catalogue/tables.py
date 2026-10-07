@@ -776,20 +776,8 @@ SHORTCUT = CatalogueTable(
 )
 
 
-def _semantic_metadata():
-    return (
-        CatalogueColumn(
-            "properties",
-            sql_type=WIDE_LIST_TYPE,
-            description="Native properties as JSON.",
-        ),
-        CatalogueColumn(
-            "provenance",
-            sql_type=WIDE_LIST_TYPE,
-            description="Property origins and derivation reasons as JSON.",
-        ),
-        _signature("the effective semantic model"),
-    )
+def _semantic_signature():
+    return _signature("the effective semantic model")
 
 
 def _semantic_description():
@@ -802,24 +790,19 @@ def _semantic_description():
 
 SEMANTIC_MODEL = CatalogueTable(
     name="SemanticModel",
-    description="Deployed semantic models, their descriptions and native definitions.",
+    description="Deployed semantic models and their descriptions.",
     key=(*ITEM_SCOPE_COLUMNS, "schema_name", "object_name"),
     columns=(
         *_scope(),
         *_object(),
         _semantic_description(),
-        CatalogueColumn(
-            "definition",
-            sql_type=WIDE_LIST_TYPE,
-            description="The deployed native TMSL database from definition readback.",
-        ),
-        *_semantic_metadata(),
+        _semantic_signature(),
     ),
 )
 
 SEMANTIC_MODEL_TABLE = CatalogueTable(
     name="SemanticModelTable",
-    description="Semantic tables and their resolved source bindings.",
+    description="Semantic tables and how each reads its managed source.",
     key=(*ITEM_SCOPE_COLUMNS, "schema_name", "object_name", "table_name"),
     columns=(
         *_scope(),
@@ -831,11 +814,14 @@ SEMANTIC_MODEL_TABLE = CatalogueTable(
         ),
         _semantic_description(),
         CatalogueColumn(
-            "source_binding",
-            sql_type=WIDE_LIST_TYPE,
-            description="Resolved logical source, physical identity and shape as JSON.",
+            "source_mode",
+            description="The storage mode of the partition reading the managed source.",
         ),
-        *_semantic_metadata(),
+        CatalogueColumn(
+            "source_access",
+            description="How that partition reads the source: sql or lakehouse.",
+        ),
+        _semantic_signature(),
     ),
 )
 
@@ -867,7 +853,7 @@ SEMANTIC_MODEL_MEASURE = CatalogueTable(
             sql_type=WIDE_LIST_TYPE,
             description="The authored format string.",
         ),
-        *_semantic_metadata(),
+        _semantic_signature(),
     ),
 )
 
@@ -895,7 +881,7 @@ SEMANTIC_MODEL_RELATIONSHIP = CatalogueTable(
         CatalogueColumn(
             "is_active", type=BOOLEAN, description="Whether the relationship is active."
         ),
-        *_semantic_metadata(),
+        _semantic_signature(),
     ),
 )
 
@@ -927,7 +913,7 @@ SEMANTIC_MODEL_COLUMN = CatalogueTable(
             sql_type=WIDE_LIST_TYPE,
             description="The calculated column expression.",
         ),
-        *_semantic_metadata(),
+        _semantic_signature(),
     ),
 )
 
