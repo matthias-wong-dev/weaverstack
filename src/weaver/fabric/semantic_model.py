@@ -180,7 +180,9 @@ class SemanticModelClient:
         """Bind each unbound SQL data source to the one connection that reaches it.
 
         A connection reaches a data source when its path is the source's
-        ``server;database``. Returns the bound paths.
+        ``server;database``. A source no connection reaches keeps the
+        connection Fabric gave it, such as single sign-on. Returns the bound
+        paths.
         """
 
         unbound = [
@@ -208,11 +210,7 @@ class SemanticModelClient:
                 == path.casefold()
             ]
             if not matches:
-                raise ConnectionBindingError(
-                    f"The model reads database {database} on {server}, and no cloud "
-                    "connection reaches it. Create a SQL cloud connection to that "
-                    "server and database in Fabric, then run again."
-                )
+                continue
             if len(matches) > 1:
                 names = ", ".join(sorted(str(c.get("displayName")) for c in matches))
                 raise ConnectionBindingError(

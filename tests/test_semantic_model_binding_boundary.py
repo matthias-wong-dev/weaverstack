@@ -77,21 +77,20 @@ def test_bound_sources_need_no_connection_lookup():
     assert not fabric.calls
 
 
-@pytest.mark.parametrize(
-    "connections,message",
-    [
-        ([], "no cloud connection reaches it. Create a SQL cloud connection"),
-        (
-            [
-                connection("a", f"{SERVER};DEV_Curated", name="First"),
-                connection("b", f"{SERVER};DEV_Curated", name="Second"),
-            ],
-            "several connections reach it: First, Second. Keep one.",
-        ),
-    ],
-)
 @weaver_test()
-def test_unbindable_source_fails_in_one_line(connections, message):
+def test_a_source_no_connection_reaches_keeps_its_own():
+    model, fabric = scripted([source("DEV_Curated")], [])
+    assert model.bind_data_sources() == ()
+    assert all(call[0] == "GET" for call in fabric.calls)
+
+
+@weaver_test()
+def test_a_source_several_connections_reach_fails_in_one_line():
+    connections = [
+        connection("a", f"{SERVER};DEV_Curated", name="First"),
+        connection("b", f"{SERVER};DEV_Curated", name="Second"),
+    ]
+    message = "several connections reach it: First, Second. Keep one."
     model, fabric = scripted([source("DEV_Curated")], connections)
     with pytest.raises(ConnectionBindingError) as failed:
         model.bind_data_sources()
