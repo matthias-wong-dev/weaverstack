@@ -737,6 +737,31 @@ def _read_authored_repository(root: Location, store: Store) -> RepositoryPart:
 
     shortcut_files: dict[WeaverItemId, str] = {}
     warehouse_shortcut_files: dict[WeaverItemId, str] = {}
+    for project in projects.values():
+        prefix = project.path + "/"
+        for relative in sorted(powerbi_paths):
+            if not relative.startswith(prefix):
+                continue
+            within = relative[len(prefix) :].split("/")
+            if within[0] not in VALIDATION_DIRECTORIES:
+                continue
+            if len(within) < 3:
+                raise DiscoveryError(
+                    f"{relative}: use {project.path}/{within[0]}/<Model>/<Schema>.<Object>.dax"
+                )
+            item = WeaverItemId(SEMANTIC_MODEL, within[1])
+            if item not in project.definitions:
+                raise DiscoveryError(
+                    f"{relative}: {item} is not defined in {project.path}"
+                )
+            _read_validation(
+                relative,
+                [within[0], *within[2:]],
+                item=item,
+                root=root,
+                store=store,
+                source_documents=source_documents,
+            )
     for relative in sorted(files):
         parts = relative.split("/")
         item = WeaverItemId(parts[0], parts[1])
