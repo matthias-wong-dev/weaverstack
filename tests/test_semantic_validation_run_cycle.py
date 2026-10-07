@@ -52,14 +52,20 @@ def run(tmp_path, monkeypatch, *, test_rows, assumption_rows, expected_rows, nam
 
 
 def statuses(session):
+    """The last result each validation's TestStatus row was written with."""
+
+    import re
+
+    row = re.compile(
+        r"N'(RevenueReconciles|RevenueIsPositive)'.*?N'(Succeeded|Failed|Error)'"
+    )
     written = {}
     for statement in session.tsql:
-        if not statement.startswith("MERGE INTO [_].[TestStatus]"):
-            continue
-        for name in ("RevenueReconciles", "RevenueIsPositive"):
-            for result in ("Succeeded", "Failed", "Error"):
-                if f"N'{name}'" in statement and f"N'{result}'" in statement:
-                    written[name] = result
+        if statement.startswith("MERGE INTO [_].[TestStatus]"):
+            # One written row per line, whether or not writes were batched.
+            for line in statement.splitlines():
+                if match := row.search(line):
+                    written[match[1]] = match[2]
     return written
 
 
