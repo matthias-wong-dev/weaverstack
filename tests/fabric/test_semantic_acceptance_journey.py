@@ -127,6 +127,10 @@ def _health(session):
     return report, {section.area: section.status for section in report.sections}
 
 
+def _findings(report):
+    return [(f.area, f.code, f.object_id, f.message) for f in report.findings]
+
+
 @weaver_test(remote=True, resources={"rest", "tds"})
 def test_semantic_model_build_load_test_health_lifecycle(
     semantic_build_context, tmp_path
@@ -201,7 +205,7 @@ def test_semantic_model_build_load_test_health_lifecycle(
     (node,) = named.nodes
     assert named.succeeded and list(node.diagnostics) == []
     report, sections = _health(context.session)
-    assert report.is_healthy, report.to_mapping()
+    assert report.is_healthy, _findings(report)
     evidence["first"] = {"test": tested.to_mapping(), "health": sections}
 
     # Unchanged Build: a fixed point.
@@ -266,7 +270,7 @@ def test_semantic_model_build_load_test_health_lifecycle(
     assert connection_signature(context.model.get_connections()) == connections
     run_validations()
     final, sections = _health(context.session)
-    assert final.is_healthy, final.to_mapping()
+    assert final.is_healthy, _findings(final)
     assert build().installation_report.action_counts()["total"] == 0
     assert not {"livy", "onelake"} & {
         event.resource for event in context.session.telemetry.events()
