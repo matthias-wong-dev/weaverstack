@@ -15,6 +15,7 @@ from .copy_files import CopyFilesExecutor
 from .endpoint_objects import EndpointObjectsExecutor
 from .folder import FolderExecutor
 from .load_file import LoadFileExecutor
+from .report import ReportDefinitionExecutor, ReportReadbackExecutor
 from .runtime_state import RuntimeStateExecutor
 from .semantic import (
     SemanticCatalogueExecutor,
@@ -32,6 +33,8 @@ from .wipe import LakehouseWipeExecutor
 
 def default_executors() -> dict[str, ActionExecutor]:
     return {
+        ReportDefinitionExecutor.name: ReportDefinitionExecutor(),
+        ReportReadbackExecutor.name: ReportReadbackExecutor(),
         SemanticModelExecutor.name: SemanticModelExecutor(),
         SemanticCatalogueExecutor.name: SemanticCatalogueExecutor(),
         SemanticReadbackExecutor.name: SemanticReadbackExecutor(),

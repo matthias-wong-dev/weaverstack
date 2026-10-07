@@ -56,7 +56,7 @@ def validate_mutation_plan(plan: MutationPlan) -> None:
             require_string(value, what=f"target {name}")
         if target.id in targets:
             raise BuildError(f"duplicate target {target.id!r}")
-        if target.kind not in {"lakehouse", "warehouse", "semanticmodel"}:
+        if target.kind not in {"lakehouse", "warehouse", "semanticmodel", "report"}:
             raise BuildError(f"unknown target kind {target.kind!r}")
         if (target.logical_item_type is None) != (target.logical_item_name is None):
             raise BuildError(f"incomplete logical item for target {target.id!r}")
@@ -66,6 +66,7 @@ def validate_mutation_plan(plan: MutationPlan) -> None:
                 "Lakehouse": "lakehouse",
                 "Warehouse": "warehouse",
                 "SemanticModel": "semanticmodel",
+                "Report": "report",
             }.get(target.logical_item_type)
             != target.kind
         ):
@@ -324,6 +325,11 @@ def _validate_scopes(plan, actions, graph):
             if scope.target_id != action.target_id:
                 raise BuildError(f"scope for action {action.id!r} crosses its target")
         for destructive in action.destructive_scopes:
+            if (
+                next(t for t in plan.targets if t.id == destructive.target_id).kind
+                == "report"
+            ):
+                raise BuildError("Report destructive operations are not supported")
             if not any(covers(write, destructive) for write in action.writes):
                 raise BuildError(
                     f"destructive scope of {action.id!r} is outside its writes"

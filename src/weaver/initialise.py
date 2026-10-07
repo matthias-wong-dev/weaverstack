@@ -119,6 +119,7 @@ def initialise(
     lakehouse: str | None = None,
     warehouse: str | None = None,
     semantic_model: str | None = None,
+    reports: dict | None = None,
     example: bool = False,
     publish_environment: bool = False,
     install_weaver: bool | None = None,
@@ -151,6 +152,7 @@ def initialise(
         lakehouse=lakehouse,
         warehouse=warehouse,
         semantic_model=semantic_model,
+        reports=reports or {},
         example=example,
     )
 
@@ -392,6 +394,10 @@ class _Requested:
     name: str
     item_type: str
 
+    @property
+    def key(self):
+        return f"Report/{self.name}" if self.role == "Report" else self.role
+
 
 def _requested(request: ProjectRequest) -> tuple[_Requested, ...]:
     from .fabric.resources import ENVIRONMENT
@@ -408,6 +414,9 @@ def _requested(request: ProjectRequest) -> tuple[_Requested, ...]:
             _Requested(SEMANTIC_MODEL, request.semantic_model, SEMANTIC_MODEL)
         )
     wanted.append(_Requested(ENVIRONMENT_ROLE, request.environment, ENVIRONMENT))
+    wanted.extend(
+        _Requested("Report", name, "Report") for name in sorted(request.reports)
+    )
     return tuple(wanted)
 
 
@@ -440,7 +449,7 @@ def _read_the_workspace(request: ProjectRequest, *, client):
                 f"{_article(other)} {other}. Choose another name for the "
                 f"{wanted.role}, or use an existing {wanted.item_type}."
             )
-        found[wanted.role] = bool(types)
+        found[wanted.key] = bool(types)
 
     environment = next(
         (
@@ -462,7 +471,7 @@ def _planned(
         FabricItemOutcome(
             role=wanted.role,
             name=wanted.name,
-            status=EXISTING if found[wanted.role] else PLANNED,
+            status=EXISTING if found[wanted.key] else PLANNED,
         )
         for wanted in _requested(request)
     )
@@ -509,7 +518,7 @@ def _create_missing(
     for wanted in _requested(request):
         if wanted.role == ENVIRONMENT_ROLE:
             continue
-        if found[wanted.role]:
+        if found[wanted.key]:
             made.append(FabricItemOutcome(wanted.role, wanted.name, EXISTING))
             continue
         create = (
@@ -546,6 +555,15 @@ def _create_missing(
                     create_semantic_model(
                         physical, wanted.name, definition=definition, client=client
                     )
+                elif wanted.item_type == "Report":
+                    from .fabric.resources import create_report
+
+                    create_report(
+                        physical,
+                        wanted.name,
+                        definition=request.reports[wanted.name],
+                        client=client,
+                    )
                 else:
                     create(physical, wanted.name, client=client)
         except WeaverError as exc:
@@ -554,7 +572,14 @@ def _create_missing(
     return tuple(made)
 
 
-_ROLE_ORDER = (CATALOGUE_ROLE, ENVIRONMENT_ROLE, LAKEHOUSE, WAREHOUSE, SEMANTIC_MODEL)
+_ROLE_ORDER = (
+    CATALOGUE_ROLE,
+    ENVIRONMENT_ROLE,
+    LAKEHOUSE,
+    WAREHOUSE,
+    SEMANTIC_MODEL,
+    "Report",
+)
 
 
 def _in_role_order(resources) -> tuple[FabricItemOutcome, ...]:

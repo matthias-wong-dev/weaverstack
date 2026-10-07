@@ -290,6 +290,15 @@ class Session(ABC):
         reference = item if isinstance(item, (ItemRef, Item)) else ItemRef(item)
         return self.scope(workspace).semantic_model(reference)
 
+    def report_item(self, item: ItemRef | str | Item, *, workspace=None):
+        from ..fabric.report import validate_bound_report
+        from ..fabric.resources import Item
+
+        if isinstance(item, Item):
+            validate_bound_report(item)
+        reference = item if isinstance(item, (ItemRef, Item)) else ItemRef(item)
+        return self.scope(workspace).report_item(reference)
+
     def semantic_source(
         self, item, *, item_type, schema, name, include_columns=True, workspace=None
     ):
@@ -914,6 +923,7 @@ class WorkspaceScope:
         self._store = store
         self._resources: list[Resource] = []
         self._semantic_models: dict[str | tuple[str, str], Any] = {}
+        self._reports: dict[str | tuple[str, str], Any] = {}
         #: Candidate Lakehouses for Livy attachment, not execution destinations.
         self._offered_spark_homes: set[str] = set()
         #: An exact attachment a frozen bundle requires. It outranks every offer.
@@ -1047,6 +1057,23 @@ class WorkspaceScope:
                     power_bi=power_bi,
                 )
             return self._semantic_models[key]
+
+    def report_item(self, item):
+        from ..fabric.report import ReportClient
+        from ..fabric.resources import Item
+
+        key = (item.workspace_id, item.id) if isinstance(item, Item) else item.name
+        with self._lock:
+            if key not in self._reports:
+                resolved = (
+                    item
+                    if isinstance(item, Item)
+                    else self.resolve_item(item, item_type="Report")
+                )
+                self._reports[key] = ReportClient(
+                    resolved.workspace_id, resolved.id, fabric=self.resolver.client
+                )
+            return self._reports[key]
 
     def _power_bi_client(self):
         from ..fabric.auth import POWER_BI_SCOPE, TokenProvider

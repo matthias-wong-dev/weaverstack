@@ -151,6 +151,7 @@ def catalogue_items_for_build(
         if item in bound
         for reference in contribution.source_references.values()
     )
+    items.update(c.model for item, c in repository.reports.items() if item in bound)
     return tuple(sorted(items, key=str))
 
 
@@ -158,7 +159,9 @@ def require_catalogue_for(bindings: ItemBindings) -> None:
     """Refuse items that need a catalogue; semantic models build without one."""
 
     others = sorted(
-        str(item) for item in bindings.by_item if item.item_type != SEMANTIC_MODEL
+        str(item)
+        for item in bindings.by_item
+        if item.item_type not in {SEMANTIC_MODEL, "Report"}
     )
     if others or not bindings.entries:
         raise BuildError(
@@ -196,8 +199,7 @@ def validate_build_request(
     catalogue_binding: WarehouseBinding | None,
 ) -> tuple[WeaverItemId, ...]:
     _require_separate_semantic_build(bindings)
-    if any(item.item_type == "Report" for item in bindings.by_item):
-        raise BuildError("Report deployment is not supported yet")
+
     if catalogue_binding is None:
         require_catalogue_for(bindings)
     if not bindings.entries:
@@ -299,6 +301,31 @@ def read_build_state(
                 workspace=workspace,
                 required=tuple(sorted(required, key=str)),
             )
+    if repository is not None:
+        from ..catalogue.tables import INSTALLATION
+
+        for model in sorted(
+            {
+                c.model
+                for i, c in repository.reports.items()
+                if i in bindings.by_item and c.model not in bindings.by_item
+            },
+            key=str,
+        ):
+            rows = catalogue.rows.get(model, {}).get(INSTALLATION.name, ())
+            if len(rows) != 1:
+                raise BuildError(f"{model} has no installed binding; build it first")
+            row = rows[0]
+            resolved = session.resolve_item(
+                row["target_name"], item_type="SemanticModel", workspace=workspace
+            )
+            if (resolved.workspace_id, resolved.id) != (
+                row.get("workspace_id"),
+                row.get("item_id"),
+            ):
+                raise BuildError(
+                    f"{model} binding has changed; rebuild the model first"
+                )
     with session.step("Read target inventories"):
         inventories = read_target_inventories(
             bindings,
@@ -782,10 +809,12 @@ def read_target_inventories(
                         WarehouseTarget.parse(target.item_id), workspace=workspace
                     )
                 inventories[binding.item] = read_warehouse_inventory(target, sql=sql)
-        elif target.kind == SEMANTIC_MODEL_TARGET:
+        elif target.kind in {SEMANTIC_MODEL_TARGET, "report"}:
             with session.substep(f"Resolve {target.display}"):
                 resolved = session.resolve_item(
-                    target.name, item_type="SemanticModel", workspace=workspace
+                    target.name,
+                    item_type="Report" if target.kind == "report" else "SemanticModel",
+                    workspace=workspace,
                 )
                 inventories[binding.item] = TargetInventory(
                     target.id,
