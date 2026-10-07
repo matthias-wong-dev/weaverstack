@@ -87,8 +87,15 @@ def _project(root):
     (folder / "assumptions" / ITEM.item_name).mkdir(parents=True)
     (folder / f"{ITEM.item_name}.tmdl").write_text(
         SOURCE_TEXT.replace(
-            "model Model\n",
-            "model Model\n    annotation Acceptance.HideSignatures = true\n",
+            "    annotation Weaver.Source = Warehouse/_weaver/_.TableDictionary\n",
+            "    annotation Weaver.Source = Warehouse/_weaver/_.TableDictionary\n"
+            "\n    column Signature\n"
+            "        dataType: string\n"
+            "        sourceColumn: Signature\n",
+        ).replace(
+            "    annotation Weaver.AutoHideForeignKeys = true\n",
+            "    annotation Weaver.AutoHideForeignKeys = true\n"
+            "    annotation Acceptance.HideSignatures = true\n",
             1,
         ),
         encoding="utf-8",

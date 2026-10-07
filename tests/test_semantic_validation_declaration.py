@@ -265,3 +265,44 @@ def test_validation_path_names_the_model_in_a_composition_scope(tmp_path):
     )
     with pytest.raises(WeaverError, match="<Model>/<Schema>.<Object>.dax"):
         parse(root)
+
+
+@weaver_test()
+def test_fabric_journey_fixture_hides_signature_in_the_final_compilation(
+    tmp_path, monkeypatch
+):
+    from pathlib import Path
+
+    monkeypatch.syspath_prepend(str(Path(__file__).parent / "fabric"))
+    from test_semantic_acceptance_journey import _project
+
+    from weaver.semantic_models.binding import bind_semantic_sources
+    from weaver.semantic_models.objects import TmdlDefinition
+
+    root = tmp_path / "project"
+    _project(root)
+    repository = parse(root)
+    (item,) = repository.semantic_models
+    reference = "Warehouse/_weaver/_.TableDictionary"
+    source = {
+        "reference": reference,
+        "server": "catalogue.datawarehouse.fabric.microsoft.com",
+        "database": "catalogue",
+        "schema": "_",
+        "object": "TableDictionary",
+        "source_columns": [
+            {"column_name": name, "data_type": "varchar"}
+            for name in ("Schema name", "Item type", "Item name", "Signature")
+        ],
+    }
+    bound = bind_semantic_sources(repository, {reference: source}, {item})
+    model = TmdlDefinition(bound.semantic_models[item].parts).model
+    assert model.tables["Objects"].columns["Signature"].isHidden is True
+    assert repository.semantic_models[item].source_references == {
+        "Objects": reference,
+        "Reference": reference,
+    }
+    assert {str(v) for v in repository[str(item)].validations} == {
+        f"{item}/Acceptance.ObjectsReconcile",
+        f"{item}/Acceptance.ObjectsAreSigned",
+    }
