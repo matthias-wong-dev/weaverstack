@@ -53,7 +53,12 @@ from .executors.sql_endpoint_refresh import (
     START_TABLES_EXECUTOR,
 )
 from .executors.sql_endpoint_refresh import CONTRACTS as ENDPOINT_REFRESH_CONTRACTS
-from .incremental import installed_as_pointer, select_build, stale_through_shortcuts
+from .incremental import (
+    BuildSelection,
+    installed_as_pointer,
+    select_build,
+    stale_through_shortcuts,
+)
 from .models import OMIT_TARGET_UNBOUND, OmittedNode
 from .prune import TargetInventory, lakehouse_prune_stage, warehouse_prune_stage
 from .runtime import item_runtime_removals, item_runtime_stages
@@ -143,23 +148,9 @@ def generate_item_build_bundle(
                 f"inventory for {item} describes {inventory.target_id}, not {target.id}"
             )
 
-    # Freshness may depend on an item outside this build, so read it before
-    # narrowing ``registered`` to bound items.
-    stale_consumers = stale_through_shortcuts(
-        repository, catalogue.registered, bound_items=by_item
-    )
-    registered = {
-        identity: document
-        for identity, document in catalogue.registered.items()
-        if identity.item in by_item
-    }
-    selection = select_build(
-        repository,
-        registered,
-        selected=selected_ids,
-        stale_consumers=stale_consumers,
-        inventories=inventories,
-        mirrored=catalogue.mirrors,
+    registered = _registered_in(catalogue, by_item)
+    selection = select_items(
+        repository, catalogue, by_item=by_item, inventories=inventories
     )
     selected_for_drop = set(selection.selected_for_drop)
     selected_for_build = set(selection.selected_for_build)
@@ -440,6 +431,35 @@ def _refuse_selected_omissions(omitted: list[OmittedNode]) -> None:
         for node in sorted(omitted, key=lambda node: (node.node_id, node.reason))
     )
     raise BuildError(f"selected object(s) could not be materialised: {details}")
+
+
+def select_items(
+    repository: WeaverRepository, catalogue, *, by_item: Mapping, inventories
+) -> BuildSelection:
+    """Select what a Build of ``by_item`` creates, drops and rebuilds."""
+
+    documents, shortcuts, loads, _validations = _selectable(repository, by_item)
+    # Freshness may depend on an item outside this build, so read it before
+    # narrowing ``registered`` to bound items.
+    stale_consumers = stale_through_shortcuts(
+        repository, catalogue.registered, bound_items=by_item
+    )
+    return select_build(
+        repository,
+        _registered_in(catalogue, by_item),
+        selected=documents | shortcuts | loads,
+        stale_consumers=stale_consumers,
+        inventories=inventories,
+        mirrored=catalogue.mirrors,
+    )
+
+
+def _registered_in(catalogue, by_item: Mapping) -> dict:
+    return {
+        identity: document
+        for identity, document in catalogue.registered.items()
+        if identity.item in by_item
+    }
 
 
 def _selectable(

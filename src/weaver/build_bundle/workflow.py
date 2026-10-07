@@ -305,7 +305,12 @@ def read_build_state(
                 )
         with session.step("Read semantic sources"):
             semantic_sources = read_semantic_sources(
-                repository, bindings, catalogue, session=session, workspace=workspace
+                repository,
+                bindings,
+                catalogue,
+                session=session,
+                workspace=workspace,
+                inventories=inventories,
             )
     return BuildState(
         catalogue=catalogue,

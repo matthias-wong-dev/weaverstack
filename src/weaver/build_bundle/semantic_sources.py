@@ -9,7 +9,9 @@ from ..semantic_models.references import source_identity
 from ..targets import physical_item
 
 
-def read_semantic_sources(repository, bindings, catalogue, *, session, workspace):
+def read_semantic_sources(
+    repository, bindings, catalogue, *, session, workspace, inventories
+):
     wanted = {}
     mappings = {}
     for item, contribution in repository.semantic_models.items():
@@ -27,6 +29,7 @@ def read_semantic_sources(repository, bindings, catalogue, *, session, workspace
                 tables[table]
             )
     observed = {}
+    rebuilt = None
     for reference, needs_columns in sorted(wanted.items()):
         identity = source_identity(reference)
         bound = bindings.by_item.get(identity.item)
@@ -96,11 +99,24 @@ def read_semantic_sources(repository, bindings, catalogue, *, session, workspace
             notes.update(
                 {c.name: c.note.literal for c in declared if c.note and c.note.literal}
             )
-        # A selected inferred source may only acquire its shape during installation.
+        # An inferred source this Build creates or rebuilds acquires its shape
+        # only during installation. One it leaves in place has its installed shape.
         if needs_columns and not columns and bound is not None and authored is not None:
-            raise BuildError(
-                f"Semantic source {reference}: source shape is unavailable before installation. Declare its schema or author semantic columns with dataType and sourceColumn."
-            )
+            if rebuilt is None:
+                from .planner import select_items
+
+                rebuilt = set(
+                    select_items(
+                        repository,
+                        catalogue,
+                        by_item=bindings.by_item,
+                        inventories=inventories,
+                    ).selected_for_build
+                )
+            if identity in rebuilt:
+                raise BuildError(
+                    f"Semantic source {reference}: source shape is unavailable before installation. Declare its schema or author semantic columns with dataType and sourceColumn."
+                )
         metadata = session.semantic_source(
             target_name,
             item_type=identity.item.item_type,

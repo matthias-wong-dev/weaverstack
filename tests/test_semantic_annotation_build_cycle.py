@@ -183,6 +183,84 @@ def test_authored_columns_refine_the_columns_a_source_generates(tmp_path):
     ]
 
 
+class _Inventory:
+    def __init__(self, installed=()):
+        self.installed = set(installed)
+
+    def physical_type(self, identity):
+        return "view" if identity in self.installed else None
+
+
+@pytest.mark.parametrize("state", ["unchanged", "changed", "new"])
+@weaver_test()
+def test_refined_columns_read_a_selected_source_view_unless_it_is_rebuilt(
+    tmp_path, state
+):
+    """A View built in the same Build has no shape until installation."""
+
+    import copy
+
+    from test_semantic_source_build_cycle import SOURCE
+
+    from weaver.build_bundle.semantic_sources import read_semantic_sources
+    from weaver.catalogue.state import Catalogue
+    from weaver.declaration.model import WeaverDocumentId
+    from weaver.declaration.repository import parse_item_repository
+    from weaver.errors import BuildError
+    from weaver.locations import Location
+
+    root = source_project(tmp_path)
+    path = root / str(ITEM) / "extension.tmdl"
+    path.write_text(path.read_text() + "\n\tcolumn Label\n\t\tisHidden\n")
+    folder = root / str(SOURCE)
+    folder.mkdir(parents=True)
+    (folder / "Cake.yml").write_text(
+        "Schema ID: Cake\nDescription: Cake records.\n", encoding="utf-8"
+    )
+    (folder / "Cake.Sales.sql").write_text(
+        "/*\nView ID: Cake.Sales\nDescription: Sales facts.\nLineage: Constant\n*/\nSELECT CAST(1 AS BIGINT) AS Id, 'sale' AS Label\n",
+        encoding="utf-8",
+    )
+    repository = parse_item_repository(Location(root.as_posix()))
+    view = WeaverDocumentId.parse("Warehouse/Serving/Cake.Sales")
+    rows = copy.deepcopy(dict(source_catalogue().rows))
+    rows[SOURCE]["Registry"] = tuple(
+        {
+            **row,
+            "object_type": "view",
+            "signature": repository.source_documents[view].physical_signature
+            if state == "unchanged"
+            else "before",
+        }
+        for row in rows[SOURCE]["Registry"]
+        if row["object_name"] == "Sales" and state != "new"
+    )
+    bindings = read_bindings()
+    inventories = {item: _Inventory() for item in bindings.by_item}
+    inventories[SOURCE] = _Inventory(() if state == "new" else (view,))
+    with source_session() as session:
+
+        def read():
+            return read_semantic_sources(
+                repository,
+                bindings,
+                Catalogue(rows),
+                session=session,
+                workspace=session.workspace,
+                inventories=inventories,
+            )
+
+        if state == "unchanged":
+            observed = read()["Warehouse/Serving/Cake.Sales"]
+            assert [c["column_name"] for c in observed["source_columns"]] == [
+                "Id",
+                "Label",
+            ]
+        else:
+            with pytest.raises(BuildError, match="unavailable before installation"):
+                read()
+
+
 @pytest.mark.parametrize(
     "failure, diagnostic",
     [
