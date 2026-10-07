@@ -143,13 +143,18 @@ def read_semantic_contribution(
                 f"{legacy}: addon.yml is no longer supported; use PowerBI/policy.tmdl or <model-name>.tmdl"
             )
 
+    # Validations are ordinary documents, read by the repository and kept out
+    # of the model's definition.
+    available = [
+        p
+        for p in available
+        if p[len(prefix) :].split("/")[0] not in {"tests", "assumptions"}
+    ]
     unsupported = sorted(
         p
         for p in available
         if p[len(prefix) :].split("/")[0]
         in {
-            "tests",
-            "assumptions",
             "schemas",
             "Tables",
             "Files",
