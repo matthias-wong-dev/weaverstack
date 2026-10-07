@@ -80,6 +80,7 @@ def verify_requested(requested, actual, *, owned=()):
         "isKey": False,
         "isNullable": True,
         "discourageImplicitMeasures": False,
+        "defaultMode": "import",
     }
 
     def contains(wanted, found, path):

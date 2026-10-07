@@ -81,3 +81,10 @@ def test_nondefault_removed_relationship_property_is_refused():
     actual["model"]["relationships"][0]["isActive"] = False
     with pytest.raises(InstallError, match="isActive"):
         verify_requested(expected["model"], actual, owned=("/model",))
+
+
+@weaver_test()
+def test_import_default_mode_allows_engine_omission():
+    verify_requested({"defaultMode": "import"}, {"model": {"culture": "en-AU"}})
+    with pytest.raises(InstallError, match="defaultMode"):
+        verify_requested({"defaultMode": "directLake"}, {"model": {}})
