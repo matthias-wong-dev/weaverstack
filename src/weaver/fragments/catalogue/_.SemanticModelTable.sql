@@ -25,9 +25,8 @@ Schema:
   Object name: varchar(128)
   Table name: varchar(128)
   Description: varchar(max)
-  Source binding: varchar(max)
-  Properties: varchar(max)
-  Provenance: varchar(max)
+  Source mode: varchar(128)
+  Source access: varchar(128)
   Signature: varchar(128)
 */
 select cast(null as varchar(128)) as [Item type]
@@ -36,8 +35,7 @@ select cast(null as varchar(128)) as [Item type]
      , cast(null as varchar(128)) as [Object name]
      , cast(null as varchar(128)) as [Table name]
      , cast(null as varchar(max)) as [Description]
-     , cast(null as varchar(max)) as [Source binding]
-     , cast(null as varchar(max)) as [Properties]
-     , cast(null as varchar(max)) as [Provenance]
+     , cast(null as varchar(128)) as [Source mode]
+     , cast(null as varchar(128)) as [Source access]
      , cast(null as varchar(128)) as [Signature]
  where 1 = 0

@@ -1,7 +1,5 @@
 """The catalogue stores native semantic definitions and their child projection."""
 
-import json
-
 from support.weaver_test import weaver_test
 
 from weaver.build_bundle.catalogue_actions import desired_catalogue
@@ -82,15 +80,11 @@ def test_semantic_catalogue_roundtrips_model_root_and_projects_native_children(
     rows = restored.rows[item]
     assert rows["Installation"][0]["workspace_id"] == "workspace-id"
     assert rows["Installation"][0]["item_id"] == "model-id"
-    assert json.loads(rows[SEMANTIC_MODEL.name][0]["definition"]) == observed
+    assert "definition" not in rows[SEMANTIC_MODEL.name][0]
     (measure,) = rows[SEMANTIC_MODEL_MEASURE.name]
     assert measure["table_name"] == "Calendar"
     assert measure["measure_name"] == "Answer"
-    assert json.loads(measure["properties"])["expression"] == "1"
-    assert (
-        json.loads(measure["provenance"])["expression"]["source"]
-        == "SemanticModel/Reporting/extension.tmdl"
-    )
+    assert measure["expression"] == "1"
     pruned = without_claims(
         restored,
         [

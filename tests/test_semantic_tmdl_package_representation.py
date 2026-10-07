@@ -213,7 +213,9 @@ def test_public_build_sends_opaque_tmdl_and_projects_only_observed_tmsl(tmp_path
     assert not session.spark_sql and not session.python
     writes = session.tsql
     observed_write = next(
-        i for i, s in enumerate(writes) if "MERGE" in s and "[_].[SemanticModel]" in s
+        i
+        for i, s in enumerate(writes)
+        if "MERGE" in s and "[_].[SemanticModelTable]" in s
     )
     certify = next(
         i

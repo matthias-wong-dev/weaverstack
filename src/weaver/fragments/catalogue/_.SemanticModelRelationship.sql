@@ -32,8 +32,6 @@ Schema:
   To cardinality: varchar(128)
   Cross filtering behavior: varchar(128)
   Is active: bit
-  Properties: varchar(max)
-  Provenance: varchar(max)
   Signature: varchar(128)
 */
 select cast(null as varchar(128)) as [Item type]
@@ -49,7 +47,5 @@ select cast(null as varchar(128)) as [Item type]
      , cast(null as varchar(128)) as [To cardinality]
      , cast(null as varchar(128)) as [Cross filtering behavior]
      , cast(null as bit) as [Is active]
-     , cast(null as varchar(max)) as [Properties]
-     , cast(null as varchar(max)) as [Provenance]
      , cast(null as varchar(128)) as [Signature]
  where 1 = 0

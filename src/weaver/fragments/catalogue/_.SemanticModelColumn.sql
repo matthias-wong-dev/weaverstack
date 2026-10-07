@@ -30,8 +30,6 @@ Schema:
   Column type: varchar(128)
   Source column: varchar(128)
   Expression: varchar(max)
-  Properties: varchar(max)
-  Provenance: varchar(max)
   Signature: varchar(128)
 */
 select cast(null as varchar(128)) as [Item type]
@@ -45,7 +43,5 @@ select cast(null as varchar(128)) as [Item type]
      , cast(null as varchar(128)) as [Column type]
      , cast(null as varchar(128)) as [Source column]
      , cast(null as varchar(max)) as [Expression]
-     , cast(null as varchar(max)) as [Properties]
-     , cast(null as varchar(max)) as [Provenance]
      , cast(null as varchar(128)) as [Signature]
  where 1 = 0
