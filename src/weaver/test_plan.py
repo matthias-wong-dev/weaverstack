@@ -54,6 +54,7 @@ class InstalledValidation:
     #: queries.
     definition: str | None = None
     bound_item: Item | None = None
+    expected_target: PhysicalTargetRef | None = None
 
     @classmethod
     def of(cls, node: InstalledNode) -> "InstalledValidation":
@@ -67,6 +68,7 @@ class InstalledValidation:
             description=node.description,
             definition=node.definition,
             bound_item=node.bound_item if node.definition is not None else None,
+            expected_target=node.expected_target,
         )
 
     @property
@@ -130,6 +132,9 @@ class InstalledValidation:
                 "name": self.bound_item.name,
                 "type": self.bound_item.type,
             },
+            "expected_target": None
+            if self.expected_target is None
+            else {"kind": self.expected_target.kind, "name": self.expected_target.name},
         }
 
     @classmethod
@@ -150,6 +155,9 @@ class InstalledValidation:
             bound_item=None
             if mapping.get("bound_item") is None
             else Item(**mapping["bound_item"]),
+            expected_target=None
+            if mapping.get("expected_target") is None
+            else PhysicalTargetRef(**mapping["expected_target"]),
         )
 
 

@@ -23,6 +23,7 @@ ONELAKE_PUBLICATION = "onelake_publication"
 SEMANTIC_REFRESH = "semantic_refresh"
 #: How a validation is reached, from where it is installed.
 PYTHON_VALIDATION = "python_validation"
+SEMANTIC_VALIDATION = "semantic_validation"
 #: The primitive kinds that run on Spark, as deployed modules.
 SPARK_KINDS = (PYTHON_TABLE, PYTHON_FOLDER, PYTHON_VALIDATION)
 
@@ -72,6 +73,7 @@ def resolve(node, *, can_refresh: bool = True) -> Resolved:
     elif node.primitive_kind not in (
         WAREHOUSE_PROCEDURE,
         PYTHON_VALIDATION,
+        SEMANTIC_VALIDATION,
         ONELAKE_PUBLICATION,
         SEMANTIC_REFRESH,
     ):
