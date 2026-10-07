@@ -949,3 +949,8 @@ def test_health_tables_carry_the_model_source_bindings(tmp_path, monkeypatch):
     assert {
         str(edge.upstream) for edge in dag.edges if edge.downstream.item == ITEM
     } == {"Warehouse/Serving/Cake.Sales", "Warehouse/Serving/Cake.Summary"}
+    # Health assesses the model's refresh as a load.
+    from weaver.installed import SEMANTIC_REFRESH
+
+    (model,) = (node for node in dag.nodes if node.identity.item == ITEM)
+    assert model.artefact_kind == SEMANTIC_REFRESH
