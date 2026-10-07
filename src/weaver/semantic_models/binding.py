@@ -24,6 +24,12 @@ def m_string(value):
     )
 
 
+def _m_identifier(name):
+    if re.fullmatch(r"[A-Za-z_][A-Za-z_0-9]*", name):
+        return name
+    return "#" + m_string(name)
+
+
 def semantic_type(value, reference, column):
     name = str(value or "").lower().split("(")[0].strip()
     for native, types in {
@@ -155,6 +161,25 @@ def _bind_partition(model, table, source):
         expressions.append(expression)
     else:
         existing.update(expression)
+    if not partitions and model.get("defaultMode") == "import":
+        # An Import model reads the shared source through M navigation.
+        table["partitions"] = [
+            {
+                "name": table["name"],
+                "mode": "import",
+                "source": {
+                    "type": "m",
+                    "expression": (
+                        "let\n"
+                        f"    Source = {_m_identifier(expression_name)},\n"
+                        f"    Data = Source{{[Schema={m_string(source['schema'])},"
+                        f"Item={m_string(source['object'])}]}}[Data]\n"
+                        "in\n    Data"
+                    ),
+                },
+            }
+        ]
+        return "import"
     partition = (
         partitions[0]
         if partitions

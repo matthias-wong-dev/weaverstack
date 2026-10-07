@@ -308,3 +308,49 @@ def test_source_annotation_uses_the_typed_lakehouse_sql_endpoint(tmp_path, monke
             == "Lakehouse/Curated/Tables/Cake.Sales"
         )
         assert not session.spark_sql and not session.python
+
+
+@weaver_test()
+def test_import_model_generates_navigation_partitions_with_lineage(
+    tmp_path, monkeypatch
+):
+    root = source_project(tmp_path)
+    extension = root / str(ITEM) / "extension.tmdl"
+    extension.write_text(
+        "model Model\n\tdefaultMode: import\n\n" + extension.read_text()
+    )
+    navigation = (
+        'let\n    Source = #"Warehouse/Serving",\n'
+        '    Data = Source{[Schema="Cake",Item="Sales"]}[Data]\nin\n    Data'
+    )
+    observed = source_model(relations={"Sales": "Sales"})
+    observed["model"]["defaultMode"] = "import"
+    observed["model"]["tables"][0]["partitions"] = [
+        {
+            "name": "Sales",
+            "mode": "import",
+            "source": {"type": "m", "expression": navigation},
+        }
+    ]
+    observed["model"]["tables"][0]["annotations"] = [
+        {"name": "Weaver.Source", "value": "Warehouse/Serving/Cake.Sales"}
+    ]
+    with source_session() as session:
+        session.answer_semantic_model(
+            "Demo", "Reporting_Dev", SubmittedDefinition(observed)
+        )
+        answer_catalogue(session, source_catalogue(), read_bindings())
+        published = capture_publication(monkeypatch, session)
+        result = weaver.build(
+            root, items=f"{ITEM}=SemanticModel/Reporting_Dev", session=session
+        )
+        assert result.succeeded, result.errors
+        table = submitted_parts(session)["definition/tables/Sales.tmdl"].decode()
+        assert "partition 'Sales' = m" in table and "mode: import" in table
+        assert 'Source{[Schema="Cake",Item="Sales"]}[Data]' in table
+        assert "column 'Id'" in table and "entity" not in table
+        rows = published()[ITEM]
+        assert {
+            (r["referencing_object_name"], r["dependency_reference"])
+            for r in rows["Dependency"]
+        } == {("Sales", "Warehouse/Serving/Cake.Sales")}

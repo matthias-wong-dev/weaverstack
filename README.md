@@ -218,7 +218,9 @@ semantic definition. A file may import installed packages such as `weaver`, but
 not other project files. Changing one recompiles every model; a model whose
 effective TMDL is unchanged still plans zero actions.
 
-Generated source tables default to Direct Lake through their typed SQL endpoint.
+Generated source tables follow the model's `defaultMode`: `import` reads the
+shared source through M navigation, and otherwise they use Direct Lake through
+their typed SQL endpoint.
 Supported authored M and entity partitions retain their storage mode. Transformed
 M and calculated-source takeovers fail before deployment. Source-generated columns
 receive hiding policies after inference; exclusions remain removed. This
