@@ -93,7 +93,7 @@ def project_files(request: ProjectRequest) -> dict[str, str]:
     if request.warehouse and not request.example:
         files[f"{WAREHOUSE}/{request.warehouse}/{KEEP_FILE}"] = ""
     if request.semantic_model:
-        files[f"{SEMANTIC_MODEL}/{request.semantic_model}/extension.tmdl"] = (
+        files[f"PowerBI/{request.semantic_model}/{request.semantic_model}.tmdl"] = (
             semantic_extension()
         )
     return files

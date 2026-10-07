@@ -176,10 +176,10 @@ MutationBindings and the physical drivers. A semantic-only Build starts no Spark
 `SemanticModel/Name` is the model-root document identity. Desired state is a
 TMDL definition-part package; observed state is Fabric-returned TMSL. Store source
 bytes, requested edits and provenance beside the package. `semantic_models.source`
-selects the PBIP or empty base; `extensions` applies organisation then item
-`extension.tmdl`. The source-span editor changes addressed native fragments and
-preserves unrelated bytes. Merging is recursive over syntax for every kind:
-object identity is kind and name within the parent, property identity is the
+selects the PBIP or empty base; `extensions` applies `PowerBI/policy.tmdl` then
+`PowerBI/<project>/<model-name>.tmdl`. The source-span editor changes addressed
+native fragments and preserves unrelated bytes. Merging is recursive over syntax
+for every kind: object identity is kind and name within the parent, property identity is the
 name. Missing refs and ambiguous targets fail with source locations.
 `semantic_models.objects` exposes live objects over the same editor, with
 property access dynamic over native names. `_SCHEMAS` bounds typed readback and

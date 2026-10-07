@@ -120,26 +120,6 @@ def build(
         needs_catalogue=False,
     )
 
-    selected = _item_bindings(items, resolved_workspace)
-    from ..build_bundle.targets import WarehouseBinding, effective_item_bindings
-    from ..build_bundle.workflow import require_catalogue_for
-
-    workspace_name = getattr(resolved_workspace, "workspace", None)
-    if resolved_workspace.catalogue:
-        bindings = effective_item_bindings(
-            selected,
-            control_item=resolved_workspace.catalogue_item,
-            workspace_name=workspace_name,
-        )
-        control = WarehouseBinding(
-            resolved_workspace.catalogue_item, workspace_name=workspace_name
-        )
-    else:
-        try:
-            require_catalogue_for(selected)
-        except BuildError as exc:
-            raise CommandError(str(exc)) from exc
-        bindings, control = selected, None
     source_location, source_store = _repository_source(source, resolved_workspace)
 
     # Parse and validate the complete request before REST target resolution,
@@ -148,6 +128,29 @@ def build(
     from ..sessions.host import use_or_create_session
 
     with prepare_repository(source_location, source_store=source_store) as prepared:
+
+        selected = _item_bindings(
+            items, resolved_workspace, repository=prepared.repository
+        )
+        from ..build_bundle.targets import WarehouseBinding, effective_item_bindings
+        from ..build_bundle.workflow import require_catalogue_for
+
+        workspace_name = getattr(resolved_workspace, "workspace", None)
+        if resolved_workspace.catalogue:
+            bindings = effective_item_bindings(
+                selected,
+                control_item=resolved_workspace.catalogue_item,
+                workspace_name=workspace_name,
+            )
+            control = WarehouseBinding(
+                resolved_workspace.catalogue_item, workspace_name=workspace_name
+            )
+        else:
+            try:
+                require_catalogue_for(selected)
+            except BuildError as exc:
+                raise CommandError(str(exc)) from exc
+            bindings, control = selected, None
         from ..semantic_models.binding import begin_semantic_sources
         from ..semantic_models.expressions import configure_sources
 
@@ -253,7 +256,7 @@ def _repository_source(source, workspace: Workspace) -> tuple[Location, Store]:
     return location, FilesystemStore()
 
 
-def _item_bindings(items, workspace: Workspace):
+def _item_bindings(items, workspace: Workspace, *, repository=None):
     from ..build_bundle.targets import ItemBindings, parse_build_item
 
     if items is None:
@@ -266,6 +269,12 @@ def _item_bindings(items, workspace: Workspace):
         raise BuildError(
             "build needs at least one item or a targets mapping in workspace "
             "configuration"
+        )
+    if repository is not None:
+        from ..declaration.selectors import expand_item_selectors
+
+        values = expand_item_selectors(
+            values, repository=repository, configured_items=workspace.configured_items
         )
     return ItemBindings(
         tuple(parse_build_item(value, workspace=workspace) for value in values)

@@ -168,15 +168,23 @@ def test_missing_semantic_target_does_not_create_an_item(tmp_path):
 def test_new_semantic_model_starts_in_the_project_culture(
     tmp_path, monkeypatch, cultures, name, expected
 ):
-    # Fabric refuses a definition whose culture differs from the model's.
+    # Fabric rejects a definition whose culture differs from the model's.
     import shutil
     from pathlib import Path
 
     probe = Path(__file__).parent / "fixtures/semantic_model/Probe"
     for model, culture in cultures.items():
-        folder = tmp_path / "SemanticModel" / model
+        folder = tmp_path / "PowerBI" / model
         shutil.copytree(probe, folder)
-        definition = folder / "Probe.SemanticModel/definition/model.tmdl"
+        (folder / "Probe.SemanticModel").rename(folder / f"{model}.SemanticModel")
+        pbir = folder / "Probe.Report/definition.pbir"
+        pbir.write_text(
+            pbir.read_text().replace("Probe.SemanticModel", f"{model}.SemanticModel")
+        )
+        (folder / "Probe.Report").rename(folder / f"{model}.Report")
+        pbip = folder / "Probe.pbip"
+        pbip.write_text(pbip.read_text().replace("Probe.Report", f"{model}.Report"))
+        definition = folder / f"{model}.SemanticModel/definition/model.tmdl"
         definition.write_bytes(
             definition.read_bytes().replace(
                 b"culture: en-US", f"culture: {culture}".encode()

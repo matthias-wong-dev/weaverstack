@@ -26,8 +26,8 @@ def compile_parts(*, base=None, organisation=None, item=None):
     fragments = tuple(
         (text.encode(), origin)
         for text, origin in (
-            (organisation, "organisation extension.tmdl"),
-            (item, "item extension.tmdl"),
+            (organisation, "PowerBI/policy.tmdl"),
+            (item, "Reporting.tmdl"),
         )
         if text is not None
     )
@@ -209,7 +209,7 @@ def test_known_expectation_collections_merge_by_identity_and_other_lists_replace
 )
 @weaver_test()
 def test_named_declarations_reject_ambiguous_or_invalid_identities(fragment):
-    with pytest.raises(ConfigError, match="extension.tmdl"):
+    with pytest.raises(ConfigError, match="Reporting.tmdl"):
         compile_parts(item=fragment)
 
 
@@ -229,7 +229,7 @@ def test_named_declarations_reject_ambiguous_or_invalid_identities(fragment):
 )
 @weaver_test()
 def test_malformed_extensions_fail_at_the_authored_line(fragment, location):
-    with pytest.raises(ConfigError, match=f"extension.tmdl:{location}:"):
+    with pytest.raises(ConfigError, match=f"Reporting.tmdl:{location}:"):
         compile_parts(item=fragment)
 
 

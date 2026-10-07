@@ -112,7 +112,7 @@ def test_pbip_definition_mutation_refresh_and_dax_round_trip(restored_semantic_m
         [
             (
                 b"model Model\n\tdiscourageImplicitMeasures\n\ntable _Measure\n\tpartition _Measure = calculated\n\t\tsource = INFO.VIEW.MEASURES()\n",
-                "extension.tmdl",
+                "Reporting.tmdl",
             )
         ],
     )

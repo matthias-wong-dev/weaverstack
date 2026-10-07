@@ -28,7 +28,7 @@ def test_semantic_catalogue_roundtrips_model_root_and_projects_native_children(
 
     folder = tmp_path / "SemanticModel" / "Reporting"
     folder.mkdir(parents=True)
-    (folder / "extension.tmdl").write_text(
+    (folder / f"{folder.name}.tmdl").write_text(
         'table Calendar\n\tpartition Calendar = calculated\n\t\tsource = ROW("Year", 2026)\n\n\tmeasure Answer = 1\n',
         encoding="utf-8",
     )

@@ -139,6 +139,18 @@ class SemanticModelTarget:
         return self.model.name
 
 
+@dataclass(frozen=True)
+class ReportTarget:
+    report: ItemRef
+
+    @classmethod
+    def parse(cls, text: str) -> "ReportTarget":
+        return cls(ItemRef.parse(text))
+
+    def __str__(self) -> str:
+        return self.report.name
+
+
 # --- the physical target grammar shared by public operations ------------------
 
 LAKEHOUSE_KIND = "Lakehouse"
@@ -146,12 +158,14 @@ WAREHOUSE_KIND = "Warehouse"
 
 #: Physical target kinds, in the order used in errors.
 SEMANTIC_MODEL_KIND = "SemanticModel"
-PHYSICAL_KINDS = (LAKEHOUSE_KIND, WAREHOUSE_KIND, SEMANTIC_MODEL_KIND)
+REPORT_KIND = "Report"
+PHYSICAL_KINDS = (LAKEHOUSE_KIND, WAREHOUSE_KIND, SEMANTIC_MODEL_KIND, REPORT_KIND)
 
 _PHYSICAL_TYPES = {
     LAKEHOUSE_KIND: DeltaTarget,
     WAREHOUSE_KIND: WarehouseTarget,
     SEMANTIC_MODEL_KIND: SemanticModelTarget,
+    REPORT_KIND: ReportTarget,
 }
 
 
@@ -186,6 +200,8 @@ def parse_physical_target(
 def physical_kind(target) -> str:
     """``Lakehouse`` or ``Warehouse`` for one typed physical target."""
 
+    if isinstance(target, ReportTarget):
+        return REPORT_KIND
     if isinstance(target, SemanticModelTarget):
         return SEMANTIC_MODEL_KIND
     if isinstance(target, DeltaTarget):
@@ -198,6 +214,8 @@ def physical_kind(target) -> str:
 def physical_item(target) -> ItemRef:
     """The item one typed physical target names."""
 
+    if isinstance(target, ReportTarget):
+        return target.report
     if isinstance(target, SemanticModelTarget):
         return target.model
     if isinstance(target, DeltaTarget):

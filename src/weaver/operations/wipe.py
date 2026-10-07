@@ -70,6 +70,10 @@ class WipeTarget:
     item_type: str
     item: ItemRef
 
+    def __post_init__(self):
+        if self.item_type == "Report":
+            raise CommandError("Report wipe is not supported")
+
     @classmethod
     def parse(cls, text: str) -> "WipeTarget":
         target = parse_physical_target(text, what="wipe target", error=CommandError)

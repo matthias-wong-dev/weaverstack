@@ -36,7 +36,7 @@ def test_preserve_uses_one_hidden_columnless_native_source_anchor(newline):
 
     native = merge_extensions(
         empty_parts("Reporting"),
-        ((shared_source_tmdl().encode(), "extension.tmdl"),),
+        ((shared_source_tmdl().encode(), "Reporting.tmdl"),),
     ).parts
     observed = source_model()
     native = {path: data.replace(b"\n", newline) for path, data in native.items()}
@@ -82,7 +82,7 @@ def _preserved_inputs():
     from weaver.semantic_models.render import empty_parts
 
     parts = merge_extensions(
-        empty_parts("Reporting"), ((shared_source_tmdl().encode(), "extension.tmdl"),)
+        empty_parts("Reporting"), ((shared_source_tmdl().encode(), "Reporting.tmdl"),)
     ).parts
     connections = [
         {

@@ -33,21 +33,34 @@ CLI sign-in and does not open a browser.
 
 ## Semantic model Build
 
-A semantic item lives under `SemanticModel/<logical-name>/`. A normal PBIP
-works without an extension. Build deploys its TMDL definition parts and preserves
-untouched source bytes, including constructs Weaver does not edit.
+A Power BI source project lives under `PowerBI/<project>/` with at most one
+local `<model-name>.SemanticModel` directory. A normal PBIP needs no Weaver
+declaration. Build deploys its TMDL definition parts and preserves untouched
+source bytes, including constructs Weaver does not edit.
 
-`extension.tmdl` contains optional partial native TMDL declarations.
-`SemanticModel/extension.tmdl` applies first, followed by
-`SemanticModel/<logical-name>/extension.tmdl`. More local values win. Object
-identity is its parent path, type and name. Supplied properties replace their
-previous values; omitted properties and unrelated source bytes remain unchanged.
+`PowerBI/policy.tmdl` contains organisation-wide partial native TMDL declarations.
+It applies first, followed by `PowerBI/<project>/<model-name>.tmdl`.
+More local values win. Object identity is its parent path, type and name.
+Supplied properties replace their previous values; omitted properties and unrelated source bytes remain unchanged.
 Named children merge recursively. A supplied expression replaces its full body.
 A `ref` declaration requires an existing object and reports its source line if
 that object is missing.
 
 An extension-only model starts from a minimal TMDL package and uses the same
-compiler. Its source folder needs only `extension.tmdl`.
+compiler. Its source folder needs only `<model-name>.tmdl`.
+
+Reports under the project, including nested `<report-name>.Report` directories,
+need a `definition.pbir` with `datasetReference.byPath` naming that exact local
+model. Thin/byConnection Reports are unsupported. Report source discovery is
+available; Report deployment is not supported yet.
+
+Build selectors expand before target binding: `SemanticModel`, `Warehouse`,
+`Lakehouse` and `Report` select their real logical items; `PowerBI` selects all
+Power BI projects, and `PowerBI/<project>` selects one. Exact selections retain
+their physical target overrides. Build source items first, then Power BI items.
+
+Rename organisation `extension.tmdl` to `PowerBI/policy.tmdl` and project
+`extension.tmdl` to `<model-name>.tmdl` before building.
 
 For a new extension-only model in an existing workspace:
 
@@ -67,7 +80,7 @@ Build updates an existing item; it never creates one. A different physical name
 can be selected with
 `--item SemanticModel/Reporting=SemanticModel/Reporting_Dev`.
 
-Edit `reporting/SemanticModel/Reporting/extension.tmdl` to define calculated content:
+Edit `reporting/PowerBI/Reporting/Reporting.tmdl` to define calculated content:
 
 ```tmdl
 table Calendar
@@ -117,9 +130,9 @@ descriptions, partitions and storage modes.
 ### Weaver annotations
 
 `Weaver.*` annotations opt a PBIP into native transformations. They can also live
-in either `extension.tmdl` layer. Weaver merges the layers before executing the
-annotations. Ordinary annotations pass through; an unknown `Weaver.*` name is
-an error. Executed annotations remain on surviving objects. Native dotted
+in either `policy.tmdl` or `<model-name>.tmdl`. Weaver merges the layers before
+executing the annotations. Ordinary annotations pass through; an unknown
+`Weaver.*` name is an error. Executed annotations remain on surviving objects. Native dotted
 annotation identifiers are quoted, such as `annotation 'Weaver.Source' = ...`.
 Weaver quotes supported bare identifiers in the effective package while retaining
 their full names and values.
@@ -276,9 +289,9 @@ deploying. A source no connection reaches keeps the connection Fabric gave it,
 such as single sign-on. A source several connections reach fails, naming them.
 Weaver creates no connections or credentials.
 
-`extension.tmdl` merges by native structure. An object is identified by its
-kind and name within its parent, and a property by its name. A new object is
-added whole, an existing one merges recursively, and a supplied property,
+`policy.tmdl` and `<model-name>.tmdl` merge by native structure. An object is
+identified by its kind and name within its parent, and a property by its name.
+A new object is added whole, an existing one merges recursively, and a supplied property,
 expression or description replaces the base value. This holds for any TMDL
 object or property, including ones Weaver does not interpret. Fabric acceptance
 and TMSL readback certify such content; known requested changes receive value

@@ -62,8 +62,7 @@ def merge(parts=None, *fragments):
 
     return merge_extensions(
         base_parts() if parts is None else parts,
-        fragments
-        or ((ORG, "SemanticModel/extension.tmdl"), (ITEM, "Sales/extension.tmdl")),
+        fragments or ((ORG, "PowerBI/policy.tmdl"), (ITEM, "Sales/Sales.tmdl")),
     )
 
 
@@ -95,7 +94,7 @@ def test_native_extension_probe(claim, newline):
     after = result.parts
     sales = after["definition/tables/Sales.tmdl"]
     if claim == "model-property":
-        # Fabric refuses a plain property after a block property.
+        # Fabric rejects a plain property after a block property.
         assert (
             b"\tdiscourageImplicitMeasures: false" + newline + b"\tdataAccessOptions"
             in after["definition/model.tmdl"]
@@ -128,11 +127,11 @@ def test_native_extension_probe(claim, newline):
         assert org.parts != after
         assert (
             result.provenance["/model/discourageImplicitMeasures"]["source"]
-            == "Sales/extension.tmdl"
+            == "Sales/Sales.tmdl"
         )
         assert (
             result.provenance["/model/tables/Sales/isHidden"]["source"]
-            == "Sales/extension.tmdl"
+            == "Sales/Sales.tmdl"
         )
         assert merge(before).parts == after
     elif claim == "opaque-native-object":
@@ -156,23 +155,23 @@ def test_native_extension_probe(claim, newline):
 @weaver_test()
 def test_extension_can_merge_an_existing_named_declaration(reference):
     fragment = ("ref " if reference else "") + "table Sales\n    isHidden\n"
-    result = merge(None, (fragment.encode(), "extension.tmdl"))
+    result = merge(None, (fragment.encode(), "Reporting.tmdl"))
     assert result.parts["definition/tables/Sales.tmdl"].count(b"table Sales") == 1
     assert result.requested["tables"] == [{"name": "Sales", "isHidden": True}]
 
 
 @weaver_test()
 def test_missing_ref_does_not_create_an_object():
-    with pytest.raises(ConfigError, match=r"extension.tmdl:1.*Missing.*not found"):
-        merge(None, (b"ref table Missing\n    isHidden\n", "extension.tmdl"))
+    with pytest.raises(ConfigError, match=r"Reporting.tmdl:1.*Missing.*not found"):
+        merge(None, (b"ref table Missing\n    isHidden\n", "Reporting.tmdl"))
 
 
 @weaver_test()
 def test_ambiguous_target_is_a_source_located_error():
     parts = base_parts()
     parts["definition/tables/duplicate.tmdl"] = b"table Sales\n    isHidden\n"
-    with pytest.raises(ConfigError, match=r"extension.tmdl:1.*Sales.*ambiguous"):
-        merge(parts, (b"ref table Sales\n    isHidden\n", "extension.tmdl"))
+    with pytest.raises(ConfigError, match=r"Reporting.tmdl:1.*Sales.*ambiguous"):
+        merge(parts, (b"ref table Sales\n    isHidden\n", "Reporting.tmdl"))
 
 
 @pytest.mark.parametrize("reference", [True, False])
@@ -188,7 +187,7 @@ def test_existing_unknown_object_merges_recursively(reference):
         b"    nestedThing Bar\n        deeper: two\n"
         b"    nestedThing Baz\n        fresh: true\n"
     )
-    result = merge(parts, (fragment, "extension.tmdl"))
+    result = merge(parts, (fragment, "Reporting.tmdl"))
     assert result.parts["definition/newThings.tmdl"] == (
         b"newThing Foo\n\tfutureProperty: two\n\tkept: yes\n\tadded: three\n"
         b"\tnestedThing Bar\n\t\tdeeper: two\n"
@@ -223,7 +222,7 @@ def test_unknown_children_merge_below_a_known_parent(newline):
         (
             b"ref table Sales\n    futureChild Kept\n        setting: two\n"
             b"    column ProductId\n        futureColumnProperty: x\n",
-            "extension.tmdl",
+            "Reporting.tmdl",
         ),
     )
     merged = result.parts["definition/tables/Sales.tmdl"]
@@ -244,7 +243,7 @@ def test_existing_perspective_merges_without_reconstruction():
     parts["definition/perspectives/Reporting.tmdl"] = b"perspective Reporting\n"
     result = merge(
         parts,
-        (b"perspective Reporting\n    perspectiveTable Sales\n", "extension.tmdl"),
+        (b"perspective Reporting\n    perspectiveTable Sales\n", "Reporting.tmdl"),
     )
     assert result.parts["definition/perspectives/Reporting.tmdl"] == (
         b"perspective Reporting\n\n\tperspectiveTable Sales\n"
@@ -283,7 +282,7 @@ def test_property_edit_keeps_crlf_fenced_text_and_unknown_neighbours():
         parts,
         (
             b"ref table Sales\n    column ProductId\n        isHidden\n",
-            "extension.tmdl",
+            "Reporting.tmdl",
         ),
     )
     assert result.parts["definition/tables/Sales.tmdl"] == original.replace(
@@ -298,7 +297,7 @@ def test_default_expression_edit_preserves_other_measure_properties():
     parts = base_parts()
     original = parts["definition/tables/Sales.tmdl"]
     fragment = b"ref table Sales\n    measure Revenue = SUMX(Sales, Sales[Amount])\n"
-    result = merge(parts, (fragment, "extension.tmdl"))
+    result = merge(parts, (fragment, "Reporting.tmdl"))
     assert result.parts["definition/tables/Sales.tmdl"] == original.replace(
         b"measure Revenue = SUM(Sales[Amount])",
         b"measure Revenue = SUMX(Sales, Sales[Amount])",
@@ -316,7 +315,7 @@ def test_default_expression_edit_preserves_other_measure_properties():
 @weaver_test()
 def test_empty_extension_keeps_every_byte():
     parts = base_parts()
-    result = merge(parts, (b"// no changes\n", "extension.tmdl"))
+    result = merge(parts, (b"// no changes\n", "Reporting.tmdl"))
     assert result.parts == parts
     assert result.requested == {} and result.provenance == {} and result.owned == ()
 
@@ -335,7 +334,7 @@ def test_merged_expression_keeps_its_authored_text(unit):
         b"expression DataSource1 =\n        let\n            Value = 1\n"
         b"        in\n            Value\n    kind: m\n"
     )
-    result = merge(parts, (fragment, "extension.tmdl"))
+    result = merge(parts, (fragment, "Reporting.tmdl"))
     ((document, node),) = PackageEditor(result.parts).locations(
         (("expression", "DataSource1"),)
     )

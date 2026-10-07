@@ -42,7 +42,7 @@ def project(tmp_path, extension, annotations=None, *, name="project"):
     root = tmp_path / name
     folder = root / str(ITEM)
     folder.mkdir(parents=True)
-    (folder / "extension.tmdl").write_text(extension, encoding="utf-8")
+    (folder / f"{folder.name}.tmdl").write_text(extension, encoding="utf-8")
     for stem, source in (annotations or {}).items():
         path = root / "SemanticModel/annotations" / f"{stem}.py"
         path.parent.mkdir(exist_ok=True)
@@ -170,7 +170,7 @@ def test_value_helpers_and_located_errors(tmp_path):
         b"\t\tformatString: AUD #,##0.00\n\t\tdisplayFolder: AUD\n"
         in (contribution.parts["definition/tables/Sales.tmdl"])
     )
-    (root / str(ITEM) / "extension.tmdl").write_text(
+    (root / str(ITEM) / f"{ITEM.item_name}.tmdl").write_text(
         "table Sales\n\tcolumn Amount\n\t\tannotation Acme.Finance.Currency = USD\n"
     )
     with pytest.raises(

@@ -54,13 +54,21 @@ class SemanticContribution:
         return content_signature(value)
 
 
-def read_semantic_contribution(item, *, root, store, paths, annotations=None):
-    prefix = str(item) + "/"
+def read_semantic_contribution(
+    item, *, root, store, paths, annotations=None, project=None
+):
+    prefix = (project.path if project else str(item)) + "/"
     available = {p for p in paths if p.startswith(prefix)}
+    if project:
+        available = {
+            p
+            for p in available
+            if not any(p.startswith(report + "/") for report in project.report_paths)
+        }
     sources = {}
 
     def read(path):
-        if path not in available and path != "SemanticModel/extension.tmdl":
+        if path not in available and path not in {"PowerBI/policy.tmdl"}:
             raise ConfigError(f"{path}: referenced semantic source is missing")
         sources[path] = store.read(root.join(*path.split("/")))
         return sources[path].decode("utf-8-sig")
@@ -80,7 +88,7 @@ def read_semantic_contribution(item, *, root, store, paths, annotations=None):
     for legacy in ("SemanticModel/addon.yml", prefix + "addon.yml"):
         if legacy in paths:
             raise ConfigError(
-                f"{legacy}: addon.yml is no longer supported; use extension.tmdl"
+                f"{legacy}: addon.yml is no longer supported; use PowerBI/policy.tmdl or <model-name>.tmdl"
             )
 
     unsupported = sorted(
@@ -110,12 +118,36 @@ def read_semantic_contribution(item, *, root, store, paths, annotations=None):
     parts = {}
     provenance = {}
     properties = {"version": "4.2", "settings": {}}
-    if pbips:
+    if project and project.model_path:
+        model_path = project.model_path
+        property_path = model_path + "/definition.pbism"
+        try:
+            properties = json.loads(read(property_path))
+        except ValueError as exc:
+            raise ConfigError(f"{property_path}: invalid properties: {exc}") from exc
+        if not isinstance(properties, dict) or not isinstance(
+            properties.get("version"), str
+        ):
+            raise ConfigError(f"{property_path}: expected versioned properties")
+        parts["definition.pbism"] = sources[property_path]
+        definition_paths = sorted(
+            p
+            for p in available
+            if p.startswith(model_path + "/definition/") and "/.pbi/" not in p
+        )
+        if not definition_paths or any(
+            not p.endswith(".tmdl") for p in definition_paths
+        ):
+            raise ConfigError(f"{model_path}: expected a supported TMDL definition")
+        for path in definition_paths:
+            read(path)
+            parts[path[len(model_path) + 1 :]] = sources[path]
+    elif pbips and not project:
         pbip = pbips[0]
         try:
-            project = json.loads(read(pbip))
+            pbip_project = json.loads(read(pbip))
             models = set()
-            for artifact in project["artifacts"]:
+            for artifact in pbip_project["artifacts"]:
                 report = referenced(str(item), artifact["report"]["path"])
                 definition = json.loads(read(report + "/definition.pbir"))
                 ref = definition["datasetReference"]
@@ -161,17 +193,22 @@ def read_semantic_contribution(item, *, root, store, paths, annotations=None):
         if other_models:
             raise ConfigError(f"{other_models[0]}: unreferenced semantic model")
     elif any(
-        p.endswith((".tmdl", ".bim", ".pbism")) and p != prefix + "extension.tmdl"
+        p.endswith((".tmdl", ".bim", ".pbism"))
+        and p != (project.model_tmdl if project else prefix + item.item_name + ".tmdl")
         for p in available
     ):
         raise ConfigError(f"{item}: semantic base files require a PBIP reference")
     extensions = []
-    for path in ("SemanticModel/extension.tmdl", prefix + "extension.tmdl"):
+    for path in (
+        ("PowerBI/policy.tmdl", project.model_tmdl)
+        if project
+        else ("PowerBI/policy.tmdl", prefix + item.item_name + ".tmdl")
+    ):
         if path in paths:
             read(path)
             extensions.append((sources[path], path))
     if not parts and not extensions:
-        raise ConfigError(f"{item}: provide a PBIP or extension.tmdl")
+        raise ConfigError(f"{item}: provide a PBIP or <model-name>.tmdl")
     contribution = SemanticContribution(parts, sources, provenance)
     if extensions:
         from .extensions import apply_extensions

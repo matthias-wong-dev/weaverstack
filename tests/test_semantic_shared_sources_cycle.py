@@ -270,7 +270,7 @@ def test_configured_data_source_names_a_logical_item(tmp_path, mapping, expected
     item = WeaverItemId.parse("SemanticModel/Reporting")
     folder = tmp_path / str(item)
     folder.mkdir(parents=True)
-    (folder / "extension.tmdl").write_text(
+    (folder / f"{folder.name}.tmdl").write_text(
         'expression DataSource = Sql.Database("server", "Curated")\n\tkind: m\n'
     )
     workspace = Workspace(

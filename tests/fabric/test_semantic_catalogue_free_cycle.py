@@ -18,7 +18,7 @@ def test_build_and_load_without_a_catalogue(
     item = f"SemanticModel/{fixed_semantic_model_name}"
     folder = tmp_path / "project" / item
     folder.mkdir(parents=True)
-    (folder / "extension.tmdl").write_text(
+    (folder / f"{folder.name}.tmdl").write_text(
         "model Model\n\tdiscourageImplicitMeasures\n\n"
         'table Calendar\n\tpartition Calendar = calculated\n\t\tsource = ROW("Year", 2026)\n\n'
         "\tmeasure Years = COUNTROWS(Calendar)\n",

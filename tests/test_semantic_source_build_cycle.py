@@ -112,7 +112,7 @@ def source_project(tmp_path):
     root = tmp_path / "project"
     folder = root / str(ITEM)
     folder.mkdir(parents=True)
-    (folder / "extension.tmdl").write_text(shared_source_tmdl(), encoding="utf-8")
+    (folder / f"{folder.name}.tmdl").write_text(shared_source_tmdl(), encoding="utf-8")
     return root
 
 
@@ -415,7 +415,7 @@ def test_pbip_source_rebind_retains_authored_mode_and_properties(tmp_path, mode)
     (folder / "Probe.SemanticModel/definition/expressions.tmdl").write_text(
         'expression \'Warehouse/Serving\' = Sql.Database("previous", "database")\n'
     )
-    (folder / "extension.tmdl").write_text("model Model\n", encoding="utf-8")
+    (folder / f"{folder.name}.tmdl").write_text("model Model\n", encoding="utf-8")
     parsed = parse_item_repository(Location(root.as_posix()))
     authored = probe_model()
     prior_sales = next(t for t in authored["model"]["tables"] if t["name"] == "Sales")
@@ -490,7 +490,7 @@ def test_direct_lake_pbip_rebind_keeps_partition_properties_and_unmapped_express
     untouched_bytes = expression_file.read_bytes().split(
         b"expression 'Warehouse/Serving'", 1
     )[0]
-    (folder / "extension.tmdl").write_text("model Model\n", encoding="utf-8")
+    (folder / f"{folder.name}.tmdl").write_text("model Model\n", encoding="utf-8")
     with source_session() as session:
         observed = probe_model()
         sales = next(t for t in observed["model"]["tables"] if t["name"] == "Sales")
@@ -540,14 +540,13 @@ def test_direct_lake_pbip_rebind_keeps_partition_properties_and_unmapped_express
 
 @weaver_test()
 @pytest.mark.parametrize("failed_source", [False, True])
-def test_selected_declared_source_shape_orders_public_build(
+def test_declared_source_build_precedes_model_deployment(
     tmp_path, monkeypatch, failed_source
 ):
-    from weaver.build_bundle.bundle import load_bundle
     from weaver.declaration.model import WeaverDocumentId
 
     root = source_project(tmp_path)
-    (root / str(ITEM) / "extension.tmdl").write_text(
+    (root / str(ITEM) / f"{ITEM.item_name}.tmdl").write_text(
         shared_source_tmdl(
             relations={"Sales": "Sales"},
             descriptions={"Sales": "Sales facts."},
@@ -576,12 +575,12 @@ def test_selected_declared_source_shape_orders_public_build(
                 notes=False,
             )
         )
+        from weaver.build_bundle.bundle import load_bundle
+
+        published = capture_publication(monkeypatch, session)
         result = weaver.build(
             root,
-            items=[
-                "Warehouse/Serving=Warehouse/Serving_Dev",
-                f"{ITEM}=SemanticModel/Reporting_Dev",
-            ],
+            items="Warehouse/Serving=Warehouse/Serving_Dev",
             bundle_only=True,
             bundle_path=tmp_path / "bundle",
             session=session,
@@ -593,17 +592,7 @@ def test_selected_declared_source_shape_orders_public_build(
             for i, a in enumerate(actions)
             if a.resource_node_id == str(identity) and a.executor == "tsql"
         )
-        semantic_index = next(
-            i for i, a in enumerate(actions) if a.executor == "semantic_model"
-        )
-        # Display order is independent of the shared executor's prerequisite graph.
-        from weaver.graph import Graph
-
-        success = Graph(
-            (a.id for a in actions),
-            ((dep, a.id) for a in actions for dep in a.depends_on),
-        )
-        assert actions[source_index].id in success.ancestors(actions[semantic_index].id)
+        assert not any(a.executor == "semantic_model" for a in actions)
         assert not any(
             "Cake" in s and "INFORMATION_SCHEMA.COLUMNS" in s for s in session.tsql
         )
@@ -642,6 +631,14 @@ def test_selected_declared_source_shape_orders_public_build(
             assert not session.semantic_model("Reporting_Dev").calls
             assert not any("MERGE INTO [_].[Registry]" in s for s in session.tsql)
         else:
+            assert not session.semantic_model("Reporting_Dev").calls
+            source_rows = published()
+            assert SOURCE in source_rows
+            answer_catalogue(session, Catalogue(source_rows), read_bindings())
+            model_result = weaver.build(
+                root, items=f"{ITEM}=SemanticModel/Reporting_Dev", session=session
+            )
+            assert model_result.succeeded, model_result.errors
             assert [
                 method for method, _ in session.semantic_model("Reporting_Dev").calls
             ] == ["update_definition", "get_definition"]
@@ -732,7 +729,7 @@ def test_lakehouse_source_keeps_tables_identity_and_plans_sql_readiness(
     from weaver.load_plan import load_dag
 
     root = source_project(tmp_path)
-    (root / str(ITEM) / "extension.tmdl").write_text(
+    (root / str(ITEM) / f"{ITEM.item_name}.tmdl").write_text(
         shared_source_tmdl(
             logical="Lakehouse/Curated",
             relations={"Customer": "Customer"},
@@ -901,7 +898,7 @@ def test_native_tables_without_source_create_no_inferred_item_edges(
         folder,
         dirs_exist_ok=True,
     )
-    (folder / "extension.tmdl").write_text(
+    (folder / f"{folder.name}.tmdl").write_text(
         "/// Authored model\nmodel Model\n", encoding="utf-8"
     )
     with source_session() as session:

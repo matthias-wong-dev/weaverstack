@@ -63,7 +63,7 @@ def test_source_annotation_reuses_one_expression_for_two_consuming_tables(
     tmp_path, monkeypatch
 ):
     root = source_project(tmp_path)
-    path = root / str(ITEM) / "extension.tmdl"
+    path = root / str(ITEM) / f"{ITEM.item_name}.tmdl"
     path.write_text(
         path.read_text()
         + "\ntable SalesAgain\n\tannotation Weaver.Source = Warehouse/Serving/Cake.Sales\n"
@@ -113,7 +113,7 @@ def test_source_annotation_reuses_one_expression_for_two_consuming_tables(
 @weaver_test()
 def test_source_generated_columns_receive_auto_hide_policy(tmp_path, scope):
     root = source_project(tmp_path)
-    path = root / str(ITEM) / "extension.tmdl"
+    path = root / str(ITEM) / f"{ITEM.item_name}.tmdl"
     source = path.read_text()
     policy = 'annotation Weaver.AutoHideColumns = "I?"\n'
     path.write_text(
@@ -148,7 +148,7 @@ def test_source_generated_columns_receive_auto_hide_policy(tmp_path, scope):
 @weaver_test()
 def test_authored_columns_refine_the_columns_a_source_generates(tmp_path):
     root = source_project(tmp_path)
-    path = root / str(ITEM) / "extension.tmdl"
+    path = root / str(ITEM) / f"{ITEM.item_name}.tmdl"
     path.write_text(
         path.read_text() + "\n\tcolumn Label\n\t\tisHidden\n\t\tsortByColumn: Id\n"
     )
@@ -206,7 +206,7 @@ def test_refined_columns_read_a_selected_source_view_unless_it_is_rebuilt(
     from weaver.locations import Location
 
     root = source_project(tmp_path)
-    path = root / str(ITEM) / "extension.tmdl"
+    path = root / str(ITEM) / f"{ITEM.item_name}.tmdl"
     path.write_text(path.read_text() + "\n\tcolumn Label\n\t\tisHidden\n")
     folder = root / str(SOURCE)
     folder.mkdir(parents=True)
@@ -273,7 +273,7 @@ def test_source_annotation_refuses_unresolved_generation_before_mutation(
     from weaver.errors import BuildError
 
     root = source_project(tmp_path)
-    path = root / str(ITEM) / "extension.tmdl"
+    path = root / str(ITEM) / f"{ITEM.item_name}.tmdl"
     if failure == "missing_object":
         path.write_text(path.read_text().replace("Cake.Sales", "Cake.Missing"))
 
@@ -419,7 +419,7 @@ def test_import_model_generates_navigation_partitions_with_lineage(
     tmp_path, monkeypatch
 ):
     root = source_project(tmp_path)
-    extension = root / str(ITEM) / "extension.tmdl"
+    extension = root / str(ITEM) / f"{ITEM.item_name}.tmdl"
     extension.write_text(
         "model Model\n\tdefaultMode: import\n\n" + extension.read_text()
     )

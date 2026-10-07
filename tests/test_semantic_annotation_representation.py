@@ -12,7 +12,7 @@ def extension_model(tmp_path, text):
     root = tmp_path / "project"
     folder = root / str(ITEM)
     folder.mkdir(parents=True)
-    (folder / "extension.tmdl").write_text(text, encoding="utf-8")
+    (folder / f"{folder.name}.tmdl").write_text(text, encoding="utf-8")
     return root
 
 
@@ -28,7 +28,7 @@ def test_auto_hide_columns_sets_matching_native_column_properties(tmp_path, scop
         + "\tcolumn ProductSK\n\t\tdataType: int64\n"
         + "\tcolumn ProductId\n\t\tdataType: int64\n",
     )
-    before = (root / str(ITEM) / "extension.tmdl").read_bytes()
+    before = (root / str(ITEM) / f"{ITEM.item_name}.tmdl").read_bytes()
     semantic = compile_source(root)
     sales = next(t for t in semantic.requested["tables"] if t["name"] == "Sales")
     columns = {c["name"]: c for c in sales["columns"]}
@@ -39,7 +39,7 @@ def test_auto_hide_columns_sets_matching_native_column_properties(tmp_path, scop
         b"annotation 'Weaver.AutoHideColumns'" in data
         for data in semantic.parts.values()
     )
-    assert (root / str(ITEM) / "extension.tmdl").read_bytes() == before
+    assert (root / str(ITEM) / f"{ITEM.item_name}.tmdl").read_bytes() == before
 
 
 @pytest.mark.parametrize(

@@ -18,7 +18,7 @@ def excluded_project(tmp_path, kind):
         if kind == "table"
         else "ref table Sales\n\tcolumn Id\n\t\tannotation Weaver.Exclude = true\n"
     )
-    (folder / "extension.tmdl").write_text(text, encoding="utf-8")
+    (folder / f"{folder.name}.tmdl").write_text(text, encoding="utf-8")
     return root
 
 
@@ -58,7 +58,7 @@ def test_excluded_generated_column_is_not_reintroduced_by_source_inference(
     import weaver
 
     root = source_project(tmp_path)
-    path = root / str(ITEM) / "extension.tmdl"
+    path = root / str(ITEM) / f"{ITEM.item_name}.tmdl"
     path.write_text(
         path.read_text() + "\tcolumn Id\n\t\tannotation Weaver.Exclude = true\n"
     )

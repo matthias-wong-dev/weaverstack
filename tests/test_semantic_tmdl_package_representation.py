@@ -4,6 +4,7 @@ import shutil
 from pathlib import Path
 
 import pytest
+from support.semantic_models import policy_path
 from support.weaver_test import weaver_test
 
 from weaver.declaration.model import WeaverItemId
@@ -67,10 +68,10 @@ def test_model_extension_changes_only_requested_property_and_local_wins(tmp_path
         for p in model.rglob("*.tmdl")
         if p != path
     }
-    (folder.parent / "extension.tmdl").write_text(
+    (policy_path(folder.parent.parent)).write_text(
         "model Model\n\tculture: en-AU\n", encoding="utf-8"
     )
-    (folder / "extension.tmdl").write_text(
+    (folder / f"{folder.name}.tmdl").write_text(
         "model Model\n\tculture: en-GB\n", encoding="utf-8"
     )
     c = parse_item_repository(Location(tmp_path.as_posix())).semantic_models[ITEM]
@@ -79,8 +80,11 @@ def test_model_extension_changes_only_requested_property_and_local_wins(tmp_path
     )
     assert {p: c.parts[p] for p in untouched} == untouched
     assert c.requested == {"culture": "en-GB"}
-    assert c.provenance["/model/culture"]["source"] == str(ITEM) + "/extension.tmdl"
-    (folder.parent / "extension.tmdl").write_text(
+    assert (
+        c.provenance["/model/culture"]["source"]
+        == str(ITEM) + f"/{ITEM.item_name}.tmdl"
+    )
+    (policy_path(folder.parent.parent)).write_text(
         "model Model\n\tculture: fr-FR\n", encoding="utf-8"
     )
     assert (
@@ -108,7 +112,7 @@ def test_column_patch_preserves_unknown_neighbours_and_expression_text(tmp_path)
         "\t\tunknownMeasureProperty: untouched\r\n"
     ).encode()
     path.write_bytes(original)
-    (folder / "extension.tmdl").write_text(
+    (folder / f"{folder.name}.tmdl").write_text(
         "ref table Sales\n\tcolumn 'Product''s ID'\n\t\tisHidden: true\n",
         encoding="utf-8",
     )
@@ -138,7 +142,7 @@ def test_native_calculated_table_uses_the_same_tmdl_package(tmp_path, pbip):
         folder = tmp_path / str(ITEM)
         folder.mkdir(parents=True)
         before = {}
-    (folder / "extension.tmdl").write_text(
+    (folder / f"{folder.name}.tmdl").write_text(
         "/// Model measures\ntable '_Measure'\n\tpartition '_Measure' = calculated\n\t\tsource = INFO.VIEW.MEASURES()\n",
         encoding="utf-8",
     )

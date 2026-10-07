@@ -3,6 +3,7 @@
 import shutil
 
 import pytest
+from support.semantic_models import policy_path
 from support.weaver_test import weaver_test
 from test_semantic_annotation_declaration import ITEM, PBIP, compile_source
 
@@ -74,8 +75,8 @@ def annotated_project(tmp_path, name, origin):
             text += "\n" + addition
         file.write_text(text)
     else:
-        (folder.parent if origin == "organisation" else folder).joinpath(
-            "extension.tmdl"
+        (
+            policy_path(root) if origin == "organisation" else folder / "Reporting.tmdl"
         ).write_text(overlay)
     return root
 
@@ -141,10 +142,10 @@ def test_weaver_annotation_namespace_is_quoted_without_rewriting_other_source(
 def test_item_extension_overrides_organisation_annotation_before_execution(tmp_path):
     root = annotated_project(tmp_path, "Weaver.AutoHideColumns", "pbip")
     folder = root / str(ITEM)
-    (folder.parent / "extension.tmdl").write_text(
+    (policy_path(folder.parent.parent)).write_text(
         'ref table Sales\n\tannotation Weaver.AutoHideColumns = "Id"\n'
     )
-    (folder / "extension.tmdl").write_text(
+    (folder / f"{folder.name}.tmdl").write_text(
         'ref table Sales\n\tannotation Weaver.AutoHideColumns = "Amount"\n'
     )
     semantic = compile_source(root)
@@ -162,7 +163,7 @@ def test_item_extension_overrides_organisation_annotation_before_execution(tmp_p
 def test_item_false_disables_organisation_foreign_key_policy(tmp_path):
     root = annotated_project(tmp_path, "Weaver.AutoHideForeignKeys", "organisation")
     folder = root / str(ITEM)
-    (folder / "extension.tmdl").write_text(
+    (folder / f"{folder.name}.tmdl").write_text(
         "model Model\n\tannotation Weaver.AutoHideForeignKeys = false\n"
     )
     before = (folder / "Probe.SemanticModel/definition/tables/Sales.tmdl").read_bytes()
