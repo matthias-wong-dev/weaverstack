@@ -280,15 +280,76 @@ def test_a_version_difference_warns_and_names_the_fix(monkeypatch):
 
 @weaver_test()
 def test_a_matching_version_says_nothing(monkeypatch):
-    from weaver import __version__
+    _local(monkeypatch, "0.9.0.dev1", checkout=True)
 
     with ConsoleSession(workspace=_fabric()) as session:
         scope = session.scope()
-        monkeypatch.setattr(scope, "livy_run", lambda *a, **k: __version__)
+        monkeypatch.setattr(scope, "livy_run", lambda *a, **k: "0.9.0.dev1")
 
         scope.check_published_version(session.warn)
 
         assert session.warnings == []
+
+
+@weaver_test()
+def test_a_checkout_is_compared_as_it_would_publish(monkeypatch):
+    """Not as its installation recorded it, which a ``--dev`` publish removed.
+
+    Published from this checkout, the Environment holds the checkout's version,
+    and the editable installation still names the one it was installed at.
+    """
+
+    import weaver
+
+    _local(monkeypatch, "0.9.0.dev2", checkout=True)
+    monkeypatch.setattr(weaver, "__version__", "0.9.0.dev1")
+
+    with ConsoleSession(workspace=_fabric()) as session:
+        scope = session.scope()
+        monkeypatch.setattr(scope, "livy_run", lambda *a, **k: "0.9.0.dev2")
+
+        scope.check_published_version(session.warn)
+
+        assert session.warnings == []
+
+
+@weaver_test()
+def test_a_checkout_is_told_to_publish_with_dev(monkeypatch):
+    """Without ``--dev``, a publish installs the released package instead."""
+
+    _local(monkeypatch, "0.9.0.dev2", checkout=True)
+
+    with ConsoleSession(workspace=_fabric()) as session:
+        scope = session.scope()
+        monkeypatch.setattr(scope, "livy_run", lambda *a, **k: "0.9.0.dev1")
+
+        scope.check_published_version(session.warn)
+
+        assert "Local weaverstack is 0.9.0.dev2" in session.warnings[0]
+        assert session.warnings[0].endswith(" --dev`.")
+
+
+@weaver_test()
+def test_an_installed_release_is_told_to_publish_without_dev(monkeypatch):
+    _local(monkeypatch, "0.9.0", checkout=False)
+
+    with ConsoleSession(workspace=_fabric()) as session:
+        scope = session.scope()
+        monkeypatch.setattr(scope, "livy_run", lambda *a, **k: "0.8.0")
+
+        scope.check_published_version(session.warn)
+
+        assert "--dev" not in session.warnings[0]
+
+
+def _local(monkeypatch, version: str, *, checkout: bool) -> None:
+    from weaver.fabric import environment
+
+    monkeypatch.setattr(
+        environment,
+        "local_weaver",
+        lambda: environment.LocalWeaver(version, checkout=checkout),
+    )
 
 
 @weaver_test()
@@ -304,7 +365,7 @@ def test_a_shared_environment_warning_names_its_owning_workspace(monkeypatch):
 
         scope.check_published_version(session.warn)
 
-        assert "publish Platform/weaver`" in session.warnings[0]
+        assert "publish Platform/weaver" in session.warnings[0]
         assert "--workspace" not in session.warnings[0]
 
 

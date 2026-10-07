@@ -81,6 +81,52 @@ def project_root(module: Path | str | None = None) -> Path:
     )
 
 
+@dataclass(frozen=True)
+class LocalWeaver:
+    """The Weaver this process runs, as a publication would compare it."""
+
+    version: str
+    #: Whether it runs from a source checkout, which ``--dev`` publishes.
+    checkout: bool
+
+
+def local_weaver(module: Path | str | None = None) -> LocalWeaver:
+    """The version a publication from here would carry.
+
+    An editable installation records its version when it is installed, and the
+    checkout moves on without it. From a checkout, this is the version a
+    ``--dev`` wheel built now would carry.
+    """
+
+    from .. import __version__
+
+    here = Path(module or __file__).resolve()
+    try:
+        root = project_root(here)
+    except CommandError:
+        return LocalWeaver(__version__, checkout=False)
+    if not here.is_relative_to(root / "src"):
+        return LocalWeaver(__version__, checkout=False)
+    version = _checkout_version(root)
+    return LocalWeaver(version or __version__, checkout=True)
+
+
+def _checkout_version(root: Path) -> str | None:
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "_weaver_checkout_version", root / "hatch_build.py"
+    )
+    if spec is None or spec.loader is None:
+        return None
+    build = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(build)
+        return build.compute_version()
+    except Exception:  # noqa: BLE001 - an unknown version falls back to metadata
+        return None
+
+
 def names_weaver(pyproject: Path) -> bool:
     """Whether a ``pyproject.toml`` declares the Weaver distribution.
 
