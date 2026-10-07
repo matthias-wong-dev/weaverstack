@@ -1,6 +1,5 @@
 """Typed semantic catalogue rows follow the model's Build lifecycle."""
 
-import json
 from dataclasses import replace
 
 from support.semantic_models import probe_model
@@ -64,7 +63,14 @@ def test_typed_semantic_rows_keep_descriptions_native_metadata_and_claim_ownersh
         t.name for t in CATALOGUE_TABLES if t.name.startswith("Semantic")
     } == semantic_tables
     assert rows["SemanticModel"][0]["description"] == "Sales model"
-    assert json.loads(rows["SemanticModel"][0]["definition"]) == observed
+    assert set(rows["SemanticModel"][0]) == {
+        "item_type",
+        "item_name",
+        "schema_name",
+        "object_name",
+        "description",
+        "signature",
+    }
     sales = next(r for r in rows["SemanticModelTable"] if r["table_name"] == "Sales")
     assert sales["description"] == "Sales transactions"
     measure = next(
@@ -91,7 +97,7 @@ def test_typed_semantic_rows_keep_descriptions_native_metadata_and_claim_ownersh
     for name in semantic_tables:
         for row in rows[name]:
             assert row["signature"] == repository.semantic_models[ITEM].signature
-            assert json.loads(row["provenance"])
+            assert not {"definition", "properties", "provenance"} & set(row)
     pruned = without_claims(
         catalogue,
         [

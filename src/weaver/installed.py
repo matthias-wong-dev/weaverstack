@@ -607,7 +607,6 @@ def _registered(catalogue: Catalogue, installations):
             if not any(
                 row.get("schema_name") == ""
                 and row.get("object_name") == ""
-                and row.get("definition")
                 and row.get("signature") == catalogue.registered[identity].signature
                 for row in definitions
             ):
@@ -794,7 +793,8 @@ class _DependencyRow:
     reference: str
     semantic_table: str | None = None
     referenced: tuple[str, ...] = ()
-    source_binding: str | None = None
+    source_mode: str | None = None
+    source_access: str | None = None
 
 
 def _dependency_rows(catalogue: Catalogue, nodes) -> tuple[_DependencyRow, ...]:
@@ -813,13 +813,13 @@ def _dependency_rows(catalogue: Catalogue, nodes) -> tuple[_DependencyRow, ...]:
                 consumer = WeaverDocumentId.model_root(item)
                 if str(consumer) not in nodes:
                     continue
-                binding = next(
+                table = next(
                     (
-                        r.get("source_binding")
+                        r
                         for r in tables.get(SEMANTIC_MODEL_TABLE.name, ())
                         if r.get("table_name") == name
                     ),
-                    None,
+                    {},
                 )
                 found.append(
                     _DependencyRow(
@@ -835,7 +835,8 @@ def _dependency_rows(catalogue: Catalogue, nodes) -> tuple[_DependencyRow, ...]:
                                 "referenced_object_name",
                             )
                         ),
-                        source_binding=binding,
+                        source_mode=table.get("source_mode"),
+                        source_access=table.get("source_access"),
                     )
                 )
                 continue
@@ -920,14 +921,11 @@ class _References:
         return tuple(edges.values())
 
     def _semantic(self, row):
-        import json
-
         from .errors import WeaverError
         from .semantic_models.references import source_identity
 
         try:
             producer = source_identity(row.reference)
-            source = json.loads(row.source_binding or "null")
             schema, name = catalogue_columns(producer)
             expected = (producer.item.item_type, producer.item.item_name, schema, name)
             node = self._objects.get(producer)
@@ -936,21 +934,19 @@ class _References:
                 or row.referenced != expected
                 or node is None
                 or node.object_type not in {"table", "view"}
-                or not isinstance(source, dict)
-                or source.get("reference") != row.reference
-                or source.get("object_type") != node.object_type
-                or source.get("item_type") != producer.item.item_type
-                or source.get("item_name") != node.target.name
-                or source.get("mode")
+                or row.source_mode
                 not in {"directLake", "import", "directQuery", "dual"}
-                or source.get("access") != "sql"
+                or row.source_access != "sql"
             ):
-                raise ValueError("source identity or binding is missing or differs")
+                raise ValueError("source identity or mode is missing or differs")
         except (WeaverError, ValueError, TypeError) as exc:
             raise CatalogueStateError(
                 f"{row.consumer} table {row.semantic_table!r}: invalid installed .source {row.reference!r}: {exc}. Build the model again."
             ) from exc
-        return (producer, None), source
+        return (producer, None), {
+            "mode": row.source_mode,
+            "access": row.source_access,
+        }
 
     def _one(self, consumer: WeaverDocumentId, reference: str):
         """Resolve shortcuts before native objects to preserve the crossing."""

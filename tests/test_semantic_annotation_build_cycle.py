@@ -47,14 +47,10 @@ def test_source_annotation_generates_columns_descriptions_and_managed_lineage(
         assert b"expression 'Warehouse/Serving'" in parts["definition/expressions.tmdl"]
         rows = published()[ITEM]
         assert rows["SemanticModelTable"][0]["description"] == "Sales description"
-        import json
-
-        provenance = json.loads(rows["SemanticModelTable"][0]["provenance"])
-        generated = [
-            origin for origin in provenance.values() if origin.get("reference")
-        ]
-        assert generated and all(o["reason"] == "Weaver.Source" for o in generated)
-        assert all(o["source"].endswith("extension.tmdl") for o in generated)
+        assert (
+            rows["SemanticModelTable"][0]["source_mode"],
+            rows["SemanticModelTable"][0]["source_access"],
+        ) == ("directLake", "sql")
         assert {
             (r["referencing_object_name"], r["dependency_reference"])
             for r in rows["Dependency"]
@@ -408,8 +404,9 @@ def test_source_annotation_uses_the_typed_lakehouse_sql_endpoint(tmp_path, monke
         assert any("TABLE_SCHEMA = N'Cake'" in sql for sql in session.tsql)
         table = published()[ITEM]["SemanticModelTable"][0]
         assert table["description"] == "Sales description"
-        binding = json.loads(table["source_binding"])
-        assert binding["item_id"] == _identifier("Lakehouse", "Serving_Dev")
+        assert table["source_access"] == "sql"
+        # Only Installation names the physical item.
+        assert "Serving_Dev" not in json.dumps(table)
         assert (
             published()[ITEM]["Dependency"][0]["dependency_reference"]
             == "Lakehouse/Curated/Tables/Cake.Sales"

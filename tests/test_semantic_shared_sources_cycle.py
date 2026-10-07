@@ -248,10 +248,7 @@ def test_shared_source_publishes_managed_table_lineage(tmp_path, monkeypatch):
     ] == [("Sales", "Serving", "Cake", "Sales")]
     model_tables = rows["SemanticModelTable"]
     sales_row = next(r for r in model_tables if r["table_name"] == "Sales")
-    assert (
-        json.loads(sales_row["source_binding"])["reference"]
-        == "Warehouse/Serving/Cake.Sales"
-    )
+    assert sales_row["source_access"] == "sql"
 
 
 @pytest.mark.parametrize(

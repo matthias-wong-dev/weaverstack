@@ -217,9 +217,10 @@ def test_public_build_catalogue_load_dax_and_unchanged_build(
     (definition,) = read_table(context.connection, SEMANTIC_MODEL, scope=SCOPE)
     (registered,) = read_table(context.connection, REGISTRY, scope=SCOPE)
     assert registered["signature"] == definition["signature"]
+    assert "definition" not in definition
+    observed = decode_model(context.model.get_definition())["model"]
     if extension:
         assert definition["description"] == "Refresh acceptance model"
-        observed = json.loads(definition["definition"])["model"]
         assert observed["culture"] == "en-US"
         assert observed["discourageImplicitMeasures"] is True
         if pbip:
@@ -237,10 +238,7 @@ def test_public_build_catalogue_load_dax_and_unchanged_build(
             )
             assert any(p["name"] == "Reporting" for p in observed["perspectives"])
     else:
-        assert (
-            json.loads(definition["definition"])["model"]["perspectives"][0]["name"]
-            == "Reporting"
-        )
+        assert observed["perspectives"][0]["name"] == "Reporting"
     semantic_tables = read_table(context.connection, SEMANTIC_MODEL_TABLE, scope=SCOPE)
     if extension:
         assert (
@@ -270,10 +268,7 @@ def test_public_build_catalogue_load_dax_and_unchanged_build(
         )
     else:
         assert not measures and not relationships
-    tables = {
-        table["name"]: table
-        for table in json.loads(definition["definition"])["model"]["tables"]
-    }
+    tables = {table["name"]: table for table in observed["tables"]}
     assert set(tables) == (
         ({"Sales", "Product"} if pbip else set())
         | ({"Calendar"} if extension else set())
@@ -400,15 +395,7 @@ def test_existing_warehouse_source_build_persists_lineage_and_loads_without_sour
     )
     objects = read_table(context.connection, SEMANTIC_MODEL_TABLE, scope=SCOPE)
     table = next(row for row in objects if row["table_name"] == "InstalledObjects")
-    source = json.loads(table["source_binding"])
-    assert source["mode"] == "directLake"
-    assert source["item_type"] == "Warehouse"
-    assert (
-        source["item_id"]
-        == context.session.resolve_item(
-            context.session.workspace.catalogue_item, item_type="Warehouse"
-        ).id
-    )
+    assert (table["source_mode"], table["source_access"]) == ("directLake", "sql")
     joined = context.connection.rows(
         "SELECT t.[Table name] AS semantic_table, t.[Description] AS description, "
         "d.[Dependency reference] AS producer FROM [_].[Dependency] d "

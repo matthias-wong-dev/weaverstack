@@ -215,7 +215,7 @@ def test_build_deploys_and_certifies_readback_without_touching_source(tmp_path, 
     )
     certify = next(i for i, s in enumerate(writes) if "MERGE" in s and "Registry" in s)
     assert definition_write < certify and child_write < certify
-    assert "calculatedTableColumn" in writes[definition_write]
+    assert "calculatedTableColumn" in writes[child_write]
     assert "Calendar" in writes[child_write] and "Year" in writes[child_write]
     assert not session.spark_sql
     assert before == {

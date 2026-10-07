@@ -225,12 +225,14 @@ Microsoft's [Direct Lake limits](https://learn.microsoft.com/en-us/fabric/fundam
 apply, including single-source and composite-model constraints for Direct Lake
 on SQL. Views use the native DirectQuery fallback; Weaver retains `directLake`.
 
-`_.SemanticModel` retains the native definition, model description and provenance.
+`_.SemanticModel` records each model's description and signature.
 `_.SemanticModelTable`, `_.SemanticModelMeasure`, `_.SemanticModelRelationship`
-and `_.SemanticModelColumn` expose typed child metadata. Models, tables, measures
-and columns include native descriptions. `SemanticModelTable.Source binding`
-retains source metadata. Join its item identity and Table name to Dependency
-item identity and Referencing object name. Each semantic
+and `_.SemanticModelColumn` expose typed child metadata read back after
+deployment. Models, tables, measures and columns include native descriptions.
+These rows are logical and identical across environments: only `_.Installation`
+names a physical item. `SemanticModelTable` records each managed source's mode
+and access. Join its item identity and Table name to Dependency item identity
+and Referencing object name. Each semantic
 table publishes its exact producer in `_.Dependency`; two consuming tables keep
 separate rows even when they share a producer. The installed DAG reads those rows
 and derives the single model-refresh node's upstream edges. Lakehouse SQL endpoint
