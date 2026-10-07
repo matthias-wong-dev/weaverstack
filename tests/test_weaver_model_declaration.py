@@ -46,7 +46,7 @@ def test_same_object_name_in_distinct_typed_items_is_distinct():
     [
         "lakehouse/Raw",
         "LAKEHOUSE/Raw",
-        "Report/Reporting",
+        "Dashboard/Reporting",
         "Lakehouse",
         "Lakehouse/Raw/Extra",
     ],
@@ -63,6 +63,15 @@ def test_semantic_item_and_model_root_share_the_canonical_spelling():
     root = WeaverDocumentId.parse("SemanticModel/Reporting")
     assert root == WeaverDocumentId.model_root(item)
     assert str(root) == str(item) == "SemanticModel/Reporting"
+
+
+@weaver_test()
+def test_report_item_is_first_class_and_retains_strict_type_spelling():
+    item = WeaverItemId.parse("Report/Reporting")
+    assert str(item) == "Report/Reporting"
+    for spelling in ("report/Reporting", "REPORT/Reporting", "Report/Reporting/Extra"):
+        with pytest.raises(IdentityError):
+            WeaverItemId.parse(spelling)
 
 
 @weaver_test()
