@@ -114,6 +114,10 @@ Build updates an existing item; it never creates one. A different physical name
 can be selected with
 `--item SemanticModel/Reporting=SemanticModel/Reporting_Dev`.
 
+Power BI items are built as a separate step from Lakehouse and Warehouse items.
+Build the sources first, then the semantic models and Reports. A SemanticModel
+and its Reports can share one Build.
+
 Edit `reporting/PowerBI/Reporting/Reporting.tmdl` to define calculated content:
 
 ```tmdl
