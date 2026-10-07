@@ -51,7 +51,7 @@ def dispatch_primitive(
 
         model = session.semantic_model(node.bound_item, workspace=workspace)
         # A new or redeployed model has no data connection until one is bound.
-        model.bind_data_sources(label=node.node_id)
+        model.bind_data_sources()
         return SemanticRefreshResult.from_response(model.refresh())
     if getattr(node, "installed", None) is not None:
         return _validation(node, session, workspace, open_runtime, collect, isolated)

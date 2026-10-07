@@ -54,9 +54,7 @@ def test_unbound_source_binds_to_the_connection_with_its_path():
             connection("personal", f"{SERVER};DEV_Curated", kind="PersonalCloud"),
         ],
     )
-    assert model.bind_data_sources(label="SemanticModel/Sales") == (
-        f"{SERVER};DEV_Curated",
-    )
+    assert model.bind_data_sources() == (f"{SERVER};DEV_Curated",)
     (_, (method, path, request)) = fabric.calls
     assert (method, path) == (
         "POST",
@@ -75,7 +73,7 @@ def test_unbound_source_binds_to_the_connection_with_its_path():
 @weaver_test()
 def test_bound_sources_need_no_connection_lookup():
     model, fabric = scripted([source("Curated", bound=True)])
-    assert model.bind_data_sources(label="SemanticModel/Sales") == ()
+    assert model.bind_data_sources() == ()
     assert not fabric.calls
 
 
@@ -96,11 +94,9 @@ def test_bound_sources_need_no_connection_lookup():
 def test_unbindable_source_fails_in_one_line(connections, message):
     model, fabric = scripted([source("DEV_Curated")], connections)
     with pytest.raises(ConnectionBindingError) as failed:
-        model.bind_data_sources(label="SemanticModel/Sales")
+        model.bind_data_sources()
     text = str(failed.value)
-    assert text.startswith(
-        f"SemanticModel/Sales reads database DEV_Curated on {SERVER}"
-    )
+    assert text.startswith(f"The model reads database DEV_Curated on {SERVER}")
     assert message in text and "\n" not in text
     assert all(call[0] == "GET" for call in fabric.calls)
 

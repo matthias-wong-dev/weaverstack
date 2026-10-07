@@ -176,7 +176,7 @@ class SemanticModelClient:
             "value", []
         )
 
-    def bind_data_sources(self, *, label: str) -> tuple[str, ...]:
+    def bind_data_sources(self) -> tuple[str, ...]:
         """Bind each unbound SQL data source to the one connection that reaches it.
 
         A connection reaches a data source when its path is the source's
@@ -209,14 +209,14 @@ class SemanticModelClient:
             ]
             if not matches:
                 raise ConnectionBindingError(
-                    f"{label} reads database {database} on {server}, and no cloud "
+                    f"The model reads database {database} on {server}, and no cloud "
                     "connection reaches it. Create a SQL cloud connection to that "
                     "server and database in Fabric, then run again."
                 )
             if len(matches) > 1:
                 names = ", ".join(sorted(str(c.get("displayName")) for c in matches))
                 raise ConnectionBindingError(
-                    f"{label} reads database {database} on {server}, and several "
+                    f"The model reads database {database} on {server}, and several "
                     f"connections reach it: {names}. Keep one."
                 )
             connection = matches[0]
