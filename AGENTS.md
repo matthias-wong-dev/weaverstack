@@ -178,10 +178,13 @@ TMDL definition-part package; observed state is Fabric-returned TMSL. Store sour
 bytes, requested edits and provenance beside the package. `semantic_models.source`
 selects the PBIP or empty base; `extensions` applies organisation then item
 `extension.tmdl`. The source-span editor changes addressed native fragments and
-preserves unrelated bytes. The hierarchy supplies object identity; missing refs,
-ambiguous targets and unsupported existing-object collisions fail with source
-locations. Complete new non-colliding native objects can pass without a bounded
-Python schema. `extension_expectations` projects known requested values for
+preserves unrelated bytes. Merging is recursive over syntax for every kind:
+object identity is kind and name within the parent, property identity is the
+name. Missing refs and ambiguous targets fail with source locations.
+`semantic_models.objects` exposes live objects over the same editor, with
+property access dynamic over native names. `_SCHEMAS` bounds typed readback and
+generation only; it never decides what can be preserved, read, merged or
+edited. `extension_expectations` projects known requested values for
 readback. Known generated objects use `render` and `patching`. Ordinary PBIP
 deployment requires no complete TMDL parser.
 Package paths/bytes and resolved source metadata determine the desired signature.

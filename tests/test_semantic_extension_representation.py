@@ -95,13 +95,20 @@ def test_native_extension_probe(claim, newline):
     after = result.parts
     sales = after["definition/tables/Sales.tmdl"]
     if claim == "model-property":
-        assert b"discourageImplicitMeasures: false" in after["definition/model.tmdl"]
+        # Fabric refuses a plain property after a block property.
+        assert (
+            b"\tdiscourageImplicitMeasures: false" + newline + b"\tdataAccessOptions"
+            in after["definition/model.tmdl"]
+        )
         assert result.requested["discourageImplicitMeasures"] is False
     elif claim == "table-property":
         assert b"/// Reporting sales." in sales
         assert b"\tisHidden: false" in sales
     elif claim == "column-property":
-        assert b"\tcolumn ProductId" + newline + b"\t\tisHidden" + newline in sales
+        assert (
+            b"\t\tsummarizeBy: none" + newline + b"\t\tisHidden" + newline + newline
+            in sales
+        )
         assert result.requested["tables"][0]["columns"][0]["isHidden"] is True
     elif claim == "new-measure":
         assert b"measure 'Double Revenue' = [Revenue] * 2" in sales
@@ -130,7 +137,7 @@ def test_native_extension_probe(claim, newline):
         assert merge(before).parts == after
     elif claim == "opaque-native-object":
         assert after["definition/perspectives/Reporting.tmdl"] == (
-            b"perspective Reporting\n    perspectiveTable Sales\n        perspectiveMeasure Revenue\n"
+            b"perspective Reporting\n\tperspectiveTable Sales\n\t\tperspectiveMeasure Revenue\n"
         )
         assert "perspectives" not in result.requested
     else:
@@ -168,17 +175,68 @@ def test_ambiguous_target_is_a_source_located_error():
         merge(parts, (b"ref table Sales\n    isHidden\n", "extension.tmdl"))
 
 
+@pytest.mark.parametrize("reference", [True, False])
 @weaver_test()
-def test_opaque_native_collision_fails_without_reconstruction():
+def test_existing_unknown_object_merges_recursively(reference):
+    parts = base_parts()
+    parts["definition/newThings.tmdl"] = (
+        b"newThing Foo\n\tfutureProperty: one\n\tkept: yes\n"
+        b"\tnestedThing Bar\n\t\tdeeper: one\n"
+    )
+    fragment = (b"ref " if reference else b"") + (
+        b"newThing Foo\n    futureProperty: two\n    added: three\n"
+        b"    nestedThing Bar\n        deeper: two\n"
+        b"    nestedThing Baz\n        fresh: true\n"
+    )
+    result = merge(parts, (fragment, "extension.tmdl"))
+    assert result.parts["definition/newThings.tmdl"] == (
+        b"newThing Foo\n\tfutureProperty: two\n\tkept: yes\n\tadded: three\n"
+        b"\tnestedThing Bar\n\t\tdeeper: two\n"
+        b"\n\tnestedThing Baz\n\t\tfresh: true\n"
+    )
+    assert {
+        p: v for p, v in result.parts.items() if p != "definition/newThings.tmdl"
+    } == {p: v for p, v in parts.items() if p != "definition/newThings.tmdl"}
+    assert result.requested == {}
+
+
+@weaver_test()
+def test_unknown_children_merge_below_a_known_parent():
+    parts = base_parts()
+    sales = parts["definition/tables/Sales.tmdl"]
+    parts["definition/tables/Sales.tmdl"] = (
+        sales + b"\n\tfutureChild Kept\n\t\tsetting: one\n"
+    )
+    result = merge(
+        parts,
+        (
+            b"ref table Sales\n    futureChild Kept\n        setting: two\n"
+            b"    column ProductId\n        futureColumnProperty: x\n",
+            "extension.tmdl",
+        ),
+    )
+    merged = result.parts["definition/tables/Sales.tmdl"]
+    assert merged.endswith(b"\tfutureChild Kept\n\t\tsetting: two\n")
+    assert b"\t\tsummarizeBy: none\n\t\tfutureColumnProperty: x\n" in merged
+    assert (
+        merged.replace(b"setting: two", b"setting: one").replace(
+            b"\t\tfutureColumnProperty: x\n", b""
+        )
+        == parts["definition/tables/Sales.tmdl"]
+    )
+
+
+@weaver_test()
+def test_existing_perspective_merges_without_reconstruction():
     parts = base_parts()
     parts["definition/perspectives/Reporting.tmdl"] = b"perspective Reporting\n"
-    with pytest.raises(
-        ConfigError, match=r"extension.tmdl:1.*perspective.*safely patch"
-    ):
-        merge(
-            parts,
-            (b"perspective Reporting\n    perspectiveTable Sales\n", "extension.tmdl"),
-        )
+    result = merge(
+        parts,
+        (b"perspective Reporting\n    perspectiveTable Sales\n", "extension.tmdl"),
+    )
+    assert result.parts["definition/perspectives/Reporting.tmdl"] == (
+        b"perspective Reporting\n\n\tperspectiveTable Sales\n"
+    )
 
 
 @pytest.mark.parametrize(
@@ -217,7 +275,9 @@ def test_property_edit_keeps_crlf_fenced_text_and_unknown_neighbours():
         ),
     )
     assert result.parts["definition/tables/Sales.tmdl"] == original.replace(
-        b"\tcolumn ProductId\r\n", b"\tcolumn ProductId\r\n\t\tisHidden\r\n", 1
+        b"\t\tunknownProperty: retained\r\n",
+        b"\t\tunknownProperty: retained\r\n\t\tisHidden\r\n",
+        1,
     )
 
 
@@ -247,3 +307,27 @@ def test_empty_extension_keeps_every_byte():
     result = merge(parts, (b"// no changes\n", "extension.tmdl"))
     assert result.parts == parts
     assert result.requested == {} and result.provenance == {} and result.owned == ()
+
+
+@pytest.mark.parametrize("unit", ["\t", "    "], ids=["tabs", "spaces"])
+@weaver_test()
+def test_merged_expression_keeps_its_authored_text(unit):
+    from weaver.semantic_models.fragments import expression_text
+    from weaver.semantic_models.tmdl import PackageEditor
+
+    parts = base_parts()
+    parts["definition/expressions.tmdl"] = (
+        f"expression Other = 1\n{unit}kind: m\n".encode()
+    )
+    fragment = (
+        b"expression DataSource1 =\n        let\n            Value = 1\n"
+        b"        in\n            Value\n    kind: m\n"
+    )
+    result = merge(parts, (fragment, "extension.tmdl"))
+    ((document, node),) = PackageEditor(result.parts).locations(
+        (("expression", "DataSource1"),)
+    )
+    assert expression_text(document, node) == "let\n    Value = 1\nin\n    Value"
+    assert result.requested["expressions"][0]["expression"] == expression_text(
+        document, node
+    )

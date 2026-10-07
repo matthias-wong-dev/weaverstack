@@ -114,8 +114,8 @@ def test_column_patch_preserves_unknown_neighbours_and_expression_text(tmp_path)
     )
     c = parse_item_repository(Location(tmp_path.as_posix())).semantic_models[ITEM]
     assert c.parts["definition/tables/Sales.tmdl"] == original.replace(
-        b"\tcolumn 'Product''s ID'\r\n",
-        b"\tcolumn 'Product''s ID'\r\n\t\tisHidden: true\r\n",
+        b"\t\tunknownColumnProperty: untouched\r\n",
+        b"\t\tunknownColumnProperty: untouched\r\n\t\tisHidden: true\r\n",
         1,
     )
     assert path.read_bytes() == original

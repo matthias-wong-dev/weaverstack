@@ -134,11 +134,27 @@ error and identify connection-owner action where applicable. A standalone
 it is not implemented here. Shared connections and gateways remain outside
 semantic-item ownership.
 
-Native PBIP deployment supports more TMDL than extension editing. Complete new,
-non-colliding native objects can be added without a Python schema for their type.
-An extension targeting an existing object type that Weaver cannot safely patch
-fails with a source-located diagnostic. Fabric acceptance and TMSL readback
-certify opaque new objects; known requested changes receive value checks.
+`extension.tmdl` merges by native structure. An object is identified by its
+kind and name within its parent, and a property by its name. A new object is
+added whole, an existing one merges recursively, and a supplied property,
+expression or description replaces the base value. This holds for any TMDL
+object or property, including ones Weaver does not interpret. Fabric acceptance
+and TMSL readback certify such content; known requested changes receive value
+checks.
+
+The same edits are available from Python, using native TMDL names:
+
+```python
+from weaver.semantic_models import TmdlDefinition
+
+definition = TmdlDefinition(parts)
+for table in definition.model.tables:
+    for column in table.columns:
+        if column.dataType == "int64":
+            column.isHidden = True
+```
+
+Each edit changes only the TMDL lines it addresses.
 
 The former `addon.yml`, `.dax` and `.source` authoring syntax is removed.
 `Weaver.*` annotation transformations, semantic wipe and DAX Test/TestStatus/Health

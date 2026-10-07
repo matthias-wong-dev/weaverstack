@@ -1,29 +1,15 @@
 """Merge partial native declarations by editing their addressed TMDL spans."""
 
+import os
 from dataclasses import dataclass, replace
-from urllib.parse import quote
 
 from ..errors import ConfigError
 from .compiler import _merge, escape, leaf_properties
 from .extension_expectations import requested_fragment
-from .tmdl import Document, PackageEditor
+from .tmdl import Document, PackageEditor, content_end, indent_width, root_file
 
-_PATCHABLE = frozenset(
-    {
-        "model",
-        "table",
-        "column",
-        "measure",
-        "partition",
-        "expression",
-        "relationship",
-        "role",
-        "tablepermission",
-        "hierarchy",
-        "level",
-        "annotation",
-    }
-)
+# TMSL collections for typed readback. Other kinds merge the same way and are
+# certified by Fabric accepting the definition.
 _COLLECTIONS = {
     "table": "tables",
     "column": "columns",
@@ -81,30 +67,50 @@ def _validate(document):
                 _error(document, node, "unterminated expression fence")
 
 
-def _text(document, node, prefix, newline, *, start=None, end=None):
-    lines = document.lines[
-        node.description_start if start is None else start : node.end
-        if end is None
-        else end
-    ]
+def _text(document, node, prefix, newline, unit, *, start=None, end=None):
+    """Re-indent extension lines at their depth below `prefix` in `unit` steps.
+
+    An expression body moves as a block: only its common indentation changes,
+    so the expression text Fabric reads back is the one authored.
+    """
+
+    bodies = {}
+    pending = [node]
+    while pending:
+        span = pending.pop()
+        pending.extend(span.children)
+        lines = range(span.header + 1, span.expression_end)
+        indents = [
+            line[: len(line) - len(line.lstrip(" \t"))]
+            for line in (document.lines[i] for i in lines)
+            if line.strip()
+        ]
+        common = os.path.commonprefix(indents) if indents else ""
+        bodies.update(dict.fromkeys(lines, common))
     result = []
-    for line in lines:
-        value = line.rstrip("\r\n")
-        if value.startswith(node.prefix):
-            value = value[len(node.prefix) :]
-        result.append(prefix + value + newline if value else newline)
+    first = node.description_start if start is None else start
+    for index in range(first, node.end if end is None else end):
+        value = document.lines[index].rstrip("\r\n")
+        if not value.strip():
+            result.append(newline)
+            continue
+        if index in bodies:
+            lead, body = bodies[index], value[len(bodies[index]) :]
+        else:
+            body = value.lstrip(" \t")
+            lead = value[: len(value) - len(body)]
+        lead = lead[len(node.prefix) :] if lead.startswith(node.prefix) else lead
+        depth, extra = divmod(indent_width(lead), 4)
+        result.append(prefix + unit * depth + " " * extra + body + newline)
     return "".join(result)
 
 
+def _unit(target, node):
+    return target.child_prefix(node)[len(node.prefix) :]
+
+
 def _filename(node):
-    if node.kind in {"table", "role", "culture", "perspective"}:
-        return f"definition/{node.kind}s/{quote(node.name, safe='')}.tmdl"
-    return {
-        "relationship": "definition/relationships.tmdl",
-        "expression": "definition/expressions.tmdl",
-        "datasource": "definition/dataSources.tmdl",
-        "function": "definition/functions.tmdl",
-    }.get(node.kind, "definition/model.tmdl")
+    return root_file(node.kind, node.name) or "definition/model.tmdl"
 
 
 def _pointer(path):
@@ -131,7 +137,8 @@ class ExtensionEditor:
             filename = _filename(node)
             previous = self.package.parts.get(filename, b"")
             newline = "\r\n" if b"\r\n" in previous else "\n"
-            content = _text(document, node, "", newline)
+            unit = Document(filename, previous).indent_unit()
+            content = _text(document, node, "", newline, unit)
             self.package.parts[filename] = (
                 previous + (newline.encode() if previous else b"") + content.encode()
             )
@@ -145,13 +152,17 @@ class ExtensionEditor:
                 )
             target, parent = parents[0]
             content = target.newline + _text(
-                document, node, target.child_prefix(parent), target.newline
+                document,
+                node,
+                target.child_prefix(parent),
+                target.newline,
+                _unit(target, parent),
             )
             self.package.parts[target.path] = target.replace(
                 parent.end, parent.end, content
             )
         pointer = _pointer(node.path)
-        if pointer and node.kind in _PATCHABLE:
+        if pointer:
             self.owned.add(pointer)
 
     def merge(self, document, node):
@@ -165,19 +176,6 @@ class ExtensionEditor:
             return
         target, current = located
         description = node.description_start < node.header
-        if node.kind not in _PATCHABLE and node.kind:
-            if (
-                node.reference
-                and not node.children
-                and not description
-                and node.value is None
-            ):
-                return
-            _error(
-                document,
-                node,
-                f"existing {node.kind} {node.name!r}: cannot safely patch this type; new non-colliding native objects are supported",
-            )
         if node.kind == "model" and node.name.casefold() != current.name.casefold():
             _error(document, node, f"model {node.name!r} not found")
         if not node.kind:
@@ -189,6 +187,7 @@ class ExtensionEditor:
                 node,
                 current.prefix,
                 target.newline,
+                _unit(target, current),
                 start=node.description_start,
                 end=node.header,
             )
@@ -202,6 +201,7 @@ class ExtensionEditor:
                 node,
                 current.prefix,
                 target.newline,
+                _unit(target, current),
                 start=node.header,
                 end=node.expression_end,
             )
@@ -233,10 +233,16 @@ class ExtensionEditor:
                 document, node, f"parent {node.parent.name!r} is missing or ambiguous"
             )
         target, parent = parents[0]
-        content = _text(document, node, target.child_prefix(parent), target.newline)
-        self.package.parts[target.path] = target.replace(
-            parent.expression_end, parent.expression_end, content
+        content = _text(
+            document,
+            node,
+            target.child_prefix(parent),
+            target.newline,
+            _unit(target, parent),
+            end=content_end(node),
         )
+        position = target.property_insertion(parent)
+        self.package.parts[target.path] = target.replace(position, position, content)
 
     def _property(self, document, node, target, current):
         # Block properties merge recursively; an explicitly supplied expression replaces its body.
@@ -247,9 +253,16 @@ class ExtensionEditor:
                 else:
                     self._merge_property(document, child)
         else:
-            content = _text(document, node, current.prefix, target.newline)
+            content = _text(
+                document,
+                node,
+                current.prefix,
+                target.newline,
+                _unit(target, current),
+                end=content_end(node),
+            )
             self.package.parts[target.path] = target.replace(
-                current.description_start, current.end, content
+                current.description_start, content_end(current), content
             )
 
 

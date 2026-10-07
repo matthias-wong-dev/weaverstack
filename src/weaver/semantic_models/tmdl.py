@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from urllib.parse import quote
 
 from ..errors import ConfigError
 
@@ -160,33 +161,108 @@ class Document:
         for child in node.children:
             if child.prefix.startswith(node.prefix) and child.indent > node.indent:
                 return child.prefix
-        return node.prefix + (
-            "\t"
-            if any(
-                "\t" in line[: len(line) - len(line.lstrip())] for line in self.lines
-            )
-            else "    "
+        return node.prefix + self.indent_unit()
+
+    def indent_unit(self):
+        """Four spaces only for a file already indented with spaces; else a tab."""
+
+        indents = [line[: len(line) - len(line.lstrip())] for line in self.lines]
+        spaces = any(i.strip("\r\n") for i in indents) and not any(
+            "\t" in i for i in indents
         )
+        return "    " if spaces else "\t"
 
     def replace(self, start, end, content):
-        self.lines[start:end] = [content] if content else []
-        return "".join(self.lines).encode("utf-8")
+        lines = list(self.lines)
+        lines[start:end] = [content] if content else []
+        return "".join(lines).encode("utf-8")
+
+    def remove(self, ranges):
+        """Delete line ranges, merging overlaps; return None for an emptied file."""
+
+        merged = []
+        for start, end in sorted(ranges):
+            if merged and start <= merged[-1][1]:
+                merged[-1] = (merged[-1][0], max(end, merged[-1][1]))
+            else:
+                merged.append((start, end))
+        lines = list(self.lines)
+        for start, end in reversed(merged):
+            del lines[start:end]
+        text = "".join(lines)
+        return text.encode("utf-8") if text.lstrip("\ufeff").strip() else None
+
+    @property
+    def index(self):
+        try:
+            return self._index
+        except AttributeError:
+            self._index = {}
+            for span in self.spans:
+                self._index.setdefault(folded(span.path), []).append(span)
+            return self._index
+
+    def property_insertion(self, node):
+        """New properties follow the last plain property, before any child.
+
+        Fabric reads a block property such as ``dataAccessOptions`` as a child,
+        and refuses a plain property after one.
+        """
+
+        end = node.expression_end
+        for child in node.children:
+            if child.kind or (child.children and not re.search(r"[:=]", child.text)):
+                break
+            end = content_end(child)
+        return end
+
+
+def folded(path):
+    return tuple((kind.casefold(), name.casefold()) for kind, name in path)
+
+
+def content_end(span):
+    return max([span.expression_end, *(content_end(c) for c in span.children)])
+
+
+def root_file(kind, name):
+    """The file a new root-level object of this kind is written to."""
+
+    if kind.casefold() in {"table", "role", "culture", "perspective"}:
+        return f"definition/{kind}s/{quote(name, safe='')}.tmdl"
+    return {
+        "relationship": "definition/relationships.tmdl",
+        "expression": "definition/expressions.tmdl",
+        "datasource": "definition/dataSources.tmdl",
+        "function": "definition/functions.tmdl",
+    }.get(kind.casefold())
 
 
 class PackageEditor:
     def __init__(self, parts):
         self.parts = dict(parts)
+        self._parsed = {}
+        # Edits made through live objects, in order: ("set", path, key, value),
+        # ("unset", path, key), ("add", path) and ("remove", path).
+        self.journal = []
+
+    def documents(self):
+        for filename in sorted(self.parts):
+            if filename.startswith("definition/") and filename.endswith(".tmdl"):
+                content = self.parts[filename]
+                cached = self._parsed.get(filename)
+                # A write always stores new bytes, so identity detects a stale parse.
+                if cached is None or cached[0] is not content:
+                    cached = (content, Document(filename, content))
+                    self._parsed[filename] = cached
+                yield cached[1]
 
     def locations(self, path):
-        wanted = tuple((k.lower(), n.casefold()) for k, n in path)
+        wanted = folded(path)
         found = []
-        for filename, content in sorted(self.parts.items()):
-            if not filename.startswith("definition/") or not filename.endswith(".tmdl"):
-                continue
-            document = Document(filename, content)
-            for span in document.spans:
-                actual = tuple((k, n.casefold()) for k, n in span.path)
-                if actual == wanted and (
+        for document in self.documents():
+            for span in document.index.get(wanted, ()):
+                if (
                     span.kind == "model"
                     if not path
                     else (bool(span.kind) or path[-1][0] == "opaque")
@@ -194,6 +270,55 @@ class PackageEditor:
                     if not span.reference or span.children:
                         found.append((document, span))
         return found
+
+    def children(self, path, kind):
+        """Names of declared child objects of one kind, in definition order."""
+
+        wanted = folded(path)
+        kind = kind.casefold()
+        names = {}
+        for document in self.documents():
+            for key, spans in document.index.items():
+                if not key or key[:-1] != wanted or key[-1][0] != kind:
+                    continue
+                for span in spans:
+                    if span.kind and (not span.reference or span.children):
+                        names.setdefault(key[-1][1], span.name)
+        return list(names.values())
+
+    def remove(self, path):
+        """Delete every declaration of an object, including bare references."""
+
+        wanted = folded(path)
+        for document in list(self.documents()):
+            spans = document.index.get(wanted, ())
+            if not spans:
+                continue
+            content = document.remove((s.description_start, s.end) for s in spans)
+            if content is None:
+                del self.parts[document.path]
+            else:
+                self.parts[document.path] = content
+
+    def remove_property(self, path, key):
+        for document, child in self._property_spans(path, key):
+            self.parts[document.path] = document.replace(
+                child.header, content_end(child), ""
+            )
+            return
+
+    def _property_spans(self, path, key):
+        matches = [
+            (document, child)
+            for document, node in self.locations(path)
+            for child in node.children
+            if not child.kind and child.name.casefold() == key.casefold()
+        ]
+        if len(matches) > 1:
+            raise ConfigError(
+                f"TMDL {path!r}/{key}: property is declared more than once"
+            )
+        return matches
 
     def add(self, path, kind, value):
         from .render import object_file, render_object
@@ -260,7 +385,7 @@ class PackageEditor:
             prefix = document.child_prefix(parent)
             unit = prefix[len(parent.prefix) :]
             header = key
-            start = end = parent.expression_end
+            start = end = document.property_insertion(parent)
         text = expression_lines(header, value, prefix, unit, document.newline)
         self.parts[document.path] = document.replace(start, end, text)
 
@@ -333,6 +458,6 @@ class PackageEditor:
             start, end = (
                 (child.header, child.header + 1)
                 if child
-                else (node.expression_end, node.expression_end)
+                else (document.property_insertion(node),) * 2
             )
         self.parts[document.path] = document.replace(start, end, content)
