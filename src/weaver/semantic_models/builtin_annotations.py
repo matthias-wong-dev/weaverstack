@@ -84,13 +84,12 @@ class Weaver__AutoHideForeignKeys(Annotation):
                     target.tables[table].columns[column].isHidden = True
 
 
-#: Native measure metadata under readable column names. DataType is omitted:
-#: a calculated table reads it as blank, and Fabric fails to save a projection
-#: of it.
+#: Native measure metadata under readable column names. DataType and
+#: FormatString are omitted: a calculated table reads both as blank, and Fabric
+#: fails to save a projection of DataType.
 MEASURE_TABLE_COLUMNS = (
     ("Measure name", "Name"),
     ("Expression", "Expression"),
-    ("Format string", "FormatString"),
     ("Format string definition", "FormatStringDefinition"),
     ("Description", "Description"),
     ("Display folder", "DisplayFolder"),

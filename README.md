@@ -139,8 +139,7 @@ Weaver's own annotations are
   build the source into its new target before changing that binding.
 - `Weaver.MeasureTable = true` on a table generates a calculated partition over
   `INFO.VIEW.MEASURES()` with the columns Measure name, Expression, Format
-  string, Format string definition, Description, Display folder, Table and
-  Data category. Native `isHidden` controls visibility.
+  string definition, Description, Display folder, Table and Data category. Native `isHidden` controls visibility.
   Use a bare table or the existing generated recipe; authored partitions are
   reported as a conflict.
 - `Weaver.Switch` on a measure lists `Table[Measure]` references, one per line.
