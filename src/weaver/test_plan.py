@@ -16,8 +16,9 @@ from typing import Mapping, Sequence
 from .catalogue.state import Catalogue
 from .catalogue.tables import TEST_DICTIONARY
 from .declaration.metadata import TEST
-from .declaration.model import WeaverDocumentId, WeaverItemId
+from .declaration.model import SEMANTIC_MODEL, WeaverDocumentId, WeaverItemId
 from .errors import ValidationError
+from .fabric.resources import Item
 from .installed import KIND_FOR_TEST_TYPE, TEST_TYPE_FOR_KIND, InstalledNode
 from .targets import PhysicalTargetRef
 
@@ -42,12 +43,17 @@ class InstalledValidation:
     logical: WeaverDocumentId
     kind: str
     target: PhysicalTargetRef
-    artefact: WeaverDocumentId
+    #: ``None`` for a semantic validation, which runs from its definition.
+    artefact: WeaverDocumentId | None
     #: What Registry says the primitive is, or ``None`` when it has no row, which
     #: is a missing installation rather than an absence of interest.
     object_type: str | None = None
     primary_key: tuple[str, ...] = ()
     description: str | None = None
+    #: A semantic validation's ``_.SemanticModelTest`` JSON, and the model it
+    #: queries.
+    definition: str | None = None
+    bound_item: Item | None = None
 
     @classmethod
     def of(cls, node: InstalledNode) -> "InstalledValidation":
@@ -59,11 +65,17 @@ class InstalledValidation:
             object_type=node.artefact_type,
             primary_key=node.primary_key,
             description=node.description,
+            definition=node.definition,
+            bound_item=node.bound_item if node.definition is not None else None,
         )
 
     @property
     def is_installed(self) -> bool:
-        return self.object_type is not None
+        return self.object_type is not None or self.definition is not None
+
+    @property
+    def is_semantic(self) -> bool:
+        return self.logical.item.item_type == SEMANTIC_MODEL
 
     @property
     def is_test(self) -> bool:
@@ -83,6 +95,12 @@ class InstalledValidation:
 
         if self.is_installed:
             return
+        if self.is_semantic:
+            raise ValidationError(
+                f"{self.logical} is declared in {TEST_DICTIONARY.name}, but its "
+                "definition is not installed. Build the model before running its "
+                "validation"
+            )
         raise ValidationError(
             f"{self.logical} is declared in {TEST_DICTIONARY.name}, but its "
             f"installed primitive {self.artefact} is not registered. Build the "
@@ -99,10 +117,19 @@ class InstalledValidation:
             "logical": str(self.logical),
             "kind": self.kind,
             "target": {"kind": self.target.kind, "name": self.target.name},
-            "artefact": str(self.artefact),
+            "artefact": None if self.artefact is None else str(self.artefact),
             "object_type": self.object_type,
             "primary_key": list(self.primary_key),
             "description": self.description,
+            "definition": self.definition,
+            "bound_item": None
+            if self.bound_item is None
+            else {
+                "id": self.bound_item.id,
+                "workspace_id": self.bound_item.workspace_id,
+                "name": self.bound_item.name,
+                "type": self.bound_item.type,
+            },
         }
 
     @classmethod
@@ -113,10 +140,16 @@ class InstalledValidation:
             target=PhysicalTargetRef(
                 kind=mapping["target"]["kind"], name=mapping["target"]["name"]
             ),
-            artefact=WeaverDocumentId.parse(mapping["artefact"]),
+            artefact=None
+            if mapping.get("artefact") is None
+            else WeaverDocumentId.parse(mapping["artefact"]),
             object_type=mapping.get("object_type"),
             primary_key=tuple(mapping.get("primary_key", ())),
             description=_text(mapping.get("description")),
+            definition=mapping.get("definition"),
+            bound_item=None
+            if mapping.get("bound_item") is None
+            else Item(**mapping["bound_item"]),
         )
 
 

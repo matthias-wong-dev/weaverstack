@@ -23,6 +23,7 @@ from .catalogue.tables import (
     ROLE_SOURCE,
     ROLE_TEST,
     SEMANTIC_MODEL_TABLE,
+    SEMANTIC_MODEL_TEST,
     SHORTCUT,
     TABLE_DICTIONARY,
     TEST_DICTIONARY,
@@ -121,6 +122,9 @@ class InstalledNode:
     mirror: InstalledMirror | None = None
     #: The typed semantic item frozen by Build, independent of display-name reuse.
     bound_item: Item | None = None
+    #: A semantic validation's installed definition: the JSON its
+    #: ``_.SemanticModelTest`` row holds. It compiles to no artefact.
+    definition: str | None = None
 
     @property
     def node_id(self) -> str:
@@ -140,7 +144,11 @@ class InstalledNode:
 
     @property
     def is_installed(self) -> bool:
-        return self.artefact_type is not None or self.artefact_kind == SEMANTIC_REFRESH
+        return (
+            self.artefact_type is not None
+            or self.artefact_kind == SEMANTIC_REFRESH
+            or self.definition is not None
+        )
 
     @property
     def is_mirrored(self) -> bool:
@@ -688,6 +696,11 @@ def _validations(catalogue: Catalogue, installations):
                     f"The catalogue contains {logical}, but does not identify a "
                     f"target for {item}. Build {item} again."
                 )
+            if item.item_type == SEMANTIC_MODEL:
+                found[logical] = _semantic_validation(
+                    tables, row, logical, kind=kind, target=target
+                )
+                continue
             artefact = validation_artefact_id(item, kind, logical.object_id)
             registered = catalogue.registered.get(artefact)
             found[logical] = InstalledNode(
@@ -701,6 +714,39 @@ def _validations(catalogue: Catalogue, installations):
                 description=_text(row.get("description")),
             )
     return found
+
+
+def _semantic_validation(tables, row, logical, *, kind, target) -> InstalledNode:
+    """A validation installed when its definition matches its declaration."""
+
+    from .fabric.resources import Item
+
+    definition = next(
+        (
+            each.get("definition")
+            for each in tables.get(SEMANTIC_MODEL_TEST.name, ())
+            if (each.get("schema_name"), each.get("object_name"))
+            == (row.get("schema_name"), row.get("object_name"))
+            and each.get("signature") == row.get("signature")
+        ),
+        None,
+    )
+    installation = tables.get(INSTALLATION.name, ({},))[0]
+    return InstalledNode(
+        identity=logical,
+        target=target,
+        role=_ROLE_FOR_VALIDATION_KIND[kind],
+        artefact_kind=kind,
+        primary_key=_column_set(row.get("primary_key")),
+        description=_text(row.get("description")),
+        definition=definition,
+        bound_item=Item(
+            id=installation.get("item_id"),
+            workspace_id=installation.get("workspace_id"),
+            name=target.name,
+            type=SEMANTIC_MODEL,
+        ),
+    )
 
 
 def _validation_kind(row: Mapping[str, object], logical: WeaverDocumentId) -> str:
@@ -818,6 +864,17 @@ def _dependency_rows(catalogue: Catalogue, nodes) -> tuple[_DependencyRow, ...]:
         for row in tables.get(DEPENDENCY.name, ()):
             schema = str(row.get("referencing_schema_name") or "")
             name = str(row.get("referencing_object_name") or "")
+            if item.item_type == SEMANTIC_MODEL and schema:
+                # A validation's read of its expected source, by full identity.
+                consumer = WeaverDocumentId.validation(item, ObjectId(schema, name))
+                if str(consumer) in nodes:
+                    found.append(
+                        _DependencyRow(
+                            consumer=consumer,
+                            reference=str(row.get("dependency_reference") or ""),
+                        )
+                    )
+                continue
             if item.item_type == SEMANTIC_MODEL:
                 consumer = WeaverDocumentId.model_root(item)
                 if str(consumer) not in nodes:
@@ -863,6 +920,22 @@ def _dependency_rows(catalogue: Catalogue, nodes) -> tuple[_DependencyRow, ...]:
                     reference=str(row.get("dependency_reference") or ""),
                 )
             )
+    # A semantic validation reads its model, so a refresh makes it stale.
+    for item, tables in catalogue.rows.items():
+        if item.item_type != SEMANTIC_MODEL:
+            continue
+        for row in tables.get(TEST_DICTIONARY.name, ()):
+            consumer = WeaverDocumentId.validation(
+                item,
+                ObjectId(str(row.get("schema_name")), str(row.get("object_name"))),
+            )
+            if str(consumer) in nodes:
+                found.append(
+                    _DependencyRow(
+                        consumer=consumer,
+                        reference=str(WeaverDocumentId.model_root(item)),
+                    )
+                )
     return tuple(
         sorted(
             dict.fromkeys(found),
@@ -972,9 +1045,22 @@ class _References:
                     f"{consumer}: model {reference!r} is not installed; build the model again"
                 )
             return producer, None
+        if "/" in reference:
+            return self._identity(consumer, reference)
         if _is_python_module_reference(reference):
             return self._python(consumer, reference)
         return self._relation(consumer, reference)
+
+    def _identity(self, consumer: WeaverDocumentId, reference: str):
+        """A semantic validation's read, named by full logical identity."""
+
+        producer = WeaverDocumentId.parse(reference)
+        if producer not in self._objects:
+            raise CatalogueStateError(
+                f"{consumer} reads {reference}, which is not installed. Build "
+                f"{producer.item}, then build {consumer.item} again."
+            )
+        return producer, None
 
     def _python(self, consumer: WeaverDocumentId, reference: str):
         symbol = _shortcut_symbol(reference)

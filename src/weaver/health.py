@@ -1064,7 +1064,9 @@ class _Assessment:
                 RED,
                 node,
                 None,
-                f"{node.artefact} is declared but not registered",
+                f"{node.artefact} is declared but not registered"
+                if node.artefact is not None
+                else "its definition is not installed; build the model again",
             )
 
     def _declared_but_not_installed(self):

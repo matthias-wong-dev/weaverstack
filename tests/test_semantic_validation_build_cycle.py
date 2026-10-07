@@ -140,3 +140,75 @@ def test_a_validation_edit_resets_only_that_validation(tmp_path, monkeypatch):
             "[_].[LoadStatus]" in s and not s.lstrip().upper().startswith("SELECT")
             for s in session.tsql[since:]
         )
+
+
+def installed(tmp_path, monkeypatch):
+    """The catalogue a first build of the model and its validations leaves."""
+
+    from weaver.catalogue.state import Catalogue
+
+    root = with_validations(tmp_path)
+    with source_session() as session:
+        answer_catalogue(session, source_catalogue(), read_bindings())
+        published = capture_publication(monkeypatch, session)
+        result = weaver.build(root, items=SELECTOR, session=session)
+        assert result.succeeded, result.errors
+        rows = published()
+    return Catalogue({**source_catalogue().rows, **rows})
+
+
+@weaver_test()
+def test_installed_validations_depend_on_their_model_and_expected_reads(
+    tmp_path, monkeypatch
+):
+    from weaver.declaration.model import WeaverDocumentId
+
+    dag = installed(tmp_path, monkeypatch).dag()
+    validations = {str(n.identity): n for n in dag.validations()}
+    assert set(validations) == {
+        "SemanticModel/Reporting/Sales.RevenueReconciles",
+        "SemanticModel/Reporting/Sales.RevenueIsPositive",
+    }
+    test = validations["SemanticModel/Reporting/Sales.RevenueReconciles"]
+    assert test.is_installed and test.artefact is None
+    assert json.loads(test.definition)["expectedSource"] == "Warehouse/Serving"
+    assert test.bound_item.name == "Reporting_Dev"
+    model = WeaverDocumentId.model_root(ITEM)
+    assert {n.identity for n in dag.ancestors(test.identity)} >= {
+        model,
+        WeaverDocumentId.parse("Warehouse/Serving/Cake.Sales"),
+    }
+    assumption = validations["SemanticModel/Reporting/Sales.RevenueIsPositive"]
+    assert model in {n.identity for n in dag.ancestors(assumption.identity)}
+    assert not dag.unresolved
+
+
+@weaver_test()
+def test_health_reports_a_missing_definition_and_pending_validations(
+    tmp_path, monkeypatch
+):
+    from datetime import datetime, timezone
+
+    from weaver.catalogue.state import Catalogue
+    from weaver.health import assess
+
+    catalogue = installed(tmp_path, monkeypatch)
+    rows = {item: dict(tables) for item, tables in catalogue.rows.items()}
+    rows[ITEM]["SemanticModelTest"] = tuple(
+        r
+        for r in rows[ITEM]["SemanticModelTest"]
+        if r["object_name"] != "RevenueIsPositive"
+    )
+    now = datetime(2026, 10, 8, tzinfo=timezone.utc)
+    report = assess(Catalogue(rows), as_of=now, generated_at=now, items=[ITEM])
+    findings = {(f.area, f.code, f.object_id) for f in report.findings}
+    assert (
+        "build",
+        "missing_validation_artefact",
+        "SemanticModel/Reporting/Sales.RevenueIsPositive",
+    ) in findings
+    assert (
+        "tests",
+        "test_pending",
+        "SemanticModel/Reporting/Sales.RevenueReconciles",
+    ) in findings
