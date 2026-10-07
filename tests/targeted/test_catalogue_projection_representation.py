@@ -353,7 +353,7 @@ def test_catalogue_from_repository_has_all_artefacts(tmp_path):
     full_estate(tmp_path / "repo")
     semantic = tmp_path / "repo/SemanticModel/Reporting"
     semantic.mkdir(parents=True)
-    (semantic / "extension.tmdl").write_text(
+    (semantic / f"{semantic.name}.tmdl").write_text(
         'table Example\n\tpartition Example = calculated\n\t\tsource = ROW("Value", 1)\n',
         encoding="utf-8",
     )

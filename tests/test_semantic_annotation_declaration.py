@@ -4,6 +4,7 @@ import shutil
 from pathlib import Path
 
 import pytest
+from support.semantic_models import policy_path
 from support.weaver_test import weaver_test
 
 from weaver.declaration.model import WeaverItemId
@@ -34,8 +35,8 @@ def source_project(
         )
     else:
         path = (
-            folder.parent if origin == "organisation" else folder
-        ) / "extension.tmdl"
+            policy_path(root) if origin == "organisation" else folder / "Reporting.tmdl"
+        )
         path.write_text(
             f"table Sales\n\tannotation {annotation} = {value}\n", encoding="utf-8"
         )
@@ -93,7 +94,7 @@ def test_source_annotation_rejects_the_wrong_scope(tmp_path, scope):
         "measure": "table Sales\n\tmeasure Value = 1\n\t\t",
         "relationship": "relationship Sales_Product\n\t",
     }
-    (root / str(ITEM) / "extension.tmdl").write_text(
+    (root / str(ITEM) / f"{ITEM.item_name}.tmdl").write_text(
         parents[scope] + "annotation Weaver.Source = Warehouse/Serving/Cake.Sales\n"
     )
     with pytest.raises(ConfigError, match=r".*tmdl.*Weaver.Source.*table"):

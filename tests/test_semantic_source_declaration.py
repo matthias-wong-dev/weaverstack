@@ -34,7 +34,7 @@ table Customer
             entityName: Customer
             expressionSource: 'Lakehouse/Curated'
 """
-    (folder / "extension.tmdl").write_text(content, encoding="utf-8")
+    (folder / f"{folder.name}.tmdl").write_text(content, encoding="utf-8")
     repository = parse_item_repository(Location(tmp_path.as_posix()))
     contribution = repository.semantic_models[
         WeaverItemId.parse("SemanticModel/Reporting")
@@ -52,4 +52,4 @@ table Customer
         tables["Customer"]["partitions"][0]["source"]["expressionSource"]
         == "Lakehouse/Curated"
     )
-    assert (folder / "extension.tmdl").read_text(encoding="utf-8") == content
+    assert (folder / f"{folder.name}.tmdl").read_text(encoding="utf-8") == content

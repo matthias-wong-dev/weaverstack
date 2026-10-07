@@ -8,6 +8,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from support.semantic_models import policy_path
 from support.weaver_test import register_session, weaver_test
 from test_semantic_model_boundary import _settle_refreshes
 
@@ -169,16 +170,16 @@ def test_public_build_catalogue_load_dax_and_unchanged_build(
     if pbip:
         shutil.copytree(PBIP, folder, dirs_exist_ok=True)
     if extension:
-        (folder.parent / "extension.tmdl").write_text(
+        (policy_path(folder.parent.parent)).write_text(
             "/// Organisation model policy\nmodel Model\n\tdiscourageImplicitMeasures\n",
             encoding="utf-8",
         )
-        (folder / "extension.tmdl").write_text(
+        (folder / f"{folder.name}.tmdl").write_text(
             '/// Refresh acceptance model\nmodel Model\n\n/// Calendar years\ntable Calendar\n\tpartition Calendar = calculated\n\t\tsource = ROW("Year", 2026)\n',
             encoding="utf-8",
         )
         if pbip:
-            extension_path = folder / "extension.tmdl"
+            extension_path = folder / f"{folder.name}.tmdl"
             extension_path.write_text(
                 extension_path.read_text(encoding="utf-8")
                 + "\nref table Sales\n\tcolumn ProductId\n\t\tisHidden\n\n\tmeasure RevenueDouble = [Revenue] * 2\n\t\tformatString: 0.00\n"
@@ -373,7 +374,7 @@ def test_existing_warehouse_source_build_persists_lineage_and_loads_without_sour
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(content)
     else:
-        (folder / "extension.tmdl").write_text(
+        (folder / f"{folder.name}.tmdl").write_text(
             "expression 'Warehouse/_weaver' = Sql.Database(\"previous\", \"database\")\n\n/// Installed catalogue objects\ntable InstalledObjects\n\tcolumn LogicalItem\n\t\tsourceColumn: Item name\n\t\tdataType: string\n\tpartition InstalledObjects = entity\n\t\tmode: directLake\n\t\tsource\n\t\t\tschemaName: _\n\t\t\tentityName: Registry\n\t\t\texpressionSource: 'Warehouse/_weaver'\n",
             encoding="utf-8",
         )

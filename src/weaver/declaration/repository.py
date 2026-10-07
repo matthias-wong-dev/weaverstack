@@ -40,6 +40,7 @@ from .model import (
     FILES,
     ITEM_TYPES,
     LAKEHOUSE,
+    REPORT,
     SEMANTIC_MODEL,
     TABLES,
     WAREHOUSE,
@@ -162,6 +163,8 @@ class RepositoryPart:
     """
 
     label: str
+    powerbi_projects: Mapping = field(default_factory=dict)
+    reports: Mapping = field(default_factory=dict)
     items: tuple[WeaverItemId, ...] = ()
     documents: Mapping[WeaverDocumentId, SourceDocument] = field(default_factory=dict)
     schemas: Mapping[WeaverSchemaId, SchemaSes] = field(default_factory=dict)
@@ -203,6 +206,13 @@ def merge_repository(*parts: RepositoryPart) -> RepositoryPart:
         declared.update(part.declared_files)
     return RepositoryPart(
         label="merged",
+        reports=_merge_keyed(
+            ((part.label, part.reports) for part in parts), what="Report"
+        ),
+        powerbi_projects=_merge_keyed(
+            ((part.label, part.powerbi_projects) for part in parts),
+            what="Power BI project",
+        ),
         items=tuple(sorted(items)),
         semantic_models=_merge_keyed(
             ((part.label, part.semantic_models) for part in parts),
@@ -378,7 +388,7 @@ def _standard_parts(authored: RepositoryPart) -> tuple[RepositoryPart, ...]:
 
     parts: list[RepositoryPart] = []
     for item in sorted(authored.items):
-        if item == BUILTIN_ITEM or item.item_type == SEMANTIC_MODEL:
+        if item == BUILTIN_ITEM or item.item_type in {SEMANTIC_MODEL, REPORT}:
             continue
         files = dict(standard_fragment(item.item_type))
         if FOLDER_DOCUMENT in files and not has_deployable_source(
@@ -476,6 +486,46 @@ def _read_authored_repository(root: Location, store: Store) -> RepositoryPart:
         ):
             continue
         discovered.append((relative, entry.is_directory))
+
+    from ..errors import ConfigError
+
+    all_paths = {p for p, directory in discovered if not directory}
+    for path in sorted(all_paths):
+        if path in {"PowerBI/extension.tmdl", "SemanticModel/extension.tmdl"}:
+            raise ConfigError(f"{path}: rename to PowerBI/policy.tmdl")
+        if (
+            path.endswith("/extension.tmdl")
+            and path.split("/")[0] in {"PowerBI", SEMANTIC_MODEL}
+            and not any(
+                component.endswith((".SemanticModel", ".Report"))
+                for component in path.split("/")[:-1]
+            )
+        ):
+            folder = path.rsplit("/", 1)[0]
+            candidates = sorted(
+                p.rsplit("/", 1)[1]
+                for p in all_paths
+                if p.startswith(folder + "/")
+                and p.endswith(".tmdl")
+                and p != path
+                and "/" not in p[len(folder) + 1 :]
+            )
+            native = sorted(
+                p.split("/")[-2][:-14] + ".tmdl"
+                for p in all_paths
+                if p.startswith(folder + "/")
+                and p.endswith(".SemanticModel/definition.pbism")
+            )
+            name = (
+                candidates
+                or native
+                or (
+                    [folder.rsplit("/", 1)[1] + ".tmdl"]
+                    if path.startswith(SEMANTIC_MODEL + "/")
+                    else ["<model-name>.tmdl"]
+                )
+            )[0]
+            raise ConfigError(f"{path}: rename to {folder}/{name}")
 
     builtin_prefix = str(_builtin_item())
     authored_builtin = sorted(
@@ -610,13 +660,56 @@ def _read_authored_repository(root: Location, store: Store) -> RepositoryPart:
             files.append(relative)
 
     file_paths = {p for p, directory in entries if not directory}
+    from ..powerbi import discover_projects, read_reports
+
+    powerbi_paths = {
+        p for p, directory in discovered if not directory and p.startswith("PowerBI/")
+    }
+    projects = discover_projects(
+        powerbi_paths,
+        directories={
+            p for p, directory in discovered if directory and p.startswith("PowerBI/")
+        },
+    )
+
+    origins = {str(item).casefold(): (item, str(item)) for item in item_ids}
+    for project in projects.values():
+        contributed = (
+            [(project.model, project.model_path or project.model_tmdl)]
+            if project.model
+            else []
+        )
+        contributed += [
+            (WeaverItemId(REPORT, p.rsplit("/", 1)[1][:-7]), p)
+            for p in project.report_paths
+        ]
+        for item, path in contributed:
+            prior = origins.get(str(item).casefold())
+            if prior:
+                raise DiscoveryError(
+                    f"{item}: duplicate logical item at {prior[1]} and {path}"
+                )
+            origins[str(item).casefold()] = (item, path)
+    standalone_reports = sorted(item for item in item_ids if item.item_type == REPORT)
+    if standalone_reports:
+        raise ConfigError(
+            f"{standalone_reports[0]}: author Reports under PowerBI/<project>/ with one local semantic model"
+        )
+    reports = read_reports(projects, paths=powerbi_paths, root=root, store=store)
+    item_ids.update(item for project in projects.values() for item in project.items)
+    file_paths |= powerbi_paths
     semantic_items = sorted(i for i in item_ids if i.item_type == SEMANTIC_MODEL)
     annotations = (
         discover_annotations(root, store, file_paths) if semantic_items else None
     )
     semantic_models = {
         item: read_semantic_contribution(
-            item, root=root, store=store, paths=file_paths, annotations=annotations
+            item,
+            root=root,
+            store=store,
+            paths=file_paths,
+            annotations=annotations,
+            project=next((p for p in projects.values() if p.model == item), None),
         )
         for item in semantic_items
     }
@@ -810,6 +903,8 @@ def _read_authored_repository(root: Location, store: Store) -> RepositoryPart:
     # data file beside it needs that file to have travelled with it.
     return RepositoryPart(
         label="authored",
+        reports=reports,
+        powerbi_projects=projects,
         items=tuple(sorted(item_ids)),
         documents=source_documents,
         schemas=schema_documents,
@@ -824,6 +919,11 @@ def _read_authored_repository(root: Location, store: Store) -> RepositoryPart:
             sorted(
                 {p for p in files if not p.startswith(SEMANTIC_MODEL + "/")}
                 | {p for semantic in semantic_models.values() for p in semantic.sources}
+                | {
+                    f"{report.path}/{p}"
+                    for report in reports.values()
+                    for p in report.parts
+                }
                 | set(annotations.sources if annotations else ())
             )
         ),
@@ -869,7 +969,7 @@ def _generated_content(authored: RepositoryPart) -> RepositoryPart:
 
     programmables: dict[WeaverDocumentId, Programmable] = {}
     for item in sorted(authored.items):
-        if item == BUILTIN_ITEM or item.item_type == SEMANTIC_MODEL:
+        if item == BUILTIN_ITEM or item.item_type in {SEMANTIC_MODEL, REPORT}:
             continue
         for programmable in item_generated_programmables(
             item=item, documents=_documents_of(authored, item)
@@ -944,6 +1044,8 @@ def compose_repository(
 
     repository = WeaverRepository(
         name=root.name,
+        reports=merged.reports,
+        powerbi_projects=merged.powerbi_projects,
         root=root,
         items=tuple(items),
         source_documents=source_documents,
