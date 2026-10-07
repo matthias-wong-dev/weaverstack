@@ -61,7 +61,7 @@ def test_typed_semantic_rows_keep_descriptions_native_metadata_and_claim_ownersh
     }
     assert {
         t.name for t in CATALOGUE_TABLES if t.name.startswith("Semantic")
-    } == semantic_tables
+    } == semantic_tables | {"SemanticModelTest"}
     assert rows["SemanticModel"][0]["description"] == "Sales model"
     assert set(rows["SemanticModel"][0]) == {
         "item_type",

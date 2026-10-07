@@ -211,6 +211,15 @@ PUBLIC_SCHEMA: dict[str, tuple[str, ...]] = {
         "Signature",
         *AUDIT,
     ),
+    "SemanticModelTest": (
+        "Item type",
+        "Item name",
+        "Schema name",
+        "Object name",
+        "Definition",
+        "Signature",
+        *AUDIT,
+    ),
     "Dependency": (
         "Item type",
         "Item name",
