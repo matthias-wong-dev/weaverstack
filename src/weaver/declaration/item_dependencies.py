@@ -7,7 +7,7 @@ from typing import Iterable, Mapping
 
 from ..errors import BuildError, DiscoveryError, GraphError
 from ..graph import Graph
-from .metadata import ObjectId
+from .metadata import DAX, ObjectId
 from .model import (
     AREAS,
     FILES,
@@ -29,6 +29,41 @@ def _declared_references(
     return tuple(
         (dependency.qualified, WeaverDocumentId(consumer.item, dependency))
         for dependency in source.document.dependencies
+    )
+
+
+def _dax_references(
+    source: SourceDocument, consumer: WeaverDocumentId
+) -> tuple[tuple[str, WeaverDocumentId], ...]:
+    """A DAX Test's expected-side reads, named in its Expected source.
+
+    Its DAX side reads only the owning model, which the installed graph adds.
+    """
+
+    document = source.document
+    if document.expected_source is None:
+        if document.declares_dependencies and document.dependencies:
+            raise DiscoveryError(
+                f"{consumer}: an Assumption on a semantic model depends only on "
+                "that model. Remove Dependencies"
+            )
+        return ()
+    item = WeaverItemId.parse(document.expected_source)
+    if document.declares_dependencies:
+        written = [(d.qualified, d) for d in document.dependencies]
+    else:
+        written = []
+        for reference in source.discovered_references:
+            if reference.call:
+                continue
+            if reference.object_id is None or reference.is_qualified:
+                raise DiscoveryError(
+                    f"{consumer}: Expected SQL reads {reference}, which is not in "
+                    f"{item}. Name objects as Schema.Object in the Expected source"
+                )
+            written.append((str(reference), reference.object_id))
+    return tuple(
+        (text, WeaverDocumentId(item, object_id)) for text, object_id in written
     )
 
 
@@ -105,7 +140,38 @@ def resolve_item_dependencies(repository: WeaverRepository) -> WeaverRepository:
     # shortcut destination as a separate hop.
     graph_edges: set[tuple[str, str]] = set()
 
+    items = {item.identity for item in repository.items}
     for consumer, source in native.items():
+        if source.language == DAX:
+            for written, destination in _dax_references(source, consumer):
+                producer = destination
+                if destination.item in items:
+                    producer, _kind = _resolve_destination(
+                        destination,
+                        native=native,
+                        logical_pairs=logical_pairs,
+                        folded_native=folded_native,
+                        folded_logical=folded_logical,
+                        consumer=consumer,
+                        written=written,
+                    )
+                    _reject_validation_producer(
+                        producer, native=native, consumer=consumer, written=written
+                    )
+                # The full identity, so the installed graph resolves it outside
+                # the model's own item.
+                edges.append(
+                    ItemDependency(
+                        consumer=consumer,
+                        producer=producer,
+                        reference=str(producer),
+                        resolution_kind="expected_source",
+                        is_within_item=False,
+                    )
+                )
+                if producer in native:
+                    graph_edges.add((str(producer), str(consumer)))
+            continue
         # A declaration replaces discovery, including an explicit empty list.
         if source.document.declares_dependencies:
             references = _declared_references(source, consumer)
@@ -253,8 +319,12 @@ def _item_graph(
     """
 
     edges: set[tuple[str, str]] = set()
+    items = {item.identity for item in repository.items}
     for edge in resolved:
         if edge.producer is None or edge.producer.item == edge.consumer.item:
+            continue
+        # An Expected source outside the project is already installed.
+        if edge.producer.item not in items:
             continue
         edges.add((str(edge.producer.item), str(edge.consumer.item)))
     for shortcut in repository.logical_shortcuts:
