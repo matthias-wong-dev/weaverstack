@@ -72,7 +72,7 @@ def column_hidden(contribution, table, column):
 @weaver_test()
 def test_builtins_are_annotation_classes_named_by_the_same_convention():
     registry = builtin_registry()
-    assert set(registry.classes) == set(NAMES)
+    assert set(registry.classes) == set(NAMES) | {"Weaver.BaseSemanticModels"}
     for name, cls in registry.classes.items():
         assert issubclass(cls, Annotation)
         assert annotation_name(cls) == name

@@ -18,7 +18,7 @@ def verified_model_key(item):
 def bind_reports(repository, targets, catalogue):
     reports = dict(repository.reports)
     for item, contribution in reports.items():
-        if item not in targets:
+        if item not in targets or contribution.model is None:
             continue
         model = targets.get(contribution.model)
         if model is not None:
@@ -48,7 +48,7 @@ def bind_reports(repository, targets, catalogue):
 def report_stages(repository, item, target):
     contribution = repository.reports[item]
     stages = []
-    previous = verified_model_key(contribution.model)
+    previous = verified_model_key(contribution.model) if contribution.model else None
     for executor in ("report_definition", "report_readback"):
         filename = f"{target.id}.{executor}.json"
         content = (
@@ -78,7 +78,7 @@ def report_stages(repository, item, target):
                 provides={action.id: (object_key(WeaverDocumentId.report_root(item)),)}
                 if executor == "report_readback"
                 else {action.id: (f"report-submitted:{item}",)},
-                requires={action.id: (previous,)},
+                requires={action.id: (previous,) if previous else ()},
                 batches=(
                     BuildBatch(id=action.id, target_id=target.id, actions=(action,)),
                 ),

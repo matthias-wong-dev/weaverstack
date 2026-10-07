@@ -13,6 +13,15 @@ from .references import source_identity
 from .tmdl import object_name, quote_name
 
 
+class Weaver__BaseSemanticModels(Annotation):
+    """Compose ordered semantic definitions from the same Power BI project."""
+
+    scopes = frozenset({"model"})
+
+    def apply(self, target):
+        pass
+
+
 class Weaver__Source(Annotation):
     """Generate a table's source from a managed relation.
 
@@ -268,6 +277,7 @@ class Weaver__Exclude(Annotation):
 
 
 BUILTIN_ANNOTATIONS = (
+    Weaver__BaseSemanticModels,
     Weaver__Source,
     Weaver__AutoHideColumns,
     Weaver__AutoHideForeignKeys,
