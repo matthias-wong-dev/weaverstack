@@ -140,3 +140,46 @@ def test_missing_semantic_target_does_not_create_an_item(tmp_path):
     assert not any(
         path.startswith("POST") for path in session.resolver().client.requested
     )
+
+
+@pytest.mark.parametrize(
+    "cultures,name,expected",
+    [
+        ({"Finance": "en-AU", "Reporting": "en-AU"}, "DEV_Finance", "en-AU"),
+        ({"Finance": "en-AU", "Reporting": "fr-FR"}, "Reporting", "fr-FR"),
+        ({"Finance": "en-AU", "Reporting": "fr-FR"}, "DEV_Finance", "en-US"),
+        ({}, "Reporting", "en-US"),
+    ],
+)
+@weaver_test()
+def test_new_semantic_model_starts_in_the_project_culture(
+    tmp_path, monkeypatch, cultures, name, expected
+):
+    # Fabric refuses a definition whose culture differs from the model's.
+    import shutil
+    from pathlib import Path
+
+    probe = Path(__file__).parent / "fixtures/semantic_model/Probe"
+    for model, culture in cultures.items():
+        folder = tmp_path / "SemanticModel" / model
+        shutil.copytree(probe, folder)
+        definition = folder / "Probe.SemanticModel/definition/model.tmdl"
+        definition.write_bytes(
+            definition.read_bytes().replace(
+                b"culture: en-US", f"culture: {culture}".encode()
+            )
+        )
+    client = CreationClient()
+    monkeypatch.setattr(
+        "weaver.fabric.environment.read_definition",
+        lambda *a, **k: EnvironmentDefinition(
+            {EXTERNAL_LIBRARIES: b"dependencies:\n  - pip:\n      - weaverstack\n"}
+        ),
+    )
+    session = TestSession(resolver=SimpleNamespace(client=client))
+    weaver.initialise(
+        tmp_path, workspace="Demo", semantic_model=name, session=session, client=client
+    )
+    (write,) = [w for w in client.writes if w[1].endswith("/semanticModels")]
+    model = decode_parts(write[2]["payload"]["definition"])["definition/model.tmdl"]
+    assert f"\tculture: {expected}\n".encode() in model

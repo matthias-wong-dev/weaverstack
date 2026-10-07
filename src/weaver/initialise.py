@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .declaration.model import LAKEHOUSE, SEMANTIC_MODEL, WAREHOUSE
+from .declaration.model import LAKEHOUSE, SEMANTIC_MODEL, WAREHOUSE, WeaverItemId
 from .errors import WeaverError
 from .onboarding import (
     WORKSPACE_CONFIG_FILE,
@@ -212,7 +212,12 @@ def initialise(
 
             resources.extend(
                 _create_missing(
-                    request, found, physical=physical, session=opened, client=rest
+                    request,
+                    found,
+                    physical=physical,
+                    session=opened,
+                    client=rest,
+                    destination=destination,
                 )
             )
             with opened.step("Writing the project files", str(destination)):
@@ -463,8 +468,52 @@ def _planned(
     )
 
 
+def _project_culture(destination: Path, name: str) -> str | None:
+    """The culture of the project's model of this name, or the one they share.
+
+    Fabric fixes a semantic model's culture when it is created, and refuses a
+    definition in another culture, so the empty model starts in the project's.
+    """
+
+    root = destination / SEMANTIC_MODEL
+    if not root.is_dir():
+        return None
+    from .locations import Location
+    from .semantic_models.objects import TmdlDefinition
+    from .semantic_models.source import read_semantic_contribution
+    from .store import FilesystemStore
+
+    paths = {
+        p.relative_to(destination).as_posix() for p in root.rglob("*") if p.is_file()
+    }
+    cultures = {}
+    for folder in sorted(p for p in root.iterdir() if p.is_dir()):
+        try:
+            contribution = read_semantic_contribution(
+                WeaverItemId(SEMANTIC_MODEL, folder.name),
+                root=Location(destination.as_posix()),
+                store=FilesystemStore(),
+                paths=paths,
+            )
+        except WeaverError:
+            continue
+        culture = TmdlDefinition(contribution.parts).model.culture
+        if isinstance(culture, str) and culture:
+            cultures[folder.name] = culture
+    if name in cultures:
+        return cultures[name]
+    shared = set(cultures.values())
+    return shared.pop() if len(shared) == 1 else None
+
+
 def _create_missing(
-    request: ProjectRequest, found: dict[str, bool], *, physical, session, client
+    request: ProjectRequest,
+    found: dict[str, bool],
+    *,
+    physical,
+    session,
+    client,
+    destination: Path,
 ) -> tuple[FabricItemOutcome, ...]:
     from .fabric.resources import LAKEHOUSE as LAKEHOUSE_ITEM
     from .fabric.resources import create_lakehouse, create_warehouse
@@ -498,7 +547,15 @@ def _create_missing(
                             ),
                         ),
                     )
-                    definition = encode_parts(seed.parts)
+                    parts = dict(seed.parts)
+                    culture = _project_culture(destination, wanted.name)
+                    if culture:
+                        from .semantic_models.objects import TmdlDefinition
+
+                        edited = TmdlDefinition(parts)
+                        edited.model.culture = culture
+                        parts = edited.parts
+                    definition = encode_parts(parts)
                     create_semantic_model(
                         physical, wanted.name, definition=definition, client=client
                     )
