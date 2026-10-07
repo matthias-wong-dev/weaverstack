@@ -938,3 +938,28 @@ def test_native_tables_without_source_create_no_inferred_item_edges(
         assert not any(
             "/connectionString" in path for path in session.resolver().client.requested
         )
+
+
+@weaver_test()
+def test_health_tables_carry_the_model_source_bindings(tmp_path, monkeypatch):
+    from weaver.operations.health import HEALTH_TABLES
+
+    root = source_project(tmp_path)
+    with source_session(tmp_path / "storage") as session:
+        sources = loadable_source_catalogue()
+        answer_catalogue(session, sources, read_bindings())
+        published = capture_publication(monkeypatch, session)
+        built = weaver.build(
+            root, items=f"{ITEM}=SemanticModel/Reporting_Dev", session=session
+        )
+        assert built.succeeded, built.errors
+    names = {table.name for table in HEALTH_TABLES}
+    rows = {
+        item: {name: value for name, value in tables.items() if name in names}
+        for item, tables in {**dict(sources.rows), **published()}.items()
+    }
+    dag = Catalogue(rows).dag()
+    assert not dag.unresolved
+    assert {
+        str(edge.upstream) for edge in dag.edges if edge.downstream.item == ITEM
+    } == {"Warehouse/Serving/Cake.Sales", "Warehouse/Serving/Cake.Summary"}

@@ -406,6 +406,7 @@ def test_health_materialises_the_tables_it_consults_and_no_others():
         "FolderDictionary",
         "TestDictionary",
         "Dependency",
+        "SemanticModelTable",
         "Shortcut",
         "Mirror",
         "LoadStatus",
