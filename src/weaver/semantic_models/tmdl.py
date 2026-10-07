@@ -29,6 +29,9 @@ _NAMED = frozenset(
         "hierarchy",
         "level",
         "annotation",
+        # `changedProperty = IsHidden` is an object, though it reads like an
+        # expression property; properties must precede it.
+        "changedproperty",
     }
 )
 

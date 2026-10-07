@@ -296,3 +296,16 @@ def test_new_properties_precede_block_properties():
         b"\tdataAccessOptions",
         b"\tdiscourageImplicitMeasures: true\n\tdataAccessOptions",
     )
+
+
+@weaver_test()
+def test_new_properties_precede_changed_property_objects():
+    sales = (
+        b"table Sales\n\tcolumn Day\n\t\tdataType: dateTime\n\t\tsourceColumn: Day\n\n"
+        b"\t\tchangedProperty = IsHidden\n\n\t\tannotation SummarizationSetBy = Automatic\n"
+    )
+    _, tmdl = definition(**{"definition/tables/Sales.tmdl": sales})
+    tmdl.model.tables["Sales"].columns["Day"].isHidden = True
+    assert tmdl.parts["definition/tables/Sales.tmdl"] == sales.replace(
+        b"\t\tsourceColumn: Day\n", b"\t\tsourceColumn: Day\n\t\tisHidden: true\n"
+    )
