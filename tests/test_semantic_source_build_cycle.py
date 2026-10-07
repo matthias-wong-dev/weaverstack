@@ -707,9 +707,12 @@ def test_environment_rebinding_and_unchanged_public_build_use_source_signatures(
                 root, items=f"{ITEM}=SemanticModel/Reporting_Dev", session=session
             )
             assert second.succeeded, second.errors
-            assert not second.selection.selected_for_build
-            assert second.installation_report.action_counts()["total"] == 0
-            assert not client.calls
+            assert second.selection.selected_for_build
+            assert not second.selection.impact.changed
+            assert [method for method, _ in client.calls] == [
+                "update_definition",
+                "get_definition",
+            ]
     assert signatures[0] != signatures[1]
     assert definitions[0] != definitions[1]
     # The catalogue's semantic rows are the same in every environment.

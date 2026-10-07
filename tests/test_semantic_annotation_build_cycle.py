@@ -276,7 +276,6 @@ def test_source_annotation_refuses_unresolved_generation_before_mutation(
     path = root / str(ITEM) / f"{ITEM.item_name}.tmdl"
     if failure == "missing_object":
         path.write_text(path.read_text().replace("Cake.Sales", "Cake.Missing"))
-
     elif failure == "missing_column":
         path.write_text(path.read_text() + "\n\tcolumn Missing\n\t\tisHidden\n")
     with source_session() as session:

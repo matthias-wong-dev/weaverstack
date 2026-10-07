@@ -319,6 +319,7 @@ class _Compilation:
         self.absent = list(contribution.absent)
         self.source_references = dict(contribution.source_references)
         self.source_bindings = dict(contribution.source_bindings)
+
         self._seen = 0
 
     def removed(self, path):
@@ -437,6 +438,7 @@ class _Compilation:
             absent=tuple(sorted(self.absent)),
             source_references=self.source_references,
             source_bindings=self.source_bindings,
+
             annotations=self.registry,
             compilation=self if phase == "schema" else None,
         )
