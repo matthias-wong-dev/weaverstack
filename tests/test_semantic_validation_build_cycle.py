@@ -191,9 +191,14 @@ def test_health_reports_a_missing_definition_and_pending_validations(
 
     from weaver.catalogue.state import Catalogue
     from weaver.health import assess
+    from weaver.operations.health import HEALTH_TABLES
 
     catalogue = installed(tmp_path, monkeypatch)
-    rows = {item: dict(tables) for item, tables in catalogue.rows.items()}
+    read = {table.name for table in HEALTH_TABLES}
+    rows = {
+        item: {name: rows for name, rows in tables.items() if name in read}
+        for item, tables in catalogue.rows.items()
+    }
     rows[ITEM]["SemanticModelTest"] = tuple(
         r
         for r in rows[ITEM]["SemanticModelTest"]
@@ -212,3 +217,8 @@ def test_health_reports_a_missing_definition_and_pending_validations(
         "test_pending",
         "SemanticModel/Reporting/Sales.RevenueReconciles",
     ) in findings
+    assert (
+        "build",
+        "missing_validation_artefact",
+        "SemanticModel/Reporting/Sales.RevenueReconciles",
+    ) not in findings
