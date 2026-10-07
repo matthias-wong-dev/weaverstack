@@ -3,6 +3,7 @@
 import json
 import os
 import shutil
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -470,9 +471,17 @@ def test_existing_warehouse_source_build_persists_lineage_and_loads_without_sour
     expected = context.connection.rows("SELECT COUNT_BIG(*) AS n FROM [_].[Registry]")[
         0
     ]["n"]
-    assert context.model.query_dax(
-        'EVALUATE ROW("N", COUNTROWS(InstalledObjects))'
-    ) == [{"[N]": expected}]
+    # The Warehouse publishes Delta commits asynchronously; Direct Lake sees the
+    # Build's last Registry row once it does, observed within 30 seconds.
+    deadline = time.monotonic() + 120
+    while True:
+        (row,) = context.model.query_dax(
+            'EVALUATE ROW("N", COUNTROWS(InstalledObjects))'
+        )
+        if row["[N]"] == expected or time.monotonic() > deadline:
+            break
+        time.sleep(10)
+    assert row == {"[N]": expected}
     print(
         json.dumps(
             {
