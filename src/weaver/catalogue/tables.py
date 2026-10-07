@@ -659,6 +659,29 @@ TEST_DICTIONARY = CatalogueTable(
     ),
 )
 
+SEMANTIC_MODEL_TEST = CatalogueTable(
+    name="SemanticModelTest",
+    description=(
+        "How each semantic model Test and Assumption runs. TestDictionary "
+        "describes the validation; this row is its installed definition."
+    ),
+    key=(SCOPE_ITEM_TYPE, SCOPE_ITEM_NAME, "schema_name", "object_name"),
+    columns=(
+        *_scope(),
+        *_object(),
+        CatalogueColumn(
+            "definition",
+            sql_type=WIDE_LIST_TYPE,
+            not_null=True,
+            description=(
+                "Versioned JSON: the DAX query and, for a Test, its logical "
+                "Expected source and Expected SQL."
+            ),
+        ),
+        _signature("the validation's source file"),
+    ),
+)
+
 DEPENDENCY = CatalogueTable(
     name="Dependency",
     description=(
@@ -938,6 +961,7 @@ DICTIONARY_TABLES = (
     KEY_DICTIONARY,
     FOREIGN_KEY_DICTIONARY,
     TEST_DICTIONARY,
+    SEMANTIC_MODEL_TEST,
     DEPENDENCY,
     SHORTCUT,
     *SEMANTIC_TABLES,

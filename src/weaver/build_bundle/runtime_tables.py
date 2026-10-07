@@ -32,7 +32,7 @@ from ..catalogue.tables import (
     SUCCEEDED,
     TEST_STATUS,
 )
-from ..declaration.model import WeaverDocumentId, WeaverItemId
+from ..declaration.model import SEMANTIC_MODEL, WeaverDocumentId, WeaverItemId
 from ..etl import (
     item_bookmarkable_objects,
     item_data_nodes,
@@ -138,6 +138,33 @@ def runtime_state_establishment(
                 )
             )
     return tuple(established)
+
+
+def changed_semantic_validations(
+    repository, catalogue, *, items: Iterable[WeaverItemId]
+) -> frozenset[WeaverDocumentId]:
+    """Semantic validations whose installed definition this Build replaces.
+
+    They compile to nothing, so their ``_.SemanticModelTest`` row stands in for
+    the artefact whose rebuild resets a validation's status.
+    """
+
+    from ..catalogue.tables import SEMANTIC_MODEL_TEST
+
+    changed = set()
+    for item in items:
+        if item.item_type != SEMANTIC_MODEL:
+            continue
+        installed = {
+            (row.get("schema_name"), row.get("object_name")): row.get("signature")
+            for row in catalogue.rows.get(item, {}).get(SEMANTIC_MODEL_TEST.name, ())
+        }
+        for identity in item_validated_objects(repository, item=item):
+            key = (identity.object_id.schema, identity.object_id.object)
+            source = repository.source_documents[identity]
+            if installed.get(key) != source.effective_signature:
+                changed.add(identity)
+    return frozenset(changed)
 
 
 def _load_status_state(repository, *, item, selected) -> list[dict]:
