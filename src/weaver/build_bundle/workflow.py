@@ -206,6 +206,17 @@ def validate_build_request(
 
     if catalogue_binding is None:
         require_catalogue_for(bindings)
+        validated = sorted(
+            str(item.identity)
+            for item in repository.items
+            if item.identity in bindings.by_item and item.validations
+        )
+        if validated:
+            raise BuildError(
+                f"{', '.join(validated)} declares tests or assumptions, which need "
+                "a Weaver catalogue: pass catalogue='Warehouse/Weaver', or give one "
+                "in workspace configuration"
+            )
     if not bindings.entries:
         raise BuildError("Select at least one Weaver item to build")
     known = {item.identity for item in repository.items}

@@ -28,6 +28,7 @@ from .dependencies import PythonImport
 from .item_dependencies import resolve_item_dependencies
 from .metadata import (
     ASSUMPTION,
+    DAX,
     FOLDER,
     PYTHON,
     SQL,
@@ -123,6 +124,8 @@ def _read_validation(
     language = language_for_filename(filename, item.item_type)
     if language is None:
         raise DiscoveryError(f"{relative}: not a Weaver validation file")
+    if item.item_type == SEMANTIC_MODEL and language != DAX:
+        raise DiscoveryError(f"{relative}: a SemanticModel {kind} is a .dax file")
     if language == PYTHON and item.item_type != LAKEHOUSE:
         raise DiscoveryError(
             f"{relative}: a Python {kind} must belong to a Lakehouse item. Move it "
@@ -737,9 +740,18 @@ def _read_authored_repository(root: Location, store: Store) -> RepositoryPart:
     for relative in sorted(files):
         parts = relative.split("/")
         item = WeaverItemId(parts[0], parts[1])
-        if item.item_type == SEMANTIC_MODEL:
-            continue
         within = parts[2:]
+        if item.item_type == SEMANTIC_MODEL:
+            if within[0] in VALIDATION_DIRECTORIES:
+                _read_validation(
+                    relative,
+                    within,
+                    item=item,
+                    root=root,
+                    store=store,
+                    source_documents=source_documents,
+                )
+            continue
 
         if within[-1] == "__init__.py" and (len(within) == 1 or within[0] == "lib"):
             raise DiscoveryError(
@@ -934,6 +946,11 @@ def _read_authored_repository(root: Location, store: Store) -> RepositoryPart:
                     f"{report.path}/{p}"
                     for report in reports.values()
                     for p in report.parts
+                }
+                | {
+                    source.relative_path
+                    for identity, source in source_documents.items()
+                    if identity.item.item_type == SEMANTIC_MODEL
                 }
                 | set(annotations.sources if annotations else ())
             )
