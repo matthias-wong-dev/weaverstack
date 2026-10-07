@@ -114,8 +114,8 @@ def initialise(
     project_folder,
     *,
     workspace: str | None = None,
-    catalogue: str = DEFAULT_CATALOGUE,
-    environment: str = DEFAULT_ENVIRONMENT,
+    catalogue: str | None = None,
+    environment: str | None = None,
     lakehouse: str | None = None,
     warehouse: str | None = None,
     semantic_model: str | None = None,
@@ -145,16 +145,43 @@ def initialise(
         )
         publish_environment = publish_environment or install_weaver
     destination = Path(project_folder).resolve()
+    repository = None
+    source_items = ()
+    configured = None
+    if semantic_model is None and (destination / "PowerBI").is_dir():
+        repository = powerbi_repository(destination)
+        source_items = tuple(
+            str(item)
+            for item in sorted(
+                set(repository.semantic_models) | set(repository.reports)
+            )
+        )
+        if (destination / WORKSPACE_CONFIG_FILE).is_file():
+            from .config import load_workspace
+
+            configured = load_workspace(destination / WORKSPACE_CONFIG_FILE)
     request = ProjectRequest(
         workspace=_workspace_name(workspace, session=session),
-        catalogue=catalogue,
-        environment=environment,
+        catalogue=catalogue
+        or (
+            configured.catalogue_item.name
+            if configured is not None and configured.catalogue
+            else DEFAULT_CATALOGUE
+        ),
+        environment=environment
+        or (
+            configured.environment.name
+            if configured is not None and configured.environment
+            else DEFAULT_ENVIRONMENT
+        ),
         lakehouse=lakehouse,
         warehouse=warehouse,
         semantic_model=semantic_model,
         reports=reports or {},
         example=example,
+        source_items=source_items,
     )
+    wanted_items = _requested(request, configured=configured)
 
     from .sessions.host import use_or_create_session
 
@@ -167,7 +194,7 @@ def initialise(
                     client if client is not None else opened.resolver(addressed).client
                 )
                 state, found, physical, environment_item = _read_the_workspace(
-                    request, client=rest
+                    request, client=rest, wanted_items=wanted_items
                 )
 
             with opened.step("Reading the Environment", request.environment):
@@ -197,15 +224,25 @@ def initialise(
                                 path.read_bytes()
                             )
             with opened.step("Checking the project files", str(destination)):
+                if source_items:
+                    # Adopt existing authored project files, not fresh scaffolding.
+                    files = {
+                        path: (destination / path).read_bytes()
+                        if (destination / path).is_file()
+                        else content
+                        for path, content in files.items()
+                    }
                 _refuse_overwrites(destination, files)
+                if source_items:
+                    files = _with_source_targets(files, source_items)
                 _check_destination_paths(destination, files)
-                _parse_generated(files, request, destination=destination)
+                configured = _parse_generated(files, request, destination=destination)
 
             if dry_run:
                 return InitialiseReport(
                     project_folder=str(destination),
                     workspace=request.workspace,
-                    resources=_planned(request, found),
+                    resources=_planned(request, found, wanted_items=wanted_items),
                     files=tuple(sorted(files)),
                     example=ExampleOutcome(generated=request.example),
                     dry_run=True,
@@ -220,6 +257,9 @@ def initialise(
                     session=opened,
                     client=rest,
                     destination=destination,
+                    wanted_items=wanted_items,
+                    repository=repository,
+                    configured=configured,
                 )
             )
             with opened.step("Writing the project files", str(destination)):
@@ -273,6 +313,36 @@ def initialise(
         environment_definition=definition_status,
         dry_run=False,
     )
+
+
+def _with_source_targets(files, source_items):
+    """Add default bindings for new source items without replacing existing targets."""
+
+    import yaml
+
+    declaration = yaml.safe_load(files[WORKSPACE_CONFIG_FILE])
+    targets = declaration.setdefault("targets", {})
+    missing = [item for item in source_items if item not in targets]
+    if not missing:
+        return files
+    for item in missing:
+        targets[item] = item.partition("/")[2]
+    return {
+        **files,
+        WORKSPACE_CONFIG_FILE: yaml.safe_dump(declaration, sort_keys=False),
+    }
+
+
+def powerbi_repository(destination):
+    """Read local declared items for ordinary project adoption and CLI validation."""
+
+    from .declaration.repository import parse_item_repository
+    from .locations import Location
+
+    root = Path(destination).resolve()
+    if not (root / "PowerBI").is_dir():
+        return None
+    return parse_item_repository(Location(root.as_posix()))
 
 
 def _bare(request: ProjectRequest):
@@ -393,13 +463,18 @@ class _Requested:
     role: str
     name: str
     item_type: str
+    logical: object = None
 
     @property
     def key(self):
-        return f"Report/{self.name}" if self.role == "Report" else self.role
+        return (
+            f"{self.role}/{self.name}"
+            if self.role in {"Report", SEMANTIC_MODEL}
+            else self.role
+        )
 
 
-def _requested(request: ProjectRequest) -> tuple[_Requested, ...]:
+def _requested(request: ProjectRequest, *, configured=None) -> tuple[_Requested, ...]:
     from .fabric.resources import ENVIRONMENT
     from .fabric.resources import LAKEHOUSE as LAKEHOUSE_ITEM
     from .fabric.resources import WAREHOUSE as WAREHOUSE_ITEM
@@ -417,10 +492,23 @@ def _requested(request: ProjectRequest) -> tuple[_Requested, ...]:
     wanted.extend(
         _Requested("Report", name, "Report") for name in sorted(request.reports)
     )
+    from .declaration.model import WeaverItemId
+
+    for value in sorted(
+        request.source_items, key=lambda value: (value.startswith("Report/"), value)
+    ):
+        item = WeaverItemId.parse(value)
+        name = (
+            configured.targets[item].physical
+            if configured is not None and item in configured.targets
+            else item.item_name
+        )
+        if not any(w.item_type == item.item_type and w.name == name for w in wanted):
+            wanted.append(_Requested(item.item_type, name, item.item_type, item))
     return tuple(wanted)
 
 
-def _read_the_workspace(request: ProjectRequest, *, client):
+def _read_the_workspace(request: ProjectRequest, *, client, wanted_items=None):
     """Read all requested item identities from one workspace listing."""
 
     from .fabric.resources import (
@@ -440,7 +528,7 @@ def _read_the_workspace(request: ProjectRequest, *, client):
         by_name.setdefault(item.name, set()).add(item.type)
 
     found: dict[str, bool] = {}
-    for wanted in _requested(request):
+    for wanted in wanted_items if wanted_items is not None else _requested(request):
         types = by_name.get(wanted.name, set())
         if types and wanted.item_type not in types:
             other = ", ".join(sorted(types))
@@ -463,7 +551,7 @@ def _read_the_workspace(request: ProjectRequest, *, client):
 
 
 def _planned(
-    request: ProjectRequest, found: dict[str, bool]
+    request: ProjectRequest, found: dict[str, bool], *, wanted_items=None
 ) -> tuple[FabricItemOutcome, ...]:
     """Report dry-run items in the same order as a real run."""
 
@@ -473,7 +561,9 @@ def _planned(
             name=wanted.name,
             status=EXISTING if found[wanted.key] else PLANNED,
         )
-        for wanted in _requested(request)
+        for wanted in (
+            wanted_items if wanted_items is not None else _requested(request)
+        )
     )
 
 
@@ -510,12 +600,15 @@ def _create_missing(
     session,
     client,
     destination: Path,
+    wanted_items=None,
+    repository=None,
+    configured=None,
 ) -> tuple[FabricItemOutcome, ...]:
     from .fabric.resources import LAKEHOUSE as LAKEHOUSE_ITEM
     from .fabric.resources import create_lakehouse, create_warehouse
 
     made = []
-    for wanted in _requested(request):
+    for wanted in wanted_items if wanted_items is not None else _requested(request):
         if wanted.role == ENVIRONMENT_ROLE:
             continue
         if found[wanted.key]:
@@ -544,7 +637,12 @@ def _create_missing(
                         ),
                     )
                     parts = dict(seed.parts)
-                    culture = _project_culture(destination, wanted.name)
+                    culture = _project_culture(
+                        destination,
+                        wanted.logical.item_name
+                        if wanted.logical is not None
+                        else wanted.name,
+                    )
                     if culture:
                         from .semantic_models.objects import TmdlDefinition
 
@@ -556,12 +654,37 @@ def _create_missing(
                         physical, wanted.name, definition=definition, client=client
                     )
                 elif wanted.item_type == "Report":
-                    from .fabric.resources import create_report
+                    from .fabric.resources import create_report, find_item
+
+                    if wanted.logical is None:
+                        definition = request.reports[wanted.name]
+                    else:
+                        from dataclasses import replace
+
+                        from .report_definition import encode_report
+
+                        contribution = repository.reports[wanted.logical]
+                        if contribution.model is not None:
+                            model_name = configured.targets[contribution.model].physical
+                            model = find_item(
+                                physical,
+                                model_name,
+                                item_type=SEMANTIC_MODEL,
+                                client=client,
+                            )
+                            contribution = replace(
+                                contribution,
+                                binding={
+                                    "workspace_id": model.workspace_id,
+                                    "item_id": model.id,
+                                },
+                            )
+                        definition = encode_report(contribution)
 
                     create_report(
                         physical,
                         wanted.name,
-                        definition=request.reports[wanted.name],
+                        definition=definition,
                         client=client,
                     )
                 else:

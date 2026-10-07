@@ -262,7 +262,11 @@ def determine_impact(
     roots = (
         changed
         | stale
-        | {identity for identity in selected_set if identity.shape == MODEL_SHAPE}
+        | {
+            identity
+            for identity in selected_set
+            if isinstance(identity, WeaverDocumentId) and identity.shape == MODEL_SHAPE
+        }
     )
     impacted = set(roots)
     graph = repository.dependency_graph

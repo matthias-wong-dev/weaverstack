@@ -205,9 +205,9 @@ def create_semantic_model(
 def create_report(
     workspace: WorkspaceItem, name: str, *, definition: dict, client=None
 ) -> Item:
-    from ..report_definition import validate_service_report
+    from ..report_definition import decode_report
 
-    validate_service_report(definition)
+    decode_report(definition)
     client = client or FabricClient()
     try:
         return find_item(workspace, name, item_type="Report", client=client)

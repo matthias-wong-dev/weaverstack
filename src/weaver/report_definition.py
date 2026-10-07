@@ -32,13 +32,14 @@ def service_reference(binding, schema):
 
 def encode_report(contribution):
     parts = dict(contribution.parts)
-    if contribution.binding is None:
+    if contribution.model is not None and contribution.binding is None:
         raise ConfigError("Report deployment needs a resolved semantic model binding")
-    definition = json.loads(parts["definition.pbir"].decode("utf-8-sig"))
-    definition["datasetReference"] = service_reference(
-        contribution.binding, definition.get("$schema", "")
-    )
-    parts["definition.pbir"] = json.dumps(definition, ensure_ascii=False).encode()
+    if contribution.model is not None:
+        definition = json.loads(parts["definition.pbir"].decode("utf-8-sig"))
+        definition["datasetReference"] = service_reference(
+            contribution.binding, definition.get("$schema", "")
+        )
+        parts["definition.pbir"] = json.dumps(definition, ensure_ascii=False).encode()
     native_format = "PBIR-Legacy" if "report.json" in parts else "PBIR"
     result = {
         "format": native_format,

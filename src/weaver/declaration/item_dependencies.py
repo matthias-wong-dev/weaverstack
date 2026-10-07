@@ -159,6 +159,8 @@ def resolve_item_dependencies(repository: WeaverRepository) -> WeaverRepository:
             graph_edges.add((str(producer), str(consumer)))
 
     for item, contribution in repository.reports.items():
+        if contribution.model is None:
+            continue
         consumer = WeaverDocumentId.report_root(item)
         producer = WeaverDocumentId.model_root(contribution.model)
         edges.append(

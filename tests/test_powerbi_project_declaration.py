@@ -214,9 +214,9 @@ def test_duplicate_logical_items_report_both_source_paths(
 
 
 @weaver_test()
-def test_report_only_project_has_thin_project_guidance(tmp_path):
-    from weaver.errors import ConfigError
-
+def test_report_only_project_retains_authored_connection_without_logical_inference(
+    tmp_path,
+):
     write(
         tmp_path,
         "PowerBI/Sales/Executive.Report/definition.pbir",
@@ -224,10 +224,14 @@ def test_report_only_project_has_thin_project_guidance(tmp_path):
             {"datasetReference": {"byPath": {"path": "../Revenue.SemanticModel"}}}
         ),
     )
-    with pytest.raises(
-        ConfigError, match="PowerBI/Sales.*report-only/thin.*not supported"
-    ):
-        parse(tmp_path)
+    repository = parse(tmp_path)
+    item = WeaverItemId("Report", "Executive")
+    assert repository.powerbi_projects["Sales"].items == (item,)
+    assert repository.reports[item].model is None
+    assert not repository.semantic_models
+    assert json.loads(repository.reports[item].parts["definition.pbir"])[
+        "datasetReference"
+    ] == {"byPath": {"path": "../Revenue.SemanticModel"}}
 
 
 @weaver_test()
@@ -254,12 +258,27 @@ def test_declared_model_without_native_base_supports_local_report(tmp_path):
         {"byPath": {"path": "../../Other.SemanticModel"}},
         {"byPath": {"path": "/Revenue.SemanticModel"}},
         {"byPath": {"path": "..\\Revenue.SemanticModel"}},
-        {"byPath": {"path": None}},
-        {},
     ],
 )
 @weaver_test()
-def test_report_reference_must_name_exact_local_model(tmp_path, reference):
+def test_report_reference_metadata_does_not_override_sole_model(tmp_path, reference):
+    path = native(tmp_path)
+    write(
+        tmp_path, path + "/definition.pbir", json.dumps({"datasetReference": reference})
+    )
+    contribution = parse(tmp_path).reports[WeaverItemId("Report", "Executive")]
+    assert contribution.model == WeaverItemId("SemanticModel", "Revenue")
+    assert (
+        json.loads(contribution.parts["definition.pbir"])["datasetReference"]
+        == reference
+    )
+
+
+@pytest.mark.parametrize(
+    "reference", [{"byPath": {"path": None}}, {}, {"byConnection": {}}]
+)
+@weaver_test()
+def test_report_requires_native_reference_shape(tmp_path, reference):
     from weaver.errors import ConfigError
 
     path = native(tmp_path)
@@ -283,20 +302,18 @@ def test_named_model_uses_policy_then_item_tmdl(tmp_path):
     assert repository.powerbi_projects["Sales"].items == (item,)
 
 
-@pytest.mark.parametrize(
-    "other", ["Other.tmdl", "Other.SemanticModel/definition.pbism"]
-)
+@pytest.mark.parametrize("other", ["Other.tmdl", "Other.SemanticModel"])
 @weaver_test()
-def test_project_rejects_multiple_local_models(tmp_path, other):
-    from weaver.errors import ConfigError
-
+def test_different_native_and_tmdl_names_are_separate_models(tmp_path, other):
     write(tmp_path, "PowerBI/Sales/Revenue.tmdl", "model Model\n")
-    write(tmp_path, "PowerBI/Sales/" + other, "model Model\n")
-    with pytest.raises(
-        ConfigError,
-        match="PowerBI/Sales.*at most one.*Revenue.*Other|PowerBI/Sales.*at most one.*Other.*Revenue",
-    ):
-        parse(tmp_path)
+    if other.endswith(".tmdl"):
+        write(tmp_path, "PowerBI/Sales/" + other, "model Model\n")
+    else:
+        native(tmp_path, model="Other", report="Other")
+    assert set(parse(tmp_path).semantic_models) == {
+        WeaverItemId("SemanticModel", "Revenue"),
+        WeaverItemId("SemanticModel", "Other"),
+    }
 
 
 def native(

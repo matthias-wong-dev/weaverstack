@@ -175,9 +175,14 @@ and payloads. `Session.execute_mutation` binds `Session.semantic_model` through
 MutationBindings and the physical drivers. A semantic-only Build starts no Spark.
 `SemanticModel/Name` is the model-root document identity. Desired state is a
 TMDL definition-part package; observed state is Fabric-returned TMSL. Store source
-bytes, requested edits and provenance beside the package. `semantic_models.source`
-selects the PBIP or empty base; `extensions` applies `PowerBI/policy.tmdl` then
-`PowerBI/<project>/<model-name>.tmdl`. The source-span editor changes addressed
+bytes, requested edits and provenance beside the package. `powerbi` discovers
+every named native or standalone definition in a project's local scope, pairing
+only exact same-name native and TMDL inputs. `semantic_models.source` reads raw
+PBIP or empty bases. `composition` recursively orders `Weaver.BaseSemanticModels`
+and rejects missing, cyclic or repeated ancestors. It uses `extensions`, the
+generic recursive merger, on raw definitions; never on already-policy-applied
+or annotation-transformed bases. Organisation policy applies once per final
+model before its own TMDL overlay. The source-span editor changes addressed
 native fragments and preserves unrelated bytes. Merging is recursive over syntax
 for every kind: object identity is kind and name within the parent, property identity is the
 name. Missing refs and ambiguous targets fail with source locations.
@@ -191,6 +196,19 @@ Package paths/bytes and resolved source metadata determine the desired signature
 Every selected model compiles and deploys regardless of its previous signature;
 selected consuming Reports redeploy through the ordinary dependency graph.
 Report-only selection retains independent signature checks.
+Every contributing native directory, overlay, policy and annotation implementation
+has its own source artefact signature; final signatures also carry effective
+source metadata and table order. Base composition is local source reuse, not a
+physical deployment edge. Variant-only Build does not deploy unselected bases.
+
+Report association is optional: same-name model first, then sole project model,
+otherwise as-authored. PBIR connection metadata never discovers that relation.
+The ordinary dependency graph, planner, catalogue and executor carry the optional
+relation. Associated Reports receive payload-only environment rebinding and
+depend on model verification; as-authored Reports retain all native connection
+bytes and certify independently. `initialise` adopts all discovered models and
+Reports from an existing PowerBI tree using configured typed targets, with no
+authored source rewrites. Its explicit single-model option remains scoped.
 
 `initialise` alone creates semantic items. Build binds the existing typed item
 and freezes its workspace/item IDs in the bundle. Definition updates permit

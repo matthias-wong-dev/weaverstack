@@ -1,4 +1,9 @@
-"""Semantic source contributions read through the repository's Store."""
+"""Semantic source contributions read through the repository's Store.
+
+Raw project reads retain native parts and same-name overlay bytes without
+policy or annotation execution. Composition owns layer ordering; final binding
+owns annotation execution, source metadata and generation.
+"""
 
 from __future__ import annotations
 
@@ -53,16 +58,12 @@ class SemanticContribution:
         import hashlib
 
         groups = {}
-        native = next(
-            (
-                p.rsplit("/", 1)[0]
-                for p in self.sources
-                if p.endswith("/definition.pbism")
-            ),
-            None,
+        natives = tuple(
+            p.rsplit("/", 1)[0] for p in self.sources if p.endswith("/definition.pbism")
         )
         for path, content in self.sources.items():
-            if native and path.startswith(native + "/"):
+            native = next((p for p in natives if path.startswith(p + "/")), None)
+            if native:
                 key = ("Definition", native.rsplit("/", 1)[-1])
                 relative = path[len(native) + 1 :]
             else:
@@ -105,9 +106,10 @@ class SemanticContribution:
 
 
 def read_semantic_contribution(
-    item, *, root, store, paths, annotations=None, project=None
+    item, *, root, store, paths, annotations=None, project=None, raw=False
 ):
     prefix = (project.path if project else str(item)) + "/"
+    definition = project.definitions[item] if project else None
     available = {p for p in paths if p.startswith(prefix)}
     if project:
         available = {
@@ -163,13 +165,13 @@ def read_semantic_contribution(
     pbips = sorted(
         p for p in available if p.endswith(".pbip") and "/" not in p[len(prefix) :]
     )
-    if len(pbips) > 1:
+    if len(pbips) > 1 and not project:
         raise ConfigError(f"{item}: expected exactly one PBIP base")
     parts = {}
     provenance = {}
     properties = {"version": "4.2", "settings": {}}
-    if project and project.model_path:
-        model_path = project.model_path
+    if definition and definition.model_path:
+        model_path = definition.model_path
         property_path = model_path + "/definition.pbism"
         try:
             properties = json.loads(read(property_path))
@@ -242,24 +244,28 @@ def read_semantic_contribution(
         ]
         if other_models:
             raise ConfigError(f"{other_models[0]}: unreferenced semantic model")
-    elif any(
+    elif not project and any(
         p.endswith((".tmdl", ".bim", ".pbism"))
-        and p != (project.model_tmdl if project else prefix + item.item_name + ".tmdl")
+        and p != prefix + item.item_name + ".tmdl"
         for p in available
     ):
         raise ConfigError(f"{item}: semantic base files require a PBIP reference")
     extensions = []
     for path in (
-        ("PowerBI/policy.tmdl", project.model_tmdl)
+        ("PowerBI/policy.tmdl", definition.model_tmdl)
         if project
         else ("PowerBI/policy.tmdl", prefix + item.item_name + ".tmdl")
     ):
+        if raw and path == "PowerBI/policy.tmdl":
+            continue
         if path in paths:
             read(path)
             extensions.append((sources[path], path))
     if not parts and not extensions:
         raise ConfigError(f"{item}: provide a PBIP or <model-name>.tmdl")
     contribution = SemanticContribution(parts, sources, provenance)
+    if raw:
+        return contribution
     if extensions:
         from .extensions import apply_extensions
 
