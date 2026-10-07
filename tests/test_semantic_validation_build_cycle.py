@@ -21,13 +21,18 @@ SELECTOR = f"{ITEM}=SemanticModel/Reporting_Dev"
 
 def with_validations(tmp_path):
     root = source_project(tmp_path)
-    folder = root / str(ITEM)
+    source = root / str(ITEM) / f"{ITEM.item_name}.tmdl"
+    folder = root / "PowerBI/Commerce"
+    folder.mkdir(parents=True)
+    source.rename(folder / source.name)
+    source.parent.rmdir()
     for directory, name, text in (
         ("tests", "Sales.RevenueReconciles", TEST),
         ("assumptions", "Sales.RevenueIsPositive", ASSUMPTION),
     ):
-        (folder / directory).mkdir()
-        (folder / directory / f"{name}.dax").write_text(text, encoding="utf-8")
+        owned = folder / directory / ITEM.item_name
+        owned.mkdir(parents=True)
+        (owned / f"{name}.dax").write_text(text, encoding="utf-8")
     return root
 
 
@@ -71,7 +76,11 @@ def test_validations_publish_their_dictionary_definition_and_dependencies(
         if r["referencing_schema_name"]
     } == {("Sales", "RevenueReconciles", "Warehouse/Serving/Cake.Sales")}
     # A semantic validation is a definition, not an installed object.
-    assert all(r["object_type"] == "semantic_model" for r in rows["Registry"])
+    assert {
+        r["object_type"] for r in rows["Registry"] if r["object_role"] == "data"
+    } == {"semantic_model"}
+    assert {r["object_role"] for r in rows["Registry"]} == {"data", "source"}
+    assert not {"test", "assumption"} & {r["object_role"] for r in rows["Registry"]}
 
 
 def answer_installed(session, rows):
@@ -121,22 +130,39 @@ def test_a_validation_edit_resets_only_that_validation(tmp_path, monkeypatch):
         since = len(session.tsql)
         unchanged = weaver.build(root, items=SELECTOR, session=session)
         assert unchanged.succeeded, unchanged.errors
-        assert not client.calls and not pending(session, since)
+        assert not unchanged.selection.impact.changed
+        assert [kind for kind, _ in client.calls] == [
+            "update_definition",
+            "get_definition",
+        ]
+        assert not pending(session, since)
 
-        path = root / str(ITEM) / "tests/Sales.RevenueReconciles.dax"
+        path = (
+            root
+            / f"PowerBI/Commerce/tests/{ITEM.item_name}/Sales.RevenueReconciles.dax"
+        )
         path.write_text(TEST.replace("[Revenue])", "[Revenue] * 1)"), encoding="utf-8")
+        client.calls.clear()
         since = len(session.tsql)
         with monkeypatch.context() as patcher:
             published = capture_publication(patcher, session)
             edited = weaver.build(root, items=SELECTOR, session=session)
             assert edited.succeeded, edited.errors
             republished = published()[ITEM]
-        assert not any(kind == "update_definition" for kind, _ in client.calls)
+        assert not edited.selection.impact.changed
+        assert (
+            republished["SemanticModel"][0]["signature"]
+            == rows[ITEM]["SemanticModel"][0]["signature"]
+        )
+        assert [kind for kind, _ in client.calls] == [
+            "update_definition",
+            "get_definition",
+        ]
         assert pending(session, since) == {"RevenueReconciles"}
         assert {r["object_name"] for r in republished["SemanticModelTest"]} == {
             "RevenueReconciles"
         }
-        assert not any(
+        assert any(
             "[_].[LoadStatus]" in s and not s.lstrip().upper().startswith("SELECT")
             for s in session.tsql[since:]
         )
