@@ -169,12 +169,35 @@ def require_catalogue_for(bindings: ItemBindings) -> None:
         )
 
 
+def _require_separate_semantic_build(bindings: ItemBindings) -> None:
+    from ..catalogue.builtin import BUILTIN_ITEM
+
+    powerbi = sorted(
+        str(item)
+        for item in bindings.by_item
+        if item.item_type in {SEMANTIC_MODEL, "Report"}
+    )
+    sources = sorted(
+        str(item)
+        for item in bindings.by_item
+        if item.item_type not in {SEMANTIC_MODEL, "Report"} and item != BUILTIN_ITEM
+    )
+    if powerbi and sources:
+        raise BuildError(
+            "Power BI items must be built as a separate step. Build "
+            f"{', '.join(sources)}, then {', '.join(powerbi)}"
+        )
+
+
 def validate_build_request(
     repository: WeaverRepository,
     bindings: ItemBindings,
     *,
     catalogue_binding: WarehouseBinding | None,
 ) -> tuple[WeaverItemId, ...]:
+    _require_separate_semantic_build(bindings)
+    if any(item.item_type == "Report" for item in bindings.by_item):
+        raise BuildError("Report deployment is not supported yet")
     if catalogue_binding is None:
         require_catalogue_for(bindings)
     if not bindings.entries:

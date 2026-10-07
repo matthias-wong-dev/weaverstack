@@ -4,6 +4,12 @@ import json
 from pathlib import Path
 
 
+def policy_path(root):
+    path = root / "PowerBI/policy.tmdl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def fixture_parts():
     folder = (
         Path(__file__).parents[1] / "fixtures/semantic_model/Probe/Probe.SemanticModel"

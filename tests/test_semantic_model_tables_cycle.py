@@ -24,7 +24,7 @@ def test_typed_semantic_rows_keep_descriptions_native_metadata_and_claim_ownersh
     tmp_path,
 ):
     root, _, bindings, _, _ = prepared(tmp_path, True)
-    (root / str(ITEM) / "extension.tmdl").write_text(
+    (root / str(ITEM) / f"{ITEM.item_name}.tmdl").write_text(
         "/// Sales model\nmodel Model\n\n/// Sales transactions\nref table Sales\n\t/// Product identity\n\tcolumn ProductId\n\n\t/// Total revenue\n\tmeasure Revenue\n",
         encoding="utf-8",
     )
