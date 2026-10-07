@@ -57,6 +57,7 @@ class InstallationContext:
     #: One publication instant for every Registry row in this installation.
     build_datetime: str | None = None
     semantic_model: Any = None
+    report_item: Any = None
 
     def resolved(self, target_id: str) -> ResolvedTarget:
         found = self.targets.get(target_id)

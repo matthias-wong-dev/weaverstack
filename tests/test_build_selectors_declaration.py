@@ -64,9 +64,7 @@ def test_report_target_vocabulary_does_not_enable_wipe():
 
 
 @weaver_test()
-def test_report_build_is_refused_before_target_preflight_until_deployment_lands(
-    tmp_path, monkeypatch
-):
+def test_report_build_reaches_typed_target_preflight(tmp_path, monkeypatch):
     import importlib
 
     import weaver
@@ -81,10 +79,10 @@ def test_report_build_is_refused_before_target_preflight_until_deployment_lands(
     operation = importlib.import_module("weaver.operations.build")
 
     def preflight(*args, **kwargs):
-        pytest.fail("Report source discovery must not enter unfinished deployment")
+        raise BuildError("typed Report preflight reached")
 
     monkeypatch.setattr(operation, "_preflight", preflight)
-    with pytest.raises(BuildError, match="Report deployment.*not supported"):
+    with pytest.raises(BuildError, match="typed Report preflight reached"):
         weaver.build(
             tmp_path, items="Report", workspace_config=tmp_path / "workspace-config.yml"
         )

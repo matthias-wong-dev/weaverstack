@@ -233,6 +233,8 @@ def render_catalogue_before_build(
 
 
 def _item_signature(repository, item) -> str:
+    if item in repository.reports:
+        return repository.reports[item].signature
     return next(model.signature for model in repository.items if model.identity == item)
 
 

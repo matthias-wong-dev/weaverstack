@@ -51,8 +51,29 @@ compiler. Its source folder needs only `<model-name>.tmdl`.
 
 Reports under the project, including nested `<report-name>.Report` directories,
 need a `definition.pbir` with `datasetReference.byPath` naming that exact local
-model. Thin/byConnection Reports are unsupported. Report source discovery is
-available; Report deployment is not supported yet.
+model. Build binds the deployment payload to the resolved service model and
+preserves authored files and native resources. Thin/byConnection source Reports
+are unsupported.
+
+Select a model and its Reports together:
+
+```bash
+weaver build ./reporting \
+  --item SemanticModel/Reporting=SemanticModel/Reporting_Dev \
+  --item Report/Executive=Report/Executive_Dev
+```
+
+Build verifies the deployed model before updating its selected Reports, then
+verifies each Report's definition and model binding before catalogue publication.
+A model deployment rebuilds its selected consuming Reports. A Report-only edit
+rebuilds that Report. Unchanged catalogue-backed builds perform no work.
+Catalogue-free model and Report builds deploy and verify on every invocation.
+A Report-only selection needs its model's certified catalogue installation.
+
+Targets must already exist. Python `weaver.initialise(..., reports={name: definition})`
+creates or reuses typed Reports from complete service-bound native definitions.
+Report updates use `updateMetadata=false`. Report wipe and destructive mutations
+are unsupported. Reports are excluded from Load, Test and refresh execution.
 
 Build selectors expand before target binding: `SemanticModel`, `Warehouse`,
 `Lakehouse` and `Report` select their real logical items; `PowerBI` selects all

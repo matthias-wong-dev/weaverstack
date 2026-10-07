@@ -12,6 +12,7 @@ gets no folder here. Item folders are empty when no example was asked for, and a
 from __future__ import annotations
 
 from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 
 from ..declaration.model import LAKEHOUSE, SEMANTIC_MODEL, WAREHOUSE
 from ..errors import CommandError
@@ -35,8 +36,15 @@ class ProjectRequest:
     warehouse: str | None = None
     example: bool = False
     semantic_model: str | None = None
+    reports: dict = dataclass_field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        from ..report_definition import validate_service_report
+
+        for name, definition in self.reports.items():
+            validate_name(name, what="Report")
+            validate_fabric_name(name, "Report")
+            validate_service_report(definition)
         for field in ("workspace", "catalogue", "environment"):
             object.__setattr__(
                 self, field, validate_name(getattr(self, field), what=field)

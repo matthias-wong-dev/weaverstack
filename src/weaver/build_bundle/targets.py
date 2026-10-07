@@ -140,7 +140,14 @@ class ReportBinding:
         return REPORT
 
     def to_bound_target(self):
-        raise BuildError("Report deployment is not supported yet")
+        return BoundTarget(
+            id=f"{self.kind}-{self.report.name}",
+            kind=self.kind,
+            item_id=self.item_id or self.report.name,
+            item_name=self.report.name,
+            workspace_id=self.workspace_id,
+            workspace_name=self.workspace_name,
+        )
 
 
 @dataclass(frozen=True)

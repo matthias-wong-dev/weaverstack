@@ -45,7 +45,9 @@ class SemanticReadbackExecutor:
         )
         from ...semantic_models.deployed import verify_requested
 
-        verify_requested(spec["requested"], model, owned=spec["owned"])
+        verify_requested(
+            spec["requested"], model, owned=spec["owned"], absent=spec.get("absent", ())
+        )
         return {"semantic_definition": model}
 
 

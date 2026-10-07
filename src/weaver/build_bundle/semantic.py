@@ -17,7 +17,7 @@ def bind_semantic_target(target, inventory):
 
     from .targets import SEMANTIC_MODEL_TARGET
 
-    if target.kind != SEMANTIC_MODEL_TARGET or inventory is None:
+    if target.kind not in {SEMANTIC_MODEL_TARGET, "report"} or inventory is None:
         return target
     return replace(
         target,
@@ -110,6 +110,7 @@ def semantic_readback_stage(repository, item, target):
                 "requested": contribution.requested,
                 "owned": contribution.owned,
                 "target_id": target.id,
+                "absent": contribution.absent,
                 "item": str(item),
             }
         )
@@ -124,12 +125,12 @@ def semantic_readback_stage(repository, item, target):
         payload_sha256=sha256_hex(content),
     )
     return PlannedStage(
-        phase=CATALOGUE,
-        slug="semantic-readback",
+        phase=BUILD,
+        slug="build-objects",
         index=0,
         description="Verify deployed semantic definitions",
         payloads={filename: content},
-        provides={},
+        provides={action.id: (f"verified-model:{item}",)},
         requires={action.id: (object_key(item),)},
         batches=(BuildBatch(id=action.id, target_id=target.id, actions=(action,)),),
     )
