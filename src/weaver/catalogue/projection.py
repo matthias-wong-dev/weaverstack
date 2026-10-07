@@ -92,6 +92,15 @@ def project_item_catalogue(
 
     scope = InstallationScope(item.item_type, item.item_name)
     retained = tuple(sorted(set(retained), key=str))
+    if item in repository.reports:
+        from .powerbi import project_report
+
+        return CatalogueProjection(
+            scope=scope,
+            rows=project_report(item, repository.reports[item])
+            if WeaverDocumentId.report_root(item) in retained
+            else {},
+        )
     if item in repository.semantic_models:
         from .semantic import project_semantic_model
 

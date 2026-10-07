@@ -458,7 +458,7 @@ def _registered_in(catalogue, by_item: Mapping) -> dict:
     return {
         identity: document
         for identity, document in catalogue.registered.items()
-        if identity.item in by_item
+        if identity.item in by_item and document.object_role != "source"
     }
 
 
@@ -474,6 +474,11 @@ def _selectable(
         | {
             WeaverDocumentId.parse(str(item))
             for item in repository.semantic_models
+            if item in by_item
+        }
+        | {
+            WeaverDocumentId.report_root(item)
+            for item in repository.reports
             if item in by_item
         },
         {

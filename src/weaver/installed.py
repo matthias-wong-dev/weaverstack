@@ -20,6 +20,7 @@ from .catalogue.tables import (
     INSTALLATION,
     ROLE_ASSUMPTION,
     ROLE_DATA,
+    ROLE_SOURCE,
     ROLE_TEST,
     SEMANTIC_MODEL_TABLE,
     SHORTCUT,
@@ -73,6 +74,7 @@ _TARGET_KIND_FOR_ITEM = {
     LAKEHOUSE: LAKEHOUSE_TARGET,
     WAREHOUSE: WAREHOUSE_TARGET,
     SEMANTIC_MODEL: "semanticmodel",
+    "Report": "report",
 }
 
 #: The catalogue uses lower case; declarations use title case.
@@ -156,7 +158,12 @@ class InstalledNode:
         target owns its data. Load-state participation is a separate concern.
         """
 
-        return self.role == ROLE_DATA and self.is_installed and not self.is_mirrored
+        return (
+            self.role == ROLE_DATA
+            and self.object_type != "report"
+            and self.is_installed
+            and not self.is_mirrored
+        )
 
     @property
     def load_name(self) -> str | None:
@@ -556,6 +563,8 @@ def _registered(catalogue: Catalogue, installations):
         catalogue.registered.items(), key=lambda pair: str(pair[0])
     ):
         target = installations.get(identity.item)
+        if document.object_role == ROLE_SOURCE:
+            continue
         if target is None:
             # Missing ownership cannot be skipped because the graph must be complete.
             raise CatalogueStateError(
@@ -605,9 +614,7 @@ def _registered(catalogue: Catalogue, installations):
                 SEMANTIC_MODEL_DEFINITION.name, ()
             )
             if not any(
-                row.get("schema_name") == ""
-                and row.get("object_name") == ""
-                and row.get("signature") == catalogue.registered[identity].signature
+                row.get("signature") == catalogue.registered[identity].signature
                 for row in definitions
             ):
                 continue
@@ -767,6 +774,8 @@ def stored_identity(item: WeaverItemId, schema: str, name: str) -> WeaverDocumen
 
     if item.item_type == SEMANTIC_MODEL and schema == "" and name == "":
         return WeaverDocumentId.model_root(item)
+    if item.item_type == "Report":
+        return WeaverDocumentId.artifact(item, schema, name)
     area, relational = stored_area(schema)
     return WeaverDocumentId(item, ObjectId(relational, name), is_files=area == FILES)
 
@@ -951,6 +960,16 @@ class _References:
     def _one(self, consumer: WeaverDocumentId, reference: str):
         """Resolve shortcuts before native objects to preserve the crossing."""
 
+        if consumer.item.item_type == "Report":
+            producer = WeaverDocumentId.parse(reference)
+            if (
+                producer.item.item_type != SEMANTIC_MODEL
+                or producer not in self._objects
+            ):
+                raise CatalogueStateError(
+                    f"{consumer}: model {reference!r} is not installed; build the model again"
+                )
+            return producer, None
         if _is_python_module_reference(reference):
             return self._python(consumer, reference)
         return self._relation(consumer, reference)

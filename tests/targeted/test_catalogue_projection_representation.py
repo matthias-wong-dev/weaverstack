@@ -358,6 +358,10 @@ def test_catalogue_from_repository_has_all_artefacts(tmp_path):
         encoding="utf-8",
     )
     repository = parse_item_repository(Location((tmp_path / "repo").as_posix()))
+    from test_powerbi_project_declaration import native
+
+    native(tmp_path / "repo")
+    repository = parse_item_repository(Location((tmp_path / "repo").as_posix()))
     catalogue = Catalogue.from_repository(repository)
 
     # Every type but ``schema``, which only a schema shortcut carries and which

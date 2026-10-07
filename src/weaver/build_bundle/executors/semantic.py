@@ -74,6 +74,7 @@ class SemanticCatalogueExecutor:
             source_references=spec.get("source_references", {}),
             source_bindings=spec.get("source_bindings", {}),
             expression_sources=spec.get("expression_sources", {}),
+            table_order=tuple(spec["table_order"]),
         )
         if contribution.signature != spec["signature"]:
             raise InstallError(f"{item}: semantic payload signature does not match")

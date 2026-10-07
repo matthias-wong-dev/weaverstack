@@ -27,6 +27,8 @@ OBJECT_TYPES = (
     "stored_procedure",
     "schema",
     "semantic_model",
+    "report",
+    "source_artifact",
 )
 
 #: What an object is for, independent of its physical shape.
@@ -38,6 +40,7 @@ ROLE_ASSUMPTION = "assumption"
 ROLE_SHORTCUT = "shortcut"
 #: A managed stored procedure invoked outside Weaver's scheduler.
 ROLE_PROGRAMMABLE = "programmable"
+ROLE_SOURCE = "source"
 OBJECT_ROLES = (
     ROLE_DATA,
     ROLE_LOAD,
@@ -45,6 +48,7 @@ OBJECT_ROLES = (
     ROLE_ASSUMPTION,
     ROLE_SHORTCUT,
     ROLE_PROGRAMMABLE,
+    ROLE_SOURCE,
 )
 
 #: Roles installed to run rather than hold rows.
@@ -67,6 +71,8 @@ OBJECT_TYPE_VOCABULARY = {
     "stored_procedure": "Stored procedure",
     "schema": "Schema",
     "semantic_model": "Semantic model",
+    "report": "Report",
+    "source_artifact": "Source artifact",
 }
 
 OBJECT_ROLE_VOCABULARY = {
@@ -76,6 +82,7 @@ OBJECT_ROLE_VOCABULARY = {
     ROLE_ASSUMPTION: "Assumption",
     ROLE_SHORTCUT: "Shortcut",
     ROLE_PROGRAMMABLE: "Programmable",
+    ROLE_SOURCE: "Source",
 }
 
 KEY_TYPE_VOCABULARY = {KEY_PRIMARY: "Primary key", KEY_UNIQUE: "Unique"}
@@ -791,10 +798,9 @@ def _semantic_description():
 SEMANTIC_MODEL = CatalogueTable(
     name="SemanticModel",
     description="Deployed semantic models and their descriptions.",
-    key=(*ITEM_SCOPE_COLUMNS, "schema_name", "object_name"),
+    key=ITEM_SCOPE_COLUMNS,
     columns=(
         *_scope(),
-        *_object(),
         _semantic_description(),
         _semantic_signature(),
     ),
@@ -803,14 +809,18 @@ SEMANTIC_MODEL = CatalogueTable(
 SEMANTIC_MODEL_TABLE = CatalogueTable(
     name="SemanticModelTable",
     description="Semantic tables and how each reads its managed source.",
-    key=(*ITEM_SCOPE_COLUMNS, "schema_name", "object_name", "table_name"),
+    key=(*ITEM_SCOPE_COLUMNS, "table_name"),
     columns=(
         *_scope(),
-        *_object(),
         CatalogueColumn(
             "table_name",
             not_null=True,
             description="The native table name, matching Dependency's referencing object name.",
+        ),
+        CatalogueColumn(
+            "table_ordinal",
+            type=BIGINT,
+            description="One-based effective TMDL declaration order.",
         ),
         _semantic_description(),
         CatalogueColumn(
@@ -830,14 +840,11 @@ SEMANTIC_MODEL_MEASURE = CatalogueTable(
     description="Semantic measures and their native expressions.",
     key=(
         *ITEM_SCOPE_COLUMNS,
-        "schema_name",
-        "object_name",
         "table_name",
         "measure_name",
     ),
     columns=(
         *_scope(),
-        *_object(),
         CatalogueColumn(
             "table_name", not_null=True, description="The measure's home table."
         ),
@@ -860,10 +867,9 @@ SEMANTIC_MODEL_MEASURE = CatalogueTable(
 SEMANTIC_MODEL_RELATIONSHIP = CatalogueTable(
     name="SemanticModelRelationship",
     description="Semantic relationships and their table/column endpoints.",
-    key=(*ITEM_SCOPE_COLUMNS, "schema_name", "object_name", "relationship_name"),
+    key=(*ITEM_SCOPE_COLUMNS, "relationship_name"),
     columns=(
         *_scope(),
-        *_object(),
         CatalogueColumn(
             "relationship_name",
             not_null=True,
@@ -890,14 +896,11 @@ SEMANTIC_MODEL_COLUMN = CatalogueTable(
     description="Semantic columns, including engine-inferred calculated columns.",
     key=(
         *ITEM_SCOPE_COLUMNS,
-        "schema_name",
-        "object_name",
         "table_name",
         "column_name",
     ),
     columns=(
         *_scope(),
-        *_object(),
         CatalogueColumn(
             "table_name", not_null=True, description="The owning semantic table."
         ),

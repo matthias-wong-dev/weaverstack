@@ -53,8 +53,6 @@ PUBLIC_SCHEMA: dict[str, tuple[str, ...]] = {
     "SemanticModel": (
         "Item type",
         "Item name",
-        "Schema name",
-        "Object name",
         "Description",
         "Signature",
         *AUDIT,
@@ -62,9 +60,8 @@ PUBLIC_SCHEMA: dict[str, tuple[str, ...]] = {
     "SemanticModelTable": (
         "Item type",
         "Item name",
-        "Schema name",
-        "Object name",
         "Table name",
+        "Table ordinal",
         "Description",
         "Source mode",
         "Source access",
@@ -74,8 +71,6 @@ PUBLIC_SCHEMA: dict[str, tuple[str, ...]] = {
     "SemanticModelMeasure": (
         "Item type",
         "Item name",
-        "Schema name",
-        "Object name",
         "Table name",
         "Measure name",
         "Description",
@@ -87,8 +82,6 @@ PUBLIC_SCHEMA: dict[str, tuple[str, ...]] = {
     "SemanticModelRelationship": (
         "Item type",
         "Item name",
-        "Schema name",
-        "Object name",
         "Relationship name",
         "From table",
         "From column",
@@ -104,8 +97,6 @@ PUBLIC_SCHEMA: dict[str, tuple[str, ...]] = {
     "SemanticModelColumn": (
         "Item type",
         "Item name",
-        "Schema name",
-        "Object name",
         "Table name",
         "Column name",
         "Description",
@@ -525,6 +516,8 @@ def test_object_type_vocabulary_is_frozen():
         "stored_procedure": "Stored procedure",
         "schema": "Schema",
         "semantic_model": "Semantic model",
+        "report": "Report",
+        "source_artifact": "Source artifact",
     }
 
 
@@ -537,6 +530,7 @@ def test_object_role_vocabulary_is_frozen():
         "assumption": "Assumption",
         "shortcut": "Shortcut",
         "programmable": "Programmable",
+        "source": "Source",
     }
 
 

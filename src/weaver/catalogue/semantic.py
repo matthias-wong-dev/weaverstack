@@ -9,6 +9,7 @@ from .tables import (
     DEPENDENCY,
     REGISTRY,
     ROLE_DATA,
+    ROLE_SOURCE,
     SEMANTIC_MODEL,
     SEMANTIC_MODEL_COLUMN,
     SEMANTIC_MODEL_MEASURE,
@@ -48,10 +49,9 @@ def project_semantic_model(item, contribution, *, deployed=None):
     common = {
         "item_type": item.item_type,
         "item_name": item.item_name,
-        "schema_name": "",
-        "object_name": "",
         "signature": contribution.signature,
     }
+    ordinals = {name: index for index, name in enumerate(contribution.table_names, 1)}
     tables, columns, measures, relationships = [], [], [], []
     for table in model["model"].get("tables", ()):
         name = table["name"]
@@ -61,6 +61,7 @@ def project_semantic_model(item, contribution, *, deployed=None):
             {
                 **common,
                 "table_name": name,
+                "table_ordinal": ordinals.get(name),
                 "description": _text(table.get("description")),
                 "source_mode": source.get("mode"),
                 "source_access": source.get("access"),
@@ -137,7 +138,27 @@ def project_semantic_model(item, contribution, *, deployed=None):
     projected = {
         DEPENDENCY.name: tuple(dependencies),
         REGISTRY.name: (
-            {**common, "object_type": "semantic_model", "object_role": ROLE_DATA},
+            {
+                **common,
+                "schema_name": "",
+                "object_name": "",
+                "object_type": "semantic_model",
+                "object_role": ROLE_DATA,
+            },
+            *(
+                {
+                    **common,
+                    "schema_name": schema,
+                    "object_name": name,
+                    "object_type": "source_artifact",
+                    "object_role": ROLE_SOURCE,
+                    "signature": signature,
+                }
+                for (
+                    schema,
+                    name,
+                ), signature in contribution.artifact_signatures.items()
+            ),
         ),
         SEMANTIC_MODEL.name: (
             {
