@@ -240,6 +240,7 @@ def test_public_load_uses_frozen_typed_ids_without_name_resolution(monkeypatch):
         assert report.succeeded
         base = f"https://api.powerbi.com/v1.0/myorg/groups/{WORKSPACE_ID}/datasets/{MODEL_ID}/refreshes"
         assert [(method, url) for method, url, _ in sent] == [
+            ("GET", base.replace("/refreshes", "/datasources")),
             ("POST", base),
             ("GET", f"{base}/{REQUEST_ID}"),
         ]
@@ -272,7 +273,7 @@ def test_public_load_records_refresh_failure_evidence_before_raising(
         request = client.request
 
         def disconnected(method, path, **kwargs):
-            if method == "GET":
+            if method == "GET" and "/refreshes/" in path:
                 raise FabricError("poll disconnected")
             return request(method, path, **kwargs)
 

@@ -98,14 +98,18 @@ def test_source_shape_and_endpoint_use_selected_session_identity(
         )
         assert observed["item_type"] == item_type
         assert observed["item_id"] == _identifier(item_type, "Serving_Dev")
-        assert observed["database"] == _identifier(
-            "SQLEndpoint" if item_type == "Lakehouse" else "Warehouse", "Serving_Dev"
-        )
+        # Connections are created by database name; item_id carries identity.
+        assert observed["database"] == "Serving_Dev"
         assert observed["source_columns"] == [
             {"column_name": name, "data_type": kind} for name, kind in columns
         ]
         assert len(connections) == 1
-        assert connections[0].database == observed["database"]
+        # TDS addresses the endpoint by ID; the model's M names the database.
+        assert connections[0].database == (
+            _identifier("SQLEndpoint", "Serving_Dev")
+            if item_type == "Lakehouse"
+            else "Serving_Dev"
+        )
         assert "TABLE_SCHEMA = N'Cake'" in cursor.calls[0][0]
         if native:
             assert session.scope()._spark is None

@@ -200,12 +200,23 @@ def test_existing_unknown_object_merges_recursively(reference):
     assert result.requested == {}
 
 
+@pytest.mark.parametrize("newline", [b"\n", b"\r\n"], ids=["lf", "crlf"])
 @weaver_test()
-def test_unknown_children_merge_below_a_known_parent():
-    parts = base_parts()
+def test_unknown_children_merge_below_a_known_parent(newline):
+    parts = {
+        path: value.replace(b"\r\n", b"\n").replace(b"\n", newline)
+        if path.endswith(".tmdl")
+        else value
+        for path, value in base_parts().items()
+    }
     sales = parts["definition/tables/Sales.tmdl"]
     parts["definition/tables/Sales.tmdl"] = (
-        sales + b"\n\tfutureChild Kept\n\t\tsetting: one\n"
+        sales
+        + newline
+        + b"\tfutureChild Kept"
+        + newline
+        + b"\t\tsetting: one"
+        + newline
     )
     result = merge(
         parts,
@@ -216,12 +227,13 @@ def test_unknown_children_merge_below_a_known_parent():
         ),
     )
     merged = result.parts["definition/tables/Sales.tmdl"]
-    assert merged.endswith(b"\tfutureChild Kept\n\t\tsetting: two\n")
-    assert b"\t\tsummarizeBy: none\n\t\tfutureColumnProperty: x\n" in merged
+    assert merged.endswith(
+        b"\tfutureChild Kept" + newline + b"\t\tsetting: two" + newline
+    )
+    added = b"\t\tfutureColumnProperty: x" + newline
+    assert b"\t\tsummarizeBy: none" + newline + added in merged
     assert (
-        merged.replace(b"setting: two", b"setting: one").replace(
-            b"\t\tfutureColumnProperty: x\n", b""
-        )
+        merged.replace(b"setting: two", b"setting: one").replace(added, b"")
         == parts["definition/tables/Sales.tmdl"]
     )
 

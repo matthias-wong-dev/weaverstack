@@ -21,6 +21,8 @@ class SemanticContribution:
     source_references: Mapping[str, str] = field(default_factory=dict)
     source_bindings: Mapping[str, dict] = field(default_factory=dict)
     expression_sources: Mapping[str, dict] = field(default_factory=dict)
+    #: Bind data sources to their connections once the definition is deployed.
+    bind_data_sources: bool = False
 
     @property
     def dependencies(self):

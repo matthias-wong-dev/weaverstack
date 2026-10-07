@@ -3,8 +3,6 @@
 import json
 from pathlib import Path
 
-from support.workspaces import _identifier
-
 
 def fixture_parts():
     folder = (
@@ -44,7 +42,7 @@ def source_model(
         if descriptions is not None
         else {"Sales": "Sales description", "Summary": "Summary description"}
     )
-    database = _identifier("SQLEndpoint" if lakehouse else "Warehouse", physical)
+    database = physical
     server = (
         "lake.datawarehouse.fabric.microsoft.com"
         if lakehouse

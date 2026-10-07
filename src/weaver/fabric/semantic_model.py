@@ -36,6 +36,24 @@ class SemanticRefreshError(FabricError):
         )
 
 
+class ConnectionBindingError(FabricError):
+    """A semantic model data source has no single connection to bind to."""
+
+
+#: Connections that a data source reference can be bound to.
+_BINDABLE = frozenset({"ShareableCloud", "OnPremisesGateway", "VirtualNetworkGateway"})
+
+
+def list_connections(client) -> list[dict]:
+    connections, path = [], "connections"
+    while path:
+        body = client.get_json(path)
+        connections.extend(body.get("value", []))
+        token = body.get("continuationToken")
+        path = f"connections?continuationToken={token}" if token else None
+    return connections
+
+
 class SemanticModelClient:
     def __init__(self, workspace_id: str, model_id: str, *, fabric, power_bi):
         self.workspace_id = workspace_id
@@ -132,25 +150,13 @@ class SemanticModelClient:
                     break
                 return {**body, "request_id": request_id}
             if status not in {"Unknown", "NotStarted", "InProgress"}:
-                messages = "; ".join(
-                    str(message.get("message", ""))
-                    for message in body.get("messages", [])
-                    if isinstance(message, dict) and message.get("type") == "Error"
-                )
-                service_error = body.get("serviceExceptionJson")
-                if service_error:
-                    messages = "; ".join(filter(None, (messages, str(service_error))))
+                messages = "; ".join(_refresh_errors(body))
                 hint = ""
                 if any(
                     word in messages.casefold()
-                    for word in (
-                        "premium_aswl_error",
-                        "gateway",
-                        "credential",
-                        "not bound",
-                    )
+                    for word in ("connection", "gateway", "credential", "not bound")
                 ):
-                    hint = " Check the model's connection and gateway in Fabric settings; ask the connection owner to configure credentials or grant access."
+                    hint = " Check the model's data connection in Fabric settings; the connection owner can grant access or update credentials."
                 raise SemanticRefreshError(
                     f"Semantic model refresh {request_id} ended with status {status!r}"
                     + (f": {messages}" if messages else "")
@@ -164,6 +170,71 @@ class SemanticModelClient:
             request_id=request_id,
             body=body,
         )
+
+    def data_sources(self) -> list[dict]:
+        return self.power_bi.get_json(f"{self.dataset_path}/datasources").get(
+            "value", []
+        )
+
+    def bind_data_sources(self, *, label: str) -> tuple[str, ...]:
+        """Bind each unbound SQL data source to the one connection that reaches it.
+
+        A connection reaches a data source when its path is the source's
+        ``server;database``. Returns the bound paths.
+        """
+
+        unbound = [
+            source
+            for source in self.data_sources()
+            if source.get("datasourceType") == "Sql" and not source.get("datasourceId")
+        ]
+        if not unbound:
+            return ()
+        connections = [
+            c
+            for c in list_connections(self.fabric)
+            if c.get("connectivityType") in _BINDABLE
+            and (c.get("connectionDetails") or {}).get("type") == "SQL"
+        ]
+        bound = []
+        for source in unbound:
+            details = source.get("connectionDetails") or {}
+            server, database = details.get("server"), details.get("database")
+            path = f"{server};{database}"
+            matches = [
+                c
+                for c in connections
+                if str(c["connectionDetails"].get("path", "")).casefold()
+                == path.casefold()
+            ]
+            if not matches:
+                raise ConnectionBindingError(
+                    f"{label} reads database {database} on {server}, and no cloud "
+                    "connection reaches it. Create a SQL cloud connection to that "
+                    "server and database in Fabric, then run again."
+                )
+            if len(matches) > 1:
+                names = ", ".join(sorted(str(c.get("displayName")) for c in matches))
+                raise ConnectionBindingError(
+                    f"{label} reads database {database} on {server}, and several "
+                    f"connections reach it: {names}. Keep one."
+                )
+            connection = matches[0]
+            self.fabric.request(
+                "POST",
+                f"{self.item_path}/bindConnection",
+                payload={
+                    "connectionBinding": {
+                        "id": connection["id"],
+                        "connectivityType": connection["connectivityType"],
+                        "connectionDetails": {"type": "SQL", "path": path},
+                    }
+                },
+                expected=(200,),
+                retry_transient=False,
+            )
+            bound.append(path)
+        return tuple(bound)
 
     def query_dax(self, query: str) -> list[dict]:
         response = self.power_bi.request(
@@ -194,6 +265,58 @@ class SemanticModelClient:
             raise FabricError(
                 f"DAX returned an invalid response for {self.model_id}: {exc}"
             ) from exc
+
+
+def _refresh_errors(body) -> list[str]:
+    """Distinct readable failure messages, without the service's JSON wrapping.
+
+    Power BI repeats one cause per table and nests it as JSON inside JSON.
+    """
+
+    import json
+
+    found, codes = [], []
+
+    def collect(value):
+        if isinstance(value, str):
+            text = value.strip()
+            if text.startswith("{"):
+                try:
+                    collect(json.loads(text))
+                    return
+                except ValueError:
+                    pass
+            if text and text not in found:
+                found.append(text)
+        elif isinstance(value, dict):
+            code = value.get("errorCode") or value.get("code")
+            if isinstance(code, str) and code not in codes:
+                codes.append(code)
+            if "errorDescription" in value:
+                collect(value["errorDescription"])
+            detail = value.get("detail")
+            if isinstance(detail, dict) and "value" in detail:
+                collect(detail["value"])
+            for key in ("error", "pbi.error", "details"):
+                if key in value:
+                    collect(value[key])
+            if "message" in value and not any(
+                k in value for k in ("error", "pbi.error", "details", "detail")
+            ):
+                collect(value["message"])
+        elif isinstance(value, list):
+            for member in value:
+                collect(member)
+
+    for message in body.get("messages", []):
+        if isinstance(message, dict) and message.get("type") == "Error":
+            collect(message.get("message", ""))
+    collect(body.get("serviceExceptionJson") or "")
+    # A transaction's other tables report only that they were cancelled.
+    cancelled = "The current operation was cancelled because another operation in the transaction failed."
+    messages = [m for m in found if m != cancelled] or found
+    labels = [c for c in codes if not c.endswith("_Details_Label")]
+    return messages + ([f"({', '.join(labels)})"] if labels else [])
 
 
 def _check_dax_error(payload):

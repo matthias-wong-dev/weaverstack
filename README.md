@@ -104,8 +104,8 @@ weaver build ./reporting --item SemanticModel/Reporting \
 
 Expressions named `Warehouse/Serving` or `Lakehouse/Curated` resolve through the
 workspace's logical targets automatically. Generic names use explicit mappings.
-`data_sources` in workspace config supplies defaults; repeatable `--data-source`
-options override them. SQL sources use the resolved SQL endpoint. Native
+`data_sources` in workspace config supplies defaults, naming logical items that
+resolve through `targets`; repeatable `--data-source` options override them. SQL sources use the resolved SQL endpoint. Native
 `Lakehouse.Contents` expressions use workspace and Lakehouse IDs. Ordinary
 expressions with no mapping remain unchanged.
 
@@ -127,12 +127,12 @@ LoadStatus Pending. It does not delete Warehouse or Lakehouse source data.
 Unchanged Build preserves LoadStatus. Semantic-only Build and Load use REST/TDS
 and start no Spark session.
 
-Source mapping changes the definition. Build and Load leave runtime connection
-bindings and credentials to Fabric settings. Refresh errors retain the service
-error and identify connection-owner action where applicable. A standalone
-`semantic-model bind` command is planned for existing approved connections;
-it is not implemented here. Shared connections and gateways remain outside
-semantic-item ownership.
+Source mapping changes the definition, naming each source by its Warehouse or
+Lakehouse name. Before refreshing, Load binds every unbound SQL data source to
+the one cloud or gateway connection whose path is that source's
+`server;database`; `weaver build --bind-data-sources` does the same after
+deploying. A source no connection reaches, or several reach, fails with the
+server and database to connect. Weaver creates no connections or credentials.
 
 `extension.tmdl` merges by native structure. An object is identified by its
 kind and name within its parent, and a property by its name. A new object is

@@ -445,6 +445,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Substitute a shared M source expression with a Warehouse or Lakehouse.",
     )
     build.add_argument(
+        "--bind-data-sources",
+        action="store_true",
+        help="After deploying a semantic model, bind each of its SQL data sources "
+        "to the connection that reaches it.",
+    )
+    build.add_argument(
         "--bundle-only",
         action="store_true",
         help="Create a deployment bundle without installing it.",
@@ -1868,6 +1874,7 @@ def _build_once(args: argparse.Namespace) -> int:
                 args.source,
                 items=args.items,
                 data_sources=args.data_sources,
+                bind_data_sources=args.bind_data_sources,
                 bundle_only=args.bundle_only,
                 bundle_path=args.bundle_path,
                 session=opened,

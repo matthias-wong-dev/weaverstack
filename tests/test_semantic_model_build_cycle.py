@@ -65,6 +65,10 @@ class DefinitionClient:
             raise self.read_failure
         return self.definition
 
+    def bind_data_sources(self, *, label):
+        self.calls.append(("bind_data_sources", label))
+        return ()
+
     def update_definition(self, definition, **options):
         self.calls.append(("update_definition", {"definition": definition, **options}))
         if self.failure:

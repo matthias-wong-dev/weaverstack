@@ -52,6 +52,18 @@ def expression_names(parts):
     }
 
 
+def _physical(target, bindings, workspace):
+    """A mapped logical item resolves as its build binding or configured target."""
+
+    item = WeaverItemId.parse(target)
+    binding = bindings.by_item.get(item)
+    if binding is not None:
+        return f"{binding.target.physical_kind}/{binding.target.item.name}"
+    if item in workspace.targets:
+        return f"{item.item_type}/{workspace.targets[item].physical}"
+    return target
+
+
 def configure_sources(repository, mappings, bindings, workspace):
     explicit = source_mappings(mappings)
     mappings = {**workspace.data_sources, **explicit}
@@ -73,7 +85,7 @@ def configure_sources(repository, mappings, bindings, workspace):
             }:
                 logical = None
             if name in mappings:
-                target = mappings[name]
+                target = _physical(mappings[name], bindings, workspace)
             elif logical is not None:
                 binding = bindings.by_item.get(logical)
                 if binding is not None:

@@ -87,6 +87,7 @@ def build(
     environment: str | None = None,
     workspace_config: str | Path | None = None,
     data_sources=None,
+    bind_data_sources: bool = False,
     bundle_only: bool = False,
     bundle_path: str | Path | None = None,
     session=None,
@@ -98,6 +99,9 @@ def build(
     none builds every item the workspace configuration declares.
 
     ``catalogue`` names the catalogue Warehouse as ``Warehouse/Weaver``.
+
+    ``bind_data_sources`` binds each deployed semantic model's SQL data sources
+    to the connection that reaches them, as a load does before refreshing.
 
     A supplied ``session`` is reused and left open. Otherwise this operation
     creates and closes one.
@@ -140,6 +144,16 @@ def build(
         repository = configure_sources(
             prepared.repository, data_sources, bindings, resolved_workspace
         )
+        if bind_data_sources:
+            from dataclasses import replace
+
+            repository = replace(
+                repository,
+                semantic_models={
+                    item: replace(contribution, bind_data_sources=True)
+                    for item, contribution in repository.semantic_models.items()
+                },
+            )
         validate_build_request(repository, bindings, catalogue_binding=control)
         _preflight(resolved_workspace, bindings, session=session)
         with use_or_create_session(session, workspace=resolved_workspace) as opened:

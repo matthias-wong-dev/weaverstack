@@ -1,7 +1,5 @@
 """Session-owned SQL endpoint and relation-shape acquisition."""
 
-from dataclasses import replace
-
 from ..catalogue.tsql import literal
 from ..errors import BuildError
 from ..fabric.resolution import _server_name
@@ -16,7 +14,6 @@ def semantic_source(
     resolver = session.resolver(workspace)
     if item_type == "Warehouse":
         endpoint = resolver.sql_endpoint(WarehouseTarget(ItemRef(resolved.name)))
-        endpoint = replace(endpoint, database=resolved.id)
     elif item_type == "Lakehouse":
         body = resolver.client.get_json(
             f"workspaces/{resolved.workspace_id}/lakehouses/{resolved.id}"
@@ -55,7 +52,9 @@ def semantic_source(
         "item_id": resolved.id,
         "workspace_id": resolved.workspace_id,
         "server": endpoint.server,
-        "database": endpoint.database,
+        # People create connections by database name, and binding matches the
+        # name; item_id keeps the source's identity across renames.
+        "database": resolved.name,
         "schema": schema,
         "object": name,
         "source_columns": columns,

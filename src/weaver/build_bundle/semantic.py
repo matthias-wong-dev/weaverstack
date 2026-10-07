@@ -46,6 +46,11 @@ def semantic_stage(repository, item, target, *, catalogue_target=None):
                 "target_id": target.id,
                 "item": str(item),
                 "allow_purge_data": True,
+                **(
+                    {"bind_data_sources": True}
+                    if contribution.bind_data_sources and not publishing
+                    else {}
+                ),
             }
         )
         + "\n"

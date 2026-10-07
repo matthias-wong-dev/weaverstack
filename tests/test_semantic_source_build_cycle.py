@@ -209,7 +209,7 @@ def test_public_build_binds_sources_and_publishes_object_dependencies(
         )
         assert b"mode: directLake" in parts["definition/tables/Sales.tmdl"]
         assert (
-            _identifier("Warehouse", "Serving_Dev").encode()
+            b'"serving.datawarehouse.fabric.microsoft.com", "Serving_Dev")'
             in parts["definition/expressions.tmdl"]
         )
         tables = {
@@ -437,7 +437,7 @@ def test_pbip_source_rebind_retains_authored_mode_and_properties(tmp_path, mode)
         assert parts["definition/tables/Sales.tmdl"] == path.read_bytes()
         assert f"mode: {mode}".encode() in parts["definition/tables/Sales.tmdl"]
         assert (
-            _identifier("Warehouse", "Serving_Dev").encode()
+            b'"serving.datawarehouse.fabric.microsoft.com", "Serving_Dev")'
             in parts["definition/expressions.tmdl"]
         )
         assert (
@@ -448,7 +448,7 @@ def test_pbip_source_rebind_retains_authored_mode_and_properties(tmp_path, mode)
         physical = session.resolve_item("Serving_Dev", item_type="Warehouse")
         bound = deployed["model"]["expressions"][0]["expression"]
         assert (
-            physical.id in bound
+            f'"{physical.name}")' in bound
             and 'Sql.Database("serving.datawarehouse.fabric.microsoft.com"' in bound
         )
         assert sales["partitions"][0]["source"]["expression"] == expression
@@ -733,7 +733,6 @@ def test_environment_rebinding_and_unchanged_public_build_use_source_signatures(
 def test_lakehouse_source_keeps_tables_identity_and_plans_sql_readiness(
     tmp_path, monkeypatch, override
 ):
-    from support.workspaces import _identifier
     from test_semantic_source_session_boundary import EndpointInventory
 
     from weaver.catalogue.claims import catalogue_columns
@@ -846,7 +845,7 @@ def test_lakehouse_source_keeps_tables_identity_and_plans_sql_readiness(
         )
         assert binding["item_type"] == "Lakehouse"
         assert binding["item_id"] == _identifier("Lakehouse", "Serving_Dev")
-        assert binding["database"] == _identifier("SQLEndpoint", "Serving_Dev")
+        assert binding["database"] == "Serving_Dev"
         table = decode_model(session.semantic_model("Reporting_Dev").definition)[
             "model"
         ]["tables"][0]

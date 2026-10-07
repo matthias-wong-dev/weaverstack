@@ -29,6 +29,8 @@ class SemanticModelExecutor:
             spec["definition"],
             allow_purge_data=spec["allow_purge_data"],
         )
+        if spec.get("bind_data_sources"):
+            client.bind_data_sources(label=spec["item"])
 
 
 class SemanticCatalogueExecutor:

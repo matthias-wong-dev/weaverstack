@@ -81,6 +81,11 @@ class Client:
 
     def request(self, method, path, **kwargs):
         self.calls.append((method, path, kwargs))
+        # A refresh first reads data sources; unscripted, they are all bound.
+        if (method, path.rsplit("/", 1)[-1]) == ("GET", "datasources") and not (
+            self.responses and getattr(self.responses[0], "datasources", False)
+        ):
+            return SimpleNamespace(status_code=200, json=lambda: {"value": []})
         return self.responses.pop(0)
 
 

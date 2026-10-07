@@ -3,6 +3,7 @@
 import json
 from pathlib import Path
 
+import pytest
 from support.weaver_test import weaver_test
 from support.workspaces import _identifier
 from test_semantic_source_build_cycle import source_session
@@ -62,7 +63,7 @@ def test_public_build_maps_generic_shared_expression_without_changing_queries(tm
     assert {p: parts[p] for p in untouched} == untouched
     expression = parts["definition/expressions.tmdl"].decode()
     assert 'Sql.Database("serving.datawarehouse.fabric.microsoft.com", ' in expression
-    assert _identifier("Warehouse", "Serving_Dev") in expression
+    assert '"serving.datawarehouse.fabric.microsoft.com", "Serving_Dev")' in expression
     assert "old-server" not in expression and "old-database" not in expression
     assert "DataSource1" in expression
     assert not session.spark_sql
@@ -88,7 +89,7 @@ def test_cli_source_mapping_overrides_workspace_config(tmp_path):
             session=session,
         )
     expression = payload_parts(result)["definition/expressions.tmdl"].decode()
-    assert _identifier("Warehouse", "Serving_Dev") in expression
+    assert '"serving.datawarehouse.fabric.microsoft.com", "Serving_Dev")' in expression
     assert "Configured" not in expression
 
 
@@ -115,7 +116,7 @@ def test_logical_expression_resolves_workspace_target_without_addon_or_override(
         )
     parts = payload_parts(result)
     assert (
-        _identifier("Warehouse", "Serving_Dev")
+        '"serving.datawarehouse.fabric.microsoft.com", "Serving_Dev")'
         in parts["definition/expressions.tmdl"].decode()
     )
     assert parts["definition/tables/Sales.tmdl"] == original
@@ -189,7 +190,7 @@ def test_cli_forwards_repeatable_data_source_mapping(tmp_path, monkeypatch, caps
     body = decode_parts(json.loads(payload.read_text())["definition"])[
         "definition/expressions.tmdl"
     ].decode()
-    assert _identifier("Warehouse", "Serving_Dev") in body
+    assert '"serving.datawarehouse.fabric.microsoft.com", "Serving_Dev")' in body
 
 
 @weaver_test()
@@ -217,7 +218,7 @@ def test_shared_source_publishes_managed_table_lineage(tmp_path, monkeypatch):
         {
             "name": "Warehouse/Serving",
             "kind": "m",
-            "expression": f'Sql.Database("serving.datawarehouse.fabric.microsoft.com", "{_identifier("Warehouse", "Serving_Dev")}")',
+            "expression": 'Sql.Database("serving.datawarehouse.fabric.microsoft.com", "Serving_Dev")',
         }
     ]
     sales = next(t for t in observed["model"]["tables"] if t["name"] == "Sales")
@@ -251,3 +252,43 @@ def test_shared_source_publishes_managed_table_lineage(tmp_path, monkeypatch):
         json.loads(sales_row["source_binding"])["reference"]
         == "Warehouse/Serving/Cake.Sales"
     )
+
+
+@pytest.mark.parametrize(
+    "mapping,expected",
+    [
+        ("Warehouse/Curated", "Warehouse/DEV_Curated"),
+        ("Warehouse/Reporting_Dev", "Warehouse/Reporting_Dev"),
+    ],
+)
+@weaver_test()
+def test_configured_data_source_names_a_logical_item(tmp_path, mapping, expected):
+    from weaver.build_bundle.targets import ItemBindings, parse_build_item
+    from weaver.declaration.model import WeaverItemId
+    from weaver.declaration.repository import parse_item_repository
+    from weaver.locations import Location
+    from weaver.semantic_models.expressions import configure_sources
+    from weaver.workspaces import TargetDeclaration, Workspace
+
+    item = WeaverItemId.parse("SemanticModel/Reporting")
+    folder = tmp_path / str(item)
+    folder.mkdir(parents=True)
+    (folder / "extension.tmdl").write_text(
+        'expression DataSource = Sql.Database("server", "Curated")\n\tkind: m\n'
+    )
+    workspace = Workspace(
+        workspace="Demo",
+        targets={
+            WeaverItemId.parse("Warehouse/Curated"): TargetDeclaration("DEV_Curated")
+        },
+        data_sources={"DataSource": mapping},
+    )
+    repository = configure_sources(
+        parse_item_repository(Location(tmp_path.as_posix())),
+        None,
+        ItemBindings((parse_build_item(f"{item}=SemanticModel/Reporting_Dev"),)),
+        workspace,
+    )
+    assert repository.semantic_models[item].expression_sources == {
+        "DataSource": {"target": expected}
+    }
