@@ -33,31 +33,31 @@ def read_semantic_sources(
     for reference, needs_columns in sorted(wanted.items()):
         identity = source_identity(reference)
         bound = bindings.by_item.get(identity.item)
-        authored = repository.source_documents.get(identity) if bound else None
-        registered = catalogue.registered.get(identity)
+        schema, name = catalogue_columns(identity)
+        source_tables = catalogue.rows.get(identity.item, {})
         if not needs_columns:
-            schema, name = catalogue_columns(identity)
-            rows = catalogue.rows.get(identity.item, {})
             observed[reference] = {
                 "reference": reference,
                 "description": next(
                     (
-                        row.get("description")
-                        for row in rows.get("TableDictionary", ())
-                        if row.get("schema_name") == schema
-                        and row.get("object_name") == name
+                        r.get("description")
+                        for r in source_tables.get("TableDictionary", ())
+                        if r.get("schema_name") == schema
+                        and r.get("object_name") == name
                     ),
                     None,
                 ),
                 "column_notes": {
-                    row["column_name"]: row["description"]
-                    for row in rows.get("ColumnDictionary", ())
-                    if row.get("schema_name") == schema
-                    and row.get("object_name") == name
-                    and row.get("description")
+                    r["column_name"]: r["description"]
+                    for r in source_tables.get("ColumnDictionary", ())
+                    if r.get("schema_name") == schema
+                    and r.get("object_name") == name
+                    and r.get("description")
                 },
             }
             continue
+        authored = repository.source_documents.get(identity) if bound else None
+        registered = catalogue.registered.get(identity)
         if authored is not None and authored.kind in {TABLE, VIEW}:
             kind = authored.kind.lower()
         elif registered is not None and registered.object_type in {"table", "view"}:

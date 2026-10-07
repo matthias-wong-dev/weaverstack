@@ -63,6 +63,7 @@ class Weaver__AutoHideColumns(Annotation):
             self.error("requires at least one glob pattern")
         tables = target.tables if target.parent is None else [target]
         for table in tables:
+
             for column in table.columns:
                 if any(fnmatchcase(column.name, p) for p in patterns):
                     column.isHidden = True

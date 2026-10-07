@@ -258,7 +258,12 @@ def determine_impact(
     }
 
     existing = set(physical_types)
-    roots = changed | stale
+    # Selected models deploy even when their effective signatures are equal.
+    roots = (
+        changed
+        | stale
+        | {identity for identity in selected_set if identity.shape == MODEL_SHAPE}
+    )
     impacted = set(roots)
     graph = repository.dependency_graph
     if graph is not None:

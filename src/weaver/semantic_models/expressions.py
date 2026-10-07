@@ -7,7 +7,7 @@ from ..declaration.model import WeaverItemId
 from ..errors import ConfigError, IdentityError
 from .binding import m_string
 from .compiler import _merge
-from .fragments import expression_text
+from .fragments import expression_text, needs_source_columns, source_table
 from .references import source_identity
 from .tmdl import Document, PackageEditor
 
@@ -76,7 +76,8 @@ def configure_sources(repository, mappings, bindings, workspace):
         existing = expression_names(contribution.parts)
         generated = {
             str(source_identity(ref).item)
-            for ref in contribution.source_references.values()
+            for table, ref in contribution.source_references.items()
+            if needs_source_columns(source_table(contribution.parts, table))
         }
         names = existing | generated
         selected = {}

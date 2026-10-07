@@ -230,8 +230,19 @@ def test_build_deploys_and_certifies_readback_without_touching_source(tmp_path, 
         repository, bindings, deployed, state2.target_inventories
     )
     second = bundle_for(tmp_path, repository, bindings, installed, "second")
-    assert not build_metadata(second.plan).selection.selected_for_build
-    assert list(second.plan.actions()) == []
+    assert build_metadata(second.plan).selection.selected_for_build == (ROOT,)
+    assert not build_metadata(second.plan).selection.impact.changed
+    semantic.calls.clear()
+    assert execute_bundle(second, session).succeeded
+    assert [c[0] for c in semantic.calls] == ["update_definition", "get_definition"]
+    assert (
+        decode_parts(semantic.calls[0][1]["definition"])
+        == repository.semantic_models[ITEM].parts
+    )
+    assert (
+        repository.semantic_models[ITEM].signature
+        == installed.catalogue.registered[ROOT].signature
+    )
 
 
 @weaver_test()
@@ -287,7 +298,9 @@ def test_failed_deployment_or_readback_cannot_certify_changed_model(tmp_path, fa
 
 @weaver_test()
 @pytest.mark.parametrize("policy", ["item", "organisation"])
-def test_policy_change_selects_only_effectively_changed_models(tmp_path, policy):
+def test_policy_change_classifies_signatures_and_deploys_all_selected_models(
+    tmp_path, policy
+):
     from uuid import NAMESPACE_URL, uuid5
 
     from weaver.build_bundle.semantic import bind_semantic_target
@@ -339,7 +352,11 @@ def test_policy_change_selects_only_effectively_changed_models(tmp_path, policy)
     result = bundle_for(
         tmp_path, changed, bindings, BuildState(installed, inventories), "policy"
     )
-    assert set(build_metadata(result.plan).selection.selected_for_build) == (
+    assert set(build_metadata(result.plan).selection.selected_for_build) == {
+        ROOT,
+        other_root,
+    }
+    assert set(build_metadata(result.plan).selection.impact.changed) == (
         {ROOT} if policy == "item" else {ROOT, other_root}
     )
     assert not build_metadata(result.plan).selection.selected_for_drop
@@ -376,7 +393,7 @@ def test_build_freezes_typed_ids_without_reading_existing_definition(tmp_path):
 
 
 @weaver_test()
-def test_organisation_policy_only_selects_effectively_changed_models(tmp_path):
+def test_organisation_policy_classifies_changed_models_and_deploys_both(tmp_path):
     root, repository, bindings, session, _ = prepared(tmp_path)
     other = root / "SemanticModel/Other"
     other.mkdir()
@@ -401,7 +418,8 @@ def test_organisation_policy_only_selects_effectively_changed_models(tmp_path):
     selection = select_build(
         changed, catalogue.registered, selected=selected, inventories=inventories
     )
-    assert selection.selected_for_build == (ROOT,)
+    assert set(selection.selected_for_build) == selected
+    assert selection.impact.changed == (ROOT,)
 
 
 def answer_catalogue(session, catalogue, bindings):
@@ -453,7 +471,9 @@ def answer_catalogue(session, catalogue, bindings):
 
 @weaver_test()
 @pytest.mark.parametrize("pbip", [False, True])
-def test_public_build_bootstraps_catalogue_and_reaches_fixed_point(tmp_path, pbip):
+def test_public_build_bootstraps_catalogue_and_redeploys_with_stable_signature(
+    tmp_path, pbip
+):
     import weaver
 
     root = project(tmp_path, pbip)
@@ -506,12 +526,12 @@ def test_public_build_bootstraps_catalogue_and_reaches_fixed_point(tmp_path, pbi
         root, items=str(ITEM) + "=SemanticModel/Reporting_Dev", session=session
     )
     assert second.succeeded, second.errors
-    assert second.installation_report.action_counts()["total"] == 0, [
-        (a.executor, a.resource_node_id)
-        for a in second.installation_report.action_results()
+    assert second.selection.selected_for_build == (ROOT,)
+    assert not second.selection.impact.changed
+    assert [method for method, _ in semantic.calls] == [
+        "update_definition",
+        "get_definition",
     ]
-    assert not second.selection.selected_for_build
-    assert semantic.calls == []
     assert all(
         identity.item != BUILTIN_ITEM
         for identity in second.selection.selected_for_build

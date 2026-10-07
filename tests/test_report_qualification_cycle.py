@@ -27,10 +27,21 @@ def test_qualification_runner_restores_all_definitions_after_failed_public_build
     report.update_definition = lambda definition, **options: writes.append(
         ("report", definition, options)
     )
-    failed = SimpleNamespace(
-        succeeded=False,
-        to_mapping=lambda: {"status": "failed"},
-        installation_report=SimpleNamespace(to_mapping=lambda: {"actions": []}),
+    from datetime import datetime, timezone
+
+    from weaver.build_bundle.report import InstallationReport
+    from weaver.operations.build import BuildResult
+
+    failed = BuildResult(
+        source=str(root),
+        items=(),
+        bundle_id="offline",
+        installation=True,
+        bundle_path=None,
+        status="failed",
+        installation_report=InstallationReport(
+            "offline", "failed", datetime.now(timezone.utc), None, ()
+        ),
     )
     monkeypatch.setattr("weaver.build", lambda *a, **k: failed)
     with pytest.raises(AssertionError, match="baseline"):
@@ -129,26 +140,40 @@ def test_qualification_lifecycle_edits_trial_and_checks_actual_selection_shape(
     report = WeaverDocumentId.report_root(WeaverItemId("Report", "Executive"))
     calls = []
 
-    def phase(name):
-        calls.append(name)
+    from weaver.build_bundle.incremental import BuildSelection, Impact
+    from weaver.operations.build import BuildResult
+
+    def phase(name, *, items=None):
+        calls.append((name, items))
         selected = {
-            "unchanged": set(),
-            "report-edit": {report},
-            "report-fixed": set(),
-            "model-edit": {model, report},
-            "model-fixed": set(),
+            "unchanged": (model, report),
+            "report-unchanged": (),
+            "report-edit": (report,),
+            "report-fixed": (),
+            "model-edit": (model, report),
+            "model-fixed": (model, report),
         }[name]
-        return SimpleNamespace(selection=SimpleNamespace(selected_for_build=selected))
+        return BuildResult(
+            source=str(root),
+            items=tuple(items or ()),
+            bundle_id="offline",
+            installation=True,
+            bundle_path=None,
+            status="succeeded",
+            selection=BuildSelection(Impact((), (), ()), (), (), selected),
+        )
 
     exercise_catalogue(
         root, "SemanticModel/Reporting", {"Report/Executive": "Executive_Dev"}, phase
     )
+    report_items = ["Report/Executive=Report/Executive_Dev"]
     assert calls == [
-        "unchanged",
-        "report-edit",
-        "report-fixed",
-        "model-edit",
-        "model-fixed",
+        ("unchanged", None),
+        ("report-unchanged", report_items),
+        ("report-edit", report_items),
+        ("report-fixed", report_items),
+        ("model-edit", None),
+        ("model-fixed", None),
     ]
     page = json.loads(
         (root / "PowerBI/Reporting/Executive.Report/definition/report.json").read_text()

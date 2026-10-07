@@ -51,7 +51,9 @@ def project(tmp_path, extension, annotations=None, *, name="project"):
 
 
 def parse(root):
-    return parse_item_repository(Location(root.as_posix()))
+    from support.semantic_compilation import compile_repository
+
+    return compile_repository(parse_item_repository(Location(root.as_posix())))
 
 
 def compile_model(root):

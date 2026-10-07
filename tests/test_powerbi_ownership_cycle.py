@@ -201,7 +201,12 @@ def test_eager_model_impact_rebuilds_selected_reports_without_drops(tmp_path):
         for i in [model, *reports]
     }
     fixed = select_build(before, registered, selected=roots, inventories=inventories)
-    assert not fixed.selected_for_build
+    assert set(fixed.selected_for_build) == roots
+    assert not fixed.impact.changed
+    report_fixed = select_build(
+        before, registered, selected=roots - {model_root}, inventories=inventories
+    )
+    assert not report_fixed.selected_for_build
     write(tmp_path, "PowerBI/Sales/Revenue.tmdl", "model Model\n\tculture: en-GB\n")
     after = parse(tmp_path)
     impacted = select_build(after, registered, selected=roots, inventories=inventories)
@@ -225,7 +230,10 @@ def test_eager_model_impact_rebuilds_selected_reports_without_drops(tmp_path):
         "{}",
     )
     report_edit = select_build(
-        parse(tmp_path), registered, selected=roots, inventories=inventories
+        parse(tmp_path),
+        registered,
+        selected=roots - {model_root},
+        inventories=inventories,
     )
     assert report_edit.selected_for_build == (selected_report,)
     assert model_root not in report_edit.impact.impacted

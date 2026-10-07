@@ -188,6 +188,9 @@ edited. `extension_expectations` projects known requested values for
 readback. Known generated objects use `render` and `patching`. Ordinary PBIP
 deployment requires no complete TMDL parser.
 Package paths/bytes and resolved source metadata determine the desired signature.
+Every selected model compiles and deploys regardless of its previous signature;
+selected consuming Reports redeploy through the ordinary dependency graph.
+Report-only selection retains independent signature checks.
 
 `initialise` alone creates semantic items. Build binds the existing typed item
 and freezes its workspace/item IDs in the bundle. Definition updates permit
@@ -210,9 +213,12 @@ selected source Table/View actions and, for Lakehouse SQL sources, the existing
 SQL endpoint refresh completion. Authored partitions, storage modes, columns and
 descriptions remain unchanged by shared-expression substitution. `annotation.py`
 is the public registry for executable Weaver annotations in PBIP and both extension
-layers. It owns exact names, scopes, grammars and handlers. Source annotations join
-the existing Session metadata and source-binding owners; inferred columns inherit
-available catalogue descriptions. Same-managed-target environment overrides run
+layers. Parsing validates declarations and collects logical sources without
+executing handlers. Final compilation executes annotations once over the merged,
+target-bound pre-annotation model, then binds source metadata and generation.
+Source annotations join the existing Session metadata and source-binding owners;
+authored data definitions remain intact and only missing descriptions are enriched.
+Tables without partitions generate source definitions and columns. Same-managed-target environment overrides run
 before generation. Generated columns receive hiding policies after inference.
 Measure-table and switch handlers write known native fragments, including dynamic
 format-string definitions. Generated MeasureTable columns omit native type
@@ -252,8 +258,9 @@ Load reads the certified model root and its typed workspace/item IDs from the
 catalogue. The installed graph, load planner and Runner dispatch a built-in
 semantic refresh through `Session.semantic_model().refresh()`. Request ID,
 service timing and outcome belong to the normal Log and LoadStatus record.
-Semantic refresh has no row counts or bookmarks. A changed Build invalidates
-LoadStatus; an unchanged Build preserves it. Semantic-only Load uses REST/TDS
+Semantic refresh has no row counts or bookmarks. Model deployment invalidates
+LoadStatus because definition updates permit clearing processed data. Report-only
+Build leaves model LoadStatus intact. Semantic-only Load uses REST/TDS
 and needs neither source files nor a deployed runtime module.
 
 Connection binding is a separate planned operation. `semantic-model bind`

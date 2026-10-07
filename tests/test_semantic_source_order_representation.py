@@ -29,9 +29,7 @@ def source_bound_annotation(tmp_path, body, *, tables=""):
         "from weaver.semantic_models import Annotation\n"
         "class ACME__AfterSource(Annotation):\n"
         '    scopes = {"model"}\n'
-        "    def apply(self, target):\n"
-        '        if "Id" not in target.tables["Sales"].columns:\n'
-        "            return\n" + body,
+        "    def apply(self, target):\n" + body,
     )
     repository = parse(tmp_path)
     source = {
@@ -66,7 +64,7 @@ def transported_contribution(repository):
 
 
 @weaver_test()
-def test_source_generated_columns_allow_final_annotation_table_ordinals(tmp_path):
+def test_final_annotation_table_ordinals_survive_source_generation(tmp_path):
     initial, repository = source_bound_annotation(
         tmp_path,
         '        if "Metadata" not in target.tables:\n'

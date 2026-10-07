@@ -247,12 +247,18 @@ def read_build_state(
     catalogued = bool(workspace.catalogue)
     if not catalogued:
         require_catalogue_for(bindings)
+        from ..semantic_models.fragments import source_table
+
         references = sorted(
             str(item)
             for item, contribution in (
                 repository.semantic_models if repository else {}
             ).items()
-            if item in bindings.by_item and contribution.source_references
+            if item in bindings.by_item
+            and any(
+                not source_table(contribution.parts, name).get("partitions")
+                for name in contribution.source_references
+            )
         )
         if references:
             raise BuildError(

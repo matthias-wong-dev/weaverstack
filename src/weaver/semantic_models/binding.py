@@ -283,11 +283,22 @@ def bind_semantic_sources(repository, observed, selected):
                 table["columns"] = _source_columns(
                     table["name"], table.get("columns", []), source, reference
                 )
+                table["columns"] = [
+                    column
+                    for column in table["columns"]
+                    if (("table", table["name"]), ("column", column["name"]))
+                    not in contribution.absent
+                ]
+
             if source.get("description"):
                 table.setdefault("description", source["description"])
             for column in table.get("columns", []):
-                note = source.get("column_notes", {}).get(
-                    column.get("sourceColumn", column["name"])
+                notes = {
+                    name.casefold(): note
+                    for name, note in source.get("column_notes", {}).items()
+                }
+                note = notes.get(
+                    str(column.get("sourceColumn", column["name"])).casefold()
                 )
                 if note:
                     column.setdefault("description", note)
@@ -298,7 +309,8 @@ def bind_semantic_sources(repository, observed, selected):
             _patch_object(editor, (), "model", patch, owned)
             requested = _merge(requested, patch)
             source["mode"] = mode
-            source["access"] = "sql"
+            if generated:
+                source["access"] = "sql"
             bindings[table["name"]] = source
             origin = contribution.provenance.get(
                 f"/model/tables/{escape(table['name'])}/source", {"source": reference}

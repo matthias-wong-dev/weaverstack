@@ -23,6 +23,7 @@ class SemanticContribution:
     source_bindings: Mapping[str, dict] = field(default_factory=dict)
     expression_sources: Mapping[str, dict] = field(default_factory=dict)
     table_order: tuple[str, ...] | None = None
+
     #: Bind data sources to their connections once the definition is deployed.
     bind_data_sources: bool = False
     #: The annotation classes this contribution compiles with; not desired state.
