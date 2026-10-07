@@ -155,10 +155,10 @@ def _answer_for(code: str):
     what is being counted.
     """
 
-    from weaver.unbind import UnbindResult
+    from weaver.catalogue.unbind import ClaimDeletion
 
     if "unbind_targets" in code:
-        return UnbindResult(
+        return ClaimDeletion(
             targets=("Lakehouse/Sales",), logical_items=(), statements=()
         ).to_mapping()
     return {}

@@ -777,10 +777,10 @@ def _plan_unbind(plan: WipePlan, workspace, *, session):
     """Render the claim deletions for the unbound targets from the catalogue."""
 
     from ..catalogue.connection import catalogue_connection
-    from ..unbind import plan_unbind
+    from ..catalogue.unbind import plan_claim_deletion
 
     lakehouses, warehouses, semantic_models = _unbound_names(plan)
-    return plan_unbind(
+    return plan_claim_deletion(
         catalogue_connection(session, workspace),
         lakehouses=lakehouses,
         warehouses=warehouses,
@@ -801,8 +801,8 @@ def unbind_catalogue_claims(
     workspace: Workspace, *, lakehouses, warehouses, session=None
 ) -> dict:
     from ..catalogue.connection import catalogue_connection
+    from ..catalogue.unbind import unbind_targets
     from ..sessions.host import use_or_create_session
-    from ..unbind import unbind_targets
 
     with use_or_create_session(session, workspace=workspace) as opened:
         catalogue = catalogue_connection(opened, workspace)

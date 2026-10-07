@@ -49,6 +49,11 @@ def test_the_top_level_is_the_ordinary_notebook_surface_only():
         "WipeItemResult",
         "WipeReport",
         "WipeResult",
+        # Forgetting items: the catalogue loses its claims and Fabric is unchanged.
+        "plan_unbind",
+        "unbind",
+        "UnbindPlan",
+        "UnbindResult",
         "load",
         "LoadRunReport",
         "LoadNodeReport",
