@@ -126,7 +126,7 @@ def _kind_requirements(values) -> set[str]:
     wanted: set[str] = set()
     for value in values or ():
         kind, _name = _kind_and_name(value)
-        if kind == "semanticmodel":
+        if kind in {"semanticmodel", "powerbi", "report"}:
             continue
         if kind.startswith("warehouse"):
             wanted.add(TDS)
