@@ -7,7 +7,7 @@ import shutil
 import pytest
 from support.semantic_models import probe_model, shared_source_tmdl, source_model
 from support.weaver_test import weaver_test
-from support.workspaces import InventoryClient, _identifier
+from support.workspaces import InventoryClient
 from test_semantic_model_build_cycle import ITEM, DefinitionClient, answer_catalogue
 from test_semantic_model_load_cycle import COMPLETED, REQUEST_ID, answer_installed
 
@@ -250,15 +250,14 @@ def test_public_build_binds_sources_and_publishes_object_dependencies(
         assert {
             (row["referenced_item_type"], row["referenced_item_name"]) for row in deps
         } == {("Warehouse", "Serving")}
-        source = session.resolve_item("Serving_Dev", item_type="Warehouse")
         objects = {row["table_name"]: row for row in rows["SemanticModelTable"]}
-        metadata = json.loads(objects["Sales"]["source_binding"])
-        assert metadata["reference"] == "Warehouse/Serving/Cake.Sales"
-        assert metadata["object_type"] == "table"
-        assert metadata["item_type"] == "Warehouse"
-        assert metadata["item_id"] == source.id
-        assert metadata["workspace_id"] == source.workspace_id
-        assert json.loads(objects["Summary"]["source_binding"])["object_type"] == "view"
+        assert {name: row["source_access"] for name, row in objects.items()} == {
+            "Sales": "sql",
+            "SalesAgain": "sql",
+            "Summary": "sql",
+        }
+        # Only Installation names the physical item.
+        assert "Serving_Dev" not in json.dumps(objects)
         assert not session.python and not session.spark_sql
 
 
@@ -679,13 +678,10 @@ def test_environment_rebinding_and_unchanged_public_build_use_source_signatures(
                 rows = published()
             signatures.append(rows[ITEM]["Registry"][0]["signature"])
             bindings.append(
-                json.loads(
-                    next(
-                        r["source_binding"]
-                        for r in rows[ITEM]["SemanticModelTable"]
-                        if r["table_name"] == "Sales"
-                    )
-                )
+                [
+                    {k: v for k, v in r.items() if k != "signature"}
+                    for r in rows[ITEM]["SemanticModelTable"]
+                ]
             )
             definitions.append(
                 decode_model(session.semantic_model("Reporting_Dev").definition)
@@ -719,13 +715,8 @@ def test_environment_rebinding_and_unchanged_public_build_use_source_signatures(
             assert not client.calls
     assert signatures[0] != signatures[1]
     assert definitions[0] != definitions[1]
-    assert (
-        bindings[0]["reference"]
-        == bindings[1]["reference"]
-        == "Warehouse/Serving/Cake.Sales"
-    )
-    assert bindings[0]["item_id"] != bindings[1]["item_id"]
-    assert bindings[0]["workspace_id"] != bindings[1]["workspace_id"]
+    # The catalogue's semantic rows are the same in every environment.
+    assert bindings[0] == bindings[1]
 
 
 @weaver_test()
@@ -836,16 +827,11 @@ def test_lakehouse_source_keeps_tables_identity_and_plans_sql_readiness(
         (edge,) = rows[ITEM]["Dependency"]
         assert edge["dependency_reference"] == "Lakehouse/Curated/Tables/Cake.Customer"
         assert edge["referenced_schema_name"] == "Tables/Cake"
-        binding = json.loads(
-            next(
-                r["source_binding"]
-                for r in rows[ITEM]["SemanticModelTable"]
-                if r["table_name"] == "Customer"
-            )
+        customer = next(
+            r for r in rows[ITEM]["SemanticModelTable"] if r["table_name"] == "Customer"
         )
-        assert binding["item_type"] == "Lakehouse"
-        assert binding["item_id"] == _identifier("Lakehouse", "Serving_Dev")
-        assert binding["database"] == "Serving_Dev"
+        assert customer["source_access"] == "sql"
+        assert "Serving_Dev" not in json.dumps(customer)
         table = decode_model(session.semantic_model("Reporting_Dev").definition)[
             "model"
         ]["tables"][0]
