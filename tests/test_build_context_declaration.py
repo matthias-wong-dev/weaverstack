@@ -513,6 +513,37 @@ def test_install_selection_does_not_expose_the_internal_catalogue_item():
     assert all(line.endswith("up to date") for line in rendered.splitlines()[1:])
 
 
+@weaver_test()
+def test_a_long_item_name_keeps_its_status_apart():
+    from weaver.build_bundle import (
+        BuildSelection,
+        Impact,
+        ItemBinding,
+        ItemBindings,
+        LakehouseBinding,
+    )
+    from weaver.declaration.model import WeaverItemId
+    from weaver.operations.build import _selection_lines
+    from weaver.targets import ItemRef
+
+    names = ("Lakehouse/Sales", "Lakehouse/Quarterly reporting archive")
+    bindings = ItemBindings(
+        tuple(
+            ItemBinding(
+                WeaverItemId.parse(name),
+                LakehouseBinding(ItemRef(f"{i}_LH"), workspace_name="Analytics"),
+            )
+            for i, name in enumerate(names)
+        )
+    )
+    selection = BuildSelection(Impact((), (), ()), (), (), ())
+
+    lines = _selection_lines(selection, bindings)[1:]
+
+    assert [line.split("  ")[1] for line in lines] == list(names)
+    assert len({line.index("up to date") for line in lines}) == 1
+
+
 # --- and missing context is a sentence ----------------------------------------
 
 
