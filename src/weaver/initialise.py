@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .declaration.model import LAKEHOUSE, SEMANTIC_MODEL, WAREHOUSE, WeaverItemId
+from .declaration.model import LAKEHOUSE, SEMANTIC_MODEL, WAREHOUSE
 from .errors import WeaverError
 from .onboarding import (
     WORKSPACE_CONFIG_FILE,
@@ -471,35 +471,22 @@ def _planned(
 def _project_culture(destination: Path, name: str) -> str | None:
     """The culture of the project's model of this name, or the one they share.
 
-    Fabric fixes a semantic model's culture when it is created, and refuses a
+    Fabric fixes a semantic model's culture at creation and rejects a
     definition in another culture, so the empty model starts in the project's.
     """
 
-    root = destination / SEMANTIC_MODEL
-    if not root.is_dir():
-        return None
+    from .declaration.repository import parse_item_repository
     from .locations import Location
     from .semantic_models.objects import TmdlDefinition
-    from .semantic_models.source import read_semantic_contribution
-    from .store import FilesystemStore
 
-    paths = {
-        p.relative_to(destination).as_posix() for p in root.rglob("*") if p.is_file()
-    }
+    if not destination.is_dir():
+        return None
+    repository = parse_item_repository(Location(destination.as_posix()))
     cultures = {}
-    for folder in sorted(p for p in root.iterdir() if p.is_dir()):
-        try:
-            contribution = read_semantic_contribution(
-                WeaverItemId(SEMANTIC_MODEL, folder.name),
-                root=Location(destination.as_posix()),
-                store=FilesystemStore(),
-                paths=paths,
-            )
-        except WeaverError:
-            continue
+    for item, contribution in repository.semantic_models.items():
         culture = TmdlDefinition(contribution.parts).model.culture
         if isinstance(culture, str) and culture:
-            cultures[folder.name] = culture
+            cultures[item.item_name] = culture
     if name in cultures:
         return cultures[name]
     shared = set(cultures.values())
@@ -543,7 +530,7 @@ def _create_missing(
                         (
                             (
                                 semantic_extension().encode("utf-8"),
-                                "initialise extension.tmdl",
+                                f"PowerBI/{wanted.name}/{wanted.name}.tmdl",
                             ),
                         ),
                     )

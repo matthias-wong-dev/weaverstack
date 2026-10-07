@@ -12,6 +12,7 @@ from ..signatures import implementation_signature
 from .metadata import ObjectId
 
 if TYPE_CHECKING:
+    from ..powerbi import PowerBIProject, ReportContribution
     from ..semantic_models.source import SemanticContribution
     from .programmable import Programmable
     from .schemas import SchemaSes
@@ -20,7 +21,8 @@ if TYPE_CHECKING:
 LAKEHOUSE = "Lakehouse"
 WAREHOUSE = "Warehouse"
 SEMANTIC_MODEL = "SemanticModel"
-ITEM_TYPES = frozenset({LAKEHOUSE, WAREHOUSE, SEMANTIC_MODEL})
+REPORT = "Report"
+ITEM_TYPES = frozenset({LAKEHOUSE, WAREHOUSE, SEMANTIC_MODEL, REPORT})
 
 #: The two areas a Lakehouse holds, and the first component of every Lakehouse
 #: data identity. Fabric keeps a Lakehouse's Delta tables under ``Tables`` and
@@ -737,6 +739,8 @@ class WeaverRepository:
 
     name: str
     items: tuple[WeaverItem, ...]
+    powerbi_projects: Mapping[str, "PowerBIProject"] = field(default_factory=dict)
+    reports: Mapping[WeaverItemId, "ReportContribution"] = field(default_factory=dict)
     root: Location | None = None
     source_documents: Mapping[WeaverDocumentId, "SourceDocument"] = field(
         default_factory=dict

@@ -18,7 +18,7 @@ from weaver.semantic_models.definition import encode_definition
 @weaver_test()
 def test_role_members_must_be_empty_before_build_can_certify_removal(tmp_path):
     root, _, bindings, session, state = prepared(tmp_path)
-    addon = root / str(ITEM) / "extension.tmdl"
+    addon = root / str(ITEM) / f"{ITEM.item_name}.tmdl"
     addon.write_text(
         addon.read_text() + "\nrole Reader\n\tmodelPermission: read\n",
         encoding="utf-8",
@@ -85,7 +85,7 @@ def test_multiline_text_equivalence_allows_build_certification(tmp_path, field):
     lines = ["Calendar[Year] > 2020", "  && Calendar[Year] < 2030"]
     text = "\n".join(lines)
     description_lines = ["Calendar[Year] > 2020", "&& Calendar[Year] < 2030"]
-    extension = root / str(ITEM) / "extension.tmdl"
+    extension = root / str(ITEM) / f"{ITEM.item_name}.tmdl"
     extension.write_text(
         extension.read_text().replace(
             "table Calendar",
