@@ -15,9 +15,13 @@ from typing import Protocol, Sequence
 
 from .metadata import ASSUMPTION, TEST
 
+#: A SemanticModel DAX Test's expected side, run in its Expected source.
+EXPECTED_SQL = "Expected SQL"
+
 CONTRACT = {
     TEST: (2, "expected then actual"),
     ASSUMPTION: (1, "the violating rows"),
+    EXPECTED_SQL: (1, "the expected rows"),
 }
 
 
