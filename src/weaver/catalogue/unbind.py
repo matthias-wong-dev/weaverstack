@@ -1,19 +1,19 @@
-"""Remove catalogue installations for explicitly named physical targets."""
+"""Delete a catalogue's claims for explicitly named physical targets."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .catalogue.reader import read_table
-from .catalogue.reconcile import prune_installation
-from .catalogue.render import InstallationScope, InstallationScopes, render_delete_scope
-from .catalogue.tables import CURRENT_STATE_TABLES, INSTALLATION, REGISTRY
-from .declaration.model import LAKEHOUSE, SEMANTIC_MODEL, WAREHOUSE
-from .targets import ItemRef
+from ..declaration.model import LAKEHOUSE, SEMANTIC_MODEL, WAREHOUSE
+from ..targets import ItemRef
+from .reader import read_table
+from .reconcile import prune_installation
+from .render import InstallationScope, InstallationScopes, render_delete_scope
+from .tables import CURRENT_STATE_TABLES, INSTALLATION, REGISTRY
 
 
 @dataclass(frozen=True)
-class UnbindResult:
+class ClaimDeletion:
     targets: tuple[str, ...]
     logical_items: tuple[str, ...]
     statements: tuple[str, ...]
@@ -27,13 +27,13 @@ class UnbindResult:
         }
 
 
-def plan_unbind(
+def plan_claim_deletion(
     catalogue,
     *,
     lakehouses=(),
     warehouses=(),
     semantic_models=(),
-) -> UnbindResult:
+) -> ClaimDeletion:
     """Render complete catalogue deletion without inspecting physical targets."""
 
     selected = (
@@ -67,7 +67,7 @@ def plan_unbind(
     )
     statements = (*statements[:1], *current, *statements[1:])
     targets = tuple(f"{item_type}/{name}" for item_type, name in sorted(selected))
-    return UnbindResult(
+    return ClaimDeletion(
         targets=targets,
         logical_items=tuple(map(str, scopes)),
         statements=statements,
@@ -82,10 +82,10 @@ def plan_unbind(
 
 def unbind_targets(
     catalogue, *, lakehouses=(), warehouses=(), semantic_models=()
-) -> UnbindResult:
+) -> ClaimDeletion:
     """Execute target-directed catalogue deletion and touch no physical target."""
 
-    result = plan_unbind(
+    result = plan_claim_deletion(
         catalogue,
         lakehouses=lakehouses,
         warehouses=warehouses,

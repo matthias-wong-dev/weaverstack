@@ -721,6 +721,12 @@ source. Unsupported source or connection forms are refused before any selected
 target is changed. Semantic wipe never owns source data, shared connections or
 gateways.
 
+An unbind removes a catalogue's claims and changes nothing in Fabric.
+`plan_unbind` reads `_.Installation` and the workspace's items, so the plan names
+the logical items that stop being managed and whether each physical item still
+exists; the CLI confirms only an item that still exists. `unbind` executes the
+claim deletion as a wipe of no targets. The catalogue itself is never unbound.
+
 A mirror plans before it acts too. `check_mirror` proves the source and refuses
 unsafe destinations, then `mirror_mutation_plan` reads what the mirror needs,
 source code definitions, case-exact source paths and the deployed load tree,

@@ -630,11 +630,11 @@ def _emptied(monkeypatch, removed=("Sales",), area="delta"):
 
 
 def _unbinding(monkeypatch, asked):
-    from weaver.unbind import UnbindResult
+    from weaver.catalogue.unbind import ClaimDeletion
 
     def plan_unbind(plan, _workspace, **_options):
         asked.append(plan.unbound)
-        return UnbindResult(
+        return ClaimDeletion(
             targets=plan.unbound, logical_items=(), statements=("delete claims",)
         )
 

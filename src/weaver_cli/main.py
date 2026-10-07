@@ -84,6 +84,13 @@ SQL / Direct Lake source in a hidden columnless table. Unsupported source and
 connection forms are refused before mutation.\
 """
 
+UNBIND_DESCRIPTION = """\
+Remove the catalogue's claims for physical items. Nothing in Fabric changes.
+
+Use it after deleting an item in Fabric, or to stop managing one. Unbinding an
+item that still exists asks for confirmation.\
+"""
+
 DOCTOR_DESCRIPTION = """\
 Check Microsoft Fabric connectivity.
 
@@ -195,6 +202,14 @@ def _requires_wipe(args) -> frozenset[str]:
     if not targets:
         return requirements(AUTH, RESOLVER, ONELAKE, TDS)
     return requirements(AUTH, RESOLVER, TDS, *_kind_requirements(targets))
+
+
+def _requires_unbind(args) -> frozenset[str]:
+    """The catalogue over TDS and the workspace's item list; no target is opened."""
+
+    from weaver.sessions.requirements import AUTH, RESOLVER, TDS, requirements
+
+    return requirements(AUTH, RESOLVER, TDS)
 
 
 def _requires_mirror(args) -> frozenset[str]:
@@ -682,6 +697,31 @@ def build_parser() -> argparse.ArgumentParser:
         requires=_requires_wipe,
         lakehouses=_physical_target_lakehouses,
     )
+
+    unbind = subcommands.add_parser(
+        "unbind",
+        help="Remove the catalogue's claims for physical items.",
+        description=UNBIND_DESCRIPTION,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    unbind.add_argument(
+        "targets",
+        nargs="+",
+        metavar="TARGET",
+        help="Physical items to unbind: Lakehouse/Name, Warehouse/Name or SemanticModel/Name.",
+    )
+    _add_workspace_args(unbind, include_environment=False)
+    unbind.add_argument(
+        "--dry-run", action="store_true", help="Show what this would unbind."
+    )
+    unbind.add_argument(
+        "--yes",
+        action="store_true",
+        help="Unbind items that still exist without asking.",
+    )
+    unbind.add_argument("--json", action="store_true", help="Emit the result as JSON.")
+    add_non_interactive(unbind)
+    unbind.set_defaults(handler=handle_unbind, requires=_requires_unbind)
 
     mirror = subcommands.add_parser(
         "mirror",
@@ -1793,6 +1833,57 @@ def handle_wipe(args: argparse.Namespace) -> int:
         print("Wipe complete\n")
         for item in result.items:
             print(f"  {item.describe()}")
+    return 0
+
+
+def handle_unbind(args: argparse.Namespace) -> int:
+    """Show the plan, and confirm only when an unbound item still exists."""
+
+    import json
+
+    workspace = _resolve_workspace(args)
+
+    with _running_session(args, workspace) as opened:
+        plan = weaver.plan_unbind(
+            args.targets, session=opened, **_command_context(workspace)
+        )
+        if args.dry_run:
+            if args.json:
+                print(json.dumps(plan.to_mapping(), indent=2))
+            else:
+                print(plan.describe())
+                print("\nNothing was changed.")
+            return 0
+
+        if not args.json:
+            print(plan.describe())
+            print()
+
+        remaining = plan.still_in_fabric
+        if remaining and not authorised(args):
+            named = ", ".join(remaining)
+            if args.json or not can_prompt(args):
+                _render_error(
+                    CommandError(
+                        f"{named} {'is' if len(remaining) == 1 else 'are'} still in "
+                        "Fabric and would no longer be managed. "
+                        "Pass --yes to unbind, or delete the item first."
+                    ),
+                    args=args,
+                )
+                return 1
+            if not confirm(args, f"{named} would no longer be managed. Unbind? [y/N] "):
+                _render_error(CommandError("Cancelled."), args=args)
+                return 1
+
+        result = weaver.unbind(plan=plan, session=opened)
+
+    if args.json:
+        print(json.dumps(result.to_mapping(), indent=2))
+    else:
+        print("Unbind complete\n")
+        for item in result.logical_items:
+            print(f"  {item}")
     return 0
 
 
