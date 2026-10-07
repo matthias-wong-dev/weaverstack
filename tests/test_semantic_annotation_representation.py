@@ -5,6 +5,7 @@ from support.weaver_test import weaver_test
 from test_semantic_annotation_declaration import ITEM, compile_source
 
 from weaver.errors import ConfigError
+from weaver.semantic_models.builtin_annotations import MEASURE_TABLE_SOURCE
 
 
 def extension_model(tmp_path, text):
@@ -107,13 +108,13 @@ def test_measure_table_generates_native_info_partition_and_preserves_visibility(
         {
             "name": "Metric",
             "mode": "import",
-            "source": {"type": "calculated", "expression": "INFO.VIEW.MEASURES()"},
+            "source": {"type": "calculated", "expression": MEASURE_TABLE_SOURCE},
         }
     ]
     assert table["measures"] == [{"name": "One", "expression": "1"}]
     data = semantic.parts["definition/tables/Metric.tmdl"]
     assert (
-        b"INFO.VIEW.MEASURES()" in data
+        b'"Measure name", [Name]' in data
         and b"annotation 'Weaver.MeasureTable' = true" in data
     )
 
@@ -133,11 +134,11 @@ def test_switch_generates_value_and_dynamic_format_for_qualified_measures(tmp_pa
     value = next(m for m in table["measures"] if m["name"] == "Value")
     assert (
         value["expression"]
-        == "SWITCH(\n    SELECTEDVALUE('Metric'[Name]),\n    \"Revenue\", 'Sales'[Revenue],\n    \"Gross Margin %\", 'Finance'[Gross Margin %]\n)"
+        == "SWITCH(\n    SELECTEDVALUE('Metric'[Measure name]),\n    \"Revenue\", 'Sales'[Revenue],\n    \"Gross Margin %\", 'Finance'[Gross Margin %]\n)"
     )
     assert (
         value["formatStringDefinition"]["expression"]
-        == 'SWITCH(\n    SELECTEDVALUE(\'Metric\'[Name]),\n    "Revenue", "0.00",\n    "Gross Margin %", "0.0%"\n)'
+        == 'SWITCH(\n    SELECTEDVALUE(\'Metric\'[Measure name]),\n    "Revenue", "0.00",\n    "Gross Margin %", "0.0%"\n)'
     )
     assert (
         b"formatStringDefinition =" in semantic.parts["definition/tables/Metric.tmdl"]
@@ -187,7 +188,7 @@ def test_switch_preserves_usable_source_dynamic_format_expression(tmp_path):
     value = next(m for m in metric["measures"] if m["name"] == "Value")
     assert (
         value["formatStringDefinition"]["expression"]
-        == "SWITCH(\n    SELECTEDVALUE('Metric'[Name]),\n    \"Revenue\", "
+        == "SWITCH(\n    SELECTEDVALUE('Metric'[Measure name]),\n    \"Revenue\", "
         + expression
         + "\n)"
     )

@@ -137,13 +137,15 @@ Weaver's own annotations are
   Consuming tables share one M expression for a logical source. Workspace and CLI
   source overrides must resolve to the selected or installed managed target;
   build the source into its new target before changing that binding.
-- `Weaver.MeasureTable = true` on a table generates its
-  `INFO.VIEW.MEASURES()` calculated partition. Native `isHidden` controls visibility.
+- `Weaver.MeasureTable = true` on a table generates a calculated partition over
+  `INFO.VIEW.MEASURES()` with the columns Measure name, Expression, Format
+  string, Format string definition, Description, Display folder, Table and
+  Data category. Native `isHidden` controls visibility.
   Use a bare table or the existing generated recipe; authored partitions are
   reported as a conflict.
 - `Weaver.Switch` on a measure lists `Table[Measure]` references, one per line.
   A unique unqualified reference is accepted. The generated value and dynamic
-  format expressions select through the measure table's `[Name]` column. Static
+  format expressions select through the measure table's `[Measure name]` column. Static
   formats and context-independent dynamic formats are supported. Ambiguous names,
   duplicate selector labels, switch-to-switch references and measure-context
   dependent format expressions fail with diagnostics.

@@ -6,6 +6,7 @@ import pytest
 from support.weaver_test import weaver_test
 from test_semantic_annotation_declaration import ITEM, PBIP, compile_source
 
+from weaver.semantic_models.builtin_annotations import MEASURE_TABLE_SOURCE
 from weaver.semantic_models.tmdl import PackageEditor
 
 NAMES = (
@@ -94,7 +95,7 @@ def test_native_annotation_executes_from_each_authoring_layer(tmp_path, name, or
         assert column["isHidden"] is True
     elif name == "Weaver.MeasureTable":
         table = next(t for t in semantic.requested["tables"] if t["name"] == "Metric")
-        assert table["partitions"][0]["source"]["expression"] == "INFO.VIEW.MEASURES()"
+        assert table["partitions"][0]["source"]["expression"] == MEASURE_TABLE_SOURCE
     elif name == "Weaver.Switch":
         table = next(t for t in semantic.requested["tables"] if t["name"] == "Metric")
         value = next(m for m in table["measures"] if m["name"] == "Value")

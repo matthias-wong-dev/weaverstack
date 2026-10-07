@@ -28,6 +28,7 @@ from weaver.catalogue.tables import (
     SEMANTIC_MODEL_TABLE,
     TABLE_DICTIONARY,
 )
+from weaver.semantic_models.builtin_annotations import MEASURE_TABLE_SOURCE
 from weaver.semantic_models.definition import decode_model
 
 SOURCE = "Warehouse/_weaver/_.TableDictionary"
@@ -169,11 +170,11 @@ def test_public_annotation_build_readback_load_and_fixed_point(
     expression = metric["partitions"][0]["source"]["expression"]
     assert (
         "\n".join(expression) if isinstance(expression, list) else expression
-    ).strip() == "INFO.VIEW.MEASURES()"
+    ).strip() == MEASURE_TABLE_SOURCE
     value = next(m for m in metric["measures"] if m["name"] == "Value")
     rendered_value = value["expression"]
     rendered_format = value["formatStringDefinition"]["expression"]
-    assert "SELECTEDVALUE('Metric'[Name])" in (
+    assert "SELECTEDVALUE('Metric'[Measure name])" in (
         "\n".join(rendered_value)
         if isinstance(rendered_value, list)
         else rendered_value

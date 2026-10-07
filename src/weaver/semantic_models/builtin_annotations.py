@@ -84,8 +84,32 @@ class Weaver__AutoHideForeignKeys(Annotation):
                     target.tables[table].columns[column].isHidden = True
 
 
+#: Native measure metadata under readable column names. DataType is omitted:
+#: a calculated table reads it as blank, and Fabric fails to save a projection
+#: of it.
+MEASURE_TABLE_COLUMNS = (
+    ("Measure name", "Name"),
+    ("Expression", "Expression"),
+    ("Format string", "FormatString"),
+    ("Format string definition", "FormatStringDefinition"),
+    ("Description", "Description"),
+    ("Display folder", "DisplayFolder"),
+    ("Table", "Table"),
+    ("Data category", "DataCategory"),
+)
+MEASURE_TABLE_SOURCE = (
+    "SELECTCOLUMNS(\n    INFO.VIEW.MEASURES(),\n"
+    + ",\n".join(f'    "{name}", [{native}]' for name, native in MEASURE_TABLE_COLUMNS)
+    + "\n)"
+)
+MEASURE_NAME_COLUMN = MEASURE_TABLE_COLUMNS[0][0]
+
+
 class Weaver__MeasureTable(Annotation):
-    """When true, generate the table as INFO.VIEW.MEASURES()."""
+    """When true, generate the table from INFO.VIEW.MEASURES().
+
+    Its columns are :data:`MEASURE_TABLE_COLUMNS`.
+    """
 
     scopes = frozenset({"table"})
 
@@ -97,7 +121,7 @@ class Weaver__MeasureTable(Annotation):
             len(partitions) != 1
             or partitions[0].name != target.name
             or partitions[0].sourceType != "calculated"
-            or partitions[0].source != "INFO.VIEW.MEASURES()"
+            or partitions[0].source != MEASURE_TABLE_SOURCE
         ):
             self.error("cannot replace an authored partition; use a bare table")
         partition = (
@@ -107,7 +131,7 @@ class Weaver__MeasureTable(Annotation):
         )
         partition.sourceType = "calculated"
         partition.mode = "import"
-        partition.set_expression("source", "INFO.VIEW.MEASURES()")
+        partition.set_expression("source", MEASURE_TABLE_SOURCE)
 
 
 def _dax_string(value):
@@ -191,7 +215,10 @@ class Weaver__Switch(Annotation):
                 f"    {_dax_string(name)}, "
                 + (dynamic or _dax_string(measure.formatString or ""))
             )
-        selector = f"SWITCH(\n    SELECTEDVALUE({quote_name(selectors[0])}[Name]),\n"
+        selector = (
+            f"SWITCH(\n    SELECTEDVALUE({quote_name(selectors[0])}"
+            f"[{MEASURE_NAME_COLUMN}]),\n"
+        )
         target.expression = selector + ",\n".join(values) + "\n)"
         target.set_expression(
             "formatStringDefinition", selector + ",\n".join(formats) + "\n)"
