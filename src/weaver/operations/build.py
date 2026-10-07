@@ -117,20 +117,29 @@ def build(
         environment=environment,
         workspace_config=workspace_config,
         session=session,
+        needs_catalogue=False,
     )
 
     selected = _item_bindings(items, resolved_workspace)
     from ..build_bundle.targets import WarehouseBinding, effective_item_bindings
+    from ..build_bundle.workflow import require_catalogue_for
 
     workspace_name = getattr(resolved_workspace, "workspace", None)
-    bindings = effective_item_bindings(
-        selected,
-        control_item=resolved_workspace.catalogue_item,
-        workspace_name=workspace_name,
-    )
-    control = WarehouseBinding(
-        resolved_workspace.catalogue_item, workspace_name=workspace_name
-    )
+    if resolved_workspace.catalogue:
+        bindings = effective_item_bindings(
+            selected,
+            control_item=resolved_workspace.catalogue_item,
+            workspace_name=workspace_name,
+        )
+        control = WarehouseBinding(
+            resolved_workspace.catalogue_item, workspace_name=workspace_name
+        )
+    else:
+        try:
+            require_catalogue_for(selected)
+        except BuildError as exc:
+            raise CommandError(str(exc)) from exc
+        bindings, control = selected, None
     source_location, source_store = _repository_source(source, resolved_workspace)
 
     # Parse and validate the complete request before REST target resolution,
@@ -195,7 +204,7 @@ def _spark_home(bindings) -> str | None:
 def _build_context_lines(workspace: Workspace, bindings) -> tuple[str, ...]:
     lines = [
         f"Workspace  {workspace.workspace}",
-        f"Catalogue  {workspace.catalogue}",
+        f"Catalogue  {workspace.catalogue or 'none'}",
         "Targets",
     ]
     for binding in bindings.entries:
@@ -217,7 +226,7 @@ def _preflight(workspace: Workspace, bindings, *, session) -> None:
     preflight_fabric_targets(
         bindings,
         workspace=workspace.workspace,
-        control_item=workspace.catalogue_item,
+        control_item=workspace.catalogue_item if workspace.catalogue else None,
         environment=workspace.environment,
         client=session.resolver(workspace).client if session is not None else None,
     )

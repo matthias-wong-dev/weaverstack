@@ -58,7 +58,7 @@ class Preflight:
 def required_items(
     bindings,
     *,
-    control_item: str,
+    control_item: str | None,
     environment=None,
 ) -> tuple[RequiredItem, ...]:
     """Derive requirements from bindings.
@@ -66,9 +66,11 @@ def required_items(
     Targets need not appear in workspace configuration.
     """
 
-    wanted: list[RequiredItem] = [
-        RequiredItem(str(control_item), WAREHOUSE, "Weaver catalogue")
-    ]
+    wanted: list[RequiredItem] = (
+        [RequiredItem(str(control_item), WAREHOUSE, "Weaver catalogue")]
+        if control_item is not None
+        else []
+    )
     if environment:
         from ..workspaces import EnvironmentRef
 
@@ -90,7 +92,7 @@ def preflight_fabric_targets(
     bindings,
     *,
     workspace: str,
-    control_item: str,
+    control_item: str | None,
     environment=None,
     client=None,
 ) -> Preflight:

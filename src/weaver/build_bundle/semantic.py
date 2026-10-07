@@ -96,6 +96,43 @@ def semantic_stage(repository, item, target, *, catalogue_target=None):
     )
 
 
+def semantic_readback_stage(repository, item, target):
+    """Verify a deployed definition on the model itself, publishing nothing."""
+
+    contribution = repository.semantic_models[item]
+    executor = "semantic_readback"
+    filename = f"{target.id}.{executor}.json"
+    content = (
+        json_text(
+            {
+                "requested": contribution.requested,
+                "owned": contribution.owned,
+                "target_id": target.id,
+                "item": str(item),
+            }
+        )
+        + "\n"
+    ).encode("utf-8")
+    action = InstallAction(
+        id=f"{executor}-{target.id}",
+        kind=executor,
+        executor=executor,
+        resource_node_id=str(item),
+        payload=filename,
+        payload_sha256=sha256_hex(content),
+    )
+    return PlannedStage(
+        phase=CATALOGUE,
+        slug="semantic-readback",
+        index=0,
+        description="Verify deployed semantic definitions",
+        payloads={filename: content},
+        provides={},
+        requires={action.id: (object_key(item),)},
+        batches=(BuildBatch(id=action.id, target_id=target.id, actions=(action,)),),
+    )
+
+
 def publication_catalogues(current, desired, selected_models):
     """Retain observed dictionaries until installation supplies replacement rows."""
     rows = {item: dict(tables) for item, tables in desired.rows.items()}

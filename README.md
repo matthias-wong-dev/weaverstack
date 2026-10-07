@@ -114,6 +114,20 @@ and consuming-table dependencies for installed Load ordering. Unknown M
 navigation remains unknown. Source mapping preserves authored columns,
 descriptions, partitions and storage modes.
 
+### Without a catalogue
+
+A workspace with no catalogue still builds and refreshes semantic models:
+
+```bash
+weaver build ./reporting --item SemanticModel/Reporting --workspace Analytics
+weaver load SemanticModel/Reporting --workspace Analytics
+```
+
+Build deploys each selected model and verifies its readback. With no catalogue
+there is no record of what is installed, so every Build redeploys, and Load
+records nothing. Lakehouse and Warehouse items, `Weaver.Source`, lineage and
+`load --stale`, `--name` or `--reload` need a catalogue.
+
 ### Load and connections
 
 ```bash

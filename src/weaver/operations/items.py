@@ -56,7 +56,7 @@ def run_context_lines(workspace, items, installed) -> tuple[str, ...]:
 
     lines = [
         f"Workspace  {workspace.workspace}",
-        f"Catalogue  {workspace.catalogue}",
+        f"Catalogue  {workspace.catalogue or 'none'}",
         "Targets",
     ]
     for item in items:

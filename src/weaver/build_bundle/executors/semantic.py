@@ -33,6 +33,22 @@ class SemanticModelExecutor:
             client.bind_data_sources()
 
 
+class SemanticReadbackExecutor:
+    name = "semantic_readback"
+
+    def execute(self, action, payload, context):
+        spec = json.loads(payload)
+        if spec["target_id"] != context.target.bound.id:
+            raise InstallError("Semantic readback requires its bound target")
+        model = decode_model(
+            context.semantic_model(context.target.bound).get_definition()
+        )
+        from ...semantic_models.deployed import verify_requested
+
+        verify_requested(spec["requested"], model, owned=spec["owned"])
+        return {"semantic_definition": model}
+
+
 class SemanticCatalogueExecutor:
     name = "semantic_catalogue"
 

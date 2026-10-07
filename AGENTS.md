@@ -620,6 +620,10 @@ Enforceable as the corresponding code lands:
   Spark creation use reader 3/writer 7 by default; schema features are per Table.
   Explicit minima may be raised by features required by that Table. The direct
   profile verifies the committed protocol, schema and properties before publishing.
+- **Semantic models compile without a catalogue.** With no catalogue, Build
+  accepts only SemanticModel items, deploys every selected model and verifies
+  readback on the model; Load refreshes the named models and records nothing.
+  Nothing target-local stands in for the catalogue, so there is no fixed point.
 - **The central catalogue is authoritative.** No target-local catalogue, no
   target-local runtime, no target-local logging authority.
 - **Certification is per object.** Before a rebuild, the selected objects and

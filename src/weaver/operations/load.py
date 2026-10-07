@@ -9,7 +9,7 @@ from typing import Sequence
 
 from ..catalogue.state import READABLE_TABLES
 from ..catalogue.tables import LOAD_STATUS
-from ..declaration.model import WeaverItemId
+from ..declaration.model import SEMANTIC_MODEL, WeaverItemId
 from ..errors import CommandError, LoadError
 from ..health import assess_load, resolve_as_of
 from ..installed import (
@@ -106,7 +106,12 @@ def load(
         environment=environment,
         workspace_config=workspace_config,
         session=session,
+        needs_catalogue=False,
     )
+    if not resolved_workspace.catalogue:
+        _refuse_without_catalogue(
+            requested, names=selected_names, stale=stale, reload=reload
+        )
 
     from ..sessions.host import use_or_create_session
 
@@ -115,10 +120,21 @@ def load(
             "Load (dry run)" if dry_run else "Load",
             ", ".join(map(str, requested)) or "every installed item",
         ) as frame:
+            state = None
+            if not resolved_workspace.catalogue:
+                from ..run import RunState
+
+                with opened.step("Resolve semantic models"):
+                    state = RunState(
+                        catalogue=uncatalogued_semantic_models(
+                            requested, workspace=resolved_workspace, session=opened
+                        )
+                    )
             report = run_load(
                 opened,
                 workspace=resolved_workspace,
                 items=requested,
+                state=state,
                 names=selected_names,
                 fault_tolerant=fault_tolerant,
                 dry_run=dry_run,
@@ -129,6 +145,72 @@ def load(
             )
             frame.failed = not report.succeeded
             return report
+
+
+def _refuse_without_catalogue(requested, *, names, stale, reload) -> None:
+    others = sorted(str(i) for i in requested if i.item_type != SEMANTIC_MODEL)
+    if not requested or others:
+        raise CommandError(
+            "Loading "
+            + (", ".join(others) or "every installed item")
+            + " needs a Weaver catalogue: pass catalogue='Warehouse/Weaver', or "
+            "give one in workspace configuration. Without one, name the semantic "
+            "models to refresh"
+        )
+    if names or stale or reload:
+        raise CommandError(
+            "--name, --stale and --reload need a Weaver catalogue; without one, "
+            "load refreshes the named semantic models"
+        )
+
+
+def uncatalogued_semantic_models(items, *, workspace, session):
+    """Installed rows for semantic models in a workspace with no catalogue.
+
+    Without a catalogue nothing records an installation, so each named model is
+    resolved in the workspace and refreshed as it stands.
+    """
+
+    from ..catalogue.state import Catalogue
+    from ..targets import physical_item
+
+    rows = {}
+    for item in items:
+        name = (
+            physical_item(workspace.target_for(item)).name
+            if item in workspace.configured_items
+            else item.item_name
+        )
+        model = session.resolve_item(name, item_type=SEMANTIC_MODEL)
+        identity = {
+            "item_type": item.item_type,
+            "item_name": item.item_name,
+            "schema_name": "",
+            "object_name": "",
+        }
+        rows[item] = {
+            "Installation": (
+                {
+                    "item_type": item.item_type,
+                    "item_name": item.item_name,
+                    "target_name": name,
+                    "workspace_id": model.workspace_id,
+                    "item_id": model.id,
+                },
+            ),
+            "Registry": (
+                {
+                    **identity,
+                    "object_type": "semantic_model",
+                    "object_role": "data",
+                    "signature": "uncatalogued",
+                },
+            ),
+            "SemanticModel": (
+                {**identity, "signature": "uncatalogued", "definition": "{}"},
+            ),
+        }
+    return Catalogue(rows)
 
 
 def _refuse_conflicting_modes(*, stale: bool, reload: bool, as_of) -> None:
@@ -286,10 +368,11 @@ def execute_load(session, *, workspace, runner, started) -> LoadRunReport:
     from ..run import dispatch_primitive, open_run_record
     from ..run.runner import Lanes
 
-    # A dry run must not create run evidence or move bookmarks.
+    # A dry run must not create run evidence or move bookmarks, and a workspace
+    # with no catalogue has nowhere to record it.
     record = (
         None
-        if runner.request.dry_run
+        if runner.request.dry_run or not workspace.catalogue
         else open_run_record(
             runner.state.catalogue,
             workspace=workspace,

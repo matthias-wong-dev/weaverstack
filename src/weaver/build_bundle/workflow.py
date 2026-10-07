@@ -21,7 +21,7 @@ from ..catalogue.state import (
     read_catalogue_state,
     reconcile_catalogue_state,
 )
-from ..declaration.model import WeaverItemId, WeaverRepository
+from ..declaration.model import SEMANTIC_MODEL, WeaverItemId, WeaverRepository
 from ..declaration.repository import parse_item_repository
 from ..errors import BuildError, DiscoveryError
 from ..locations import Location
@@ -154,14 +154,29 @@ def catalogue_items_for_build(
     return tuple(sorted(items, key=str))
 
 
+def require_catalogue_for(bindings: ItemBindings) -> None:
+    """Refuse items that need a catalogue; semantic models build without one."""
+
+    others = sorted(
+        str(item) for item in bindings.by_item if item.item_type != SEMANTIC_MODEL
+    )
+    if others or not bindings.entries:
+        raise BuildError(
+            "Building "
+            + (", ".join(others) or "this selection")
+            + " needs a Weaver catalogue: pass catalogue='Warehouse/Weaver', or "
+            "give one in workspace configuration. Semantic models build without one"
+        )
+
+
 def validate_build_request(
     repository: WeaverRepository,
     bindings: ItemBindings,
     *,
-    catalogue_binding: WarehouseBinding,
+    catalogue_binding: WarehouseBinding | None,
 ) -> tuple[WeaverItemId, ...]:
     if catalogue_binding is None:
-        raise BuildError("Select a catalogue Warehouse before building")
+        require_catalogue_for(bindings)
     if not bindings.entries:
         raise BuildError("Select at least one Weaver item to build")
     known = {item.identity for item in repository.items}
@@ -202,14 +217,32 @@ def read_build_state(
     """Read the catalogue and selected target state for build planning."""
 
     workspace = workspace if workspace is not None else session.workspace
-    if workspace is None or not workspace.catalogue:
-        raise BuildError("every build needs a Workspace with a Weaver catalogue")
+    if workspace is None:
+        raise BuildError("every build needs a Workspace")
+    catalogued = bool(workspace.catalogue)
+    if not catalogued:
+        require_catalogue_for(bindings)
+        references = sorted(
+            str(item)
+            for item, contribution in (
+                repository.semantic_models if repository else {}
+            ).items()
+            if item in bindings.by_item and contribution.source_references
+        )
+        if references:
+            raise BuildError(
+                f"{references[0]} generates tables from managed sources, which needs "
+                "a Weaver catalogue: pass catalogue='Warehouse/Weaver', or give one "
+                "in workspace configuration"
+            )
 
     # Check occupancy before the slower per-target inventory and Spark reads.
-    with session.step("Check target occupancy"):
-        occupancy = _refuse_occupied_targets(
-            bindings, session=session, workspace=workspace
-        )
+    occupancy = {}
+    if catalogued:
+        with session.step("Check target occupancy"):
+            occupancy = _refuse_occupied_targets(
+                bindings, session=session, workspace=workspace
+            )
     semantic_expressions = {}
     required = set(required_catalogue_items)
     if repository is not None:
@@ -234,12 +267,15 @@ def read_build_state(
                 )
                 required.update(aliases)
                 source["logical_items"] = sorted(str(item) for item in aliases)
-    with session.step("Read catalogue"):
-        catalogue = _read_catalogue(
-            session=session,
-            workspace=workspace,
-            required=tuple(sorted(required, key=str)),
-        )
+    # Without a catalogue nothing is installed, so every selected model deploys.
+    catalogue = Catalogue({})
+    if catalogued:
+        with session.step("Read catalogue"):
+            catalogue = _read_catalogue(
+                session=session,
+                workspace=workspace,
+                required=tuple(sorted(required, key=str)),
+            )
     with session.step("Read target inventories"):
         inventories = read_target_inventories(
             bindings,

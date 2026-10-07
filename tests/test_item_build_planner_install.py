@@ -1084,9 +1084,9 @@ def test_a_lakehouse_without_delta_mutations_gets_no_refresh(tmp_path):
 
 
 @weaver_test()
-def test_catalogue_requires_an_explicit_catalogue_warehouse(tmp_path):
+def test_lakehouse_build_requires_a_catalogue(tmp_path):
     repository = _repository(_estate(tmp_path))
-    with pytest.raises(BuildError, match="catalogue Warehouse"):
+    with pytest.raises(BuildError, match="Lakehouse/Raw needs a Weaver catalogue"):
         generate_item_build_bundle(
             repository,
             bindings=ItemBindings((_binding("Lakehouse/Raw", "Raw_Dev"),)),

@@ -79,18 +79,27 @@ def generate_item_build_bundle(
     target_inventories: Mapping[WeaverItemId, TargetInventory] | None = None,
     catalogue: Catalogue,
     stale_claims: tuple = (),
-    catalogue_binding: WarehouseBinding,
+    catalogue_binding: WarehouseBinding | None,
     execution: ExecutionIdentity | None = None,
     shortcut_sources: Mapping[str, object] | None = None,
 ) -> BuildBundle:
     if catalogue_binding is None:
-        raise BuildError("Select a catalogue Warehouse before building")
+        from .workflow import require_catalogue_for
+
+        require_catalogue_for(bindings)
     if execution is None:
         # The bindings already name the workspace. An orchestrated build resolves
         # ids and the Environment and passes them in; planning alone knows
         # neither, and says so rather than inventing them.
         execution = ExecutionIdentity(
-            workspace_name=catalogue_binding.workspace_name or ""
+            workspace_name=next(
+                (
+                    b.workspace_name
+                    for b in (catalogue_binding, *(e.target for e in bindings.entries))
+                    if getattr(b, "workspace_name", None)
+                ),
+                "",
+            )
         )
     by_item = bindings.by_item
     if not by_item:
@@ -156,6 +165,17 @@ def generate_item_build_bundle(
     selected_for_build = set(selection.selected_for_build)
     removed = set(registered) - selected_ids
 
+    if catalogue_binding is None:
+        return _semantic_bundle_without_catalogue(
+            repository,
+            selection=selection,
+            selected_for_build=selected_for_build,
+            certifiable_ids=certifiable_ids,
+            target_by_item=target_by_item,
+            execution=execution,
+            output=output,
+            store=store,
+        )
     catalogue_target = _catalogue_target(catalogue_binding, targets)
     if all(target.id != catalogue_target.id for target in targets):
         targets = targets + (catalogue_target,)
@@ -786,6 +806,76 @@ def installed_shortcut_sources(
             logical_item_name=item.item_name,
         )
     return found
+
+
+def _semantic_bundle_without_catalogue(
+    repository,
+    *,
+    selection,
+    selected_for_build,
+    certifiable_ids,
+    target_by_item,
+    execution,
+    output,
+    store,
+):
+    """Deploy and read back semantic models in a workspace with no catalogue.
+
+    Nothing is installed or certified, so each selected model deploys and its
+    readback verifies the definition on the model itself.
+    """
+
+    from ..mutation.models import MutationPlan
+    from .semantic import semantic_readback_stage, semantic_stage
+
+    stages: list[PlannedStage] = []
+    for item, target in target_by_item.items():
+        if WeaverDocumentId.parse(str(item)) not in selected_for_build:
+            continue
+        stages.append(semantic_stage(repository, item, target))
+        stages.append(
+            semantic_readback_stage(repository, item, target).declaring(
+                requires=(PHYSICAL_COMPLETE,)
+            )
+        )
+    targets = tuple(target_by_item.values())
+    sequences, payloads, target_changes, required = enumerate_stages(
+        stages, targets=targets, completion_target_id=targets[0].id
+    )
+    omitted = [
+        OmittedNode(
+            node_id=str(identity),
+            reason=OMIT_TARGET_UNBOUND,
+            detail=f"item {identity.item} is not bound",
+        )
+        for identity in sorted(repository.source_documents, key=str)
+        if identity not in certifiable_ids
+    ]
+    plan = MutationPlan(
+        targets=targets,
+        sequences=sequences,
+        execution=BundleExecution.of(
+            execution, catalogue_target_id=None, spark_home_target_id=None
+        ),
+        build_envelope={
+            "repository_name": repository.name,
+            "repository_signature": repository.signature,
+            "selection": selection.to_mapping(),
+            "omitted_nodes": [
+                node.to_mapping()
+                for node in sorted(omitted, key=lambda n: (n.node_id, n.reason))
+            ],
+            "target_changes": {
+                key: [change.to_mapping() for change in value]
+                for key, value in sorted(target_changes.items())
+            },
+            "runtime_state": [],
+            "runtime_state_established": [],
+        },
+        required_completion=required,
+    )
+    plan = replace(plan, bundle_id=compute_bundle_id(plan))
+    return write_bundle(output, plan=plan, payloads=payloads, store=store)
 
 
 def _catalogue_target(binding: WarehouseBinding, targets):
