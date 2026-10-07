@@ -89,6 +89,24 @@ def test_other_items_still_need_a_catalogue(tmp_path):
 
 
 @weaver_test()
+def test_validations_need_a_catalogue(tmp_path):
+    root = project(tmp_path, False)
+    tests = root / str(ITEM) / "assumptions"
+    tests.mkdir()
+    (tests / "Sales.Nothing.dax").write_text(
+        "/*\nAssumption ID: Sales.Nothing\nDescription: Nothing is wrong.\n*/\n"
+        'EVALUATE FILTER(ROW("N", 1), FALSE())\n',
+        encoding="utf-8",
+    )
+    session = session_without_catalogue()
+    from weaver.errors import BuildError
+
+    with pytest.raises(BuildError, match="declares tests or assumptions"):
+        weaver.build(root, items=SELECTOR, session=session)
+    assert not session.semantic_model("Reporting_Dev").calls
+
+
+@weaver_test()
 def test_load_refreshes_named_models_without_recording(monkeypatch):
     from test_semantic_model_load_cycle import (
         COMPLETED,
