@@ -308,6 +308,44 @@ inference; exclusions remain removed. This compilation uses the ordinary Build,
 catalogue and installed dependency graph. Ordinary PBIP adoption can start with
 logical source annotations and add generation only for tables without partitions.
 
+### Tests and Assumptions
+
+A model's `tests/` and `assumptions/` hold DAX validations, named
+`<Schema>.<Object>.dax` like any Test or Assumption. A Test compares its
+Expected SQL, run in its Expected source, with its DAX, run against the model:
+
+```text
+/*
+Test ID: Sales.RevenueReconciles
+
+Description: Revenue in the model agrees with the serving Warehouse.
+
+Primary key: Month
+
+Expected source: Warehouse/Serving
+
+Expected SQL: |
+  SELECT Month, SUM(Revenue) AS Revenue
+  FROM Cake.Sales
+  GROUP BY Month
+*/
+
+EVALUATE
+SUMMARIZECOLUMNS('Date'[Month], "Revenue", [Revenue])
+```
+
+The comparison is the ordinary Test contract: both sides return the same
+columns in the same order, and the Primary key only pairs discrepancies. DAX
+column labels such as `'Date'[Month]` compare as `Month`. Expected SQL is T-SQL
+for a Warehouse and Spark SQL for a Lakehouse, naming objects as
+`Schema.Object` in the Expected source. An Assumption's DAX returns the rows
+that violate it.
+
+Build publishes each validation's definition to the catalogue, so editing one
+updates no model and keeps its LoadStatus. `weaver test SemanticModel/Reporting`
+runs them, records TestStatus and Log, and Health treats them like any other
+validation: a refresh after a pass makes them stale until they run again.
+
 ### Without a catalogue
 
 A workspace with no catalogue still builds and refreshes semantic models:
@@ -320,7 +358,8 @@ weaver load SemanticModel/Reporting --workspace Analytics
 Build deploys each selected model and verifies its readback. With no catalogue
 Load records nothing. Authored tables can retain logical `Weaver.Source` annotations
 without catalogue metadata. Source generation, Lakehouse and Warehouse operations,
-installed lineage and `load --stale`, `--name` or `--reload` need a catalogue.
+installed lineage, Tests and Assumptions, and `load --stale`, `--name` or `--reload`
+need a catalogue.
 
 ### Load and connections
 
@@ -365,9 +404,9 @@ for table in definition.model.tables:
 
 Each edit changes only the TMDL lines it addresses.
 
-The former `addon.yml`, `.dax` and `.source` authoring syntax is removed.
-Semantic wipe and DAX Test/TestStatus/Health are separate follow-ups. Native TMDL
-expresses relationships and calculated tables.
+The former `addon.yml` and `.source` authoring syntax is removed, and a `.dax`
+file is a Test or Assumption. Native TMDL expresses relationships and
+calculated tables.
 Delegated-user Azure CLI/browser access remains a separate user validation.
 
 ## Documentation
