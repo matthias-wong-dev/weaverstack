@@ -432,4 +432,6 @@ def apply_annotations(contribution, registry=None):
     """Run every dispatched annotation in definition order."""
 
     registry = registry or contribution.annotations or builtin_registry()
-    return _Compilation(contribution, registry).run()
+    compiled = replace(_Compilation(contribution, registry).run(), table_order=None)
+    # Freeze final native order before transport sorts the definition parts.
+    return replace(compiled, table_order=compiled.table_names)

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import posixpath
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from typing import Mapping
 
 from ..errors import ConfigError
@@ -264,6 +264,4 @@ def read_semantic_contribution(
         contribution = apply_extensions(contribution, item.item_name, extensions)
     from .annotation import apply_annotations
 
-    contribution = apply_annotations(contribution, annotations)
-    # Freeze effective declaration order before payload codecs sort native parts.
-    return replace(contribution, table_order=contribution.table_names)
+    return apply_annotations(contribution, annotations)
