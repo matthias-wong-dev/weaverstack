@@ -222,3 +222,43 @@ def test_health_reports_a_missing_definition_and_pending_validations(
         "missing_validation_artefact",
         "SemanticModel/Reporting/Sales.RevenueReconciles",
     ) not in findings
+
+
+@weaver_test()
+def test_health_reports_a_model_behind_its_source(tmp_path, monkeypatch):
+    """A source View rebuilt after the model refreshed leaves the model behind."""
+
+    from datetime import datetime, timezone
+
+    from weaver.catalogue.state import Catalogue
+    from weaver.declaration.model import WeaverItemId
+    from weaver.health import assess
+    from weaver.operations.health import HEALTH_TABLES
+
+    catalogue = installed(tmp_path, monkeypatch)
+    read = {table.name for table in HEALTH_TABLES}
+    rows = {
+        item: {name: rows for name, rows in tables.items() if name in read}
+        for item, tables in catalogue.rows.items()
+    }
+
+    def status(item, schema, name, completed):
+        at = datetime(2026, 10, 7, completed, tzinfo=timezone.utc)
+        return {
+            "item_type": item.item_type,
+            "item_name": item.item_name,
+            "schema_name": schema,
+            "object_name": name,
+            "result": "succeeded",
+            "started_datetime": at,
+            "completed_datetime": at,
+        }
+
+    source = WeaverItemId.parse("Warehouse/Serving")
+    rows[ITEM]["LoadStatus"] = (status(ITEM, "", "", 9),)
+    rows[source]["LoadStatus"] = (status(source, "Cake", "Summary", 10),)
+    now = datetime(2026, 10, 7, 8, tzinfo=timezone.utc)
+    report = assess(Catalogue(rows), as_of=now, generated_at=now, items=[ITEM])
+    (behind,) = (f for f in report.findings if f.object_id == "SemanticModel/Reporting")
+    assert (behind.area, behind.code) == ("load", "load_stale_ancestor")
+    assert "Warehouse/Serving/Cake.Summary" in behind.message
