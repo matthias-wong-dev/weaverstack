@@ -444,19 +444,24 @@ def _selection_lines(selection, bindings) -> tuple[str, ...]:
         ("selected for build", selection.selected_for_build),
         ("selected for removal", selection.selected_for_drop),
     )
-    lines = ["Install selection"]
-    for binding in bindings.entries:
-        display = (
+    displays = [
+        (
+            binding,
             f"Catalogue {binding.target.physical_kind}/{binding.target.item.name}"
             if binding.item == BUILTIN_ITEM
-            else str(binding.item)
+            else str(binding.item),
         )
+        for binding in bindings.entries
+    ]
+    width = max([26, *(len(display) + 2 for _, display in displays)])
+    lines = ["Install selection"]
+    for binding, display in displays:
         counted = [
             (label, sum(identity.item == binding.item for identity in identities))
             for label, identities in categories
         ]
         counted = [(label, count) for label, count in counted if count]
-        lines.append(f"  {display}" if counted else f"  {display:<26}up to date")
+        lines.append(f"  {display}" if counted else f"  {display:<{width}}up to date")
         lines.extend(f"    {label:<24}{count}" for label, count in counted)
     return tuple(lines)
 
