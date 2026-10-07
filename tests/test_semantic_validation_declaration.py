@@ -53,11 +53,12 @@ SELECT 1 AS Month, CAST(1 AS decimal(18, 2)) AS Revenue
 
 def project(tmp_path, files, *, serving=False):
     root = tmp_path / "project"
-    model = root / "SemanticModel/Sales"
+    model = root / "PowerBI/Commerce"
     model.mkdir(parents=True)
-    (model / "extension.tmdl").write_text("table Sales\n\tmeasure Revenue = 1\n")
+    (model / "Sales.tmdl").write_text("table Sales\n\tmeasure Revenue = 1\n")
     for relative, text in files.items():
-        path = model / relative
+        directory, name = relative.split("/", 1)
+        path = model / directory / "Sales" / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
     if serving:
@@ -111,7 +112,7 @@ def test_tests_and_assumptions_are_validation_documents(tmp_path):
 def test_a_validation_edit_leaves_the_model_definition_unchanged(tmp_path):
     root = project(tmp_path, {"tests/Sales.RevenueReconciles.dax": TEST})
     before = parse(root)
-    path = root / "SemanticModel/Sales/tests/Sales.RevenueReconciles.dax"
+    path = root / "PowerBI/Commerce/tests/Sales/Sales.RevenueReconciles.dax"
     path.write_text(TEST.replace("[Revenue])", "[Revenue] * 1)"), encoding="utf-8")
     after = parse(root)
     item = next(iter(before.semantic_models))
@@ -217,4 +218,50 @@ def test_an_expected_object_missing_from_a_project_source_is_refused(tmp_path):
         serving=True,
     )
     with pytest.raises(WeaverError, match="does not match an object"):
+        parse(root)
+
+
+@weaver_test()
+def test_named_variants_own_validations_without_inheriting_base_tests(tmp_path):
+    root = project(tmp_path, {"tests/Sales.RevenueReconciles.dax": TEST})
+    scope = root / "PowerBI/Commerce"
+    (scope / "Executive.tmdl").write_text(
+        "model Model\n\tannotation Weaver.BaseSemanticModels = Sales\n"
+    )
+    before = parse(root)
+    items = {item.identity.item_name: item for item in before.items}
+    assert not items["Executive"].validations
+    tests = scope / "tests/Executive"
+    tests.mkdir()
+    (tests / "Sales.RevenueReconciles.dax").write_text(TEST)
+    after = parse(root)
+    items = {item.identity.item_name: item for item in after.items}
+    assert {str(v) for v in items["Executive"].validations} == {
+        "SemanticModel/Executive/Sales.RevenueReconciles"
+    }
+    assert {str(v) for v in items["Sales"].validations} == {
+        "SemanticModel/Sales/Sales.RevenueReconciles"
+    }
+    assert after.semantic_models == before.semantic_models
+    assert after.signature != before.signature
+
+
+@pytest.mark.parametrize("owner", ["Gone", "sales"])
+@weaver_test()
+def test_validation_owner_must_be_an_exact_local_definition(tmp_path, owner):
+    root = project(tmp_path, {"tests/Sales.RevenueReconciles.dax": TEST})
+    tests = root / "PowerBI/Commerce/tests"
+    (tests / "Sales").rename(tests / owner)
+    with pytest.raises(WeaverError, match=f"SemanticModel/{owner} is not defined"):
+        parse(root)
+
+
+@weaver_test()
+def test_validation_path_names_the_model_in_a_composition_scope(tmp_path):
+    root = project(tmp_path, {"tests/Sales.RevenueReconciles.dax": TEST})
+    tests = root / "PowerBI/Commerce/tests"
+    (tests / "Sales/Sales.RevenueReconciles.dax").rename(
+        tests / "Sales.RevenueReconciles.dax"
+    )
+    with pytest.raises(WeaverError, match="<Model>/<Schema>.<Object>.dax"):
         parse(root)

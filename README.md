@@ -310,8 +310,10 @@ logical source annotations and add generation only for tables without partitions
 
 ### Tests and Assumptions
 
-A model's `tests/` and `assumptions/` hold DAX validations, named
-`<Schema>.<Object>.dax` like any Test or Assumption. A Test compares its
+`PowerBI/<project>/tests/<Model>/` and `assumptions/<Model>/` hold DAX
+validations for the named local definition, including standalone and composed
+models. Each file is named `<Schema>.<Object>.dax`. Base composition reuses TMDL;
+each model owns its validations. A Test compares its
 Expected SQL, run in its Expected source, with its DAX, run against the model:
 
 ```text
@@ -341,8 +343,10 @@ for a Warehouse and Spark SQL for a Lakehouse, naming objects as
 `Schema.Object` in the Expected source. An Assumption's DAX returns the rows
 that violate it.
 
-Build publishes each validation's definition to the catalogue, so editing one
-updates no model and keeps its LoadStatus. `weaver test SemanticModel/Reporting`
+Build publishes each validation's definition to the catalogue. A validation edit
+leaves the model's effective signature unchanged and resets only that validation's
+TestStatus. Every selected model still deploys and resets its LoadStatus.
+`weaver test SemanticModel/Reporting`
 runs them, records TestStatus and Log, and Health treats them like any other
 validation: a refresh after a pass makes them stale until they run again.
 

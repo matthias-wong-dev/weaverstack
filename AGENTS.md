@@ -265,10 +265,13 @@ These rows are logical and identical across environments: only `_.Installation`
 names a physical item.
 
 A semantic model's Tests and Assumptions are DAX validation documents. They
-compile to nothing: `_.SemanticModelTest` holds each installed definition, with
+belong to `PowerBI/<project>/tests/<Model>/` or `assumptions/<Model>/`, where
+Model is an exact named local definition. Composed models own their validations.
+They compile to nothing: `_.SemanticModelTest` holds each installed definition, with
 its logical Expected source, and no Registry row claims it. A validation is
 installed when that row matches its `_.TestDictionary` signature; a changed
-definition resets its TestStatus without updating the model. The installed graph
+definition resets its TestStatus and leaves the effective model signature intact.
+Every selected model still deploys and resets LoadStatus. The installed graph
 adds its dependency on the model, so a refresh makes a pass stale. A run resolves
 the Expected source through `_.Installation` and compares the two sides in
 `runtime/relation_compare.py`, which keeps `runtime/test_compare.py`'s contract. `SemanticModelTable` records each managed source's mode

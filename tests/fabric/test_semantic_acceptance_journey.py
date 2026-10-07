@@ -1,8 +1,8 @@
 """A semantic model's whole lifecycle on a fixed Fabric item, through public calls.
 
-Build, Load, Test and Health; an unchanged Build; a model change, which makes
-the passed Tests stale once it loads; a Test-only change, which deploys
-nothing; a wipe that keeps the data source; and a rebuild back to green. The
+Build, Load, Test and Health; repeated selected-model deployment; a model change,
+which makes passed Tests stale once it loads; a Test edit with stable model
+signature; a wipe keeping the data source; and a rebuild back to green. The
 Tests run real DAX against the model and real T-SQL against the catalogue.
 """
 
@@ -82,10 +82,10 @@ FILTER(Objects, ISBLANK(Objects[Signature]))
 
 
 def _project(root):
-    folder = root / str(ITEM)
-    (folder / "tests").mkdir(parents=True)
-    (folder / "assumptions").mkdir()
-    (folder / "extension.tmdl").write_text(
+    folder = root / "PowerBI/Acceptance"
+    (folder / "tests" / ITEM.item_name).mkdir(parents=True)
+    (folder / "assumptions" / ITEM.item_name).mkdir(parents=True)
+    (folder / f"{ITEM.item_name}.tmdl").write_text(
         SOURCE_TEXT.replace(
             "model Model\n",
             "model Model\n    annotation Acceptance.HideSignatures = true\n",
@@ -98,11 +98,11 @@ def _project(root):
     (annotations / "Acceptance__HideSignatures.py").write_text(
         ANNOTATION, encoding="utf-8"
     )
-    test = folder / "tests/Acceptance.ObjectsReconcile.dax"
+    test = folder / f"tests/{ITEM.item_name}/Acceptance.ObjectsReconcile.dax"
     test.write_text(TEST, encoding="utf-8")
-    (folder / "assumptions/Acceptance.ObjectsAreSigned.dax").write_text(
-        ASSUMPTION, encoding="utf-8"
-    )
+    (
+        folder / f"assumptions/{ITEM.item_name}/Acceptance.ObjectsAreSigned.dax"
+    ).write_text(ASSUMPTION, encoding="utf-8")
     return folder, test
 
 
@@ -183,7 +183,9 @@ def test_semantic_model_build_load_test_health_lifecycle(
         if row["referencing_object_name"] == "ObjectsReconcile"
     } == {"Warehouse/_weaver/_.TableDictionary"}
     assert {
-        row["object_type"] for row in read_table(connection, REGISTRY, scope=SCOPE)
+        row["object_type"]
+        for row in read_table(connection, REGISTRY, scope=SCOPE)
+        if row["object_role"] == "data"
     } == {"semantic_model"}
     deployed = decode_model(context.model.get_definition())["model"]
     objects = next(t for t in deployed["tables"] if t["name"] == "Objects")
@@ -208,15 +210,18 @@ def test_semantic_model_build_load_test_health_lifecycle(
     assert report.is_healthy, _findings(report)
     evidence["first"] = {"test": tested.to_mapping(), "health": sections}
 
-    # Unchanged Build: a fixed point.
+    # A selected model deploys again with a stable effective signature.
     unchanged = build()
-    assert unchanged.installation_report.action_counts()["total"] == 0
-    assert _load_result(connection) == "succeeded"
+    assert semantic_actions(unchanged)
+    assert not unchanged.selection.impact.changed
+    assert _load_result(connection) == "pending"
     assert set(_statuses(connection).values()) == {"succeeded"}
+    assert weaver.load(str(ITEM), session=context.session).succeeded
+    run_validations()
     assert _health(context.session)[0].is_healthy
 
     # A model change deploys, and a Test that passed before the reload is stale.
-    extension = folder / "extension.tmdl"
+    extension = folder / f"{ITEM.item_name}.tmdl"
     extension.write_text(
         extension.read_text().replace(
             "    measure One = 1\n", "    measure One = 1\n\n    measure Two = 2\n"
@@ -241,17 +246,19 @@ def test_semantic_model_build_load_test_health_lifecycle(
     run_validations()
     assert _health(context.session)[0].is_healthy
 
-    # A Test-only change republishes its definition and deploys nothing.
+    # A validation edit leaves the effective model signature unchanged.
     test_path.write_text(TEST.replace(DAX_COUNT, '"Objects", [Rows]'), encoding="utf-8")
     before = context.model.get_definition()
     edited = build()
-    assert not semantic_actions(edited)
+    assert semantic_actions(edited)
+    assert not edited.selection.impact.changed
     assert decode_model(context.model.get_definition()) == decode_model(before)
-    assert _load_result(connection) == "succeeded"
+    assert _load_result(connection) == "pending"
     assert _statuses(connection) == {
         "ObjectsReconcile": "pending",
         "ObjectsAreSigned": "succeeded",
     }
+    assert weaver.load(str(ITEM), session=context.session).succeeded
     run_validations()
     assert _health(context.session)[0].is_healthy
 
@@ -271,7 +278,13 @@ def test_semantic_model_build_load_test_health_lifecycle(
     run_validations()
     final, sections = _health(context.session)
     assert final.is_healthy, _findings(final)
-    assert build().installation_report.action_counts()["total"] == 0
+    repeated = build()
+    assert semantic_actions(repeated)
+    assert not repeated.selection.impact.changed
+    assert _load_result(connection) == "pending"
+    assert weaver.load(str(ITEM), session=context.session).succeeded
+    run_validations()
+    assert _health(context.session)[0].is_healthy
     assert not {"livy", "onelake"} & {
         event.resource for event in context.session.telemetry.events()
     }
