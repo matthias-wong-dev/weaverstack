@@ -22,6 +22,7 @@ from .dependencies import (
 )
 from .metadata import (
     ASSUMPTION,
+    DAX,
     FOLDER,
     PYTHON,
     SPARK_SQL,
@@ -34,7 +35,7 @@ from .metadata import (
     extract_sql_metadata_and_body,
     parse_document,
 )
-from .model import LAKEHOUSE, WeaverDocumentId
+from .model import LAKEHOUSE, SEMANTIC_MODEL, WeaverDocumentId
 
 if TYPE_CHECKING:  # names used only in annotations
     from .ddl import GeneratedDdl
@@ -43,6 +44,7 @@ if TYPE_CHECKING:  # names used only in annotations
 
 PYTHON_SUFFIX = ".py"
 SQL_SUFFIX = ".sql"
+DAX_SUFFIX = ".dax"
 
 #: Python cannot have a dot in a module name, so a schema separator is needed.
 PYTHON_ID_SEPARATOR = "__"
@@ -78,12 +80,14 @@ def language_for_filename(filename: str, item_type: str) -> str | None:
         return PYTHON
     if filename.endswith(SQL_SUFFIX):
         return sql_dialect_for_item_type(item_type)
+    if filename.endswith(DAX_SUFFIX) and item_type == SEMANTIC_MODEL:
+        return DAX
     return None
 
 
 def _stem(filename: str) -> str:
     name = filename.rsplit("/", 1)[-1]
-    for suffix in (PYTHON_SUFFIX, SQL_SUFFIX):
+    for suffix in (PYTHON_SUFFIX, SQL_SUFFIX, DAX_SUFFIX):
         if name.endswith(suffix):
             return name[: -len(suffix)]
     return name
@@ -167,6 +171,8 @@ class SourceDocument:
     python_imports: tuple[PythonImport, ...] = ()
     sql_body: str | None = None
     sql_analysis: SqlAnalysis | None = None
+    #: A SemanticModel validation's query, run against the installed model.
+    dax_body: str | None = None
     #: Names this file refers to, as written. Whether each resolves is a build
     #: concern, because it needs the external-dependency configuration.
     discovered_references: tuple[RelationReference, ...] = ()
@@ -324,6 +330,8 @@ def read_source_document(
         return _read_python(
             relative_path, text, source_hash, filename_id, item_type=item_type
         )
+    if language == DAX:
+        return _read_dax(relative_path, text, source_hash, filename_id)
     return _read_sql(
         relative_path,
         text,
@@ -638,6 +646,55 @@ def _read_sql(
         sql_body=body,
         sql_analysis=analysis,
         discovered_references=extract_sql_references(body),
+    )
+
+
+_DAX_QUERY = re.compile(
+    r"\A(?:\s+|//[^\n]*|--[^\n]*|/\*.*?\*/)*(EVALUATE|DEFINE)\b", re.I | re.S
+)
+
+
+def _read_dax(
+    relative_path: str, text: str, source_hash: str, filename_id: ObjectId
+) -> SourceDocument:
+    """Read a SemanticModel validation: metadata, then a DAX query.
+
+    A Test's DAX is its actual side and its Expected SQL the expected side. An
+    Assumption's DAX returns the violating rows.
+    """
+
+    with _metadata_of(relative_path):
+        metadata_text, body = extract_sql_metadata_and_body(text)
+        document = parse_document(metadata_text, language=DAX)
+    _check_declared_id(relative_path, document, filename_id)
+    if not _DAX_QUERY.match(body):
+        raise DiscoveryError(
+            f"{relative_path}: the body must be a DAX query beginning with "
+            "EVALUATE or DEFINE"
+        )
+    references: tuple[RelationReference, ...] = ()
+    if document.expected_sql is not None:
+        from .validation_program import EXPECTED_SQL, validate_validation_contract
+
+        if document.expected_source.startswith(LAKEHOUSE + "/"):
+            from .spark_sql_program import parse_spark_sql_program as parse
+        else:
+            from .tsql_program import parse_tsql_program as parse
+        what = f"{relative_path}: Expected SQL"
+        program = parse(document.expected_sql, what=what, error=DiscoveryError)
+        validate_validation_contract(
+            program, what=what, kind=EXPECTED_SQL, error=DiscoveryError
+        )
+        references = extract_sql_references(document.expected_sql)
+    return SourceDocument(
+        relative_path=relative_path,
+        language=DAX,
+        text=text,
+        source_hash=source_hash,
+        document=document,
+        item_type=SEMANTIC_MODEL,
+        dax_body=body.rstrip(),
+        discovered_references=references,
     )
 
 

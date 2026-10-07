@@ -130,7 +130,7 @@ def test_semantic_targets_are_typed_through_configuration_and_build_bindings():
         ("Reporting.tmdl", "model Model\n   culture: en-US\n"),
         ("Tables/Dim__Date.py", "invalid authored table"),
         ("Dim__Date.sql", "select 1"),
-        ("tests/RowCount.dax", 'EVALUATE ROW("Count", 1)'),
+        ("RowCount.dax", 'EVALUATE ROW("Count", 1)'),
         ("addon.yml", "model: {}\n"),
     ],
 )
