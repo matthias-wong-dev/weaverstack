@@ -385,3 +385,13 @@ def test_cli_load_uses_public_semantic_execution_without_spark(
             assert str(ITEM).split("/")[0] in output
             assert "  Rows" not in output
         assert not session.python and not session.spark_sql
+
+
+@weaver_test()
+def test_health_reads_no_warehouse_inventory_for_a_model():
+    session = session_for()
+    answer_installed(session, installed_rows())
+    report = weaver.health(session=session)
+    assert [str(target) for target in report.targets] == ["SemanticModel/Reporting_Dev"]
+    assert not any("sys.objects" in statement for statement in session.tsql)
+    assert not session.spark_sql

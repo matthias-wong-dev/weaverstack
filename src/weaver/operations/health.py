@@ -165,7 +165,7 @@ def _inventories(session, *, workspace, targets, dag):
 
     from ..build_bundle.prune import read_lakehouse_inventory, read_warehouse_inventory
     from ..build_bundle.targets import BoundTarget
-    from ..targets import ItemRef, WarehouseTarget
+    from ..targets import SEMANTIC_MODEL_TARGET, ItemRef, WarehouseTarget
 
     bound_items = {}
     for item, target in dag.installations.items():
@@ -173,6 +173,9 @@ def _inventories(session, *, workspace, targets, dag):
 
     found = {}
     for target in targets:
+        if target.kind == SEMANTIC_MODEL_TARGET:
+            # A model's objects live in its definition, which Build reads back.
+            continue
         item = bound_items.get(target)
         bound = BoundTarget(
             id=f"{target.kind}-{target.name}",
