@@ -94,7 +94,7 @@ def test_semantic_unbinding_uses_typed_target_and_removes_every_semantic_claim()
     from support.semantic_wipe import catalogue_answers
 
     from weaver.catalogue.connection import CatalogueConnection
-    from weaver.unbind import plan_unbind
+    from weaver.catalogue.unbind import plan_claim_deletion
 
     answers = catalogue_answers(
         [
@@ -115,7 +115,7 @@ def test_semantic_unbinding_uses_typed_target_and_removes_every_semantic_claim()
             },
         ]
     )
-    result = plan_unbind(
+    result = plan_claim_deletion(
         CatalogueConnection(lambda statement: answers[statement]),
         semantic_models=("Reporting",),
     )

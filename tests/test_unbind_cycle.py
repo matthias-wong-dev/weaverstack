@@ -5,7 +5,7 @@ from __future__ import annotations
 from support.weaver_test import weaver_test
 
 from weaver.catalogue.tables import INSTALLATION
-from weaver.unbind import plan_unbind, unbind_targets
+from weaver.catalogue.unbind import plan_claim_deletion, unbind_targets
 
 
 class _Catalogue:
@@ -50,9 +50,9 @@ ROWS = (
 
 
 @weaver_test()
-def test_plan_unbind_selects_by_physical_target_and_orders_dependent_deletes():
+def test_plan_claim_deletion_selects_by_physical_target_and_orders_dependent_deletes():
     catalogue = _Catalogue(ROWS)
-    result = plan_unbind(catalogue, lakehouses=("Sales_Dev",))
+    result = plan_claim_deletion(catalogue, lakehouses=("Sales_Dev",))
 
     assert result.targets == ("Lakehouse/Sales_Dev",)
     assert result.logical_items == ("Lakehouse/Sales",)
@@ -130,8 +130,8 @@ def test_the_combined_delete_names_every_installation_and_no_others():
 def test_removing_nothing_renders_nothing():
     """An empty selection must not become a `DELETE` with no predicate."""
 
-    from weaver.unbind import plan_unbind
+    from weaver.catalogue.unbind import plan_claim_deletion
 
-    result = plan_unbind(_Catalogue(()), lakehouses=(), warehouses=())
+    result = plan_claim_deletion(_Catalogue(()), lakehouses=(), warehouses=())
 
     assert result.statements == ()
