@@ -25,6 +25,36 @@ class ReportContribution:
     model: WeaverItemId
     parts: Mapping[str, bytes]
 
+    @property
+    def source_signature(self):
+        import hashlib
+
+        from .semantic_models.compiler import content_signature
+
+        return content_signature(
+            {
+                "model": str(self.model),
+                "parts": {
+                    p: hashlib.sha256(b).hexdigest() for p, b in self.parts.items()
+                },
+            }
+        )
+
+    def effective_signature(self, *, binding=None):
+        from .semantic_models.compiler import content_signature
+
+        return content_signature(
+            {
+                "compiler": 1,
+                "source": self.source_signature,
+                "binding": binding,
+            }
+        )
+
+    @property
+    def signature(self):
+        return self.effective_signature()
+
 
 def artifact_paths(paths, suffix):
     return sorted(

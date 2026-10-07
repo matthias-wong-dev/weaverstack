@@ -66,13 +66,15 @@ def test_typed_semantic_rows_keep_descriptions_native_metadata_and_claim_ownersh
     assert set(rows["SemanticModel"][0]) == {
         "item_type",
         "item_name",
-        "schema_name",
-        "object_name",
         "description",
         "signature",
     }
     sales = next(r for r in rows["SemanticModelTable"] if r["table_name"] == "Sales")
     assert sales["description"] == "Sales transactions"
+    assert (
+        sales["table_ordinal"]
+        == repository.semantic_models[ITEM].table_names.index("Sales") + 1
+    )
     measure = next(
         r for r in rows["SemanticModelMeasure"] if r["measure_name"] == "Revenue"
     )
