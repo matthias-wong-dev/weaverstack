@@ -39,14 +39,23 @@ def test_native_extension_named_parts_are_preserved(tmp_path):
     )
 
 
+@pytest.mark.parametrize("names", [("Serving", "serving"), ("serving", "Serving")])
 @weaver_test()
-def test_duplicate_typed_source_items_report_both_paths(tmp_path):
+def test_duplicate_typed_source_items_report_both_paths(tmp_path, names):
     from weaver.errors import DiscoveryError
+    from weaver.store import Entry, FilesystemStore
 
-    write(tmp_path, "Warehouse/Serving/.gitkeep", "")
-    write(tmp_path, "Warehouse/serving/.gitkeep", "")
+    root = Location(tmp_path.as_posix())
+
+    class CaseSensitiveListing(FilesystemStore):
+        def list(self, location, *, recursive=False):
+            if location == root:
+                # A case-sensitive Store can expose both names on every host.
+                return [Entry(root / "Warehouse" / name, True) for name in names]
+            return super().list(location, recursive=recursive)
+
     with pytest.raises(DiscoveryError) as raised:
-        parse(tmp_path)
+        parse_item_repository(root, store=CaseSensitiveListing())
     assert "Warehouse/Serving" in str(raised.value)
     assert "Warehouse/serving" in str(raised.value)
 
