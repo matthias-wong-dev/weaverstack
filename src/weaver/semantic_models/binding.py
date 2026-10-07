@@ -6,7 +6,7 @@ from dataclasses import replace
 
 from ..errors import BuildError
 from .compiler import _NAMED_COLLECTIONS, _merge, escape, leaf_properties
-from .fragments import needs_source_columns, source_context, source_table
+from .fragments import source_context, source_table
 from .patching import _patch_object
 from .references import source_identity
 from .tmdl import PackageEditor
@@ -250,8 +250,9 @@ def bind_semantic_sources(repository, observed, selected):
 
     contributions = dict(repository.semantic_models)
     for item, contribution in repository.semantic_models.items():
-        if item not in selected or not contribution.source_references:
+        if item not in selected:
             continue
+        contribution = apply_annotations(contribution)
         editor = PackageEditor(contribution.parts)
         requested = copy.deepcopy(contribution.requested)
         owned = set(contribution.owned)
@@ -268,16 +269,46 @@ def bind_semantic_sources(repository, observed, selected):
                 )
             source = copy.deepcopy(observed[reference])
             before = leaf_properties({"model": {"tables": [table]}})
-            generated = needs_source_columns(table)
-            mode = _bind_partition(context, table, source)
+            generated = not table.get("partitions")
+            mode = (
+                _bind_partition(context, table, source)
+                if generated
+                else table["partitions"][0].get(
+                    "mode", context.get("defaultMode", "import")
+                )
+            )
             if generated:
                 table["columns"] = _source_columns(
                     table["name"], table.get("columns", []), source, reference
                 )
+                table["columns"] = [
+                    column
+                    for column in table["columns"]
+                    if (("table", table["name"]), ("column", column["name"]))
+                    not in contribution.absent
+                ]
+                from fnmatch import fnmatchcase
+
+                for column in table["columns"]:
+                    if any(
+                        fnmatchcase(column["name"], value)
+                        if kind == "glob"
+                        else column["name"] == value
+                        for kind, value in contribution.column_hiding.get(
+                            table["name"], ()
+                        )
+                    ):
+                        column["isHidden"] = True
             if source.get("description"):
                 table.setdefault("description", source["description"])
-            for column in table["columns"]:
-                note = source.get("column_notes", {}).get(column.get("sourceColumn"))
+            for column in table.get("columns", []):
+                notes = {
+                    name.casefold(): note
+                    for name, note in source.get("column_notes", {}).items()
+                }
+                note = notes.get(
+                    str(column.get("sourceColumn", column["name"])).casefold()
+                )
                 if note:
                     column.setdefault("description", note)
             patch = _changes(before_context, context)
@@ -287,7 +318,8 @@ def bind_semantic_sources(repository, observed, selected):
             _patch_object(editor, (), "model", patch, owned)
             requested = _merge(requested, patch)
             source["mode"] = mode
-            source["access"] = "sql"
+            if generated:
+                source["access"] = "sql"
             bindings[table["name"]] = source
             origin = contribution.provenance.get(
                 f"/model/tables/{escape(table['name'])}/source", {"source": reference}
@@ -299,14 +331,14 @@ def bind_semantic_sources(repository, observed, selected):
                         "reason": "Weaver.Source",
                         "reference": reference,
                     }
-        contributions[item] = apply_annotations(
-            replace(
-                contribution,
-                parts=editor.parts,
-                requested=requested,
-                owned=tuple(sorted(owned)),
-                provenance=provenance,
-                source_bindings=bindings,
-            )
+        compiled = replace(
+            contribution,
+            parts=editor.parts,
+            requested=requested,
+            owned=tuple(sorted(owned)),
+            provenance=provenance,
+            source_bindings=bindings,
+            table_order=None,
         )
+        contributions[item] = replace(compiled, table_order=compiled.table_names)
     return replace(repository, semantic_models=contributions)

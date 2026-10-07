@@ -33,6 +33,29 @@ def read_semantic_sources(
     for reference, needs_columns in sorted(wanted.items()):
         identity = source_identity(reference)
         bound = bindings.by_item.get(identity.item)
+        schema, name = catalogue_columns(identity)
+        source_tables = catalogue.rows.get(identity.item, {})
+        if not needs_columns:
+            observed[reference] = {
+                "reference": reference,
+                "description": next(
+                    (
+                        r.get("description")
+                        for r in source_tables.get("TableDictionary", ())
+                        if r.get("schema_name") == schema
+                        and r.get("object_name") == name
+                    ),
+                    None,
+                ),
+                "column_notes": {
+                    r["column_name"]: r["description"]
+                    for r in source_tables.get("ColumnDictionary", ())
+                    if r.get("schema_name") == schema
+                    and r.get("object_name") == name
+                    and r.get("description")
+                },
+            }
+            continue
         authored = repository.source_documents.get(identity) if bound else None
         registered = catalogue.registered.get(identity)
         if authored is not None and authored.kind in {TABLE, VIEW}:

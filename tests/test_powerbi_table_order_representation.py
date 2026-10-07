@@ -60,7 +60,9 @@ def test_final_annotations_and_sorted_part_codec_preserve_effective_order(tmp_pa
         'from weaver.semantic_models import Annotation\nclass ACME__FinalTables(Annotation):\n    scopes = {"model"}\n    def apply(self, target):\n        target.tables["Alpha"].remove()\n        target.tables.add("Last")\n',
     )
     item = WeaverItemId("SemanticModel", "Revenue")
-    contribution = parse(tmp_path).semantic_models[item]
+    from support.semantic_compilation import compile_repository
+
+    contribution = compile_repository(parse(tmp_path)).semantic_models[item]
     assert contribution.table_order == ("Zebra", "Last")
     transported = replace(contribution, parts=dict(sorted(contribution.parts.items())))
     assert transported.table_names == ("Zebra", "Last")

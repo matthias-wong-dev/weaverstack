@@ -22,7 +22,8 @@ class Weaver__Source(Annotation):
 
     scopes = frozenset({"table"})
 
-    def apply(self, target):
+    @property
+    def reference(self):
         reference = self.value
         if reference.startswith("Lakehouse/") and (
             len(reference.split("/")) != 4 or reference.split("/")[2] != "Tables"
@@ -32,6 +33,10 @@ class Weaver__Source(Annotation):
             source_identity(reference)
         except ConfigError as exc:
             self.error(str(exc))
+        return reference
+
+    def apply(self, target):
+        reference = self.reference
         compilation = self._compilation
         pointer = _pointer((("table", target.name),))
         origin = compilation.provenance.get(
@@ -56,6 +61,10 @@ class Weaver__AutoHideColumns(Annotation):
             self.error("requires at least one glob pattern")
         tables = target.tables if target.parent is None else [target]
         for table in tables:
+            hiding = self._compilation.column_hiding
+            hiding[table.name] = hiding.get(table.name, ()) + tuple(
+                ("glob", p) for p in patterns
+            )
             for column in table.columns:
                 if any(fnmatchcase(column.name, p) for p in patterns):
                     column.isHidden = True
@@ -80,8 +89,11 @@ class Weaver__AutoHideForeignKeys(Annotation):
                         "many-side column"
                     )
                 table, column = object_name(endpoint[1]), object_name(endpoint[2])
-                if table in target.tables and column in target.tables[table].columns:
-                    target.tables[table].columns[column].isHidden = True
+                if table in target.tables:
+                    hiding = self._compilation.column_hiding
+                    hiding[table] = hiding.get(table, ()) + (("name", column),)
+                    if column in target.tables[table].columns:
+                        target.tables[table].columns[column].isHidden = True
 
 
 #: Native measure metadata under readable column names. DataType and

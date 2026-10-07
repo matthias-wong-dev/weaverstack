@@ -23,6 +23,9 @@ class SemanticContribution:
     source_bindings: Mapping[str, dict] = field(default_factory=dict)
     expression_sources: Mapping[str, dict] = field(default_factory=dict)
     table_order: tuple[str, ...] | None = None
+    column_hiding: Mapping[str, tuple[tuple[str, str], ...]] = field(
+        default_factory=dict
+    )
     #: Bind data sources to their connections once the definition is deployed.
     bind_data_sources: bool = False
     #: The annotation classes this contribution compiles with; not desired state.
@@ -262,6 +265,6 @@ def read_semantic_contribution(
         from .extensions import apply_extensions
 
         contribution = apply_extensions(contribution, item.item_name, extensions)
-    from .annotation import apply_annotations
+    from .annotation import prepare_annotations
 
-    return apply_annotations(contribution, annotations)
+    return prepare_annotations(contribution, annotations)

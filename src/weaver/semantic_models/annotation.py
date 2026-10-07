@@ -309,6 +309,7 @@ class _Compilation:
         self.absent = list(contribution.absent)
         self.source_references = dict(contribution.source_references)
         self.source_bindings = dict(contribution.source_bindings)
+        self.column_hiding = dict(contribution.column_hiding)
         self._seen = 0
 
     def removed(self, path):
@@ -406,6 +407,7 @@ class _Compilation:
             absent=tuple(sorted(self.absent)),
             source_references=self.source_references,
             source_bindings=self.source_bindings,
+            column_hiding=self.column_hiding,
             annotations=self.registry,
         )
 
@@ -426,6 +428,27 @@ def _quote_names(editor, names):
         content = "".join(lines).encode("utf-8")
         if content != editor.parts[document.path]:
             editor.parts[document.path] = content
+
+
+def prepare_annotations(contribution, registry=None):
+    """Validate declarations and collect logical sources without executing handlers."""
+
+    registry = registry or contribution.annotations or builtin_registry()
+    references = {}
+    for name, content in contribution.parts.items():
+        if not name.startswith("definition/") or not name.endswith(".tmdl"):
+            continue
+        document = Document(name, content)
+        for node in document.spans:
+            if node.kind != "annotation":
+                continue
+            cls = registry.dispatch(document, node)
+            if cls is not None and node.name == "Weaver.Source":
+                annotation = object.__new__(cls)
+                annotation._text = expression_text(document, node)
+                annotation._location = f"{name}:{node.header + 1}: {node.name}"
+                references[node.parent.name] = annotation.reference
+    return replace(contribution, source_references=references, annotations=registry)
 
 
 def apply_annotations(contribution, registry=None):

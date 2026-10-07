@@ -109,7 +109,13 @@ def exercise_catalogue(trial, model, reports, build_phase):
     report_roots = {
         WeaverDocumentId.report_root(WeaverItemId.parse(item)) for item in reports
     }
-    assert not build_phase("unchanged").selection.selected_for_build
+    unchanged = build_phase("unchanged")
+    assert set(unchanged.selection.selected_for_build) == {model_root, *report_roots}
+    assert not unchanged.selection.impact.changed
+    report_selectors = [f"{item}=Report/{target}" for item, target in reports.items()]
+    assert not build_phase(
+        "report-unchanged", items=report_selectors
+    ).selection.selected_for_build
     item = next(iter(reports))
     report = repository.reports[WeaverItemId.parse(item)]
     path = trial / report.path / "definition/report.json"
@@ -121,10 +127,12 @@ def exercise_catalogue(trial, model, reports, build_phase):
     path.write_text(
         json.dumps(authored, ensure_ascii=False, indent=2), encoding="utf-8"
     )
-    assert build_phase("report-edit").selection.selected_for_build == {
-        WeaverDocumentId.report_root(WeaverItemId.parse(item))
-    }
-    assert not build_phase("report-fixed").selection.selected_for_build
+    assert set(
+        build_phase("report-edit", items=report_selectors).selection.selected_for_build
+    ) == {WeaverDocumentId.report_root(WeaverItemId.parse(item))}
+    assert not build_phase(
+        "report-fixed", items=report_selectors
+    ).selection.selected_for_build
     (overlay,) = trial.rglob(f"{model.split('/', 1)[1]}.tmdl")
     text = overlay.read_text(encoding="utf-8")
     import re
@@ -139,9 +147,11 @@ def exercise_catalogue(trial, model, reports, build_phase):
     else:
         text += "\nmodel Model\n\tdescription: Stage 3 qualification model edit\n"
     overlay.write_text(text, encoding="utf-8")
-    selected = build_phase("model-edit").selection.selected_for_build
-    assert model_root in selected and report_roots <= selected
-    assert not build_phase("model-fixed").selection.selected_for_build
+    selected = set(build_phase("model-edit").selection.selected_for_build)
+    assert selected == {model_root, *report_roots}
+    repeated = build_phase("model-fixed")
+    assert set(repeated.selection.selected_for_build) == selected
+    assert not repeated.selection.impact.changed
 
 
 def qualify(*, source, output, session, model, model_target, reports):
@@ -198,10 +208,12 @@ def qualify(*, source, output, session, model, model_target, reports):
 
     session.execute_mutation = capture
 
-    def build_phase(name, *, active_session=session):
+    def build_phase(name, *, items=None, active_session=session):
         nonlocal phase
         phase = name
-        result = weaver.build(trial, items=selectors, session=active_session)
+        result = weaver.build(
+            trial, items=selectors if items is None else items, session=active_session
+        )
         save(output, name, result.to_mapping())
         save(output, f"{name}-actions", result.installation_report.to_mapping())
         assert result.succeeded, f"{name} Build failed"
