@@ -198,8 +198,11 @@ class WipeItemResult:
         if self.counts is None:
             object.__setattr__(self, "counts", {})
 
-    def describe(self) -> str:
-        """Describe the item outcome in ASCII for Windows console compatibility."""
+    def describe(self, width: int = 26) -> str:
+        """Describe the item outcome in ASCII for Windows console compatibility.
+
+        ``width`` aligns the outcome after the longest target in a summary.
+        """
 
         outcome = f"catalogue {self.outcome}" if self.is_catalogue else self.outcome
         words = [outcome]
@@ -207,7 +210,7 @@ class WipeItemResult:
             words.append("claims unbound")
         counted = self.counts or {}
         words.extend(f"{counted[word]} {word}" for word in COUNTED if counted.get(word))
-        return f"{self.target:<28}{', '.join(words)}"
+        return f"{self.target.ljust(width)}  {', '.join(words)}"
 
     def to_mapping(self) -> dict:
         return {
