@@ -151,7 +151,11 @@ def catalogue_items_for_build(
         if item in bound
         for reference in contribution.source_references.values()
     )
-    items.update(c.model for item, c in repository.reports.items() if item in bound)
+    items.update(
+        c.model
+        for item, c in repository.reports.items()
+        if item in bound and c.model is not None
+    )
     return tuple(sorted(items, key=str))
 
 
@@ -314,7 +318,9 @@ def read_build_state(
             {
                 c.model
                 for i, c in repository.reports.items()
-                if i in bindings.by_item and c.model not in bindings.by_item
+                if i in bindings.by_item
+                and c.model is not None
+                and c.model not in bindings.by_item
             },
             key=str,
         ):

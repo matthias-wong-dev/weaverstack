@@ -6,23 +6,40 @@ from dataclasses import dataclass
 from typing import Mapping
 
 from .declaration.model import REPORT, SEMANTIC_MODEL, WeaverItemId
-from .errors import ConfigError
+from .errors import ConfigError, DiscoveryError
+
+
+@dataclass(frozen=True)
+class SemanticDefinition:
+    model: WeaverItemId
+    model_path: str | None
+    model_tmdl: str | None
 
 
 @dataclass(frozen=True)
 class PowerBIProject:
     path: str
-    model: WeaverItemId | None
-    model_path: str | None
-    model_tmdl: str | None
+    definitions: Mapping[WeaverItemId, SemanticDefinition]
     items: tuple[WeaverItemId, ...]
     report_paths: tuple[str, ...] = ()
+
+    @property
+    def model(self):
+        return next(iter(self.definitions)) if len(self.definitions) == 1 else None
+
+    @property
+    def model_path(self):
+        return self.definitions[self.model].model_path if self.model else None
+
+    @property
+    def model_tmdl(self):
+        return self.definitions[self.model].model_tmdl if self.model else None
 
 
 @dataclass(frozen=True)
 class ReportContribution:
     path: str
-    model: WeaverItemId
+    model: WeaverItemId | None
     parts: Mapping[str, bytes]
     binding: Mapping[str, str] | None = None
 
@@ -34,7 +51,7 @@ class ReportContribution:
 
         return content_signature(
             {
-                "model": str(self.model),
+                "model": str(self.model) if self.model else None,
                 "parts": {
                     p: hashlib.sha256(b).hexdigest() for p, b in self.parts.items()
                 },
@@ -86,37 +103,44 @@ def discover_projects(paths, directories=()):
         native = {p for p in entries if p.startswith(prefix)}
         models = artifact_paths(native, ".SemanticModel")
         reports = artifact_paths(native, ".Report")
-        names = {p.rsplit("/", 1)[1][:-14] for p in models} | {
-            p.rsplit("/", 1)[1][:-5] for p in declarations
-        }
-        if len(models) > 1 or len(names) > 1:
-            raise ConfigError(
-                f"{prefix.rstrip('/')}: expected at most one local semantic model; found {', '.join(models + declarations)}"
+        names = {}
+        for path in models + declarations:
+            model_name = path.rsplit("/", 1)[1][
+                : -14 if path.endswith(".SemanticModel") else -5
+            ]
+            prior = names.get(model_name.casefold())
+            if prior and (
+                prior[0] != model_name
+                or any(
+                    p.endswith(".SemanticModel") == path.endswith(".SemanticModel")
+                    for p in prior[1]
+                )
+            ):
+                raise DiscoveryError(
+                    f"SemanticModel/{model_name}: duplicate logical item at {prior[1][0]} and {path}"
+                )
+            if prior:
+                prior[1].append(path)
+            else:
+                names[model_name.casefold()] = (model_name, [path])
+        definitions = {}
+        for model_name, _ in sorted(names.values()):
+            item = WeaverItemId(SEMANTIC_MODEL, model_name)
+            definitions[item] = SemanticDefinition(
+                item,
+                next(
+                    (p for p in models if p.rsplit("/", 1)[1][:-14] == model_name), None
+                ),
+                next(
+                    (p for p in declarations if p.rsplit("/", 1)[1][:-5] == model_name),
+                    None,
+                ),
             )
-        model_path = models[0] if models else None
-        model_tmdl = declarations[0] if declarations else None
-        model_name = (
-            model_path.rsplit("/", 1)[1][:-14]
-            if model_path
-            else model_tmdl.rsplit("/", 1)[1][:-5]
-            if model_tmdl
-            else None
-        )
-        model = WeaverItemId(SEMANTIC_MODEL, model_name) if model_name else None
-        if reports and model is None:
-            raise ConfigError(
-                f"{prefix.rstrip('/')}: report-only/thin projects are not supported; declare one local semantic model"
-            )
-        items = ([model] if model else []) + [
+        items = list(definitions) + [
             WeaverItemId(REPORT, p.rsplit("/", 1)[1][:-7]) for p in reports
         ]
         projects[name] = PowerBIProject(
-            prefix.rstrip("/"),
-            model,
-            model_path,
-            model_tmdl,
-            tuple(sorted(items)),
-            tuple(reports),
+            prefix.rstrip("/"), definitions, tuple(sorted(items)), tuple(reports)
         )
     return projects
 
@@ -151,6 +175,8 @@ def read_reports(projects, *, paths, root, store):
                 raise ConfigError(f"{pbip}: invalid PBIP reference: {exc}") from exc
         for path in report_paths:
             item = WeaverItemId(REPORT, path.rsplit("/", 1)[1][:-7])
+            same_name = WeaverItemId(SEMANTIC_MODEL, item.item_name)
+            model = same_name if same_name in project.definitions else project.model
             parts = {
                 p[len(path) + 1 :]: store.read(root.join(*p.split("/")))
                 for p in sorted(paths)
@@ -160,25 +186,22 @@ def read_reports(projects, *, paths, root, store):
             try:
                 definition = json.loads(parts["definition.pbir"].decode("utf-8-sig"))
                 ref = definition["datasetReference"]
-                if not isinstance(ref, dict) or set(ref) != {"byPath"}:
-                    raise ValueError(
-                        "thin/byConnection Reports are not supported; use a local byPath model"
-                    )
-                relative = ref["byPath"]["path"]
-                if (
-                    not isinstance(relative, str)
-                    or not relative
-                    or "\\" in relative
-                    or relative.startswith("/")
+                if not isinstance(ref, dict) or set(ref) not in (
+                    {"byPath"},
+                    {"byConnection"},
                 ):
-                    raise ValueError("expected a relative local model path")
-                expected = (
-                    project.model_path
-                    or f"{project.path}/{project.model.item_name}.SemanticModel"
-                )
-                if posixpath.normpath(posixpath.join(path, relative)) != expected:
-                    raise ValueError(f"byPath must name the local model {expected}")
+                    raise ValueError(
+                        "expected a native byPath or byConnection reference"
+                    )
+                kind = next(iter(ref))
+                field = "path" if kind == "byPath" else "connectionString"
+                if (
+                    not isinstance(ref[kind], dict)
+                    or not isinstance(ref[kind].get(field), str)
+                    or not ref[kind][field]
+                ):
+                    raise ValueError(f"expected a native {field}")
             except (KeyError, TypeError, ValueError, AttributeError) as exc:
                 raise ConfigError(f"{definition_path}: {exc}") from exc
-            reports[item] = ReportContribution(path, project.model, parts)
+            reports[item] = ReportContribution(path, model, parts)
     return reports

@@ -40,5 +40,7 @@ def project_report(item, contribution):
                 "referenced_object_name": "",
                 "signature": contribution.signature,
             },
-        ),
+        )
+        if contribution.model is not None
+        else (),
     }

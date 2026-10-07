@@ -179,6 +179,18 @@ def _validate(args):
         raise CommandError("Pass --workspace.")
     if not args.project_folder:
         raise CommandError("Pass --project-folder for non-interactive setup.")
+    source_items = ()
+    if getattr(args, "semantic_model", None) is None:
+        from weaver.initialise import powerbi_repository
+
+        repository = powerbi_repository(args.project_folder)
+        if repository is not None:
+            source_items = tuple(
+                str(item)
+                for item in sorted(
+                    set(repository.semantic_models) | set(repository.reports)
+                )
+            )
     ProjectRequest(
         workspace=args.workspace,
         catalogue=args.catalogue or DEFAULT_CATALOGUE,
@@ -187,6 +199,7 @@ def _validate(args):
         warehouse=args.warehouse,
         semantic_model=getattr(args, "semantic_model", None),
         example=bool(args.example),
+        source_items=source_items,
     )
 
 
