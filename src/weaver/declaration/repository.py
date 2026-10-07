@@ -674,11 +674,10 @@ def _read_authored_repository(root: Location, store: Store) -> RepositoryPart:
 
     origins = {str(item).casefold(): (item, str(item)) for item in item_ids}
     for project in projects.values():
-        contributed = (
-            [(project.model, project.model_path or project.model_tmdl)]
-            if project.model
-            else []
-        )
+        contributed = [
+            (definition.model, definition.model_path or definition.model_tmdl)
+            for definition in project.definitions.values()
+        ]
         contributed += [
             (WeaverItemId(REPORT, p.rsplit("/", 1)[1][:-7]), p)
             for p in project.report_paths
@@ -709,10 +708,22 @@ def _read_authored_repository(root: Location, store: Store) -> RepositoryPart:
             store=store,
             paths=file_paths,
             annotations=annotations,
-            project=next((p for p in projects.values() if p.model == item), None),
         )
         for item in semantic_items
+        if not any(item in p.definitions for p in projects.values())
     }
+    from ..semantic_models.composition import read_project_models
+
+    for project in projects.values():
+        semantic_models.update(
+            read_project_models(
+                project,
+                root=root,
+                store=store,
+                paths=file_paths,
+                annotations=annotations,
+            )
+        )
     source_documents: dict[WeaverDocumentId, SourceDocument] = {}
     schema_documents: dict[WeaverSchemaId, SchemaSes] = {}
     programmables: dict[WeaverDocumentId, Programmable] = {}

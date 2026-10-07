@@ -33,8 +33,10 @@ CLI sign-in and does not open a browser.
 
 ## Semantic model Build
 
-A Power BI source project lives under `PowerBI/<project>/` with at most one
-local `<model-name>.SemanticModel` directory. A normal PBIP needs no Weaver
+A Power BI source project lives under `PowerBI/<project>/`. Each native
+`<model-name>.SemanticModel` directory or standalone `<model-name>.tmdl` declares
+one logical model. A native directory and TMDL file with the same name form one
+model; different names form separate models. A normal PBIP needs no Weaver
 declaration. Build deploys its TMDL definition parts and preserves untouched
 source bytes, including constructs Weaver does not edit.
 
@@ -50,10 +52,13 @@ An extension-only model starts from a minimal TMDL package and uses the same
 compiler. Its source folder needs only `<model-name>.tmdl`.
 
 Reports under the project, including nested `<report-name>.Report` directories,
-need a `definition.pbir` with `datasetReference.byPath` naming that exact local
-model. Build binds the deployment payload to the resolved service model and
-preserves authored files and native resources. Thin/byConnection source Reports
-are unsupported.
+associate with the same-name logical model first, otherwise the project's sole
+model. Without a same-name or sole model, a Report deploys as authored.
+PBIR paths, connection IDs and lineage never infer a logical association.
+For an associated Report, Build rebinds only the deployment payload to the
+resolved service model. Otherwise it preserves every connection byte and adds
+no model dependency. Authored files and native resources remain unchanged.
+Reverse-mapping thin Report connections is not supported.
 
 Select a model and its Reports together:
 
@@ -66,9 +71,11 @@ weaver build ./reporting \
 Build verifies the deployed model before updating its selected Reports, then
 verifies each Report's definition and model binding before catalogue publication.
 A model deployment rebuilds its selected consuming Reports. A Report-only edit
-rebuilds that Report. Unchanged catalogue-backed builds perform no work.
+rebuilds that Report. Unchanged catalogue-backed Report-only builds perform no work;
+every selected model deploys even with an unchanged signature.
 Catalogue-free model and Report builds deploy and verify on every invocation.
-A Report-only selection needs its model's certified catalogue installation.
+A logically associated Report-only selection needs its model's certified
+catalogue installation. An as-authored Report is independently certified.
 
 Targets must already exist. Python `weaver.initialise(..., reports={name: definition})`
 creates or reuses typed Reports from complete service-bound native definitions.
@@ -79,6 +86,12 @@ Build selectors expand before target binding: `SemanticModel`, `Warehouse`,
 `Lakehouse` and `Report` select their real logical items; `PowerBI` selects all
 Power BI projects, and `PowerBI/<project>` selects one. Exact selections retain
 their physical target overrides. Build source items first, then Power BI items.
+
+To adopt an existing `PowerBI` source tree, run ordinary `initialise` against its
+project folder without `--semantic-model`. It creates or reuses every discovered
+logical model and Report at its configured typed target, preserves authored
+files, and writes default target entries when there is no workspace config.
+An explicit `--semantic-model Name` still provisions just that named model.
 
 Rename organisation `extension.tmdl` to `PowerBI/policy.tmdl` and project
 `extension.tmdl` to `<model-name>.tmdl` before building.
@@ -151,6 +164,12 @@ descriptions, partitions and storage modes.
 
 ### Weaver annotations
 
+Start with ordinary PBIP modelling, add `Weaver.Source` lineage and metadata,
+apply organisation policy, and test the model. Use a same-name TMDL overlay for
+project edits. Shared edits can form named local definitions that several
+outputs compose. Custom annotations remain an optional last transformation over
+the fully composed input.
+
 `Weaver.*` annotations opt a PBIP into native transformations. They can also live
 in either `policy.tmdl` or `<model-name>.tmdl`. Weaver merges the layers before
 executing the annotations. Ordinary annotations pass through; an unknown
@@ -178,6 +197,13 @@ Weaver's own annotations are
   M expression per logical source. Their workspace and CLI source overrides must
   resolve to the selected or installed managed target; build the source into its
   new target before changing that binding.
+- `Weaver.BaseSemanticModels` on a model lists local semantic-definition names,
+  one per line. A name includes its native directory and same-name overlay.
+  Bases compose recursively in declared order; later properties win. Organisation
+  policy applies once to the resulting model, followed by that model's own
+  overlay. Self-references, cycles, missing local names and repeated ancestors
+  (including diamonds) fail with a scoped diagnostic. Composition adds no
+  dependency on a base's physical Fabric item.
 - `Weaver.MeasureTable = true` on a table generates a calculated partition over
   `INFO.VIEW.MEASURES()` with the columns Measure name, Expression, Format
   string definition, Description, Display folder, Table and Data category. Native `isHidden` controls visibility.

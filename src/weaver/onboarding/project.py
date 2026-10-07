@@ -37,6 +37,7 @@ class ProjectRequest:
     example: bool = False
     semantic_model: str | None = None
     reports: dict = dataclass_field(default_factory=dict)
+    source_items: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         from ..report_definition import validate_service_report
@@ -66,6 +67,7 @@ class ProjectRequest:
             self.lakehouse is None
             and self.warehouse is None
             and self.semantic_model is None
+            and not self.source_items
         ):
             raise CommandError(
                 "Choose a Lakehouse, a Warehouse, or a SemanticModel for the project."
@@ -86,7 +88,7 @@ class ProjectRequest:
             chosen.append(f"{WAREHOUSE}/{self.warehouse}")
         if self.semantic_model:
             chosen.append(f"{SEMANTIC_MODEL}/{self.semantic_model}")
-        return tuple(chosen)
+        return tuple(dict.fromkeys(chosen + list(self.source_items)))
 
 
 def project_files(request: ProjectRequest) -> dict[str, str]:
@@ -133,6 +135,8 @@ def _workspace_config(request: ProjectRequest) -> str:
         lines.append(
             f"  {SEMANTIC_MODEL}/{request.semantic_model}: {_scalar(request.semantic_model)}"
         )
+    for item in request.source_items:
+        lines.append(f"  {item}: {_scalar(item.partition('/')[2])}")
     return "\n".join(lines) + "\n"
 
 
