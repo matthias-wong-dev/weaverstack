@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import posixpath
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Mapping
 
 from ..errors import ConfigError
@@ -22,11 +22,59 @@ class SemanticContribution:
     source_references: Mapping[str, str] = field(default_factory=dict)
     source_bindings: Mapping[str, dict] = field(default_factory=dict)
     expression_sources: Mapping[str, dict] = field(default_factory=dict)
+    table_order: tuple[str, ...] | None = None
     #: Bind data sources to their connections once the definition is deployed.
     bind_data_sources: bool = False
     #: The annotation classes this contribution compiles with; not desired state.
     annotations: object = field(default=None, compare=False, repr=False)
     compilation: object = field(default=None, compare=False, repr=False)
+
+    @property
+    def table_names(self):
+        from .tmdl import Document
+
+        if self.table_order is not None:
+            return self.table_order
+        names = {}
+        paths = list(self.parts)
+        if "definition/model.tmdl" in paths:
+            paths.remove("definition/model.tmdl")
+            paths.insert(0, "definition/model.tmdl")
+        for path in paths:
+            if path.startswith("definition/") and path.endswith(".tmdl"):
+                for span in Document(path, self.parts[path]).spans:
+                    if span.kind == "table" and len(span.path) == 1:
+                        names.setdefault(span.name.casefold(), span.name)
+        return tuple(names.values())
+
+    @property
+    def artifact_signatures(self):
+        import hashlib
+
+        groups = {}
+        native = next(
+            (
+                p.rsplit("/", 1)[0]
+                for p in self.sources
+                if p.endswith("/definition.pbism")
+            ),
+            None,
+        )
+        for path, content in self.sources.items():
+            if native and path.startswith(native + "/"):
+                key = ("Definition", native.rsplit("/", 1)[-1])
+                relative = path[len(native) + 1 :]
+            else:
+                key = (
+                    "Policy" if path == "PowerBI/policy.tmdl" else "Definition",
+                    path.rsplit("/", 1)[-1],
+                )
+                relative = key[1]
+            groups.setdefault(key, {})[relative] = hashlib.sha256(content).hexdigest()
+        for path, content in getattr(self.annotations, "sources", {}).items():
+            name = path.rsplit("/", 1)[-1]
+            groups[("Annotations", name)] = {name: hashlib.sha256(content).hexdigest()}
+        return {key: content_signature(parts) for key, parts in sorted(groups.items())}
 
     @property
     def dependencies(self):
@@ -43,8 +91,9 @@ class SemanticContribution:
         import hashlib
 
         value = {
-            "compiler": 2,
+            "compiler": 3,
             "parts": {p: hashlib.sha256(b).hexdigest() for p, b in self.parts.items()},
+            "table_order": self.table_names,
         }
         if self.absent:
             value["absent"] = self.absent

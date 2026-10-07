@@ -13,7 +13,7 @@ Prohibit rebuild: true
 
 Has load procedure: false
 
-Primary key: Item type, Item name, Schema name, Object name, Table name, Column name
+Primary key: Item type, Item name, Table name, Column name
 
 Not null:
   - Signature
@@ -21,8 +21,6 @@ Not null:
 Schema:
   Item type: varchar(128)
   Item name: varchar(128)
-  Schema name: varchar(128)
-  Object name: varchar(128)
   Table name: varchar(128)
   Column name: varchar(128)
   Description: varchar(max)
@@ -34,8 +32,6 @@ Schema:
 */
 select cast(null as varchar(128)) as [Item type]
      , cast(null as varchar(128)) as [Item name]
-     , cast(null as varchar(128)) as [Schema name]
-     , cast(null as varchar(128)) as [Object name]
      , cast(null as varchar(128)) as [Table name]
      , cast(null as varchar(128)) as [Column name]
      , cast(null as varchar(max)) as [Description]

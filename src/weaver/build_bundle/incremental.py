@@ -206,6 +206,8 @@ def declared_signatures(
         artefact = installed.get(identity)
         if isinstance(identity, WeaverDocumentId) and identity.shape == MODEL_SHAPE:
             signatures[identity] = repository.semantic_models[identity.item].signature
+        elif identity.item in repository.reports:
+            signatures[identity] = repository.reports[identity.item].signature
         elif declaration is not None:
             signatures[identity] = declaration.signature
         elif artefact is not None:
@@ -326,7 +328,11 @@ def select_build(
     # changed is replaced like any other changed node.
     pointers = shortcut_destinations(repository)
     untouched = set(impact.impacted_descendants) & pointers
-    models = {identity for identity in selected if identity.shape == MODEL_SHAPE}
+    models = {
+        identity
+        for identity in selected
+        if identity.shape == MODEL_SHAPE or identity.item in repository.reports
+    }
     selected_for_drop = set(impact.impacted) - prohibited - untouched - models
     refreshed = (set(impact.impacted) & pointers) - prohibited
     return BuildSelection(

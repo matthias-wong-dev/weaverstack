@@ -158,6 +158,20 @@ def resolve_item_dependencies(repository: WeaverRepository) -> WeaverRepository:
             )
             graph_edges.add((str(producer), str(consumer)))
 
+    for item, contribution in repository.reports.items():
+        consumer = WeaverDocumentId.report_root(item)
+        producer = WeaverDocumentId.model_root(contribution.model)
+        edges.append(
+            ItemDependency(
+                consumer=consumer,
+                producer=producer,
+                reference=str(contribution.model),
+                resolution_kind="artifact",
+                is_within_item=False,
+            )
+        )
+        graph_edges.add((str(producer), str(consumer)))
+
     unique = {
         (edge.consumer, edge.reference, edge.producer, edge.resolution_kind): edge
         for edge in edges
@@ -179,6 +193,7 @@ def resolve_item_dependencies(repository: WeaverRepository) -> WeaverRepository:
                 WeaverDocumentId.model_root(item): None
                 for item in repository.semantic_models
             },
+            **{WeaverDocumentId.report_root(item): None for item in repository.reports},
         },
         logical_pairs,
         graph_edges,
