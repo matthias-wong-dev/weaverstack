@@ -768,6 +768,17 @@ def test_one_coherent_line_per_physical_item(monkeypatch):
 
 
 @weaver_test()
+def test_a_long_target_keeps_its_outcome_apart():
+    from weaver.operations.wipe import EMPTIED, WipeItemResult
+
+    item = WipeItemResult(
+        target="SemanticModel/A semantic model name", outcome=EMPTIED, counts={}
+    )
+    assert item.describe() == "SemanticModel/A semantic model name  emptied"
+    assert item.describe(40).endswith(" " * 7 + "emptied")
+
+
+@weaver_test()
 def test_a_file_is_not_counted_as_a_folder(monkeypatch):
     """The reports carry names and not kinds, so `entries` is what can be said.
 

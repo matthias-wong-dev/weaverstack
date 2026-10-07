@@ -1831,8 +1831,9 @@ def handle_wipe(args: argparse.Namespace) -> int:
         print(json.dumps(result.to_mapping(), indent=2))
     else:
         print("Wipe complete\n")
+        width = max([26, *(len(item.target) for item in result.items)])
         for item in result.items:
-            print(f"  {item.describe()}")
+            print(f"  {item.describe(width)}")
     return 0
 
 
