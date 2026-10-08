@@ -100,23 +100,86 @@ def validate_service_report(definition):
         raise ConfigError(f"Invalid Report service binding: {exc}") from exc
 
 
-def verify_report(desired, observed):
+def verify_report(
+    desired, observed, *, binding=None, service_binding=None, report_name=None
+):
     expected, actual = decode_report(desired), decode_report(observed)
-    for parts in (expected, actual):
-        try:
-            reference = json.loads(parts["definition.pbir"].decode("utf-8-sig"))[
-                "datasetReference"
-            ]
-        except (KeyError, ValueError, TypeError) as exc:
-            raise InstallError(f"Report binding readback is invalid: {exc}") from exc
-        if parts is expected:
-            binding = reference
-        elif reference != binding:
-            raise InstallError("Report binding does not match the deployed model")
-    # Fabric can reserialize the binding JSON; every other native part stays exact.
-    expected_binding = json.loads(expected.pop("definition.pbir").decode("utf-8-sig"))
-    actual_binding = json.loads(actual.pop("definition.pbir").decode("utf-8-sig"))
-    if expected_binding != actual_binding or expected != actual:
+    try:
+        expected_properties = json.loads(
+            expected.pop("definition.pbir").decode("utf-8-sig")
+        )
+        actual_properties = json.loads(
+            actual.pop("definition.pbir").decode("utf-8-sig")
+        )
+        expected_reference = expected_properties.pop("datasetReference")
+        actual_reference = actual_properties.pop("datasetReference")
+        if binding is None:
+            if expected_reference != actual_reference:
+                raise InstallError("Report binding does not match the deployed model")
+        else:
+            if expected_reference != service_reference(
+                binding, expected_properties.get("$schema", "")
+            ):
+                raise InstallError(
+                    "Report deployment binding differs from its model identity"
+                )
+            if not isinstance(service_binding, dict) or any(
+                str(service_binding.get(key, "")).casefold()
+                != binding[field].casefold()
+                for key, field in (
+                    ("datasetId", "item_id"),
+                    ("datasetWorkspaceId", "workspace_id"),
+                )
+            ):
+                raise InstallError(
+                    "Report service binding does not match the deployed model and workspace"
+                )
+            if set(actual_reference) != {"byConnection"}:
+                raise InstallError(
+                    "Report binding readback is not a service connection"
+                )
+            connection = actual_reference["byConnection"]
+            identifiers = re.findall(
+                r"(?:^|;)\s*semanticModelId\s*=\s*([0-9a-fA-F-]+)\s*(?=;|$)",
+                connection.get("connectionString", ""),
+                flags=re.IGNORECASE,
+            )
+            if not identifiers:
+                identifiers = [connection.get("pbiModelDatabaseName", "")]
+            if (
+                len(identifiers) != 1
+                or identifiers[0].casefold() != binding["item_id"].casefold()
+            ):
+                raise InstallError("Report binding does not match the deployed model")
+            if ".platform" in expected and ".platform" in actual:
+                expected_platform = json.loads(
+                    expected.pop(".platform").decode("utf-8-sig")
+                )
+                actual_platform = json.loads(
+                    actual.pop(".platform").decode("utf-8-sig")
+                )
+                if expected_platform != actual_platform:
+                    if actual_platform["metadata"]["displayName"] != report_name:
+                        raise InstallError(
+                            "Report platform metadata does not match its bound target"
+                        )
+                    actual_platform["metadata"]["displayName"] = expected_platform[
+                        "metadata"
+                    ]["displayName"]
+                    if (
+                        actual_platform["config"]["logicalId"]
+                        == "00000000-0000-0000-0000-000000000000"
+                    ):
+                        actual_platform["config"]["logicalId"] = expected_platform[
+                            "config"
+                        ]["logicalId"]
+                    if expected_platform != actual_platform:
+                        raise InstallError(
+                            "Report platform metadata differs from deployed native parts"
+                        )
+    except (KeyError, ValueError, TypeError, AttributeError) as exc:
+        raise InstallError(f"Report binding readback is invalid: {exc}") from exc
+    if expected_properties != actual_properties or expected != actual:
         raise InstallError(
             "Report definition readback differs from deployed native parts"
         )

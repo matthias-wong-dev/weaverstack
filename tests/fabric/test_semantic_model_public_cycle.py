@@ -232,7 +232,17 @@ def test_public_build_catalogue_load_dax_and_unchanged_build(
         context.model.model_id,
     )
     (definition,) = read_table(context.connection, SEMANTIC_MODEL, scope=SCOPE)
-    (registered,) = read_table(context.connection, REGISTRY, scope=SCOPE)
+    (registered,) = (
+        row
+        for row in read_table(context.connection, REGISTRY, scope=SCOPE)
+        if (
+            row["schema_name"],
+            row["object_name"],
+            row["object_type"],
+            row["object_role"],
+        )
+        == ("", "", "semantic_model", "data")
+    )
     assert registered["signature"] == definition["signature"]
     assert "definition" not in definition
     observed = decode_model(context.model.get_definition())["model"]

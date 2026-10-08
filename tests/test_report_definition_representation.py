@@ -112,3 +112,123 @@ def test_report_verification_rejects_wrong_binding_and_changed_resource():
     )
     with pytest.raises(InstallError, match="binding"):
         verify_report(desired, encode_report(other))
+
+
+def service_normalized_report(desired):
+    import base64
+
+    observed = json.loads(json.dumps(desired))
+    for part in observed["parts"]:
+        if part["path"] == "definition.pbir":
+            props = json.loads(base64.b64decode(part["payload"]))
+            props["datasetReference"] = {
+                "byConnection": {
+                    "connectionString": f"Data Source=pbiazure://api.powerbi.com;Initial Catalog=ServiceModel;Integrated Security=ClaimsToken;semanticModelId={MODEL};"
+                }
+            }
+            part["payload"] = base64.b64encode(json.dumps(props).encode()).decode()
+        elif part["path"] == ".platform":
+            props = json.loads(base64.b64decode(part["payload"]))
+            props["metadata"]["displayName"] = "Executive_Dev"
+            props["config"]["logicalId"] = "00000000-0000-0000-0000-000000000000"
+            part["payload"] = base64.b64encode(json.dumps(props).encode()).decode()
+    return observed
+
+
+@weaver_test()
+def test_bound_report_readback_accepts_service_normalization_with_verified_identity():
+    from weaver.report_definition import encode_report, verify_report
+
+    authored = contribution()
+    authored.parts[".platform"] = json.dumps(
+        {
+            "metadata": {"type": "Report", "displayName": "Executive"},
+            "config": {"version": "2.0", "logicalId": MODEL},
+        }
+    ).encode()
+    desired = encode_report(replace(authored, binding=BINDING))
+    observed = service_normalized_report(desired)
+    verify_report(
+        desired,
+        observed,
+        binding=BINDING,
+        service_binding={"datasetId": MODEL, "datasetWorkspaceId": WORKSPACE},
+        report_name="Executive_Dev",
+    )
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        "model",
+        "workspace",
+        "missing-workspace",
+        "connection-model",
+        "resource",
+        "platform-type",
+        "platform-name",
+        "platform-logical-id",
+        "pbir-version",
+        "as-authored",
+    ],
+)
+@weaver_test()
+def test_service_normalization_keeps_binding_and_native_content_guards(change):
+    import base64
+
+    from weaver.errors import InstallError
+    from weaver.report_definition import encode_report, verify_report
+
+    authored = contribution()
+    authored = replace(
+        authored,
+        parts={
+            **authored.parts,
+            ".platform": json.dumps(
+                {
+                    "metadata": {"type": "Report", "displayName": "Executive"},
+                    "config": {"version": "2.0", "logicalId": MODEL},
+                }
+            ).encode(),
+        },
+    )
+    desired = encode_report(replace(authored, binding=BINDING))
+    observed = service_normalized_report(desired)
+    identity = {"datasetId": MODEL, "datasetWorkspaceId": WORKSPACE}
+    wrong = "ffffffff-bbbb-cccc-dddd-eeeeeeeeeeee"
+    if change == "model":
+        identity["datasetId"] = wrong
+    elif change == "workspace":
+        identity["datasetWorkspaceId"] = wrong
+    elif change == "missing-workspace":
+        del identity["datasetWorkspaceId"]
+    else:
+        for part in observed["parts"]:
+            raw = base64.b64decode(part["payload"])
+            if change == "resource" and part["path"] == "StaticResources/theme.json":
+                part["payload"] = base64.b64encode(b"changed").decode()
+            elif change == "connection-model" and part["path"] == "definition.pbir":
+                part["payload"] = base64.b64encode(
+                    raw.replace(MODEL.encode(), wrong.encode())
+                ).decode()
+            elif change == "pbir-version" and part["path"] == "definition.pbir":
+                props = json.loads(raw)
+                props["version"] = "5.0"
+                part["payload"] = base64.b64encode(json.dumps(props).encode()).decode()
+            elif change.startswith("platform-") and part["path"] == ".platform":
+                props = json.loads(raw)
+                if change == "platform-type":
+                    props["metadata"]["type"] = "SemanticModel"
+                elif change == "platform-name":
+                    props["metadata"]["displayName"] = "Wrong"
+                else:
+                    props["config"]["logicalId"] = wrong
+                part["payload"] = base64.b64encode(json.dumps(props).encode()).decode()
+    with pytest.raises(InstallError):
+        verify_report(
+            desired,
+            observed,
+            binding=None if change == "as-authored" else BINDING,
+            service_binding=identity,
+            report_name="Executive_Dev",
+        )

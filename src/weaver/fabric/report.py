@@ -17,11 +17,24 @@ def validate_bound_report(item):
 
 
 class ReportClient:
-    def __init__(self, workspace_id, report_id, *, fabric):
+    def __init__(self, workspace_id, report_id, *, fabric, power_bi_factory=None):
         self.workspace_id = workspace_id
         self.report_id = report_id
         self.fabric = fabric
+        self._power_bi_factory = power_bi_factory
+        self._power_bi = None
         self.item_path = f"workspaces/{workspace_id}/reports/{report_id}"
+
+    def get_binding(self):
+        if self._power_bi is None:
+            if self._power_bi_factory is None:
+                raise ConfigError(
+                    "Report binding readback needs the Session's Power BI client"
+                )
+            self._power_bi = self._power_bi_factory()
+        return self._power_bi.get_json(
+            f"groups/{self.workspace_id}/reports/{self.report_id}"
+        )
 
     def get_definition(self, *, timeout=900):
         response = self.fabric.request(

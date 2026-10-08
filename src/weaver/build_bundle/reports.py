@@ -55,6 +55,7 @@ def report_stages(repository, item, target):
             json_text(
                 {
                     "definition": encode_report(contribution),
+                    "binding": contribution.binding,
                     "target_id": target.id,
                     "item": str(item),
                 }
