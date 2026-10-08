@@ -63,7 +63,7 @@ class ReportContribution:
 
         return content_signature(
             {
-                "compiler": 1,
+                "compiler": 2 if binding is not None else 1,
                 "source": self.source_signature,
                 "binding": binding,
             }
