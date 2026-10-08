@@ -280,9 +280,6 @@ def test_fabric_journey_fixture_hides_signature_in_the_final_compilation(
     from weaver.semantic_models.objects import TmdlDefinition
 
     root = tmp_path / "project"
-    _project(root)
-    repository = parse(root)
-    (item,) = repository.semantic_models
     reference = "Warehouse/_weaver/_.TableDictionary"
     source = {
         "reference": reference,
@@ -301,6 +298,9 @@ def test_fabric_journey_fixture_hides_signature_in_the_final_compilation(
             )
         ],
     }
+    _project(root, source_metadata=source)
+    repository = parse(root)
+    (item,) = repository.semantic_models
     bound = bind_semantic_sources(repository, {reference: source}, {item})
     model = TmdlDefinition(bound.semantic_models[item].parts).model
     assert model.tables["Objects"].columns["Signature"].isHidden is True
