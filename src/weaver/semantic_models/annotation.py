@@ -405,7 +405,11 @@ class _Compilation:
         dispatched = set()
         for document, node in declared:
             cls = self.registry.dispatch(document, node)
-            if cls is None or cls.phase != phase:
+            if (
+                cls is None
+                or cls.phase != phase
+                or node.name == "Weaver.BaseSemanticModels"
+            ):
                 continue
             dispatched.add(node.name)
             if not self.editor.locations(node.parent.path):
@@ -438,11 +442,14 @@ class _Compilation:
             absent=tuple(sorted(self.absent)),
             source_references=self.source_references,
             source_bindings=self.source_bindings,
-
             annotations=self.registry,
             compilation=self if phase == "schema" else None,
         )
-        return replace(compiled, table_order=compiled.table_names) if phase == "post_schema" else compiled
+        return (
+            replace(compiled, table_order=compiled.table_names)
+            if phase == "post_schema"
+            else compiled
+        )
 
 
 def _quote_names(editor, names):
@@ -509,4 +516,3 @@ def apply_annotations(contribution, registry=None):
 
     contribution = begin_annotations(contribution, registry)
     return contribution.compilation.run("post_schema")
-

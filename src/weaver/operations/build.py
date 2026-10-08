@@ -128,7 +128,6 @@ def build(
     from ..sessions.host import use_or_create_session
 
     with prepare_repository(source_location, source_store=source_store) as prepared:
-
         selected = _item_bindings(
             items, resolved_workspace, repository=prepared.repository
         )
