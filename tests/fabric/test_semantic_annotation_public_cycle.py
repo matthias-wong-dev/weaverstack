@@ -4,10 +4,12 @@ import json
 import shutil
 
 import pytest
+from support.semantic_models import policy_path
 from support.weaver_test import weaver_test
 from test_semantic_model_public_cycle import (
     ITEM,
     PBIP,
+    ROOT,
     SCOPE,
 )
 from test_semantic_model_public_cycle import (
@@ -92,7 +94,7 @@ ref table Sales
 def _project(folder, form):
     folder.mkdir(parents=True)
     if form == "source-extension":
-        target = folder / "extension.tmdl"
+        target = folder / f"{folder.name}.tmdl"
         target.write_text(SOURCE_TEXT, encoding="utf-8")
         return target
     shutil.copytree(PBIP, folder, dirs_exist_ok=True)
@@ -118,11 +120,11 @@ def _project(folder, form):
         )
         (definition / "tables/Metric.tmdl").write_text(METRIC_TEXT, encoding="utf-8")
         return model
-    (folder.parent / "extension.tmdl").write_text(
+    policy_path(folder.parent.parent).write_text(
         'model Model\n\tannotation Weaver.AutoHideColumns = "Product*"\n',
         encoding="utf-8",
     )
-    target = folder / "extension.tmdl"
+    target = folder / "Probe.tmdl"
     target.write_text(OVERLAY_TEXT + "\n" + METRIC_TEXT, encoding="utf-8")
     return target
 
@@ -243,13 +245,21 @@ def test_public_annotation_build_readback_load_and_fixed_point(
     )
     status = read_table(context.connection, LOAD_STATUS, predicate=SCOPE.predicate)
     assert len(status) == 1 and status[0]["result"] == "succeeded"
+    (definition,) = read_table(context.connection, SEMANTIC_MODEL, scope=SCOPE)
     repeated = weaver.build(project, items=selection, session=context.session)
+    assert repeated.succeeded, repeated.errors
+    assert repeated.selection.selected_for_build == (ROOT,)
+    assert not repeated.selection.impact.changed
+    assert repeated.installation_report.action_counts()["total"] > 0
     assert (
-        repeated.succeeded
-        and repeated.installation_report.action_counts()["total"] == 0
+        read_table(context.connection, SEMANTIC_MODEL, scope=SCOPE)[0]["signature"]
+        == definition["signature"]
     )
     assert (
-        read_table(context.connection, LOAD_STATUS, predicate=SCOPE.predicate) == status
+        read_table(context.connection, LOAD_STATUS, predicate=SCOPE.predicate)[0][
+            "result"
+        ]
+        == "pending"
     )
     assert {p: p.read_bytes() for p in before} == before
     edit_target.write_text(
@@ -270,7 +280,14 @@ def test_public_annotation_build_readback_load_and_fixed_point(
     )
     assert context.load(str(ITEM), session=context.session).succeeded
     final = weaver.build(project, items=selection, session=context.session)
-    assert final.succeeded and final.installation_report.action_counts()["total"] == 0
+    assert final.succeeded, final.errors
+    assert final.selection.selected_for_build == (ROOT,)
+    assert not final.selection.impact.changed
+    assert final.installation_report.action_counts()["total"] > 0
+    assert (
+        read_table(context.connection, LOAD_STATUS, scope=SCOPE)[0]["result"]
+        == "pending"
+    )
     assert not {"livy", "onelake"} & {
         e.resource for e in context.session.telemetry.events()
     }
@@ -282,10 +299,10 @@ def test_public_annotation_build_readback_load_and_fixed_point(
                     "build": True,
                     "readback": True,
                     "load": True,
-                    "unchanged_zero_actions": True,
+                    "unchanged_eager_stable_signature": True,
                     "changed_pending": True,
                     "reload": True,
-                    "final_zero_actions": True,
+                    "final_eager_pending_refresh": True,
                     "no_livy_or_onelake": True,
                 }
             },
