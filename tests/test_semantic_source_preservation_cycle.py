@@ -206,7 +206,7 @@ def test_authored_source_build_preserves_native_definition_without_catalogue_met
 
 
 @weaver_test()
-def test_public_build_executes_annotations_once_before_source_generation(
+def test_public_build_executes_default_annotations_once_after_source_generation(
     tmp_path, monkeypatch
 ):
     import builtins
@@ -258,9 +258,9 @@ def test_public_build_executes_annotations_once_before_source_generation(
         )
         assert result.succeeded, result.errors
     assert calls == [
-        ("custom", ()),
-        ("Weaver__AutoHideColumns", ()),
         ("Weaver__Source", ()),
+        ("custom", ("Id", "Label")),
+        ("Weaver__AutoHideColumns", ()),
     ]
 
 
