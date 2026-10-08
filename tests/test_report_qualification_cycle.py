@@ -179,9 +179,12 @@ def test_qualification_lifecycle_edits_trial_and_checks_actual_selection_shape(
         (root / "PowerBI/Reporting/Executive.Report/definition/report.json").read_text()
     )
     assert page["settings"]["useStylableVisualContainerHeader"]
+    from weaver.semantic_models import TmdlDefinition
+
+    text = (root / "PowerBI/Reporting/Reporting.tmdl").read_bytes()
     assert (
-        "Stage 3 qualification model edit"
-        in (root / "PowerBI/Reporting/Reporting.tmdl").read_text()
+        TmdlDefinition({"definition/model.tmdl": text}).model.description
+        == "Stage 3 qualification model edit"
     )
 
 
