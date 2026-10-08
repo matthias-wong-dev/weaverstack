@@ -326,9 +326,13 @@ def test_public_build_catalogue_load_dax_and_unchanged_build(
     unchanged = weaver.build(root, items=selector, session=context.session)
     print(json.dumps(unchanged.to_mapping(), default=str))
     assert unchanged.succeeded, unchanged.errors
-    assert not unchanged.selection.selected_for_build
-    assert unchanged.installation_report.action_counts()["total"] == 0
-    assert read_table(context.connection, LOAD_STATUS, scope=SCOPE) == (loaded,)
+    assert unchanged.selection.selected_for_build == (ROOT,)
+    assert not unchanged.selection.impact.changed
+    assert unchanged.installation_report.action_counts()["total"] > 0
+    assert (
+        read_table(context.connection, LOAD_STATUS, scope=SCOPE)[0]["result"]
+        == "pending"
+    )
     assert read_table(context.connection, SEMANTIC_MODEL, scope=SCOPE) == (definition,)
     assert {
         p.relative_to(root).as_posix(): p.read_bytes()

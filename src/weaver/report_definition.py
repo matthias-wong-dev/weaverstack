@@ -25,7 +25,9 @@ def service_reference(binding, schema):
             name="EntityDataSource",
             connectionType="pbiServiceXmlaStyleLive",
         )
-    elif not schema.endswith("/2.0.0/schema.json"):
+    elif schema.endswith("/2.0.0/schema.json"):
+        connection["connectionString"] += f"semanticModelId={binding['item_id']};"
+    else:
         raise ConfigError(f"Unsupported Report definition schema {schema!r}")
     return {"byConnection": connection}
 
