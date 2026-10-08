@@ -52,11 +52,12 @@ class Model:
         self.connections = [copy.deepcopy(BINDING)]
         self.calls = []
         self.fabric = SimpleNamespace(
+            request=lambda *a, **k: self.calls.append("request"),
             get_json=lambda path: {
                 **copy.deepcopy(BINDING),
                 "credentialDetails": {"credentialType": "WorkspaceIdentity"},
                 "lastUsedTime": len(self.calls),
-            }
+            },
         )
 
     def get_definition(self, *, format=None):
@@ -355,3 +356,31 @@ def test_generated_definition_guard_precedes_catalogue_actions():
     with pytest.raises(AssertionError, match="source"):
         session.execute_mutation(p, payloads)
     assert not calls
+
+
+@weaver_test()
+def test_load_cannot_repair_a_lost_configured_binding_with_a_new_client():
+    from weaver.fabric.semantic_model import SemanticModelClient
+
+    model, source = contract()
+    writes = []
+    model.fabric.request = lambda *a, **k: writes.append((a, k))
+    get_json = model.fabric.get_json
+    model.fabric.get_json = lambda path: (
+        {"value": [BINDING]} if path == "connections" else get_json(path)
+    )
+    session = SimpleNamespace(execute_mutation=lambda *a, **k: None)
+    source.attach(session)
+    client = SemanticModelClient(
+        model.workspace_id, model.model_id, fabric=model.fabric, power_bi=object()
+    )
+    client.data_sources = lambda: [
+        {
+            "datasourceType": "Sql",
+            "connectionDetails": {"server": "source.example", "database": "Catalogue"},
+        }
+    ]
+    with pytest.raises(AssertionError, match="rebind"):
+        client.bind_data_sources()
+    assert not writes
+    source.detach(session)
