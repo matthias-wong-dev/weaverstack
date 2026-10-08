@@ -464,7 +464,6 @@ def prepare_annotations(contribution, registry=None):
 
     registry = registry or contribution.annotations or builtin_registry()
     references = {}
-    dispatched = set()
     editor = PackageEditor(contribution.parts)
     for document in editor.documents():
         for node in document.spans:
@@ -473,13 +472,11 @@ def prepare_annotations(contribution, registry=None):
             cls = registry.dispatch(document, node)
             if cls is None:
                 continue
-            dispatched.add(node.name)
             if node.name == "Weaver.Source":
                 annotation = object.__new__(cls)
                 annotation._text = expression_text(document, node)
                 annotation._location = f"{document.path}:{node.header + 1}: {node.name}"
                 references[node.parent.name] = annotation.reference
-    _quote_names(editor, dispatched)
     return replace(
         contribution,
         parts=editor.parts,

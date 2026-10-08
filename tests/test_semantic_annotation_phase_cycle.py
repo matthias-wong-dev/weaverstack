@@ -16,6 +16,24 @@ def parse(root):
 
 
 @weaver_test()
+def test_source_collection_preserves_native_annotation_bytes():
+    from weaver.semantic_models.annotation import prepare_annotations
+    from weaver.semantic_models.source import SemanticContribution
+
+    raw = b"model Model\n\ntable Sales\n\tannotation Weaver.Source = Warehouse/Serving/Cake.Sales\n"
+    contribution = SemanticContribution(
+        parts={"definition/model.tmdl": raw},
+        sources={},
+        requested={},
+        owned=(),
+        provenance={},
+    )
+    prepared = prepare_annotations(contribution)
+    assert prepared.source_references == {"Sales": "Warehouse/Serving/Cake.Sales"}
+    assert prepared.parts == contribution.parts
+
+
+@weaver_test()
 def test_parsing_does_not_execute_annotation_handlers(tmp_path):
     from test_semantic_annotation_declaration import ITEM
 
