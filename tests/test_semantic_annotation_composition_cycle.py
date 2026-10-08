@@ -79,6 +79,13 @@ class Acme__Policy(Annotation):
     assert compiled.semantic_models[base].parts == base_parts
     assert TmdlDefinition(base_parts).model.description is None
     contribution = compiled.semantic_models[derived]
+    assert any(
+        b"annotation 'Weaver.BaseSemanticModels' = Base" in content
+        for content in contribution.parts.values()
+    )
+    assert {a["name"]: a["value"] for a in contribution.requested["annotations"]}[
+        "Weaver.BaseSemanticModels"
+    ] == "Base"
     model = TmdlDefinition(contribution.parts).model
     assert model.description.count("|schema") == 1
     assert model.description.count("|post") == 1

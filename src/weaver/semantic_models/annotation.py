@@ -405,13 +405,11 @@ class _Compilation:
         dispatched = set()
         for document, node in declared:
             cls = self.registry.dispatch(document, node)
-            if (
-                cls is None
-                or cls.phase != phase
-                or node.name == "Weaver.BaseSemanticModels"
-            ):
+            if cls is None or cls.phase != phase:
                 continue
             dispatched.add(node.name)
+            if node.name == "Weaver.BaseSemanticModels":
+                continue
             if not self.editor.locations(node.parent.path):
                 continue
             annotation = object.__new__(cls)
@@ -453,7 +451,7 @@ class _Compilation:
 
 
 def _quote_names(editor, names):
-    """Quote dispatched annotation names, which Fabric keeps only when quoted."""
+    """Quote retained annotation names for native deployment."""
 
     for document in list(editor.documents()):
         lines = list(document.lines)
