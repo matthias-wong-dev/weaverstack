@@ -9,6 +9,14 @@ from weaver.semantic_models.binding import _SQL_RELATIONS
 from weaver.semantic_models.definition import decode_model, decode_parts, encode_parts
 from weaver.semantic_models.wipe import reset_definition
 
+# The fixed PBIP fixture has two source-free literal Import partitions.
+_LOCAL_LITERAL_M = frozenset(
+    {
+        "let\n    Source = #table(type table [Id = Int64.Type, ProductId = Int64.Type, Amount = Currency.Type], {{1, 10, 12.5}, {2, 20, 7.5}})\nin\n    Source",
+        'let\n    Source = #table(type table [ProductId = Int64.Type, ProductName = text], {{10, "Cake"}, {20, "Coffee"}})\nin\n    Source',
+    }
+)
+
 
 def _hash(value):
     return hashlib.sha256(
@@ -52,7 +60,9 @@ def _observed_sources(observed):
             assert partition.get("mode") == "import" and source["type"] == "m", (
                 "Configured fixture source mode changed"
             )
-            values.append(_expression(source["expression"]))
+            expression = _expression(source["expression"])
+            if expression not in _LOCAL_LITERAL_M:
+                values.append(expression)
     assert values, "Configured fixture source was removed"
     assert len(set(values)) == 1, "Configured fixture source navigation changed"
     return values[0]
@@ -71,7 +81,9 @@ def _desired_sources(parts):
             assert partition.mode == "import" and partition.sourceType == "m", (
                 "Configured fixture source mode changed; use a separately approved target"
             )
-            values.append(_expression(partition.source))
+            expression = _expression(partition.source)
+            if expression not in _LOCAL_LITERAL_M:
+                values.append(expression)
     assert values, "Configured fixture source was removed"
     assert len(set(values)) == 1, "Configured fixture source navigation changed"
     return values[0]
