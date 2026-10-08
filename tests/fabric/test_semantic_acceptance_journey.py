@@ -27,7 +27,9 @@ from weaver.catalogue.tables import (
     TEST_DICTIONARY,
     TEST_STATUS,
 )
+from weaver.declaration.model import WeaverItemId
 from weaver.semantic_models import TmdlDefinition
+from weaver.semantic_models.binding import m_string
 from weaver.semantic_models.definition import decode_model
 from weaver.semantic_models.wipe import connection_signature
 
@@ -82,24 +84,46 @@ FILTER(Objects, ISBLANK(Objects[Signature]))
 """
 
 
-def _project(root):
+def _project(root, *, source_metadata):
     source = TmdlDefinition({"definition/model.tmdl": SOURCE_TEXT.encode()})
-    # Fabric's Direct Lake on SQL model cannot include a calculated measure table.
+    # Snapshot below is calculated; keep this journey separate from Direct Lake.
     source.model.tables["Metric"].remove()
+    partitions = []
+    for name, columns in (
+        (
+            "Objects",
+            ("Item type", "Item name", "Schema name", "Object type", "Signature"),
+        ),
+        ("Reference", ("Item type", "Item name")),
+    ):
+        table = source.model.tables[name]
+        for column_name in columns:
+            if column_name not in table.columns:
+                column = table.columns.add(column_name)
+                column.dataType = "string"
+                column.sourceColumn = column_name
+        partitions.append(
+            (
+                name,
+                f"    partition {name} = m\n"
+                "        mode: import\n"
+                "        source =\n"
+                "            let\n"
+                f"                Source = Sql.Database({m_string(source_metadata['server'])}, "
+                f"{m_string(source_metadata['database'])}),\n"
+                f"                Navigation = Source{{[Schema={m_string(source_metadata['schema'])}, "
+                f"Item={m_string(source_metadata['object'])}]}}[Data]\n"
+                "            in\n                Navigation\n",
+            )
+        )
+    text = source.parts["definition/model.tmdl"].decode()
+    for name, partition in partitions:
+        text = text.replace(f"table {name}\n", f"table {name}\n{partition}", 1)
     folder = root / "PowerBI/Acceptance"
     (folder / "tests" / ITEM.item_name).mkdir(parents=True)
     (folder / "assumptions" / ITEM.item_name).mkdir(parents=True)
     (folder / f"{ITEM.item_name}.tmdl").write_text(
-        source.parts["definition/model.tmdl"]
-        .decode()
-        .replace(
-            "    annotation Weaver.Source = Warehouse/_weaver/_.TableDictionary\n",
-            "    annotation Weaver.Source = Warehouse/_weaver/_.TableDictionary\n"
-            "\n    column Signature\n"
-            "        dataType: string\n"
-            "        sourceColumn: Signature\n",
-        )
-        .replace(
+        text.replace(
             "    annotation Weaver.AutoHideForeignKeys = true\n",
             "    annotation Weaver.AutoHideForeignKeys = true\n"
             "    annotation Acceptance.HideSignatures = true\n",
@@ -152,7 +176,12 @@ def test_semantic_model_build_load_test_health_lifecycle(
     context = semantic_build_context
     connection = context.connection
     root = tmp_path / "project"
-    folder, test_path = _project(root)
+    folder, test_path = _project(
+        root,
+        source_metadata=context.session.semantic_source(
+            WeaverItemId.parse("Warehouse/_weaver/_.TableDictionary")
+        ),
+    )
     selection = f"{ITEM}=SemanticModel/{context.target}"
     evidence = {}
 
