@@ -24,7 +24,10 @@ def reset_definition(
     source = _preserved_partition(model, connections) if preserve_data_source else None
     if source is not None:
         table, partition = source
-        retained = [partition["source"]["expressionSource"]]
+        retained = [
+            partition["source"].get("expressionSource")
+            or connections[0]["connectionDetails"]["path"]
+        ]
         native = PackageEditor(parts)
         expressions = [
             _fragment(native, (("expression", expression["name"]),))
@@ -40,7 +43,7 @@ def reset_definition(
             for index, line in enumerate(lines)
             if line.lstrip().startswith("partition ")
         )
-        lines[header] = "partition 'Source' = entity\n"
+        lines[header] = f"partition 'Source' = {partition['source']['type']}\n"
         editor.parts["definition/tables/__WeaverSource.tmdl"] = (
             "table '__WeaverSource'\n\tisHidden: true\n"
             + "".join("\t" + line for line in lines)
@@ -87,6 +90,8 @@ def _preserved_partition(model, connections):
         and not model.get("dataSources")
     ):
         return None
+    if _explicit_import(model, partitions, connections):
+        return partitions[0]
     qualified = (
         len(connections) == 1
         and connections[0].get("connectivityType") == "Automatic"
@@ -111,12 +116,51 @@ def _preserved_partition(model, connections):
         or not all(isinstance(name, str) and name for name in expressions)
     ):
         raise CommandError(
-            "--preserve-data-source supports one Automatic SQL source with Direct Lake entity partitions"
+            "--preserve-data-source supports one Automatic SQL Direct Lake source or one ShareableCloud SQL Import source with literal navigation"
         )
     names = [expression["name"] for expression in model.get("expressions", [])]
     if len(names) != len(set(names)) or not expressions <= set(names):
         raise CommandError("The preserved source expression is missing or duplicated")
     return partitions[0]
+
+
+def _explicit_import(model, partitions, connections):
+    from .binding import _SQL_RELATIONS
+
+    if (
+        len(connections) != 1
+        or connections[0].get("connectivityType") != "ShareableCloud"
+        or not connections[0].get("id")
+        or connections[0].get("connectionDetails", {}).get("type") != "SQL"
+        or not partitions
+        or model.get("dataSources")
+        or model.get("expressions")
+    ):
+        return False
+    path = connections[0]["connectionDetails"].get("path")
+    if not isinstance(path, str) or not path:
+        return False
+    for _, partition in partitions:
+        source = partition.get("source", {})
+        if partition.get("mode") != "import" or source.get("type") != "m":
+            return False
+        expression = source.get("expression", "")
+        if isinstance(expression, list):
+            expression = "\n".join(expression)
+        if not isinstance(expression, str):
+            return False
+        match = next(
+            (m for pattern in _SQL_RELATIONS if (m := pattern.fullmatch(expression))),
+            None,
+        )
+        if match is None:
+            return False
+        values = [match[key][1:-1].replace('""', '"') for key in ("server", "database")]
+        if any(not value or "#" in value or ";" in value for value in values):
+            return False
+        if ";".join(values).casefold() != path.casefold():
+            return False
+    return True
 
 
 def connection_signature(connections):

@@ -271,3 +271,199 @@ def test_readback_projects_only_the_wipe_owned_model_and_source_shell(preserve):
         {"model": _WipeProjection(model, {"culture", "tables", "expressions"})},
         connections if preserve else [],
     )
+
+
+def _import_inputs():
+    from weaver.semantic_models.extensions import merge_extensions
+    from weaver.semantic_models.render import empty_parts
+
+    expression = (
+        'let\n    Source = Sql.Database("server", "Catalogue"),\n'
+        '    Navigation = Source{[Schema="_", Item="TableDictionary"]}[Data]\n'
+        "in\n    Navigation"
+    )
+    partition = {
+        "name": "Objects",
+        "mode": "import",
+        "source": {"type": "m", "expression": expression},
+    }
+    observed = {
+        "model": {
+            "culture": "en-US",
+            "tables": [
+                {
+                    "name": "Objects",
+                    "columns": [{"name": "Item name", "dataType": "string"}],
+                    "partitions": [partition],
+                },
+            ],
+        }
+    }
+    text = (
+        "table Objects\n\tcolumn 'Item name'\n\t\tdataType: string\n"
+        "\tpartition Objects = m\n\t\tmode: import\n\t\tsource =\n"
+        + "".join("\t\t\t" + line + "\n" for line in expression.splitlines())
+    )
+    parts = merge_extensions(
+        empty_parts("Reporting"), ((text.encode(), "source.tmdl"),)
+    ).parts
+    connections = [
+        {
+            "id": "12345678-1234-1234-1234-123456789abc",
+            "connectivityType": "ShareableCloud",
+            "connectionDetails": {"type": "SQL", "path": "server;Catalogue"},
+        }
+    ]
+    return observed, parts, connections
+
+
+@weaver_test()
+def test_explicit_sql_import_retains_native_m_and_binding_in_columnless_shell():
+    from weaver.semantic_models.wipe import reset_definition, verify_reset
+
+    observed, native, connections = _import_inputs()
+    result = reset_definition(
+        "Reporting",
+        observed,
+        parts=native,
+        preserve_data_source=True,
+        connections=connections,
+    )
+    parts = decode_parts(result["definition"])
+    text = parts["definition/tables/__WeaverSource.tmdl"]
+    assert b"partition 'Source' = m" in text
+    assert b"mode: import" in text
+    assert b'Source = Sql.Database("server", "Catalogue")' in text
+    assert b'Navigation = Source{[Schema="_", Item="TableDictionary"]}[Data]' in text
+    assert b"column " not in text
+    assert (
+        result["expected"]["tables"][0]["partitions"][0]["source"]
+        == observed["model"]["tables"][0]["partitions"][0]["source"]
+    )
+    verify_reset(result, {"model": result["expected"]}, connections)
+
+
+@pytest.mark.parametrize(
+    "fault",
+    [
+        "unbound",
+        "automatic",
+        "gateway",
+        "non_sql",
+        "multiple_connections",
+        "wrong_path",
+        "direct_query",
+        "mixed_mode",
+        "transformed_m",
+        "escaped_identity",
+        "shared_expression",
+        "legacy_datasource",
+        "missing_native",
+    ],
+)
+@weaver_test()
+def test_explicit_import_refuses_unsupported_sources_before_mutation(fault):
+    from test_semantic_wipe_cycle import setup
+
+    from weaver import wipe
+    from weaver.errors import CommandError
+    from weaver.semantic_models.definition import encode_parts
+
+    original, parts, connections = _import_inputs()
+    partition = original["model"]["tables"][0]["partitions"][0]
+    if fault == "unbound":
+        connections[0].pop("id")
+    elif fault == "automatic":
+        connections[0]["connectivityType"] = "Automatic"
+    elif fault == "gateway":
+        connections[0]["connectivityType"] = "OnPremisesGateway"
+    elif fault == "non_sql":
+        connections[0]["connectionDetails"]["type"] = "Web"
+    elif fault == "multiple_connections":
+        connections.append(copy.deepcopy(connections[0]))
+    elif fault == "wrong_path":
+        connections[0]["connectionDetails"]["path"] = "other;Catalogue"
+    elif fault == "direct_query":
+        partition["mode"] = "directQuery"
+    elif fault == "mixed_mode":
+        other = copy.deepcopy(partition)
+        other["mode"] = "directLake"
+        original["model"]["tables"][0]["partitions"].append(other)
+    elif fault == "transformed_m":
+        partition["source"]["expression"] += " & OtherSource"
+    elif fault == "escaped_identity":
+        partition["source"]["expression"] = partition["source"]["expression"].replace(
+            '"server"', '"s#(lf)erver"'
+        )
+    elif fault == "shared_expression":
+        original["model"]["expressions"] = [
+            {"name": "Other", "kind": "m", "expression": "1"}
+        ]
+    elif fault == "legacy_datasource":
+        original["model"]["dataSources"] = [{"name": "Other"}]
+    elif fault == "missing_native":
+        parts = {
+            p: v for p, v in parts.items() if not p.startswith("definition/tables/")
+        }
+    session, client = setup()
+    client.before, client.native, client.connections = (
+        original,
+        encode_parts(parts),
+        connections,
+    )
+    with pytest.raises(CommandError, match="preserve-data-source|Source TMDL"):
+        wipe(
+            ("Warehouse/Reporting", "SemanticModel/Reporting"),
+            session=session,
+            preserve_data_source=True,
+        )
+    assert not client.updated
+    assert not any(call.kind == "execute_mutation" for call in session.calls)
+
+
+@pytest.mark.parametrize("changed_binding", [False, True])
+@weaver_test()
+def test_public_import_wipe_requires_the_same_explicit_binding_after_update(
+    changed_binding,
+):
+    from test_semantic_wipe_cycle import setup
+
+    from weaver import wipe
+    from weaver.semantic_models.definition import encode_parts
+    from weaver.semantic_models.wipe import reset_definition
+
+    original, parts, connections = _import_inputs()
+    session, client = setup()
+    client.before, client.native, client.connections = (
+        original,
+        encode_parts(parts),
+        connections,
+    )
+    spec = reset_definition(
+        "Reporting",
+        original,
+        parts=parts,
+        preserve_data_source=True,
+        connections=connections,
+    )
+    client.after = {"model": spec["expected"]}
+    if changed_binding:
+        from weaver.errors import CommandError
+
+        update = client.update_definition
+
+        def lose_binding(*args, **kwargs):
+            result = update(*args, **kwargs)
+            client.connections = []
+            return result
+
+        client.update_definition = lose_binding
+        with pytest.raises(CommandError, match="wipe did not complete.*connection"):
+            wipe("SemanticModel/Reporting", session=session, preserve_data_source=True)
+    else:
+        result = wipe(
+            "SemanticModel/Reporting", session=session, preserve_data_source=True
+        )
+        assert result.emptied == ("SemanticModel/Reporting",)
+        assert client.connections == connections
+    assert len([c for c in client.calls if c[0] == "update"]) == 1

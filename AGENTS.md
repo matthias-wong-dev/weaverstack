@@ -712,10 +712,14 @@ A semantic-only selection keeps the catalogue and unbinds the selected model's
 claims. Registry certification and current runtime state are removed before the
 REST reset; dictionary claims are removed after verified readback. It uses no Spark.
 `--preserve-data-source` is frozen in WipePlan. It retains one Automatic SQL /
-Direct Lake source through a hidden `__WeaverSource` table with one partition and
-no columns or measures, plus the deployed native shared expressions. Unsupported
-source or connection forms are refused before any selected target is changed.
-Semantic wipe never owns source data, shared connections or gateways.
+Direct Lake source or one explicitly bound ShareableCloud SQL / Import source
+through a hidden `__WeaverSource` table with one native partition and no columns
+or measures. Direct Lake retains its deployed shared expressions. Import requires
+literal SQL database and relation navigation without transforms or shared
+expressions. Every Import partition must match the bound connection's physical
+source. Unsupported source or connection forms are refused before any selected
+target is changed. Semantic wipe never owns source data, shared connections or
+gateways.
 
 A mirror plans before it acts too. `check_mirror` proves the source and refuses
 unsafe destinations, then `mirror_mutation_plan` reads what the mirror needs,
