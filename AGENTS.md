@@ -239,7 +239,10 @@ target-bound model, materialises source metadata and generated columns, then run
 post-schema annotations. Each annotation occurrence executes once in its phase.
 Source annotations join the existing Session metadata and source-binding owners;
 authored data definitions remain intact and only missing descriptions are enriched.
-Tables without partitions generate source definitions and columns. Same-managed-target environment overrides run
+Tables without partitions generate source definitions and columns. Declared
+`Weaver.Source` links publish SQL access for authored partitions as well,
+without replacing their native mode or materialising generated columns.
+Same-managed-target environment overrides run
 before generation. Post-schema handlers see generated columns and apply hiding
 through the ordinary object API.
 Measure-table and switch handlers write known native fragments, including dynamic

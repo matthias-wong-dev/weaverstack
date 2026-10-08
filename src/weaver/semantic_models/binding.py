@@ -309,8 +309,7 @@ def bind_semantic_sources(repository, observed, selected):
             _patch_object(editor, (), "model", patch, owned)
             requested = _merge(requested, patch)
             source["mode"] = mode
-            if generated:
-                source["access"] = "sql"
+            source["access"] = "sql"
             bindings[table["name"]] = source
             origin = contribution.provenance.get(
                 f"/model/tables/{escape(table['name'])}/source", {"source": reference}
