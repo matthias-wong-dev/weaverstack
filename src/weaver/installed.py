@@ -939,7 +939,7 @@ class _References:
             expected = (producer.item.item_type, producer.item.item_name, schema, name)
             node = self._objects.get(producer)
             # A metadata-only Weaver.Source annotation establishes provenance
-            # without verifying the authored partition\'s access method.
+            # without verifying the authored partition's access method.
             if (
                 str(producer) != row.reference
                 or row.referenced != expected

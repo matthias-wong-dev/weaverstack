@@ -134,7 +134,12 @@ def test_public_source_build_preserves_authored_data_and_enriches_native_mapping
         assert not dag.unresolved
         edges = [edge for edge in dag.edges if edge.downstream.item == ITEM]
         assert [
-            (edge.semantic_table, str(edge.upstream), edge.source_mode, edge.source_access)
+            (
+                edge.semantic_table,
+                str(edge.upstream),
+                edge.source_mode,
+                edge.source_access,
+            )
             for edge in edges
         ] == [("Sales", "Warehouse/Serving/Cake.Sales", "dual", None)]
         assert path.read_bytes() == before
