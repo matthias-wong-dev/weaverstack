@@ -20,4 +20,8 @@ def test_annotation_acceptance_inputs_use_named_tmdl(tmp_path, monkeypatch, form
     fixture._project(folder, form)
     parsed = parse_item_repository(Location(root.as_posix()))
     assert set(parsed.semantic_models) == {fixture.ITEM}
+    from weaver.semantic_models import TmdlDefinition
+
+    tables = TmdlDefinition(parsed.semantic_models[fixture.ITEM].parts).model.tables
+    assert tables["Metric"].isHidden is True
     assert not list(root.rglob("extension.tmdl"))
