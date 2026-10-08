@@ -22,6 +22,14 @@ class ReportReadbackExecutor:
         spec = json.loads(payload)
         if spec["target_id"] != context.target.bound.id:
             raise InstallError("Report readback requires its bound target")
-        observed = context.report_item(context.target.bound).get_definition()
-        verify_report(spec["definition"], observed)
+        report = context.report_item(context.target.bound)
+        observed = report.get_definition()
+        binding = spec.get("binding")
+        verify_report(
+            spec["definition"],
+            observed,
+            binding=binding,
+            service_binding=report.get_binding() if binding is not None else None,
+            report_name=context.target.bound.name,
+        )
         return {"report_definition": observed}
