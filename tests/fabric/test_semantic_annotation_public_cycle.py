@@ -229,7 +229,7 @@ def test_public_annotation_build_readback_load_and_fixed_point(
         SEMANTIC_MODEL_MEASURE,
     ):
         assert read_table(context.connection, table, predicate=SCOPE.predicate)
-    loaded = weaver.load(str(ITEM), session=context.session)
+    loaded = context.load(str(ITEM), session=context.session)
     assert loaded.succeeded, loaded.to_mapping()
     assert len(loaded.nodes) == 1 and loaded.nodes[0].result.status == "Completed"
     request_id = loaded.nodes[0].result.request_id
@@ -268,7 +268,7 @@ def test_public_annotation_build_readback_load_and_fixed_point(
         ]
         == "pending"
     )
-    assert weaver.load(str(ITEM), session=context.session).succeeded
+    assert context.load(str(ITEM), session=context.session).succeeded
     final = weaver.build(project, items=selection, session=context.session)
     assert final.succeeded and final.installation_report.action_counts()["total"] == 0
     assert not {"livy", "onelake"} & {

@@ -37,13 +37,14 @@ def test_public_wipe_preserves_item_sources_and_catalogue_then_rebuilds(
     semantic_build_context, tmp_path, preserve
 ):
     context = semantic_build_context
+    context.source.require_preservation(preserve)
     folder = tmp_path / "project" / str(ITEM)
     _project(folder, "source-extension")
     project = folder.parent.parent
     selection = f"{ITEM}=SemanticModel/{context.target}"
     built = weaver.build(project, items=selection, session=context.session)
     assert built.succeeded, built.errors
-    loaded = weaver.load(str(ITEM), session=context.session)
+    loaded = context.load(str(ITEM), session=context.session)
     assert loaded.succeeded, loaded.to_mapping()
     assert (
         read_table(context.connection, LOAD_STATUS, scope=SCOPE)[0]["result"]
@@ -156,7 +157,7 @@ def test_public_wipe_preserves_item_sources_and_catalogue_then_rebuilds(
         read_table(context.connection, LOAD_STATUS, scope=SCOPE)[0]["result"]
         == "pending"
     )
-    assert weaver.load(str(ITEM), session=context.session).succeeded
+    assert context.load(str(ITEM), session=context.session).succeeded
     assert connection_signature(model.get_connections()) == binding_before
     fixed = weaver.build(project, items=selection, session=context.session)
     assert fixed.succeeded and fixed.installation_report.action_counts()["total"] == 0
