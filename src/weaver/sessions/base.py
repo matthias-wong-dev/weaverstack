@@ -1071,7 +1071,10 @@ class WorkspaceScope:
                     else self.resolve_item(item, item_type="Report")
                 )
                 self._reports[key] = ReportClient(
-                    resolved.workspace_id, resolved.id, fabric=self.resolver.client
+                    resolved.workspace_id,
+                    resolved.id,
+                    fabric=self.resolver.client,
+                    power_bi_factory=self._power_bi_client,
                 )
             return self._reports[key]
 
