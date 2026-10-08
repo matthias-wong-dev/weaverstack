@@ -292,7 +292,13 @@ def test_fabric_journey_fixture_hides_signature_in_the_final_compilation(
         "object": "TableDictionary",
         "source_columns": [
             {"column_name": name, "data_type": "varchar"}
-            for name in ("Schema name", "Item type", "Item name", "Signature")
+            for name in (
+                "Schema name",
+                "Item type",
+                "Item name",
+                "Object type",
+                "Signature",
+            )
         ],
     }
     bound = bind_semantic_sources(repository, {reference: source}, {item})
