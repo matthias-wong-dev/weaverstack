@@ -124,7 +124,7 @@ def _project(folder, form):
         'model Model\n\tannotation Weaver.AutoHideColumns = "Product*"\n',
         encoding="utf-8",
     )
-    target = folder / "Probe.tmdl"
+    target = folder / f"{folder.name}.tmdl"
     target.write_text(OVERLAY_TEXT + "\n" + METRIC_TEXT, encoding="utf-8")
     return target
 
