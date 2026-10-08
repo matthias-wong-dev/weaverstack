@@ -655,7 +655,9 @@ def build_item_repository_source(
     executors=None,
 ) -> ItemBuildResult:
     with prepare_repository(source, source_store=source_store) as prepared:
-        repository = prepared.repository
+        from ..semantic_models.binding import begin_semantic_sources
+
+        repository = begin_semantic_sources(prepared.repository, bindings.by_item)
         validate_build_request(
             repository, bindings, catalogue_binding=catalogue_binding
         )

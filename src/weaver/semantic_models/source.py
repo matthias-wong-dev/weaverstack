@@ -26,6 +26,7 @@ class SemanticContribution:
     bind_data_sources: bool = False
     #: The annotation classes this contribution compiles with; not desired state.
     annotations: object = field(default=None, compare=False, repr=False)
+    compilation: object = field(default=None, compare=False, repr=False)
 
     @property
     def dependencies(self):
@@ -176,6 +177,6 @@ def read_semantic_contribution(item, *, root, store, paths, annotations=None):
         from .extensions import apply_extensions
 
         contribution = apply_extensions(contribution, item.item_name, extensions)
-    from .annotation import apply_annotations
+    from .annotation import prepare_annotations
 
-    return apply_annotations(contribution, annotations)
+    return prepare_annotations(contribution, annotations)

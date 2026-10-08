@@ -100,7 +100,7 @@ def source_table(parts, name):
 def needs_source_columns(table):
     """A table whose partition Weaver generates takes every source column."""
 
-    return not table.get("partitions") or not table.get("columns")
+    return not table.get("partitions")
 
 
 def source_context(parts, table):

@@ -55,7 +55,9 @@ def parse(root):
 
 
 def compile_model(root):
-    return parse(root).semantic_models[ITEM]
+    from weaver.semantic_models.annotation import apply_annotations
+
+    return apply_annotations(parse(root).semantic_models[ITEM])
 
 
 def column_hidden(contribution, table, column):
@@ -107,7 +109,7 @@ def test_model_scoped_project_annotation_edits_native_properties(tmp_path):
         {"DWG__HideIntegerColumns": HIDE_INTEGERS},
     )
     repository = parse(root)
-    contribution = repository.semantic_models[ITEM]
+    contribution = compile_model(root)
     assert column_hidden(contribution, "Sales", "Quantity") is True
     assert column_hidden(contribution, "Customer", "CustomerId") is True
     assert column_hidden(contribution, "Sales", "Region") is None
@@ -290,6 +292,7 @@ def test_implementation_change_recompiles_without_changing_desired_state(tmp_pat
         {"DWG__HideIntegerColumns": HIDE_INTEGERS},
     )
     first = parse(root)
+    first_compiled = compile_model(root)
     refactored = HIDE_INTEGERS.replace(
         '                if column.dataType == "int64":\n'
         "                    column.isHidden = True\n",
@@ -299,15 +302,14 @@ def test_implementation_change_recompiles_without_changing_desired_state(tmp_pat
     path = root / "SemanticModel/annotations/DWG__HideIntegerColumns.py"
     path.write_text(textwrap.dedent(refactored), encoding="utf-8")
     second = parse(root)
+    second_compiled = compile_model(root)
     assert second.signature != first.signature
-    assert (
-        second.semantic_models[ITEM].signature == first.semantic_models[ITEM].signature
-    )
+    assert second_compiled.signature == first_compiled.signature
     path.write_text(
         textwrap.dedent(HIDE_INTEGERS.replace('"int64"', '"string"')), encoding="utf-8"
     )
-    changed = parse(root).semantic_models[ITEM]
-    assert changed.signature != first.semantic_models[ITEM].signature
+    changed = compile_model(root)
+    assert changed.signature != first_compiled.signature
 
 
 @weaver_test()

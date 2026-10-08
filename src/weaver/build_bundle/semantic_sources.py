@@ -35,6 +35,29 @@ def read_semantic_sources(
         bound = bindings.by_item.get(identity.item)
         authored = repository.source_documents.get(identity) if bound else None
         registered = catalogue.registered.get(identity)
+        if not needs_columns:
+            schema, name = catalogue_columns(identity)
+            rows = catalogue.rows.get(identity.item, {})
+            observed[reference] = {
+                "reference": reference,
+                "description": next(
+                    (
+                        row.get("description")
+                        for row in rows.get("TableDictionary", ())
+                        if row.get("schema_name") == schema
+                        and row.get("object_name") == name
+                    ),
+                    None,
+                ),
+                "column_notes": {
+                    row["column_name"]: row["description"]
+                    for row in rows.get("ColumnDictionary", ())
+                    if row.get("schema_name") == schema
+                    and row.get("object_name") == name
+                    and row.get("description")
+                },
+            }
+            continue
         if authored is not None and authored.kind in {TABLE, VIEW}:
             kind = authored.kind.lower()
         elif registered is not None and registered.object_type in {"table", "view"}:

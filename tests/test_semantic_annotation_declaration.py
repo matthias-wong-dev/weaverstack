@@ -43,7 +43,12 @@ def source_project(
 
 
 def compile_source(root):
-    return parse_item_repository(Location(root.as_posix())).semantic_models[ITEM]
+    from weaver.semantic_models.annotation import apply_annotations
+
+    contribution = parse_item_repository(Location(root.as_posix())).semantic_models[
+        ITEM
+    ]
+    return apply_annotations(contribution)
 
 
 @pytest.mark.parametrize("origin", ["pbip", "organisation", "item"])

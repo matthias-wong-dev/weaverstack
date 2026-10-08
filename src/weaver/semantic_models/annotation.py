@@ -65,6 +65,7 @@ class Annotation:
     """
 
     scopes: frozenset[str] = frozenset()
+    phase = "post_schema"
 
     _text: str
     _location: str
@@ -185,6 +186,8 @@ def discover_annotations(root, store, paths) -> AnnotationRegistry:
             )
         if cls.apply is Annotation.apply:
             raise ConfigError(f"{path}: {stem} must implement apply(self, target)")
+        if cls.phase not in ("schema", "post_schema"):
+            raise ConfigError(f"{path}: {stem}.phase must be 'schema' or 'post_schema'")
         classes[name] = cls
     return AnnotationRegistry(classes, sources)
 
@@ -279,6 +282,13 @@ def _expected(path, key, value):
 
 def _without(requested, path):
     kind, name = path[0]
+    if kind == "opaque":
+        result = dict(requested)
+        if len(path) == 1:
+            result.pop(name, None)
+        elif name in result:
+            result[name] = _without(result[name], path[1:])
+        return result
     collection = _COLLECTION_OF.get(kind.casefold())
     if collection not in requested:
         return requested
@@ -317,6 +327,11 @@ class _Compilation:
         self.requested = _without(self.requested, path)
         pointer = _pointer(path)
         if pointer is not None:
+            self.provenance = {
+                key: value
+                for key, value in self.provenance.items()
+                if key != pointer and not key.startswith(pointer + "/")
+            }
             self.owned = {
                 o
                 for o in self.owned
@@ -348,6 +363,13 @@ class _Compilation:
                     self.requested = _merge(self.requested, patch)
                     for leaf in leaf_properties({"model": patch}):
                         self.provenance[leaf] = {"source": origin, "reason": node.name}
+            elif event[0] == "unset":
+                self.requested = _without(
+                    self.requested, event[1] + (("opaque", event[2]),)
+                )
+                pointer = _pointer(event[1])
+                if pointer is not None:
+                    self.provenance.pop(pointer + "/" + escape(event[2]), None)
             elif event[0] == "add":
                 added.append(event[1])
             elif event[0] == "remove":
@@ -370,22 +392,19 @@ class _Compilation:
             if expected is not None:
                 self.requested = _merge(self.requested, expected)
 
-    def run(self):
-        for path in self.contribution.absent:
-            self.editor.remove(path)
-            self.removed(path)
+    def run(self, phase):
         declared = [
             (document, node)
-            for name in self.contribution.parts
+            for name in self.editor.parts
             if name.startswith("definition/") and name.endswith(".tmdl")
-            for document in [Document(name, self.contribution.parts[name])]
+            for document in [Document(name, self.editor.parts[name])]
             for node in document.spans
             if node.kind == "annotation"
         ]
         dispatched = set()
         for document, node in declared:
             cls = self.registry.dispatch(document, node)
-            if cls is None:
+            if cls is None or cls.phase != phase:
                 continue
             dispatched.add(node.name)
             if not self.editor.locations(node.parent.path):
@@ -396,6 +415,17 @@ class _Compilation:
             annotation._compilation = self
             annotation.apply(TmdlObject(self.editor, node.parent.path))
             self._settle(document, node)
+            if phase == "post_schema":
+                references = prepare_annotations(
+                    replace(self.contribution, parts=self.editor.parts), self.registry
+                ).source_references
+                if any(
+                    self.source_references.get(name) != reference
+                    for name, reference in references.items()
+                ):
+                    annotation.error(
+                        "post_schema introduces a source dependency; declare phase = 'schema'"
+                    )
         _quote_names(self.editor, dispatched)
         return replace(
             self.contribution,
@@ -407,6 +437,7 @@ class _Compilation:
             source_references=self.source_references,
             source_bindings=self.source_bindings,
             annotations=self.registry,
+            compilation=self if phase == "schema" else None,
         )
 
 
@@ -428,8 +459,51 @@ def _quote_names(editor, names):
             editor.parts[document.path] = content
 
 
-def apply_annotations(contribution, registry=None):
-    """Run every dispatched annotation in definition order."""
+def prepare_annotations(contribution, registry=None):
+    """Validate annotations and collect sources without executing handlers."""
 
     registry = registry or contribution.annotations or builtin_registry()
-    return _Compilation(contribution, registry).run()
+    references = {}
+    dispatched = set()
+    editor = PackageEditor(contribution.parts)
+    for document in editor.documents():
+        for node in document.spans:
+            if node.kind != "annotation":
+                continue
+            cls = registry.dispatch(document, node)
+            if cls is None:
+                continue
+            dispatched.add(node.name)
+            if node.name == "Weaver.Source":
+                annotation = object.__new__(cls)
+                annotation._text = expression_text(document, node)
+                annotation._location = f"{document.path}:{node.header + 1}: {node.name}"
+                references[node.parent.name] = annotation.reference
+    _quote_names(editor, dispatched)
+    return replace(
+        contribution,
+        parts=editor.parts,
+        source_references=references,
+        annotations=registry,
+    )
+
+
+def begin_annotations(contribution, registry=None):
+    if contribution.compilation is not None:
+        return contribution
+    registry = registry or contribution.annotations or builtin_registry()
+    compilation = _Compilation(contribution, registry)
+    for path in contribution.absent:
+        compilation.editor.remove(path)
+        compilation.removed(path)
+    result = prepare_annotations(compilation.run("schema"), registry)
+    compilation.editor.parts = dict(result.parts)
+    compilation.source_references = dict(result.source_references)
+    return result
+
+
+def apply_annotations(contribution, registry=None):
+    """Execute schema then post-schema annotations over one editor."""
+
+    contribution = begin_annotations(contribution, registry)
+    return contribution.compilation.run("post_schema")

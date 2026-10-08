@@ -21,17 +21,10 @@ class Weaver__Source(Annotation):
     """
 
     scopes = frozenset({"table"})
+    phase = "schema"
 
     def apply(self, target):
-        reference = self.value
-        if reference.startswith("Lakehouse/") and (
-            len(reference.split("/")) != 4 or reference.split("/")[2] != "Tables"
-        ):
-            self.error("use Lakehouse/<item>/Tables/<schema>.<object>")
-        try:
-            source_identity(reference)
-        except ConfigError as exc:
-            self.error(str(exc))
+        reference = self.reference
         compilation = self._compilation
         pointer = _pointer((("table", target.name),))
         origin = compilation.provenance.get(
@@ -43,6 +36,19 @@ class Weaver__Source(Annotation):
             "reference": reference,
         }
         compilation.source_references[target.name] = reference
+
+    @property
+    def reference(self):
+        reference = self.value
+        if reference.startswith("Lakehouse/") and (
+            len(reference.split("/")) != 4 or reference.split("/")[2] != "Tables"
+        ):
+            self.error("use Lakehouse/<item>/Tables/<schema>.<object>")
+        try:
+            source_identity(reference)
+        except ConfigError as exc:
+            self.error(str(exc))
+        return reference
 
 
 class Weaver__AutoHideColumns(Annotation):
@@ -111,6 +117,7 @@ class Weaver__MeasureTable(Annotation):
     """
 
     scopes = frozenset({"table"})
+    phase = "schema"
 
     def apply(self, target):
         if not self.boolean():
@@ -131,6 +138,11 @@ class Weaver__MeasureTable(Annotation):
         partition.sourceType = "calculated"
         partition.mode = "import"
         partition.set_expression("source", MEASURE_TABLE_SOURCE)
+        for name, _ in MEASURE_TABLE_COLUMNS:
+            if name not in target.columns:
+                column = target.columns.add(name)
+                column.sourceColumn = "[" + name + "]"
+                column.isNameInferred = True
 
 
 def _dax_string(value):

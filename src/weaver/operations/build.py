@@ -148,10 +148,14 @@ def build(
     from ..sessions.host import use_or_create_session
 
     with prepare_repository(source_location, source_store=source_store) as prepared:
+        from ..semantic_models.binding import begin_semantic_sources
         from ..semantic_models.expressions import configure_sources
 
         repository = configure_sources(
-            prepared.repository, data_sources, bindings, resolved_workspace
+            begin_semantic_sources(prepared.repository, bindings.by_item),
+            data_sources,
+            bindings,
+            resolved_workspace,
         )
         if bind_data_sources:
             from dataclasses import replace

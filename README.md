@@ -124,6 +124,12 @@ annotation identifiers are quoted, such as `annotation 'Weaver.Source' = ...`.
 Weaver quotes supported bare identifiers in the effective package while retaining
 their full names and values.
 
+Annotations execute in two phases over the composed model. `schema` annotations
+run before source metadata and generated columns are determined. `post_schema`
+annotations run over the completed schema. Each occurrence executes once, in
+declaration order within its phase. `Weaver.Source` and `Weaver.MeasureTable` use
+`schema`; the other built-ins use `post_schema`.
+
 Weaver's own annotations are
 [`semantic_models/builtin_annotations.py`](src/weaver/semantic_models/builtin_annotations.py):
 
@@ -132,8 +138,8 @@ Weaver's own annotations are
   and copies available table and column descriptions from the catalogue. A table
   without an authored partition takes every source column; an authored column
   refines the source column it names, so `column Code` with `isHidden` hides one
-  column and keeps the rest. A table with an authored partition infers columns
-  only when none are authored. Authored properties take precedence.
+  column and keeps the rest. With an authored partition, it preserves partitions,
+  expressions, columns and types and enriches missing descriptions by source column.
   Consuming tables share one M expression for a logical source. Workspace and CLI
   source overrides must resolve to the selected or installed managed target;
   build the source into its new target before changing that binding.
@@ -217,6 +223,12 @@ after the class. `scopes` lists the TMDL object kinds it may annotate.
 namespace, an undefined annotation in it is an error. The `Weaver` namespace is
 reserved.
 
+Custom annotations default to `phase = "post_schema"`. Set `phase = "schema"`
+on the class to establish structure or introduce a source before metadata
+resolution. Default handlers see source-generated columns and the known
+MeasureTable columns. A new source dependency in `post_schema` fails with a
+diagnostic; source resolution occurs once.
+
 Annotation files are trusted code: Build executes them while it compiles each
 semantic definition. A file may import installed packages such as `weaver`, but
 not other project files. Changing one recompiles every model; a model whose
@@ -225,9 +237,8 @@ effective TMDL is unchanged still plans zero actions.
 Generated source tables follow the model's `defaultMode`: `import` reads the
 shared source through M navigation, and otherwise they use Direct Lake through
 their typed SQL endpoint.
-Supported authored M and entity partitions retain their storage mode. Transformed
-M and calculated-source takeovers fail before deployment. Source-generated columns
-receive hiding policies after inference; exclusions remain removed. This
+Authored partitions retain their expressions and storage mode. Source-generated
+columns receive built-in and custom transformations after inference; exclusions remain removed. This
 compilation uses the ordinary Build, catalogue and installed dependency graph.
 
 ### Without a catalogue

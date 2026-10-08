@@ -6,10 +6,9 @@ from dataclasses import replace
 
 from ..errors import BuildError
 from .compiler import _NAMED_COLLECTIONS, _merge, escape, leaf_properties
-from .fragments import needs_source_columns, source_context, source_table
+from .fragments import source_context, source_table
 from .patching import _patch_object
 from .references import source_identity
-from .tmdl import PackageEditor
 
 
 def m_string(value):
@@ -246,13 +245,17 @@ def _source_columns(table, authored, source, reference):
 
 
 def bind_semantic_sources(repository, observed, selected):
-    from .annotation import apply_annotations
+    from .annotation import begin_annotations
 
     contributions = dict(repository.semantic_models)
     for item, contribution in repository.semantic_models.items():
-        if item not in selected or not contribution.source_references:
+        if item not in selected:
             continue
-        editor = PackageEditor(contribution.parts)
+        contribution = begin_annotations(contribution)
+        compilation = contribution.compilation
+        editor = compilation.editor
+        editor.parts = dict(contribution.parts)
+        compilation.contribution = contribution
         requested = copy.deepcopy(contribution.requested)
         owned = set(contribution.owned)
         provenance = copy.deepcopy(contribution.provenance)
@@ -262,22 +265,30 @@ def bind_semantic_sources(repository, observed, selected):
             before_table = copy.deepcopy(table)
             context = source_context(editor.parts, table)
             before_context = copy.deepcopy(context)
-            if reference not in observed:
+            generated = not table.get("partitions")
+            if reference not in observed and generated:
                 raise BuildError(
                     f"Semantic source {reference}: source metadata was not read before Build planning"
                 )
-            source = copy.deepcopy(observed[reference])
+            source = copy.deepcopy(observed.get(reference, {"reference": reference}))
             before = leaf_properties({"model": {"tables": [table]}})
-            generated = needs_source_columns(table)
-            mode = _bind_partition(context, table, source)
+            mode = (
+                _bind_partition(context, table, source)
+                if generated
+                else table["partitions"][0].get(
+                    "mode", context.get("defaultMode", "import")
+                )
+            )
             if generated:
                 table["columns"] = _source_columns(
                     table["name"], table.get("columns", []), source, reference
                 )
             if source.get("description"):
                 table.setdefault("description", source["description"])
-            for column in table["columns"]:
-                note = source.get("column_notes", {}).get(column.get("sourceColumn"))
+            for column in table.get("columns", []):
+                note = source.get("column_notes", {}).get(
+                    column.get("sourceColumn", column["name"])
+                )
                 if note:
                     column.setdefault("description", note)
             patch = _changes(before_context, context)
@@ -299,14 +310,21 @@ def bind_semantic_sources(repository, observed, selected):
                         "reason": "Weaver.Source",
                         "reference": reference,
                     }
-        contributions[item] = apply_annotations(
-            replace(
-                contribution,
-                parts=editor.parts,
-                requested=requested,
-                owned=tuple(sorted(owned)),
-                provenance=provenance,
-                source_bindings=bindings,
-            )
-        )
+        compilation.requested = requested
+        compilation.owned = owned
+        compilation.provenance = provenance
+        compilation.source_bindings = bindings
+        contributions[item] = compilation.run("post_schema")
     return replace(repository, semantic_models=contributions)
+
+
+def begin_semantic_sources(repository, selected):
+    from .annotation import begin_annotations
+
+    return replace(
+        repository,
+        semantic_models={
+            item: begin_annotations(contribution) if item in selected else contribution
+            for item, contribution in repository.semantic_models.items()
+        },
+    )
