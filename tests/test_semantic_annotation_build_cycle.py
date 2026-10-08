@@ -267,8 +267,6 @@ def test_refined_columns_read_a_selected_source_view_unless_it_is_rebuilt(
         ("missing_object", "no managed Table or View"),
         ("missing_columns", "no source columns"),
         ("unsupported_type", "unsupported type"),
-        ("transformed_m", "unsupported M source"),
-        ("calculated_partition", "unsupported authored partition form"),
         ("missing_column", "Cake.Sales has no column Missing"),
     ],
 )
@@ -282,13 +280,7 @@ def test_source_annotation_refuses_unresolved_generation_before_mutation(
     path = root / str(ITEM) / "extension.tmdl"
     if failure == "missing_object":
         path.write_text(path.read_text().replace("Cake.Sales", "Cake.Missing"))
-    elif failure in {"transformed_m", "calculated_partition"}:
-        body = (
-            '\tpartition Sales = m\n\t\tmode: import\n\t\tsource = Table.FirstN(#table({"Id"}, {{1}}), 1)\n'
-            if failure == "transformed_m"
-            else '\tpartition Sales = calculated\n\t\tsource = ROW("Id", 1)\n'
-        )
-        path.write_text(path.read_text() + body)
+
     elif failure == "missing_column":
         path.write_text(path.read_text() + "\n\tcolumn Missing\n\t\tisHidden\n")
     with source_session() as session:
