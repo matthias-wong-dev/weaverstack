@@ -6,6 +6,7 @@ import time
 from pathlib import Path
 
 import pytest
+from support.semantic_fixture_source import ConfiguredSemanticSource
 from support.weaver_test import weaver_test
 
 from weaver.fabric.client import FabricError
@@ -46,25 +47,21 @@ def _settle_refreshes(model):
 
 
 @pytest.fixture
-def restored_semantic_model(fixed_semantic_model, tmp_path):
+def restored_semantic_model(fixed_semantic_model, semantic_model_session, tmp_path):
     model = fixed_semantic_model
     _settle_refreshes(model)
-    original = model.get_definition()
+    source = ConfiguredSemanticSource.capture(model)
+    original = source.original
     backup = tmp_path / "original-definition.json"
     backup.write_text(json.dumps(original), encoding="utf-8")
     print(f"Semantic model definition backup: {backup}")
+    source.attach(semantic_model_session)
     try:
         yield model
     finally:
-        _settle_refreshes(model)
-        model.update_definition(original, allow_purge_data=True, timeout=300)
-        restored = decode_model(model.get_definition())
-        assert restored == decode_model(original), (
-            "Original semantic model definition was not restored"
-        )
-        print(
-            f"Restored semantic model {model.model_id}; definition matches the backup"
-        )
+        source.detach(semantic_model_session)
+        source.restore(_settle_refreshes)
+        print("SEMANTIC_SOURCE_EVIDENCE " + json.dumps(source.evidence))
 
 
 @weaver_test(remote=True, resources={"rest"})
