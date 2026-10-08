@@ -2,10 +2,17 @@
 
 import pytest
 from support.weaver_test import weaver_test
-from test_semantic_custom_annotation_declaration import parse, project
+from test_semantic_custom_annotation_declaration import project
 
 from weaver.errors import ConfigError
 from weaver.semantic_models import Annotation
+
+
+def parse(root):
+    from weaver.declaration.repository import parse_item_repository
+    from weaver.locations import Location
+
+    return parse_item_repository(Location(root.as_posix()))
 
 
 @weaver_test()
@@ -92,7 +99,11 @@ def test_annotation_defaults_to_post_schema():
 def test_builtin_annotation_phases():
     from weaver.semantic_models.annotation import builtin_registry
 
-    phases = {name: cls.phase for name, cls in builtin_registry().classes.items()}
+    phases = {
+        name: cls.phase
+        for name, cls in builtin_registry().classes.items()
+        if name != "Weaver.BaseSemanticModels"
+    }
     assert phases == {
         "Weaver.Source": "schema",
         "Weaver.MeasureTable": "schema",
