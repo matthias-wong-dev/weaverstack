@@ -232,12 +232,14 @@ SQL endpoint refresh completion. Authored partitions, storage modes, columns and
 descriptions remain unchanged by shared-expression substitution. `annotation.py`
 is the public registry for executable Weaver annotations in PBIP and both extension
 layers. Parsing validates declarations and collects logical sources without
-executing handlers. Final compilation executes annotations once over the merged,
-target-bound pre-annotation model, then binds source metadata and generation.
+executing handlers. Final compilation runs schema annotations over the merged,
+target-bound model, materialises source metadata and generated columns, then runs
+post-schema annotations. Each annotation occurrence executes once in its phase.
 Source annotations join the existing Session metadata and source-binding owners;
 authored data definitions remain intact and only missing descriptions are enriched.
 Tables without partitions generate source definitions and columns. Same-managed-target environment overrides run
-before generation. Generated columns receive hiding policies after inference.
+before generation. Post-schema handlers see generated columns and apply hiding
+through the ordinary object API.
 Measure-table and switch handlers write known native fragments, including dynamic
 format-string definitions. Generated MeasureTable columns omit native type
 declarations and require `calculatedTableColumn`/`string` in typed readback.
