@@ -215,7 +215,9 @@ the existing Session metadata and source-binding owners; inferred columns inheri
 available catalogue descriptions. Same-managed-target environment overrides run
 before generation. Generated columns receive hiding policies after inference.
 Measure-table and switch handlers write known native fragments, including dynamic
-format-string definitions. Exclusion uses span removal and explicit observed-absence
+format-string definitions. Generated MeasureTable columns omit native type
+declarations and require `calculatedTableColumn`/`string` in typed readback.
+Exclusion uses span removal and explicit observed-absence
 expectations. Payloads carry those expectations through the shared executor before
 catalogue certification. Keep ordinary annotations and surviving Weaver annotations;
 unknown Weaver names fail. The former YAML .source and .dax directives are removed.

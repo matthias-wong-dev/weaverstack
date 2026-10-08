@@ -7,6 +7,7 @@ from fnmatch import fnmatchcase
 
 from ..errors import ConfigError
 from .annotation import Annotation, _pointer
+from .compiler import _merge
 from .extension_expectations import _ENDPOINT
 from .references import source_identity
 from .tmdl import object_name, quote_name
@@ -143,6 +144,25 @@ class Weaver__MeasureTable(Annotation):
                 column = target.columns.add(name)
                 column.sourceColumn = "[" + name + "]"
                 column.isNameInferred = True
+                expected = {"type": "calculatedTableColumn", "dataType": "string"}
+                compilation = self._compilation
+                compilation.requested = _merge(
+                    compilation.requested,
+                    {
+                        "tables": [
+                            {
+                                "name": target.name,
+                                "columns": [{"name": name, **expected}],
+                            }
+                        ]
+                    },
+                )
+                pointer = _pointer(column._path)
+                for key in expected:
+                    compilation.provenance[pointer + "/" + key] = {
+                        "source": self._location.split(":", 1)[0],
+                        "reason": "Weaver.MeasureTable",
+                    }
 
 
 def _dax_string(value):
