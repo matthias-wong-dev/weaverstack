@@ -93,3 +93,25 @@ def test_report_session_refuses_wrong_bound_type_before_resolution():
                 )
             )
     assert transport.calls == []
+
+
+@weaver_test()
+def test_report_binding_readback_uses_session_power_bi_route_lazily(monkeypatch):
+    transport = Transport()
+    workspace = Workspace(workspace="Analytics")
+    resolver = FabricResolver(workspace, client=transport)
+    routes = []
+    with ConsoleSession(workspace=workspace, resolver=resolver) as session:
+        scope = session.scope(workspace)
+
+        def power_bi():
+            routes.append("Power BI")
+            return SimpleNamespace(get_json=lambda path: {"path": path})
+
+        monkeypatch.setattr(scope, "_power_bi_client", power_bi)
+        report = session.report_item("Executive")
+        assert not routes
+        assert report.get_binding() == {"path": "groups/workspace-id/reports/report-id"}
+        assert report.get_binding() == {"path": "groups/workspace-id/reports/report-id"}
+        assert routes == ["Power BI"]
+        assert not scope.livy.acquired

@@ -37,6 +37,17 @@ class ReportBoundary:
         self.events.append("report_read")
         return self.definition
 
+    def get_binding(self):
+        from weaver.report_definition import decode_report
+
+        props = json.loads(decode_report(self.definition)["definition.pbir"])
+        connection = props["datasetReference"]["byConnection"]["connectionString"]
+        fields = dict(part.split("=", 1) for part in connection.split(";") if part)
+        return {
+            "datasetId": fields["Initial Catalog"],
+            "datasetWorkspaceId": fields["Data Source"].rsplit("/", 1)[1],
+        }
+
 
 def prepared_project(tmp_path):
     root = project(tmp_path, False)
@@ -134,6 +145,26 @@ def test_public_catalogue_free_project_verifies_model_before_report_and_stays_ea
     assert actions["semantic_readback"].id in actions["report_definition"].depends_on
     assert actions["report_definition"].id in actions["report_readback"].depends_on
     assert report.calls == ["update", "read", "update", "read"]
+
+
+@weaver_test()
+def test_public_report_wrong_workspace_binding_prevents_success(tmp_path):
+    root, session, events, model, report = prepared_project(tmp_path)
+    expected = report.get_binding
+    report.get_binding = lambda: {
+        **expected(),
+        "datasetWorkspaceId": "ffffffff-bbbb-cccc-dddd-eeeeeeeeeeee",
+    }
+    result = weaver.build(
+        root,
+        items=[
+            f"{ITEM}=SemanticModel/Reporting_Dev",
+            "Report/Executive=Report/Executive_Dev",
+        ],
+        session=session,
+    )
+    assert not result.succeeded
+    assert any("binding" in str(error) for error in result.errors)
 
 
 @pytest.mark.parametrize(
