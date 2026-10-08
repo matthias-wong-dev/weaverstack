@@ -89,6 +89,7 @@ class ConfiguredSemanticSource:
     evidence: list = field(default_factory=list)
     touched: bool = False
     execute: object = None
+    request: object = None
 
     @classmethod
     def capture(cls, model):
@@ -206,6 +207,15 @@ class ConfiguredSemanticSource:
 
     def attach(self, session):
         self.execute = session.execute_mutation
+        self.request = self.model.fabric.request
+
+        def request(method, path, *args, **kwargs):
+            assert not (
+                method.upper() != "GET" and path.rstrip("/").endswith("/bindConnection")
+            ), "Configured fixture cannot rebind its source connection"
+            return self.request(method, path, *args, **kwargs)
+
+        self.model.fabric.request = request
 
         def execute(plan, payloads=None, **options):
             self.verify("before-mutation")
@@ -229,6 +239,7 @@ class ConfiguredSemanticSource:
 
     def detach(self, session):
         session.execute_mutation = self.execute
+        self.model.fabric.request = self.request
 
     def restore(self, settle):
         if not self.touched:
