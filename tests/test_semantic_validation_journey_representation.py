@@ -54,3 +54,40 @@ def test_validation_journey_uses_import_source_tables(tmp_path, monkeypatch):
         partition.mode for table in model.tables for partition in table.partitions
     } == {"import"}
     assert model.tables["Objects"].columns["Signature"].isHidden
+
+
+@weaver_test()
+def test_journey_acquires_its_configured_catalogue_through_session(
+    tmp_path, monkeypatch
+):
+    import inspect
+
+    from weaver.sessions.base import Session
+    from weaver.workspaces import Workspace
+
+    monkeypatch.syspath_prepend(str(Path(__file__).parent / "fabric"))
+    journey = importlib.import_module("test_semantic_acceptance_journey")
+    calls = []
+    expected = object()
+
+    class RecordingSession:
+        workspace = Workspace(workspace="Fixture", catalogue="Warehouse/Catalogue")
+
+        def semantic_source(self, *args, **kwargs):
+            inspect.signature(Session.semantic_source).bind(self, *args, **kwargs)
+            calls.append((args, kwargs))
+            return expected
+
+    session = RecordingSession()
+    assert journey._catalogue_source(session) is expected
+    assert calls == [
+        (
+            (session.workspace.catalogue_item,),
+            {
+                "item_type": "Warehouse",
+                "schema": "_",
+                "name": "TableDictionary",
+                "include_columns": False,
+            },
+        )
+    ]

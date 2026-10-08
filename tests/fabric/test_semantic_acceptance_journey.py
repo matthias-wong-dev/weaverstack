@@ -27,7 +27,6 @@ from weaver.catalogue.tables import (
     TEST_DICTIONARY,
     TEST_STATUS,
 )
-from weaver.declaration.model import WeaverItemId
 from weaver.semantic_models import TmdlDefinition
 from weaver.semantic_models.binding import m_string
 from weaver.semantic_models.definition import decode_model
@@ -82,6 +81,16 @@ Description: Every catalogued object carries a signature.
 EVALUATE
 FILTER(Objects, ISBLANK(Objects[Signature]))
 """
+
+
+def _catalogue_source(session):
+    return session.semantic_source(
+        session.workspace.catalogue_item,
+        item_type="Warehouse",
+        schema="_",
+        name="TableDictionary",
+        include_columns=False,
+    )
 
 
 def _project(root, *, source_metadata):
@@ -178,9 +187,7 @@ def test_semantic_model_build_load_test_health_lifecycle(
     root = tmp_path / "project"
     folder, test_path = _project(
         root,
-        source_metadata=context.session.semantic_source(
-            WeaverItemId.parse("Warehouse/_weaver/_.TableDictionary")
-        ),
+        source_metadata=_catalogue_source(context.session),
     )
     selection = f"{ITEM}=SemanticModel/{context.target}"
     evidence = {}
