@@ -1,4 +1,4 @@
-"""The generated-source lifecycle stays separate from calculated measure tables."""
+"""The validation journey uses Import, separate from generated Direct Lake cases."""
 
 import importlib
 from pathlib import Path
@@ -12,10 +12,18 @@ from weaver.semantic_models.binding import bind_semantic_sources
 
 
 @weaver_test()
-def test_validation_journey_uses_only_direct_lake_source_tables(tmp_path, monkeypatch):
+def test_validation_journey_uses_import_source_tables(tmp_path, monkeypatch):
     monkeypatch.syspath_prepend(str(Path(__file__).parent / "fabric"))
     journey = importlib.import_module("test_semantic_acceptance_journey")
-    journey._project(tmp_path)
+    journey._project(
+        tmp_path,
+        source_metadata={
+            "server": "source.example",
+            "database": "Source",
+            "schema": "_",
+            "object": "TableDictionary",
+        },
+    )
     parsed = parse_item_repository(Location(tmp_path.as_posix()))
     reference = "Warehouse/_weaver/_.TableDictionary"
     metadata = {
@@ -44,5 +52,5 @@ def test_validation_journey_uses_only_direct_lake_source_tables(tmp_path, monkey
     assert set(table.name for table in model.tables) == {"Objects", "Reference"}
     assert {
         partition.mode for table in model.tables for partition in table.partitions
-    } == {"directLake"}
+    } == {"import"}
     assert model.tables["Objects"].columns["Signature"].isHidden
