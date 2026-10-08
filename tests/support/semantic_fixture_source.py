@@ -156,7 +156,13 @@ class ConfiguredSemanticSource:
         self.record(stage, definition, connections, shared)
 
     def guard_definition(self, definition):
-        assert _desired_sources(decode_parts(definition)) == self.expression, (
+        observed = definition.get("format") == "TMSL"
+        expression = (
+            _observed_sources(decode_model(definition))
+            if observed
+            else _desired_sources(decode_parts(definition))
+        )
+        assert expression == self.expression, (
             "Configured fixture source changed; use a separately approved target"
         )
 
@@ -213,6 +219,12 @@ class ConfiguredSemanticSource:
             assert not (
                 method.upper() != "GET" and path.rstrip("/").endswith("/bindConnection")
             ), "Configured fixture cannot rebind its source connection"
+            if method.upper() == "POST" and path.rstrip("/").endswith(
+                f"/{self.model.model_id}/updateDefinition"
+            ):
+                self.verify("before-definition-update")
+                self.guard_definition(kwargs["payload"]["definition"])
+                self.touched = True
             return self.request(method, path, *args, **kwargs)
 
         self.model.fabric.request = request

@@ -2,6 +2,7 @@
 
 import json
 
+from support.semantic_fixture_source import ConfiguredSemanticSource
 from support.weaver_test import weaver_test
 from test_semantic_model_boundary import (
     restored_semantic_model as restored_semantic_model,
@@ -24,11 +25,13 @@ def test_build_and_load_without_a_catalogue(
         "\tmeasure Years = COUNTROWS(Calendar)\n",
         encoding="utf-8",
     )
+    source = ConfiguredSemanticSource.capture(restored_semantic_model)
+    source.retain(folder)
     assert not session.workspace.catalogue
     built = weaver.build(folder.parent.parent, items=f"{item}={item}", session=session)
     assert built.succeeded, built.errors
     assert built.installation_report.action_counts()["succeeded"] == 2
-    loaded = weaver.load(item, session=session)
+    loaded = source.run("load", weaver.load, item, session=session)
     assert loaded.succeeded, loaded.to_mapping()
     (node,) = loaded.nodes
     assert node.primitive_kind == "semantic_refresh"

@@ -384,3 +384,67 @@ def test_load_cannot_repair_a_lost_configured_binding_with_a_new_client():
         client.bind_data_sources()
     assert not writes
     source.detach(session)
+
+
+@weaver_test()
+def test_direct_definition_client_cannot_remove_configured_source():
+    from weaver.fabric.semantic_model import SemanticModelClient
+
+    model, source = contract()
+    writes = []
+    model.fabric.request = lambda *a, **k: writes.append((a, k))
+    model.fabric.wait_for_operation = lambda *a, **k: {}
+    source.attach(SimpleNamespace(execute_mutation=lambda *a, **k: None))
+    client = SemanticModelClient(
+        model.workspace_id, model.model_id, fabric=model.fabric, power_bi=object()
+    )
+    definition = encode_parts(
+        {
+            "definition.pbism": PARTS["definition.pbism"],
+            "definition/model.tmdl": b"model Model\n",
+        }
+    )
+    with pytest.raises(AssertionError, match="source"):
+        client.update_definition(definition, allow_purge_data=True, timeout=300)
+    assert not writes
+    assert not source.touched
+
+
+@weaver_test()
+def test_restored_fixture_admission_and_refusal_do_not_write_during_teardown(
+    tmp_path, monkeypatch
+):
+    import importlib
+    from pathlib import Path
+
+    from weaver.fabric.semantic_model import SemanticModelClient
+
+    monkeypatch.syspath_prepend(str(Path(__file__).parent / "fabric"))
+    boundary = importlib.import_module("test_semantic_model_boundary")
+    monkeypatch.setattr(boundary, "_settle_refreshes", lambda model: None)
+    model = Model()
+    writes = []
+    model.fabric.request = lambda *a, **k: writes.append((a, k))
+    model.fabric.wait_for_operation = lambda *a, **k: {}
+    session = SimpleNamespace(
+        execute_mutation=lambda *a, **k: writes.append("mutation")
+    )
+    fixture = boundary.restored_semantic_model.__wrapped__(model, session, tmp_path)
+    assert next(fixture) is model
+    assert model.calls[:3] == ["observed", "native", "binding"]
+    client = SemanticModelClient(
+        model.workspace_id, model.model_id, fabric=model.fabric, power_bi=object()
+    )
+    with pytest.raises(AssertionError, match="source"):
+        client.update_definition(
+            encode_parts(
+                {
+                    "definition.pbism": PARTS["definition.pbism"],
+                    "definition/model.tmdl": b"model Model\n",
+                }
+            ),
+            allow_purge_data=True,
+        )
+    with pytest.raises(StopIteration):
+        next(fixture)
+    assert not writes
