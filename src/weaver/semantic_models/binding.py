@@ -309,7 +309,9 @@ def bind_semantic_sources(repository, observed, selected):
             _patch_object(editor, (), "model", patch, owned)
             requested = _merge(requested, patch)
             source["mode"] = mode
-            source["access"] = "sql"
+            # Authored partitions establish logical provenance only; Weaver
+            # verifies SQL access when it creates or rebinds a partition.
+            source["access"] = "sql" if generated else None
             bindings[table["name"]] = source
             origin = contribution.provenance.get(
                 f"/model/tables/{escape(table['name'])}/source", {"source": reference}

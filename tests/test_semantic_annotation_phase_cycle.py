@@ -299,13 +299,13 @@ def test_authored_source_partition_and_column_types_are_preserved(tmp_path):
     ).semantic_models[ITEM]
     table = TmdlDefinition(compiled.parts).model.tables["Sales"]
     assert compiled.source_bindings["Sales"]["mode"] == "import"
-    assert compiled.source_bindings["Sales"]["access"] == "sql"
+    assert compiled.source_bindings["Sales"]["access"] is None
     assert compiled.source_bindings["Sales"]["server"] == "source.example"
     metadata_only = bind_semantic_sources(parse(root), {}, {ITEM}).semantic_models[ITEM]
     assert metadata_only.source_bindings["Sales"] == {
         "reference": reference,
         "mode": "import",
-        "access": "sql",
+        "access": None,
     }
     from weaver.catalogue.semantic import project_semantic_model
     from weaver.semantic_models.fragments import source_table
@@ -316,7 +316,7 @@ def test_authored_source_partition_and_column_types_are_preserved(tmp_path):
         deployed={"model": {"tables": [source_table(compiled.parts, "Sales")]}},
     )
     (row,) = projected["SemanticModelTable"]
-    assert (row["source_mode"], row["source_access"]) == ("import", "sql")
+    assert (row["source_mode"], row["source_access"]) == ("import", None)
     assert table.partitions["Sales"].source == '#table({"Original"}, {{"1"}})'
     assert table.columns["Id"].dataType == "string"
     assert table.columns["Id"].sourceColumn == "Original"

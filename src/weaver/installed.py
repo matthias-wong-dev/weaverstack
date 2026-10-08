@@ -938,6 +938,8 @@ class _References:
             schema, name = catalogue_columns(producer)
             expected = (producer.item.item_type, producer.item.item_name, schema, name)
             node = self._objects.get(producer)
+            # A metadata-only Weaver.Source annotation establishes provenance
+            # without verifying the authored partition\'s access method.
             if (
                 str(producer) != row.reference
                 or row.referenced != expected
@@ -945,7 +947,7 @@ class _References:
                 or node.object_type not in {"table", "view"}
                 or row.source_mode
                 not in {"directLake", "import", "directQuery", "dual"}
-                or row.source_access != "sql"
+                or row.source_access not in {"sql", None}
             ):
                 raise ValueError("source identity or mode is missing or differs")
         except (WeaverError, ValueError, TypeError) as exc:

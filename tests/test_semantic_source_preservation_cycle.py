@@ -124,6 +124,19 @@ def test_public_source_build_preserves_authored_data_and_enriches_native_mapping
             (r["referencing_object_name"], r["dependency_reference"])
             for r in rows["Dependency"]
         } == {("Sales", "Warehouse/Serving/Cake.Sales")}
+        (sales,) = [
+            row for row in rows["SemanticModelTable"] if row["table_name"] == "Sales"
+        ]
+        assert (sales["source_mode"], sales["source_access"]) == ("dual", None)
+        from weaver.catalogue.state import Catalogue
+
+        dag = Catalogue({**source_catalogue().rows, **published()}).dag()
+        assert not dag.unresolved
+        edges = [edge for edge in dag.edges if edge.downstream.item == ITEM]
+        assert [
+            (edge.semantic_table, str(edge.upstream), edge.source_mode, edge.source_access)
+            for edge in edges
+        ] == [("Sales", "Warehouse/Serving/Cake.Sales", "dual", None)]
         assert path.read_bytes() == before
         assert not any(
             "Cake" in sql and "INFORMATION_SCHEMA.COLUMNS" in sql

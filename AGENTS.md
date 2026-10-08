@@ -240,8 +240,9 @@ post-schema annotations. Each annotation occurrence executes once in its phase.
 Source annotations join the existing Session metadata and source-binding owners;
 authored data definitions remain intact and only missing descriptions are enriched.
 Tables without partitions generate source definitions and columns. Declared
-`Weaver.Source` links publish SQL access for authored partitions as well,
-without replacing their native mode or materialising generated columns.
+`Weaver.Source` links on authored partitions publish logical lineage and
+native storage mode, but no physical access claim unless Weaver actually
+established the connector. Generated partitions publish SQL access.
 Same-managed-target environment overrides run
 before generation. Post-schema handlers see generated columns and apply hiding
 through the ordinary object API.
