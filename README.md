@@ -292,8 +292,9 @@ diagnostic; source resolution occurs once.
 
 Annotation files are trusted code: Build executes them while it compiles each
 semantic definition. A file may import installed packages such as `weaver`, but
-not other project files. Each selected model executes annotations once after
-native, policy and target layers merge, then resolves source metadata and generation.
+not other project files. After native, policy and target layers merge, each
+selected model runs schema annotations, materialises source metadata and generated
+columns, then runs post-schema annotations. Each occurrence executes once in its phase.
 Its final effective package determines the persisted signature. Every selected
 model deploys; selected consuming Reports redeploy with it. Report-only Build
 retains independent change detection.
