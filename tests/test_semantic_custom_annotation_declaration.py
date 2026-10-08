@@ -57,9 +57,7 @@ def parse(root):
 
 
 def compile_model(root):
-    from weaver.semantic_models.annotation import apply_annotations
-
-    return apply_annotations(parse(root).semantic_models[ITEM])
+    return parse(root).semantic_models[ITEM]
 
 
 def column_hidden(contribution, table, column):
