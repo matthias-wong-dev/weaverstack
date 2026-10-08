@@ -27,6 +27,7 @@ from weaver.catalogue.tables import (
     TEST_DICTIONARY,
     TEST_STATUS,
 )
+from weaver.semantic_models import TmdlDefinition
 from weaver.semantic_models.definition import decode_model
 from weaver.semantic_models.wipe import connection_signature
 
@@ -82,17 +83,23 @@ FILTER(Objects, ISBLANK(Objects[Signature]))
 
 
 def _project(root):
+    source = TmdlDefinition({"definition/model.tmdl": SOURCE_TEXT.encode()})
+    # Fabric's Direct Lake on SQL model cannot include a calculated measure table.
+    source.model.tables["Metric"].remove()
     folder = root / "PowerBI/Acceptance"
     (folder / "tests" / ITEM.item_name).mkdir(parents=True)
     (folder / "assumptions" / ITEM.item_name).mkdir(parents=True)
     (folder / f"{ITEM.item_name}.tmdl").write_text(
-        SOURCE_TEXT.replace(
+        source.parts["definition/model.tmdl"]
+        .decode()
+        .replace(
             "    annotation Weaver.Source = Warehouse/_weaver/_.TableDictionary\n",
             "    annotation Weaver.Source = Warehouse/_weaver/_.TableDictionary\n"
             "\n    column Signature\n"
             "        dataType: string\n"
             "        sourceColumn: Signature\n",
-        ).replace(
+        )
+        .replace(
             "    annotation Weaver.AutoHideForeignKeys = true\n",
             "    annotation Weaver.AutoHideForeignKeys = true\n"
             "    annotation Acceptance.HideSignatures = true\n",
