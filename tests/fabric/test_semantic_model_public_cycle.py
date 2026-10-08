@@ -8,6 +8,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from support.semantic_fixture_source import ConfiguredSemanticSource
 from support.semantic_models import policy_path
 from support.weaver_test import register_session, weaver_test
 from test_semantic_model_boundary import _settle_refreshes
@@ -106,53 +107,67 @@ def semantic_build_context(
         history = read_table(connection, LOG, predicate=history_predicate)
         retained_log_ids = {row["log_sk"] for row in history}
         _settle_refreshes(model)
-        original = model.get_definition()
+        source = ConfiguredSemanticSource.capture(model)
+        original = source.original
         backup = tmp_path / "original-definition.json"
         backup.write_text(json.dumps(original), encoding="utf-8")
         print(f"Original semantic definition: {backup}")
+        source.attach(session)
         try:
             yield SimpleNamespace(
                 session=session,
                 connection=connection,
                 model=model,
                 target=fixed_semantic_model_name,
+                source=source,
+                wipe=source.wipe,
+                load=lambda *a, **k: source.run("load", weaver.load, *a, **k),
             )
         finally:
+            source.detach(session)
             try:
-                _settle_refreshes(model)
-                model.update_definition(original, allow_purge_data=True, timeout=300)
-                model.refresh(timeout=300)
-                assert decode_model(model.get_definition()) == decode_model(original)
-                print(f"Restored semantic model {model.workspace_id}/{model.model_id}")
+                source.restore(_settle_refreshes)
+                if source.touched:
+                    print(
+                        f"Restored semantic model {model.workspace_id}/{model.model_id}"
+                    )
             finally:
-                session.flush()
-                statements = list(prune_installation(SCOPE))
-                statements.extend(
-                    render_delete_scope(table, scope=SCOPE)
-                    for table in (*CURRENT_STATE_TABLES, LOAD_STATISTIC)
-                )
-                added_log_ids = {
-                    row["log_sk"]
-                    for row in read_table(connection, LOG, predicate=history_predicate)
-                } - retained_log_ids
-                statements.extend(
-                    f"DELETE FROM [_].[Log] WHERE [Log SK] = {literal(log_id)};"
-                    for log_id in sorted(added_log_ids)
-                )
-                connection.execute("\n".join(statements))
-                remaining = _owned_counts(connection)
-                assert all(row["rows"] == 0 for row in remaining), remaining
-                assert {
-                    row["log_sk"]
-                    for row in read_table(connection, LOG, predicate=history_predicate)
-                } == retained_log_ids
-                assert {
-                    json.dumps(row, default=str, sort_keys=True)
-                    for row in read_table(connection, INSTALLATION)
-                } == {json.dumps(row, default=str, sort_keys=True) for row in claims}
-                print(
-                    "Removed only RefreshAcceptance catalogue rows and its new model logs"
-                )
+                print("SEMANTIC_SOURCE_EVIDENCE " + json.dumps(source.evidence))
+                if source.touched:
+                    _cleanup_catalogue(
+                        session, connection, history_predicate, retained_log_ids, claims
+                    )
+
+
+def _cleanup_catalogue(
+    session, connection, history_predicate, retained_log_ids, claims
+):
+    session.flush()
+    statements = list(prune_installation(SCOPE))
+    statements.extend(
+        render_delete_scope(table, scope=SCOPE)
+        for table in (*CURRENT_STATE_TABLES, LOAD_STATISTIC)
+    )
+    added_log_ids = {
+        row["log_sk"]
+        for row in read_table(connection, LOG, predicate=history_predicate)
+    } - retained_log_ids
+    statements.extend(
+        f"DELETE FROM [_].[Log] WHERE [Log SK] = {literal(log_id)};"
+        for log_id in sorted(added_log_ids)
+    )
+    connection.execute("\n".join(statements))
+    remaining = _owned_counts(connection)
+    assert all(row["rows"] == 0 for row in remaining), remaining
+    assert {
+        row["log_sk"]
+        for row in read_table(connection, LOG, predicate=history_predicate)
+    } == retained_log_ids
+    assert {
+        json.dumps(row, default=str, sort_keys=True)
+        for row in read_table(connection, INSTALLATION)
+    } == {json.dumps(row, default=str, sort_keys=True) for row in claims}
+    print("Removed only RefreshAcceptance catalogue rows and its new model logs")
 
 
 @weaver_test(remote=True, resources={"rest", "tds"})
@@ -199,6 +214,7 @@ def test_public_build_catalogue_load_dax_and_unchanged_build(
             model_path.read_text(encoding="utf-8") + "\nref perspective Reporting\n",
             encoding="utf-8",
         )
+    context.source.retain(folder)
     root = folder.parent.parent
     original_sources = {
         p.relative_to(root).as_posix(): p.read_bytes()
@@ -273,6 +289,7 @@ def test_public_build_catalogue_load_dax_and_unchanged_build(
     assert set(tables) == (
         ({"Sales", "Product"} if pbip else set())
         | ({"Calendar"} if extension else set())
+        | {"__WeaverSource"}
     )
     if extension:
         assert {column["name"] for column in tables["Calendar"]["columns"]} == {"Year"}
@@ -284,7 +301,7 @@ def test_public_build_catalogue_load_dax_and_unchanged_build(
     away = root.with_name("source-not-present")
     root.rename(away)
     try:
-        report = weaver.load(str(ITEM), session=context.session)
+        report = context.load(str(ITEM), session=context.session)
     finally:
         away.rename(root)
     print(json.dumps(report.to_mapping(), default=str))
@@ -419,7 +436,7 @@ def test_existing_warehouse_source_build_persists_lineage_and_loads_without_sour
     away = root.with_name("source-not-present")
     root.rename(away)
     try:
-        loaded = weaver.load(str(ITEM), session=context.session)
+        loaded = context.load(str(ITEM), session=context.session)
     finally:
         away.rename(root)
     print(json.dumps({"load": loaded.to_mapping()}, default=str))

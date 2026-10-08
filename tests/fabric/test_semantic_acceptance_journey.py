@@ -30,7 +30,6 @@ from weaver.catalogue.tables import (
 from weaver.semantic_models import TmdlDefinition
 from weaver.semantic_models.binding import m_string
 from weaver.semantic_models.definition import decode_model
-from weaver.semantic_models.wipe import connection_signature
 
 ANNOTATION = '''from weaver.semantic_models import Annotation
 
@@ -93,7 +92,7 @@ def _catalogue_source(session):
     )
 
 
-def _project(root, *, source_metadata):
+def _project(root, *, source_metadata, native_source=None):
     source = TmdlDefinition({"definition/model.tmdl": SOURCE_TEXT.encode()})
     # Snapshot below is calculated; keep this journey separate from Direct Lake.
     source.model.tables["Metric"].remove()
@@ -125,6 +124,18 @@ def _project(root, *, source_metadata):
                 "            in\n                Navigation\n",
             )
         )
+    if native_source is not None:
+        partitions = [
+            (
+                name,
+                f"    partition {name} = m\n        mode: import\n        source =\n"
+                + "\n".join(
+                    "            " + line for line in native_source.splitlines()
+                )
+                + "\n",
+            )
+            for name, _ in partitions
+        ]
     text = source.parts["definition/model.tmdl"].decode()
     for name, partition in partitions:
         text = text.replace(f"table {name}\n", f"table {name}\n{partition}", 1)
@@ -185,9 +196,12 @@ def test_semantic_model_build_load_test_health_lifecycle(
     context = semantic_build_context
     connection = context.connection
     root = tmp_path / "project"
+    source_metadata = _catalogue_source(context.session)
+    context.source.require_metadata(source_metadata)
     folder, test_path = _project(
         root,
-        source_metadata=_catalogue_source(context.session),
+        source_metadata=source_metadata,
+        native_source=context.source.expression,
     )
     selection = f"{ITEM}=SemanticModel/{context.target}"
     evidence = {}
@@ -240,11 +254,11 @@ def test_semantic_model_build_load_test_health_lifecycle(
     deployed = decode_model(context.model.get_definition())["model"]
     objects = next(t for t in deployed["tables"] if t["name"] == "Objects")
     assert next(c for c in objects["columns"] if c["name"] == "Signature")["isHidden"]
-    connections = connection_signature(context.model.get_connections())
+    context.source.verify("first-build")
     assert _load_result(connection) == "pending"
 
     # Load, Test, Health: the first certification of the whole lifecycle.
-    assert weaver.load(str(ITEM), session=context.session).succeeded
+    assert context.load(str(ITEM), session=context.session).succeeded
     assert _load_result(connection) == "succeeded"
     tested = run_validations()
     assert _statuses(connection) == {
@@ -266,7 +280,7 @@ def test_semantic_model_build_load_test_health_lifecycle(
     assert not unchanged.selection.impact.changed
     assert _load_result(connection) == "pending"
     assert set(_statuses(connection).values()) == {"succeeded"}
-    assert weaver.load(str(ITEM), session=context.session).succeeded
+    assert context.load(str(ITEM), session=context.session).succeeded
     run_validations()
     assert _health(context.session)[0].is_healthy
 
@@ -282,7 +296,7 @@ def test_semantic_model_build_load_test_health_lifecycle(
     assert semantic_actions(changed)
     assert _load_result(connection) == "pending"
     assert not _health(context.session)[0].is_healthy
-    assert weaver.load(str(ITEM), session=context.session).succeeded
+    assert context.load(str(ITEM), session=context.session).succeeded
     stale, sections = _health(context.session)
     assert not stale.is_healthy
     assert {
@@ -308,12 +322,12 @@ def test_semantic_model_build_load_test_health_lifecycle(
         "ObjectsReconcile": "pending",
         "ObjectsAreSigned": "succeeded",
     }
-    assert weaver.load(str(ITEM), session=context.session).succeeded
+    assert context.load(str(ITEM), session=context.session).succeeded
     run_validations()
     assert _health(context.session)[0].is_healthy
 
     # Wipe keeping the data source, then rebuild to green.
-    wiped = weaver.wipe(
+    wiped = context.wipe(
         f"SemanticModel/{context.target}",
         preserve_data_source=True,
         session=context.session,
@@ -321,10 +335,10 @@ def test_semantic_model_build_load_test_health_lifecycle(
     assert wiped.emptied == (f"SemanticModel/{context.target}",)
     for table in (*PROJECTED_TABLES, *CURRENT_STATE_TABLES):
         assert not read_table(connection, table, scope=SCOPE), table.name
-    assert connection_signature(context.model.get_connections()) == connections
+    context.source.verify("wipe-rebuild")
     build()
-    assert weaver.load(str(ITEM), session=context.session).succeeded
-    assert connection_signature(context.model.get_connections()) == connections
+    assert context.load(str(ITEM), session=context.session).succeeded
+    context.source.verify("wipe-rebuild")
     run_validations()
     final, sections = _health(context.session)
     assert final.is_healthy, _findings(final)
@@ -332,7 +346,7 @@ def test_semantic_model_build_load_test_health_lifecycle(
     assert semantic_actions(repeated)
     assert not repeated.selection.impact.changed
     assert _load_result(connection) == "pending"
-    assert weaver.load(str(ITEM), session=context.session).succeeded
+    assert context.load(str(ITEM), session=context.session).succeeded
     run_validations()
     assert _health(context.session)[0].is_healthy
     assert not {"livy", "onelake"} & {
