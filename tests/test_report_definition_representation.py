@@ -52,15 +52,47 @@ def test_report_binding_changes_only_effective_definition_bytes(schema):
     reference = json.loads(parts["definition.pbir"])["datasetReference"]
     assert set(reference) == {"byConnection"}
     connection = reference["byConnection"]
-    assert (
-        connection["connectionString"]
-        == f"Data Source=powerbi://api.powerbi.com/v1.0/myorg/{WORKSPACE};Initial Catalog={MODEL};"
-    )
+    expected_connection = f"Data Source=powerbi://api.powerbi.com/v1.0/myorg/{WORKSPACE};Initial Catalog={MODEL};"
+    if schema == "2.0.0":
+        expected_connection += f"semanticModelId={MODEL};"
+    assert connection["connectionString"] == expected_connection
     if schema == "2.0.0":
         assert set(connection) == {"connectionString"}
     else:
         assert connection["pbiModelDatabaseName"] == MODEL
         assert connection["connectionType"] == "pbiServiceXmlaStyleLive"
+
+
+@weaver_test()
+def test_modern_report_binding_carries_explicit_service_model_id():
+    from weaver.report_definition import decode_report, encode_report
+
+    parts = decode_report(encode_report(replace(contribution(), binding=BINDING)))
+    connection = json.loads(parts["definition.pbir"])["datasetReference"][
+        "byConnection"
+    ]
+    parameters = dict(
+        field.split("=", 1)
+        for field in connection["connectionString"].split(";")
+        if field
+    )
+    assert parameters["semanticModelId"] == MODEL
+    assert set(connection) == {"connectionString"}
+
+
+@weaver_test()
+def test_bound_report_recertifies_after_service_binding_encoder_change():
+    from weaver.semantic_models.compiler import content_signature
+
+    authored = contribution()
+    bound = replace(authored, binding=BINDING)
+    previous = content_signature(
+        {"compiler": 1, "source": bound.source_signature, "binding": BINDING}
+    )
+    assert bound.signature != previous
+    assert authored.signature == content_signature(
+        {"compiler": 1, "source": authored.source_signature, "binding": None}
+    )
 
 
 @weaver_test()
