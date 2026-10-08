@@ -200,6 +200,8 @@ Every contributing native directory, overlay, policy and annotation implementati
 has its own source artefact signature; final signatures also carry effective
 source metadata and table order. Base composition is local source reuse, not a
 physical deployment edge. Variant-only Build does not deploy unselected bases.
+The effective definition quotes the retained `Weaver.BaseSemanticModels`
+annotation name for native readback. Composition does not execute its handler.
 
 Report association is optional: same-name model first, then sole project model,
 otherwise as-authored. PBIR connection metadata never discovers that relation.
