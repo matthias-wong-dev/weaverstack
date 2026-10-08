@@ -135,18 +135,13 @@ def exercise_catalogue(trial, model, reports, build_phase):
     ).selection.selected_for_build
     (overlay,) = trial.rglob(f"{model.split('/', 1)[1]}.tmdl")
     text = overlay.read_text(encoding="utf-8")
-    import re
+    from weaver.semantic_models import TmdlDefinition
 
-    if "model Model" in text:
-        text = re.sub(
-            r"(?m)^\tdescription:.*$",
-            "\tdescription: Stage 3 qualification model edit",
-            text,
-            count=1,
-        )
-    else:
-        text += "\nmodel Model\n\tdescription: Stage 3 qualification model edit\n"
-    overlay.write_text(text, encoding="utf-8")
+    if "model Model" not in text:
+        text += "\nmodel Model\n"
+    definition = TmdlDefinition({"definition/model.tmdl": text.encode("utf-8")})
+    definition.model.description = "Stage 3 qualification model edit"
+    overlay.write_bytes(definition.parts["definition/model.tmdl"])
     selected = set(build_phase("model-edit").selection.selected_for_build)
     assert selected == {model_root, *report_roots}
     repeated = build_phase("model-fixed")
