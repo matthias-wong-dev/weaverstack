@@ -395,3 +395,27 @@ def test_health_reads_no_warehouse_inventory_for_a_model():
     assert [str(target) for target in report.targets] == ["SemanticModel/Reporting_Dev"]
     assert not any("sys.objects" in statement for statement in session.tsql)
     assert not session.spark_sql
+
+
+@weaver_test()
+def test_health_reads_no_inventory_for_power_bi_targets():
+    from types import SimpleNamespace
+
+    from weaver.operations.health import _inventories
+    from weaver.targets import PhysicalTargetRef
+
+    class Untouchable:
+        def __getattr__(self, name):
+            raise AssertionError(f"Health asked the session for {name}")
+
+    found = _inventories(
+        Untouchable(),
+        workspace=SimpleNamespace(workspace="Analytics"),
+        targets=[
+            PhysicalTargetRef("semanticmodel", "Sales"),
+            PhysicalTargetRef("report", "Sales"),
+        ],
+        dag=SimpleNamespace(installations={}),
+    )
+
+    assert found == {}
