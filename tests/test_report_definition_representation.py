@@ -451,6 +451,25 @@ def test_report_readback_names_an_extra_part():
 
 
 @weaver_test()
+def test_report_readback_expects_the_platform_fabric_adds():
+    import base64
+
+    from weaver.report_definition import encode_report, verify_report
+
+    desired = encode_report(as_authored_report())
+    desired["parts"] = [p for p in desired["parts"] if p["path"] != ".platform"]
+    observed = json.loads(json.dumps(desired))
+    observed["parts"].append(
+        {
+            "path": ".platform",
+            "payloadType": "InlineBase64",
+            "payload": base64.b64encode(b'{"metadata": {"type": "Report"}}').decode(),
+        }
+    )
+    assert verify_report(desired, observed) == ()
+
+
+@weaver_test()
 def test_report_readback_reports_a_service_format_upgrade():
     import base64
 

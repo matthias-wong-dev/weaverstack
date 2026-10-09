@@ -213,7 +213,9 @@ def verify_report(desired, observed, *, binding=None, service_binding=None):
         if path not in actual:
             differences.append(f"{path} missing")
         elif path not in expected:
-            differences.append(f"{path} extra")
+            # Fabric returns a `.platform` for every item, authored or not.
+            if path != ".platform":
+                differences.append(f"{path} extra")
         elif path == ".platform":
             if _platform(expected[path]) != _platform(actual[path]):
                 differences.append(f"{path} changed")
