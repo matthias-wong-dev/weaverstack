@@ -69,8 +69,9 @@ A variant has no native directory, so its name links the Report, whatever its
 ## Provision and build
 
 Configure each logical item in the existing `workspace-config.yml` `targets`
-section when physical names differ. Ordinary initialise adopts all discovered
-models and Reports; it leaves the authored PBIP and overlays untouched:
+section when physical names differ. Ordinary initialise adds a target for each
+discovered model and Report and leaves the authored PBIP and overlays untouched.
+Build creates any model or Report that does not exist yet:
 
 ```bash
 weaver initialise --workspace Analytics --project-folder ./reporting --non-interactive
