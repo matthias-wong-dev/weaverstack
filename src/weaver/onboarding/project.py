@@ -216,14 +216,15 @@ first build creates those catalogue tables.
 
 ## The Environment
 
-Publish before running Python work, and after changing packages:
+Publish before building a Lakehouse or running Python work, and after changing
+packages:
 
 ```bash
 weaver fabric environment publish --path Environment/{request.environment}.Environment
 ```
 
-Publishing can take several minutes. Spark SQL needs a Lakehouse; Python work
-that imports Weaver also needs the published Environment.
+Publishing can take several minutes. Lakehouse builds and Python work run in
+Fabric Spark with this Environment.
 
 ## Working interactively
 

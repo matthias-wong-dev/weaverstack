@@ -203,6 +203,25 @@ def test_deferred_render_names_normal_publish_and_next_commands(capsys):
 
 
 @weaver_test()
+@pytest.mark.parametrize(
+    "items, when",
+    [((), "the first load that runs Python"), (("Lakehouse",), "the first build")],
+)
+def test_deferred_render_says_when_to_publish(capsys, items, when):
+    render(
+        InitialiseReport(
+            project_folder="project",
+            workspace="Analytics",
+            resources=(
+                FabricItemOutcome("Environment", "Weaver", "created"),
+                *(FabricItemOutcome(role, "Landing", "created") for role in items),
+            ),
+        )
+    )
+    assert f"Publish it before {when}.\n" in capsys.readouterr().out
+
+
+@weaver_test()
 def test_json_initialise_is_machine_mode_without_prompts(monkeypatch, tmp_path, capsys):
     cli = importlib.import_module("weaver_cli.main")
     prompts = importlib.import_module("weaver_cli.initialise")

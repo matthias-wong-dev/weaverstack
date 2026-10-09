@@ -298,7 +298,11 @@ def render(report):
             item.name for item in report.resources if item.role == "Environment"
         )
         print("\nEnvironment publication deferred.")
-        print("Publish it before the first load that runs Python.\n")
+        if any(item.role == "Lakehouse" for item in report.resources):
+            # A Lakehouse build runs in Fabric Spark with this Environment.
+            print("Publish it before the first build.\n")
+        else:
+            print("Publish it before the first load that runs Python.\n")
         print(
             f"  weaver fabric environment publish --path {shlex.quote(environment_directory(name))}"
         )
