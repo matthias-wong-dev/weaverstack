@@ -132,6 +132,35 @@ class FabricStore:
         if not self.fs.mkdirs(self._path(location)):
             raise StoreError(f"could not create directory {location.value}")
 
+    def copy(self, source: Location, destination: Location) -> None:
+        """Copy one file within OneLake."""
+
+        try:
+            copied = self.fs.cp(self._path(source), self._path(destination), False)
+        except Exception as exc:
+            raise StoreError(
+                f"cannot copy {source.value} to {destination.value}: {exc}"
+            ) from exc
+        if copied is False:
+            raise StoreError(f"could not copy {source.value} to {destination.value}")
+
+    def move(self, source: Location, destination: Location) -> None:
+        """Move one file within OneLake, replacing the destination."""
+
+        try:
+            moved = self.fs.mv(
+                self._path(source),
+                self._path(destination),
+                create_path=True,
+                overwrite=True,
+            )
+        except Exception as exc:
+            raise StoreError(
+                f"cannot move {source.value} to {destination.value}: {exc}"
+            ) from exc
+        if moved is False:
+            raise StoreError(f"could not move {source.value} to {destination.value}")
+
     def copy_to_local(self, source: Location, destination: Path) -> None:
         """Copy OneLake content to the driver and remove Hadoop checksum debris.
 
