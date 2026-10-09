@@ -695,7 +695,7 @@ def _read_authored_repository(root: Location, store: Store) -> RepositoryPart:
     standalone_reports = sorted(item for item in item_ids if item.item_type == REPORT)
     if standalone_reports:
         raise ConfigError(
-            f"{standalone_reports[0]}: author Reports under PowerBI/<project>/ with one local semantic model"
+            f"{standalone_reports[0]}: author Reports under PowerBI/<project>/ beside their semantic model"
         )
     reports = read_reports(projects, paths=powerbi_paths, root=root, store=store)
     item_ids.update(item for project in projects.values() for item in project.items)

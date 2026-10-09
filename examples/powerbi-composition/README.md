@@ -61,9 +61,10 @@ win. Names containing spaces or commas remain whole names, not CSV entries.
 Bases must be local; cycles and repeated ancestors, including diamonds, fail.
 
 Save variant Reports as `Executive.Report` and `Public.Report` within this project.
-Those names select their corresponding logical models regardless of PBIR paths
-or connection IDs. A differently named Report in this multi-model project stays
-as authored and gains no inferred model dependency.
+A variant has no native directory, so its name links the Report, whatever its
+`byPath` reference names. A differently named Report links to the model its
+`byPath` reference names, such as `../Normal.SemanticModel`; with a
+`byConnection` reference it deploys as authored.
 
 ## Provision and build
 

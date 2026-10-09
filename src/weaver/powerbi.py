@@ -23,17 +23,18 @@ class PowerBIProject:
     items: tuple[WeaverItemId, ...]
     report_paths: tuple[str, ...] = ()
 
-    @property
-    def model(self):
-        return next(iter(self.definitions)) if len(self.definitions) == 1 else None
+    def model_at(self, path):
+        """The logical model whose native directory is ``path``.
 
-    @property
-    def model_path(self):
-        return self.definitions[self.model].model_path if self.model else None
-
-    @property
-    def model_tmdl(self):
-        return self.definitions[self.model].model_tmdl if self.model else None
+        A model declared only by ``<Name>.tmdl`` owns ``<Name>.SemanticModel``
+        beside that declaration.
+        """
+        for item, definition in self.definitions.items():
+            if path == (
+                definition.model_path or f"{self.path}/{item.item_name}.SemanticModel"
+            ):
+                return item
+        return None
 
 
 @dataclass(frozen=True)
@@ -175,8 +176,6 @@ def read_reports(projects, *, paths, root, store):
                 raise ConfigError(f"{pbip}: invalid PBIP reference: {exc}") from exc
         for path in report_paths:
             item = WeaverItemId(REPORT, path.rsplit("/", 1)[1][:-7])
-            same_name = WeaverItemId(SEMANTIC_MODEL, item.item_name)
-            model = same_name if same_name in project.definitions else project.model
             parts = {
                 p[len(path) + 1 :]: store.read(root.join(*p.split("/")))
                 for p in sorted(paths)
@@ -203,5 +202,20 @@ def read_reports(projects, *, paths, root, store):
                     raise ValueError(f"expected a native {field}")
             except (KeyError, TypeError, ValueError, AttributeError) as exc:
                 raise ConfigError(f"{definition_path}: {exc}") from exc
+            model = WeaverItemId(SEMANTIC_MODEL, item.item_name)
+            if model not in project.definitions:
+                model = None
+                if kind == "byPath":
+                    relative = ref[kind][field]
+                    model = project.model_at(
+                        posixpath.normpath(posixpath.join(path, relative))
+                    )
+                    if model is None:
+                        raise ConfigError(
+                            f"{definition_path}: byPath {relative!r} names no "
+                            f"semantic model in {project.path}. Point it at a model "
+                            "in this project, name the Report after a model, or use "
+                            "a byConnection reference"
+                        )
             reports[item] = ReportContribution(path, model, parts)
     return reports

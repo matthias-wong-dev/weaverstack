@@ -213,30 +213,43 @@ def test_duplicate_logical_items_report_both_source_paths(
     assert kind in str(raised.value)
 
 
+@pytest.mark.parametrize(
+    "reference",
+    [
+        "../Revenue.SemanticModel",
+        "../../Other/Revenue.SemanticModel",
+        "../../Other.SemanticModel",
+        "/Revenue.SemanticModel",
+        "..\\Revenue.SemanticModel",
+        "../Revenue.Report",
+    ],
+)
 @weaver_test()
-def test_report_only_project_retains_authored_connection_without_logical_inference(
-    tmp_path,
+def test_report_by_path_to_no_project_model_is_refused_with_the_fix(
+    tmp_path, reference
 ):
+    from weaver.errors import ConfigError
+
+    write(tmp_path, "PowerBI/Sales/Forecast.tmdl", "model Model\n")
     write(
         tmp_path,
         "PowerBI/Sales/Executive.Report/definition.pbir",
-        json.dumps(
-            {"datasetReference": {"byPath": {"path": "../Revenue.SemanticModel"}}}
-        ),
+        json.dumps({"datasetReference": {"byPath": {"path": reference}}}),
     )
-    repository = parse(tmp_path)
-    item = WeaverItemId("Report", "Executive")
-    assert repository.powerbi_projects["Sales"].items == (item,)
-    assert repository.reports[item].model is None
-    assert not repository.semantic_models
-    assert json.loads(repository.reports[item].parts["definition.pbir"])[
-        "datasetReference"
-    ] == {"byPath": {"path": "../Revenue.SemanticModel"}}
+    with pytest.raises(ConfigError) as raised:
+        parse(tmp_path)
+    message = str(raised.value)
+    assert "PowerBI/Sales/Executive.Report/definition.pbir" in message
+    assert "name the Report after a model" in message
+    assert "byConnection" in message
 
 
 @weaver_test()
-def test_declared_model_without_native_base_supports_local_report(tmp_path):
+def test_report_by_path_links_the_model_it_names_whatever_the_report_is_called(
+    tmp_path,
+):
     write(tmp_path, "PowerBI/Sales/Revenue.tmdl", "model Model\n")
+    write(tmp_path, "PowerBI/Sales/Forecast.tmdl", "model Model\n")
     write(
         tmp_path,
         "PowerBI/Sales/Executive.Report/definition.pbir",
@@ -250,24 +263,26 @@ def test_declared_model_without_native_base_supports_local_report(tmp_path):
     ].model == WeaverItemId("SemanticModel", "Revenue")
 
 
-@pytest.mark.parametrize(
-    "reference",
-    [
-        {"byConnection": {"connectionString": "external"}},
-        {"byPath": {"path": "../../Other/Revenue.SemanticModel"}},
-        {"byPath": {"path": "../../Other.SemanticModel"}},
-        {"byPath": {"path": "/Revenue.SemanticModel"}},
-        {"byPath": {"path": "..\\Revenue.SemanticModel"}},
-    ],
-)
 @weaver_test()
-def test_report_reference_metadata_does_not_override_sole_model(tmp_path, reference):
+def test_report_by_path_names_a_native_model_directory(tmp_path):
+    native(tmp_path, model="Revenue", report="Executive")
+    native(tmp_path, model="Forecast", report="Outlook", nested="Reports/Forecast/")
+    repository = parse(tmp_path)
+    assert {
+        report.item_name: contribution.model.item_name
+        for report, contribution in repository.reports.items()
+    } == {"Executive": "Revenue", "Outlook": "Forecast"}
+
+
+@weaver_test()
+def test_report_by_connection_deploys_as_authored_beside_project_models(tmp_path):
+    reference = {"byConnection": {"connectionString": "external"}}
     path = native(tmp_path)
     write(
         tmp_path, path + "/definition.pbir", json.dumps({"datasetReference": reference})
     )
     contribution = parse(tmp_path).reports[WeaverItemId("Report", "Executive")]
-    assert contribution.model == WeaverItemId("SemanticModel", "Revenue")
+    assert contribution.model is None
     assert (
         json.loads(contribution.parts["definition.pbir"])["datasetReference"]
         == reference
@@ -360,7 +375,6 @@ def test_native_pbip_discovers_nested_report_and_preserves_bytes(tmp_path):
     repository = parse(tmp_path)
     model = WeaverItemId("SemanticModel", "Revenue")
     report = WeaverItemId("Report", "Executive")
-    assert repository.powerbi_projects["Sales"].model == model
     contribution = repository.reports[report]
     assert contribution.model == model
     assert contribution.path == path

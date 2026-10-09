@@ -51,13 +51,20 @@ that object is missing.
 An extension-only model starts from a minimal TMDL package and uses the same
 compiler. Its source folder needs only `<model-name>.tmdl`.
 
-Reports under the project, including nested `<report-name>.Report` directories,
-associate with the same-name logical model first, otherwise the project's sole
-model. Without a same-name or sole model, a Report deploys as authored.
-PBIR paths, connection IDs and lineage never infer a logical association.
-For an associated Report, Build rebinds only the deployment payload to the
-resolved service model. Otherwise it preserves every connection byte and adds
-no model dependency. Authored files and native resources remain unchanged.
+A Report under the project, including a nested `<report-name>.Report` directory,
+links to the first of:
+
+1. the same-name logical model, including a variant composed with
+   `Weaver.BaseSemanticModels`;
+2. the model its `definition.pbir` `byPath` reference names in the project: a
+   `<model-name>.SemanticModel` directory, or `<model-name>.SemanticModel` beside
+   a model declared only by `<model-name>.tmdl`.
+
+A Report with a `byConnection` reference and no same-name model deploys as
+authored: it stays bound to the same model in every environment and gains no
+model dependency. A `byPath` reference that names no model in the project is
+refused. For a linked Report, Build rebinds only the deployment payload to the
+resolved service model. Authored files and native resources remain unchanged.
 Reverse-mapping thin Report connections is not supported.
 
 Select a model and its Reports together:
@@ -74,7 +81,7 @@ A model deployment rebuilds its selected consuming Reports. A Report-only edit
 rebuilds that Report. Unchanged catalogue-backed Report-only builds perform no work;
 every selected model deploys even with an unchanged signature.
 Catalogue-free model and Report builds deploy and verify on every invocation.
-A logically associated Report-only selection needs its model's certified
+A linked Report-only selection needs its model's certified
 catalogue installation. An as-authored Report is independently certified.
 
 Targets must already exist. Python `weaver.initialise(..., reports={name: definition})`

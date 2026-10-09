@@ -10,29 +10,33 @@ from weaver.catalogue.powerbi import project_report
 from weaver.declaration.model import WeaverDocumentId, WeaverItemId
 from weaver.report_definition import decode_report
 
+BY_CONNECTION = {
+    "byConnection": {
+        "connectionString": "physical unrelated",
+        "pbiModelDatabaseName": "other-id",
+    }
+}
+
 
 @pytest.mark.parametrize(
-    "reference",
+    "reference, linked",
     [
-        {"byPath": {"path": "../Normal.SemanticModel"}},
-        {
-            "byConnection": {
-                "connectionString": "physical unrelated",
-                "pbiModelDatabaseName": "other-id",
-            }
-        },
+        ({"byPath": {"path": "../Normal.SemanticModel"}}, "Normal"),
+        (BY_CONNECTION, None),
     ],
 )
 @weaver_test()
-def test_report_naming_conventions_ignore_connection_metadata(tmp_path, reference):
+def test_report_links_by_name_then_by_path_then_deploys_as_authored(
+    tmp_path, reference, linked
+):
+    # Executive's native byPath names its base, Normal; the same-name variant wins.
     native(tmp_path, model="Normal", report="Executive")
-    write(tmp_path, "PowerBI/Sales/Executive.tmdl", "model Model\n")
-    write(tmp_path, "PowerBI/Sales/Public.tmdl", "model Model\n")
     write(
         tmp_path,
-        "PowerBI/Sales/Reports/Executive.Report/definition.pbir",
-        json.dumps({"datasetReference": reference}),
+        "PowerBI/Sales/Executive.tmdl",
+        "model Model\n\tannotation Weaver.BaseSemanticModels = Normal\n",
     )
+    write(tmp_path, "PowerBI/Sales/Public.tmdl", "model Model\n")
     write(
         tmp_path,
         "PowerBI/Sales/Dashboard.Report/definition.pbir",
@@ -44,7 +48,6 @@ def test_report_naming_conventions_ignore_connection_metadata(tmp_path, referenc
     assert repository.reports[executive].model == WeaverItemId(
         "SemanticModel", "Executive"
     )
-    assert repository.reports[dashboard].model is None
     edges = repository.dependency_edges
     assert any(
         edge.consumer == WeaverDocumentId.report_root(executive)
@@ -52,6 +55,16 @@ def test_report_naming_conventions_ignore_connection_metadata(tmp_path, referenc
         == WeaverDocumentId.model_root(WeaverItemId("SemanticModel", "Executive"))
         for edge in edges
     )
+    if linked:
+        model = WeaverItemId("SemanticModel", linked)
+        assert repository.reports[dashboard].model == model
+        assert any(
+            edge.consumer == WeaverDocumentId.report_root(dashboard)
+            and edge.producer == WeaverDocumentId.model_root(model)
+            for edge in edges
+        )
+        return
+    assert repository.reports[dashboard].model is None
     assert not any(
         edge.consumer == WeaverDocumentId.report_root(dashboard) for edge in edges
     )
@@ -60,15 +73,24 @@ def test_report_naming_conventions_ignore_connection_metadata(tmp_path, referenc
     assert len(rows["Registry"]) == 2
 
 
+def as_authored(root):
+    path = root / "PowerBI/Reporting/Executive.Report/definition.pbir"
+    native_bytes = (
+        b'{"version":"4.0","datasetReference":{"byConnection":'
+        b'{"connectionString":"Data Source=powerbi://api.powerbi.com/v1.0/myorg/'
+        b'Production;Initial Catalog=Reporting;"}}}\r\n'
+    )
+    path.write_bytes(native_bytes)
+    return native_bytes
+
+
 @weaver_test()
 def test_public_as_authored_report_build_uses_no_model_target_and_preserves_all_bytes(
     tmp_path,
 ):
     root, session, events, model, report = prepared_project(tmp_path)
     write(root, "PowerBI/Reporting/Public.tmdl", "model Model\n")
-    path = root / "PowerBI/Reporting/Executive.Report/definition.pbir"
-    native_bytes = b'{"version":"4.0","datasetReference":{"byPath":{"path":"../Reporting.SemanticModel"}}}\r\n'
-    path.write_bytes(native_bytes)
+    native_bytes = as_authored(root)
     before = {
         p.relative_to(root).as_posix(): p.read_bytes()
         for p in root.rglob("*")
@@ -93,6 +115,7 @@ def test_public_as_authored_report_build_uses_no_model_target_and_preserves_all_
 def test_report_without_local_models_deploys_as_authored_without_inference(tmp_path):
     root, session, events, model, report = prepared_project(tmp_path)
     (root / "PowerBI/Reporting/Reporting.tmdl").unlink()
+    as_authored(root)
     repository = parse(root)
     item = WeaverItemId("Report", "Executive")
     assert not repository.semantic_models
@@ -124,6 +147,7 @@ def test_as_authored_report_certification_is_independent_of_always_selected_mode
 
     root, session, events, model, report = prepared_project(tmp_path)
     write(root, "PowerBI/Reporting/Public.tmdl", "model Model\n")
+    as_authored(root)
     repository = parse(root)
     bindings = ItemBindings(
         tuple(
@@ -180,3 +204,19 @@ def test_as_authored_report_certification_is_independent_of_always_selected_mode
     assert not result.succeeded
     outcomes = {a.action_id: a.status for a in result.action_results()}
     assert outcomes["publish-catalogue"] == outcomes["publish-registry"] == "skipped"
+
+
+@weaver_test()
+def test_report_build_refuses_a_by_path_report_without_its_model_before_fabric(
+    tmp_path,
+):
+    from weaver.errors import ConfigError
+
+    root, session, events, model, report = prepared_project(tmp_path)
+    (root / "PowerBI/Reporting/Reporting.tmdl").unlink()
+    write(root, "PowerBI/Reporting/Public.tmdl", "model Model\n")
+    with pytest.raises(ConfigError, match="Executive.Report/definition.pbir"):
+        weaver.build(
+            root, items="Report/Executive=Report/Executive_Dev", session=session
+        )
+    assert not events

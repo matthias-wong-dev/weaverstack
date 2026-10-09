@@ -175,7 +175,7 @@ def test_initialise_as_authored_report_has_no_binding_requirement(
     authored = json.dumps(
         {
             "version": "4.0",
-            "datasetReference": {"byPath": {"path": "../A.SemanticModel"}},
+            "datasetReference": {"byConnection": {"connectionString": "external"}},
         }
     ).encode()
     write(tmp_path, "PowerBI/Independent/Analyst.Report/definition.pbir", authored)
