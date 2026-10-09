@@ -238,6 +238,7 @@ def test_desktop_mutation_binds_semantic_session_without_spark(
         else:
             assert [method for method, _ in model.calls] == [
                 "update_definition",
+                "invalid_measures",
                 "get_definition",
             ]
 

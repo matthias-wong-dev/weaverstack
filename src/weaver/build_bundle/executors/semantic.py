@@ -31,6 +31,34 @@ class SemanticModelExecutor:
         )
         if spec.get("bind_data_sources"):
             client.bind_data_sources()
+        return {"measure_check": require_valid_measures(client, spec["item"])}
+
+
+def require_valid_measures(client, item) -> str:
+    """Fail a deployment whose measures no longer evaluate.
+
+    Only a measure Fabric reports as not `Valid` fails it. When Power BI refuses
+    DAX queries, as it does for a service principal without dataset access, the
+    check reports that it did not run.
+    """
+
+    from ...fabric.client import FabricError
+
+    try:
+        invalid = client.invalid_measures()
+    except FabricError as exc:
+        return f"not run: {exc}"
+    if invalid:
+        listed = "; ".join(
+            f"'{table}'[{measure}]: {reason.rstrip('.')}"
+            for table, measure, reason in invalid
+        )
+        raise InstallError(
+            f"{item}: {len(invalid)} measure{'s' if len(invalid) != 1 else ''} "
+            f"cannot be evaluated after deployment. {listed}. Fix the DAX or restore "
+            "what it references, then build again."
+        )
+    return "passed"
 
 
 class SemanticReadbackExecutor:

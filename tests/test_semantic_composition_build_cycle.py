@@ -147,7 +147,11 @@ def test_selected_variant_public_build_runs_final_annotations_once_without_base_
         assert calls[-1][0] == culture
         assert set(calls[-1][1]) == {"Zebra", "Alpha", name + "View"}
         assert len(calls) == (1 if name == "Executive" else 2)
-        assert len(models[name].calls) == 2
+        assert [call for call, _ in models[name].calls] == [
+            "update_definition",
+            "invalid_measures",
+            "get_definition",
+        ]
         assert not models["Normal"].calls
         part = next(
             c[1]["definition"]
@@ -193,7 +197,7 @@ def test_project_and_type_public_build_select_every_named_model(tmp_path, monkey
             if selector != "SemanticModel"
             else set()
         )
-    assert all(len(client.calls) == 6 for client in models.values())
+    assert all(len(client.calls) == 9 for client in models.values())
     assert all(
         client.calls == ["update", "read", "update", "read"]
         for client in reports.values()

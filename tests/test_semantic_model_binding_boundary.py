@@ -1,11 +1,13 @@
 """Load binds a model's data sources to the connection that reaches them."""
 
 import json
+from types import SimpleNamespace
 
 import pytest
 from support.weaver_test import weaver_test
 from test_semantic_model_rest_boundary import Client, response
 
+from weaver.fabric.client import FabricError
 from weaver.fabric.semantic_model import (
     ConnectionBindingError,
     DataSourceBinding,
@@ -172,7 +174,7 @@ def test_build_binds_after_deploying_only_when_asked(tmp_path, bind):
     SemanticModelExecutor().execute(None, payload, context)
     assert [call[0] for call in client.calls] == ["update_definition"] + (
         ["bind_data_sources"] if bind else []
-    )
+    ) + ["invalid_measures"]
     assert (
         repository.semantic_models[item].signature
         == replace(
@@ -257,3 +259,39 @@ def test_load_warns_before_refreshing_a_model_with_a_source_no_connection_reache
     assert not [call for call in calls if call[0] == "POST"]
     assert f"No connection has the path {path}." in str(failed.value)
     assert not [call for call in fabric.calls if call[0] == "POST"]
+
+
+@weaver_test()
+@pytest.mark.parametrize(
+    "answer, outcome",
+    [([], "passed"), (FabricError("401 Unauthorized", status_code=401), "not run")],
+)
+def test_deployment_reports_whether_its_measures_were_checked(answer, outcome):
+    from weaver.build_bundle.executors.semantic import require_valid_measures
+
+    def invalid_measures():
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    client = SimpleNamespace(invalid_measures=invalid_measures)
+    assert require_valid_measures(client, "SemanticModel/Sales").startswith(outcome)
+
+
+@weaver_test()
+def test_deployment_with_an_invalid_measure_fails_naming_it():
+    from weaver.build_bundle.executors.semantic import require_valid_measures
+    from weaver.errors import InstallError
+
+    client = SimpleNamespace(
+        invalid_measures=lambda: [
+            ("Sales", "Margin", "Column 'Cost' in table 'Sales' cannot be found.")
+        ]
+    )
+    with pytest.raises(InstallError) as raised:
+        require_valid_measures(client, "SemanticModel/Sales")
+    assert str(raised.value) == (
+        "SemanticModel/Sales: 1 measure cannot be evaluated after deployment. "
+        "'Sales'[Margin]: Column 'Cost' in table 'Sales' cannot be found. Fix the "
+        "DAX or restore what it references, then build again."
+    )

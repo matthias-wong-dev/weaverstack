@@ -59,6 +59,11 @@ class DefinitionClient:
         self.definition = encode_definition({"model": {"culture": "en-US"}})
         self.failure = None
         self.read_failure = None
+        self.invalid = []
+
+    def invalid_measures(self):
+        self.calls.append(("invalid_measures", None))
+        return self.invalid
 
     def get_definition(self):
         self.calls.append(("get_definition", None))
@@ -203,7 +208,11 @@ def test_build_deploys_and_certifies_readback_without_touching_source(tmp_path, 
         load_bundle(bundle.location, store=FilesystemStore()), session
     )
     assert report.succeeded, report.to_mapping()
-    assert [c[0] for c in semantic.calls] == ["update_definition", "get_definition"]
+    assert [c[0] for c in semantic.calls] == [
+        "update_definition",
+        "invalid_measures",
+        "get_definition",
+    ]
     submitted = semantic.calls[0][1]
     assert submitted["allow_purge_data"] is True
     assert (
@@ -236,7 +245,11 @@ def test_build_deploys_and_certifies_readback_without_touching_source(tmp_path, 
     assert not build_metadata(second.plan).selection.impact.changed
     semantic.calls.clear()
     assert execute_bundle(second, session).succeeded
-    assert [c[0] for c in semantic.calls] == ["update_definition", "get_definition"]
+    assert [c[0] for c in semantic.calls] == [
+        "update_definition",
+        "invalid_measures",
+        "get_definition",
+    ]
     assert (
         decode_parts(semantic.calls[0][1]["definition"])
         == repository.semantic_models[ITEM].parts
@@ -532,6 +545,7 @@ def test_public_build_bootstraps_catalogue_and_redeploys_with_stable_signature(
     assert not second.selection.impact.changed
     assert [method for method, _ in semantic.calls] == [
         "update_definition",
+        "invalid_measures",
         "get_definition",
     ]
     assert all(
@@ -551,5 +565,22 @@ def test_public_build_bootstraps_catalogue_and_redeploys_with_stable_signature(
     assert third.selection.selected_for_build == (ROOT,)
     assert [call[0] for call in semantic.calls] == [
         "update_definition",
+        "invalid_measures",
         "get_definition",
     ]
+
+
+@weaver_test()
+def test_an_invalid_measure_fails_the_build_and_certifies_nothing(tmp_path):
+    root, repository, bindings, session, state = prepared(tmp_path, False)
+    bundle = bundle_for(tmp_path, repository, bindings, state, "invalid")
+    semantic = session.semantic_model("Reporting_Dev")
+    semantic.definition = encode_definition(engine_model(repository))
+    semantic.invalid = [("Calendar", "Days", "Column 'Date' cannot be found.")]
+    session.calls.clear()
+    report = execute_bundle(
+        load_bundle(bundle.location, store=FilesystemStore()), session
+    )
+    assert not report.succeeded
+    assert "'Calendar'[Days]: Column 'Date' cannot be found" in str(report.to_mapping())
+    assert not any("MERGE" in s and "Registry" in s for s in session.tsql)

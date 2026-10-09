@@ -296,6 +296,45 @@ class SemanticModelClient:
                 f"DAX returned an invalid response for {self.model_id}: {exc}"
             ) from exc
 
+    def invalid_measures(self) -> list[tuple[str, str, str]]:
+        """Measures the deployed model cannot evaluate, as (table, measure, reason).
+
+        Fabric accepts a definition whose measures reference missing objects and
+        marks them in `INFO.VIEW.MEASURES()`. Evaluating one returns the reason.
+        """
+
+        rows = self.query_dax(
+            "EVALUATE SELECTCOLUMNS("
+            'FILTER(INFO.VIEW.MEASURES(), [State] <> "Valid"), '
+            '"Table", [Table], "Measure", [Name], "State", [State])'
+        )
+        invalid = []
+        for row in rows:
+            table, measure = str(row.get("[Table]")), str(row.get("[Measure]"))
+            reason = str(row.get("[State]"))
+            try:
+                self.query_dax(
+                    f'EVALUATE ROW("Value", {_dax_table(table)}[{_dax_member(measure)}])'
+                )
+            except FabricError as exc:
+                reason = _dax_reason(str(exc)) or reason
+            invalid.append((table, measure, reason))
+        return invalid
+
+
+def _dax_table(name: str) -> str:
+    return "'" + name.replace("'", "''") + "'"
+
+
+def _dax_member(name: str) -> str:
+    return name.replace("]", "]]")
+
+
+def _dax_reason(message: str) -> str:
+    message = re.sub(r"</?oii>", "", message)
+    message = message.removeprefix("DAX failed: ")
+    return re.sub(r"^MdxScript\([^)]*\) \(\d+, \d+\) ", "", message).strip()
+
 
 def _refresh_errors(body) -> list[str]:
     """Distinct readable failure messages, without the service's JSON wrapping.

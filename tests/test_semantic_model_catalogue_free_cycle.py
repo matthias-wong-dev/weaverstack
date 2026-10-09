@@ -46,7 +46,11 @@ def test_semantic_build_deploys_and_reads_back_without_a_catalogue(tmp_path, pbi
     model.definition = encode_definition(engine_model(repository))
     first = weaver.build(root, items=SELECTOR, session=session)
     assert first.succeeded, first.errors
-    assert [call[0] for call in model.calls] == ["update_definition", "get_definition"]
+    assert [call[0] for call in model.calls] == [
+        "update_definition",
+        "invalid_measures",
+        "get_definition",
+    ]
     assert (
         decode_parts(model.calls[0][1]["definition"])
         == repository.semantic_models[ITEM].parts
@@ -56,7 +60,11 @@ def test_semantic_build_deploys_and_reads_back_without_a_catalogue(tmp_path, pbi
     model.calls.clear()
     second = weaver.build(root, items=SELECTOR, session=session)
     assert second.succeeded, second.errors
-    assert [call[0] for call in model.calls] == ["update_definition", "get_definition"]
+    assert [call[0] for call in model.calls] == [
+        "update_definition",
+        "invalid_measures",
+        "get_definition",
+    ]
 
 
 @weaver_test()

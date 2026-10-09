@@ -133,6 +133,7 @@ def test_a_validation_edit_resets_only_that_validation(tmp_path, monkeypatch):
         assert not unchanged.selection.impact.changed
         assert [kind for kind, _ in client.calls] == [
             "update_definition",
+            "invalid_measures",
             "get_definition",
         ]
         assert not pending(session, since)
@@ -156,6 +157,7 @@ def test_a_validation_edit_resets_only_that_validation(tmp_path, monkeypatch):
         )
         assert [kind for kind, _ in client.calls] == [
             "update_definition",
+            "invalid_measures",
             "get_definition",
         ]
         assert pending(session, since) == {"RevenueReconciles"}

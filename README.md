@@ -147,7 +147,9 @@ assert result.succeeded, result.errors
 
 Build sends the effective TMDL package to Fabric. After deployment it reads
 TMSL back from Fabric, verifies requested edits and publishes the observed model
-to the five semantic catalogue tables. Failed updates or readback checks leave
+to the five semantic catalogue tables. A measure Fabric cannot evaluate fails the
+Build and is named with Fabric's reason; without permission to query the model,
+Build reports that the check did not run. Failed updates or readback checks leave
 the selected model uncertified. Every selected model compiles and deploys, even
 when its effective signature matches the installed model.
 

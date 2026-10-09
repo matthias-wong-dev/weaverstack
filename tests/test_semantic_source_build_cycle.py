@@ -641,7 +641,7 @@ def test_declared_source_build_precedes_model_deployment(
             assert model_result.succeeded, model_result.errors
             assert [
                 method for method, _ in session.semantic_model("Reporting_Dev").calls
-            ] == ["update_definition", "get_definition"]
+            ] == ["update_definition", "invalid_measures", "get_definition"]
 
 
 @weaver_test()
@@ -711,6 +711,7 @@ def test_environment_rebinding_and_unchanged_public_build_use_source_signatures(
             assert not second.selection.impact.changed
             assert [method for method, _ in client.calls] == [
                 "update_definition",
+                "invalid_measures",
                 "get_definition",
             ]
     assert signatures[0] != signatures[1]
