@@ -277,10 +277,11 @@ def equivalent_command(args):
 
 
 def _table(report):
+    roles = max((len(o.role) for o in report.resources), default=0) + 2
+    names = max((len(o.name) for o in report.resources), default=0) + 2
     for outcome in report.resources:
-        print(
-            f"  {outcome.role:14}{outcome.name:22}{DISPLAY.get(outcome.status, outcome.status)}"
-        )
+        status = DISPLAY.get(outcome.status, outcome.status)
+        print(f"  {outcome.role:{roles}}{outcome.name:{names}}{status}")
     print(f"  Environment publication: {report.environment_publication}")
 
 
@@ -309,7 +310,16 @@ def render(report):
 
 def render_dry_run(report):
     _table(report)
-    print(f"Project files will be created in {report.project_folder}.")
+    from pathlib import Path
+
+    folder = Path(report.project_folder)
+    new = sum(not (folder / path).exists() for path in report.files)
+    kept = len(report.files) - new
+    print(
+        f"Project files in {report.project_folder}: {new} to write"
+        + (f", {kept} already there and kept" if kept else "")
+        + "."
+    )
     if report.example.generated:
         print("Sales example source will be added.")
     print("No changes were made.")

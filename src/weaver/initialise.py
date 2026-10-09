@@ -268,7 +268,10 @@ def initialise(
                 from .fabric.environment import create_with_definition
                 from .fabric.environment_definition import read_environment_definition
 
-                with opened.step("Creating the Environment", request.environment):
+                with opened.step(
+                    f"Creating the Environment {request.environment}",
+                    request.environment,
+                ):
                     try:
                         create_with_definition(
                             physical,
@@ -618,7 +621,7 @@ def _create_missing(
             create_lakehouse if wanted.item_type == LAKEHOUSE_ITEM else create_warehouse
         )
         try:
-            with session.step(f"Creating the {wanted.role}", wanted.name):
+            with session.step(f"Creating the {wanted.role} {wanted.name}", wanted.name):
                 if wanted.item_type == SEMANTIC_MODEL:
                     from .fabric.resources import create_semantic_model
                     from .onboarding.project import semantic_extension

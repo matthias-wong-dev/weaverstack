@@ -384,3 +384,30 @@ def test_workspace_option_starts_at_project_folder(capsys):
         < text.index("Catalogue name")
     )
     assert "Examples: Curated, Silver" in text
+
+
+@weaver_test()
+def test_dry_run_keeps_columns_apart_and_counts_kept_files(tmp_path, capsys):
+    from weaver_cli.initialise import render_dry_run
+
+    (tmp_path / "workspace-config.yml").write_text("workspace: Analytics\n")
+    render_dry_run(
+        InitialiseReport(
+            project_folder=str(tmp_path),
+            workspace="Analytics",
+            resources=(
+                FabricItemOutcome("Catalogue", "Catalogue", "existing"),
+                FabricItemOutcome(
+                    "Report", "Executive summary for the board", "planned"
+                ),
+            ),
+            files=("README.md", "workspace-config.yml"),
+            dry_run=True,
+        )
+    )
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[1].endswith("Executive summary for the board  create")
+    assert lines[0].rindex("Catalogue") == lines[1].index("Executive")
+    assert (
+        f"Project files in {tmp_path}: 1 to write, 1 already there and kept." in lines
+    )
