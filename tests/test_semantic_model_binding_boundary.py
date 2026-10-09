@@ -453,3 +453,38 @@ def test_a_readback_fabric_does_not_return_leaves_the_item_uncertified():
         "to confirm it: getDefinition returned 500. Build Report/Executive again "
         "to certify it."
     )
+
+
+@weaver_test()
+@pytest.mark.parametrize("direct_lake", [False, True])
+def test_load_warns_about_connections_only_for_a_model_that_needs_one(direct_lake):
+    from types import SimpleNamespace
+
+    from test_semantic_model_load_cycle import COMPLETED, ITEM, REQUEST_ID
+
+    from weaver.fabric.semantic_model import DataSourceBinding
+    from weaver.installed import SEMANTIC_REFRESH
+    from weaver.run.dispatch import dispatch_primitive
+
+    path = f"{SERVER};Serving_Dev"
+    model = SimpleNamespace(
+        bind_data_sources=lambda: DataSourceBinding(unreached=(path,)),
+        refresh=lambda unreached: {**COMPLETED, "request_id": REQUEST_ID},
+    )
+    warned = []
+    session = SimpleNamespace(
+        semantic_model=lambda item, workspace=None: model, warn=warned.append
+    )
+    node = SimpleNamespace(
+        node_id="load:semanticmodel/Reporting",
+        physical_target="semanticmodel/Reporting",
+        primitive_kind=SEMANTIC_REFRESH,
+        logical_id=ITEM,
+        bound_item=None,
+        direct_lake=direct_lake,
+    )
+
+    result = dispatch_primitive(node, session=session)
+
+    assert result.succeeded
+    assert bool(warned) is not direct_lake

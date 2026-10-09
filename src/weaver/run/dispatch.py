@@ -52,7 +52,7 @@ def dispatch_primitive(
         model = session.semantic_model(node.bound_item, workspace=workspace)
         # A new or redeployed model has no data connection until one is bound.
         binding = model.bind_data_sources()
-        for path in binding.unreached:
+        for path in () if node.direct_lake else binding.unreached:
             # Single sign-on can still reach the source, so this does not stop.
             session.warn(
                 f"{node.logical_id} reads {path}, and no connection has that "

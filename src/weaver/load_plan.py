@@ -83,6 +83,9 @@ class LoadNode:
     #: A refresh barrier only. The ``(schema, table)`` pairs read through the
     #: endpoint, or ``None`` when a read needs every table synced.
     refresh_tables: tuple[tuple[str, str], ...] | None = ()
+    #: A semantic refresh only. Every recorded source is read in Direct Lake,
+    #: which uses single sign-on and needs no connection.
+    direct_lake: bool = False
 
     @property
     def sort_key(self) -> tuple[str, str, str, str]:
@@ -428,6 +431,13 @@ class _Planner:
                     else None
                 ),
                 bound_item=installed.bound_item,
+                direct_lake=installed.artefact_kind == SEMANTIC_REFRESH
+                and {
+                    edge.source_mode
+                    for edge in self.dag.reads(installed.identity)
+                    if edge.semantic_table is not None
+                }
+                == {"directLake"},
             )
             self.nodes[node_id] = node
         return node

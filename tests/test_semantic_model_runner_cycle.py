@@ -198,7 +198,7 @@ def test_semantic_nodes_preserve_catalogue_dependency_edges_between_producers():
     assert len(planned.nodes) == 3
 
 
-def _traced_estate():
+def _traced_estate(mode="import"):
     """A Warehouse with two loads, a model reading one of them, and one reading none."""
 
     warehouse = WeaverItemId.parse("Warehouse/Sales")
@@ -243,7 +243,7 @@ def _traced_estate():
         {
             **scope,
             "table_name": "Orders",
-            "source_mode": "import",
+            "source_mode": mode,
             "source_access": "sql",
         },
     )
@@ -300,3 +300,23 @@ def test_an_untraced_model_waits_only_for_what_the_selection_runs():
     )
     assert len(named.nodes) == 2
     assert not named.edges
+
+
+@weaver_test()
+@pytest.mark.parametrize("mode", ["import", "directLake"])
+def test_a_model_read_only_in_direct_lake_needs_no_connection(mode):
+    """Direct Lake reads with single sign-on, so Load does not warn about connections."""
+
+    installed, warehouse, traced = _traced_estate(mode)
+
+    planned = load_dag(installed, items=(warehouse, ITEM, traced))
+    models = {
+        node.logical_id: node.direct_lake
+        for node in planned.nodes
+        if node.primitive_kind == "semantic_refresh"
+    }
+
+    assert models == {
+        WeaverDocumentId.model_root(traced): mode == "directLake",
+        ROOT: False,
+    }
