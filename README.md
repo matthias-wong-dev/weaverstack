@@ -375,7 +375,19 @@ TestStatus. Every selected model still deploys and resets its LoadStatus.
 `weaver test SemanticModel/Reporting`
 runs them, records TestStatus and Log, and Health treats them like any other
 validation: a deployment or refresh after a pass makes them stale until they run
-again.
+again. Like Load, it refuses a model whose last Build is not certified.
+
+`weaver test` runs in file mode when `--file` is given or no catalogue is
+configured: it reads validations from the project folder (`--source`, default
+the current directory), runs them against the deployed model and prints the
+results without recording them. Item targets and Expected sources resolve
+through workspace configuration `targets:`. `--file` takes files, directories
+or globs and repeats.
+
+Load and Test accept `PowerBI` and `PowerBI/<project>`, read from the project
+folder. `--name` repeats, and each value is a regular expression matched
+against the whole object name, ignoring case; one that matches nothing is an
+error.
 
 ### Without a catalogue
 
@@ -389,9 +401,9 @@ weaver load SemanticModel/Reporting --workspace Analytics
 Build deploys each selected model and verifies its readback. With no catalogue
 Load records nothing. Authored tables can retain logical `Weaver.Source` annotations
 without catalogue metadata; each names a configured or mapped target, or a Table
-or View the project declares. Source generation, Lakehouse and Warehouse operations,
-installed lineage, Tests and Assumptions, and `load --stale`, `--name` or `--reload`
-need a catalogue.
+or View the project declares. Tests and Assumptions run in file mode. Source
+generation, Lakehouse and Warehouse operations, installed lineage, and
+`load --stale`, `--name` or `--reload` need a catalogue.
 
 ### Load and connections
 
