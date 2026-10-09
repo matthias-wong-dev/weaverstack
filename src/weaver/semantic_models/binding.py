@@ -4,6 +4,13 @@ import copy
 import re
 from dataclasses import replace
 
+from ..declaration.metadata import (
+    AUDIT_COLUMNS,
+    SPARK_SQL,
+    SQL,
+    audit_column_name,
+    signature_column_name,
+)
 from ..errors import BuildError
 from .compiler import _NAMED_COLLECTIONS, _merge, escape, leaf_properties
 from .fragments import source_context, source_table
@@ -219,20 +226,40 @@ def _changes(before, after, key=""):
     return copy.deepcopy(after)
 
 
+def _housekeeping(reference):
+    """The audit and signature columns Weaver adds to a source's rows."""
+
+    language = (
+        SQL if source_identity(reference).item.item_type == "Warehouse" else SPARK_SQL
+    )
+    return {
+        name.casefold()
+        for name in (
+            *(audit_column_name(c, language) for c in AUDIT_COLUMNS),
+            signature_column_name(language),
+        )
+    }
+
+
 def _source_columns(table, authored, source, reference):
     """Every source column, refined by the authored column it names.
 
     An authored column matches by ``sourceColumn``, else by name. One that matches
-    nothing must be calculated.
+    nothing must be calculated. Weaver's housekeeping columns appear only when an
+    authored column names them.
     """
 
     by_source = {str(c.get("sourceColumn", c["name"])).casefold(): c for c in authored}
+    housekeeping = _housekeeping(reference)
     columns = []
     for c in source["source_columns"]:
         name = c["column_name"]
+        if name.casefold() in housekeeping and name.casefold() not in by_source:
+            continue
         column = by_source.pop(name.casefold(), {"name": name})
         column.setdefault("sourceColumn", name)
-        column.setdefault("dataType", semantic_type(c["data_type"], reference, name))
+        if "dataType" not in column:
+            column["dataType"] = semantic_type(c["data_type"], reference, name)
         columns.append(column)
     for column in by_source.values():
         if not column.get("expression"):

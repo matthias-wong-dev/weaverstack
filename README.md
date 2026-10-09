@@ -204,8 +204,10 @@ Weaver's own annotations are
   associates available catalogue metadata. Authored partitions, source expressions,
   modes, columns, types and mappings remain intact. Only missing descriptions are
   enriched, matching columns by `sourceColumn`, or by name when absent.
-  A table without a partition generates its source and takes every source column;
-  authored columns refine the source columns they name. Generated tables share one
+  A table without a partition generates its source and takes every row and every
+  source column except Weaver's row audit columns and row signature;
+  authored columns refine the source columns they name, and can name those
+  columns to include them. Generated tables share one
   M expression per logical source. Their workspace and CLI source overrides must
   resolve to the selected or installed managed target; build the source into its
   new target before changing that binding.

@@ -179,6 +179,78 @@ def test_authored_columns_refine_the_columns_a_source_generates(tmp_path):
     ]
 
 
+@pytest.mark.parametrize(
+    "reference, housekeeping",
+    [
+        (
+            "Warehouse/Serving/Cake.Sales",
+            {
+                "Row insert datetime": "datetime2",
+                "Row update datetime": "datetime2",
+                "Row delete datetime": "datetime2",
+                "Row signature": "varbinary",
+            },
+        ),
+        (
+            "Lakehouse/Serving/Tables/Cake.Sales",
+            {
+                "row_insert_datetime": "datetime2",
+                "row_update_datetime": "datetime2",
+                "row_delete_datetime": "datetime2",
+                "row_signature": "varchar",
+            },
+        ),
+    ],
+)
+@weaver_test()
+def test_generation_leaves_out_weaver_housekeeping_columns(
+    tmp_path, reference, housekeeping
+):
+    from weaver.declaration.repository import parse_item_repository
+    from weaver.locations import Location
+    from weaver.semantic_models import TmdlDefinition
+    from weaver.semantic_models.binding import bind_semantic_sources
+
+    root = source_project(tmp_path, value=reference)
+    names = list(housekeeping)
+    path = root / str(ITEM) / f"{ITEM.item_name}.tmdl"
+    # An authored column brings one back; its dataType avoids the binary type.
+    path.write_text(
+        path.read_text()
+        + f"\tcolumn '{names[1]}'\n"
+        + f"\tcolumn Signature\n\t\tdataType: string\n\t\tsourceColumn: {names[3]}\n"
+    )
+    source = {
+        "reference": reference,
+        "server": "serving.example",
+        "database": "Serving_Dev",
+        "schema": "Cake",
+        "object": "Sales",
+        "object_type": "table",
+        "source_columns": [
+            {"column_name": "Id", "data_type": "bigint"},
+            {"column_name": "source_file", "data_type": "varchar"},
+            *(
+                {"column_name": name, "data_type": kind}
+                for name, kind in housekeeping.items()
+            ),
+        ],
+    }
+    repository = parse_item_repository(Location(root.as_posix()))
+    compiled = bind_semantic_sources(repository, {reference: source}, {ITEM})
+    columns = (
+        TmdlDefinition(compiled.semantic_models[ITEM].parts)
+        .model.tables["Sales"]
+        .columns
+    )
+    assert [(c.name, c.sourceColumn, c.dataType) for c in columns] == [
+        (names[1], names[1], "dateTime"),
+        ("Signature", names[3], "string"),
+        ("Id", "Id", "int64"),
+        ("source_file", "source_file", "string"),
+    ]
+
+
 class _Inventory:
     def __init__(self, installed=()):
         self.installed = set(installed)
