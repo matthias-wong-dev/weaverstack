@@ -97,7 +97,9 @@ def test_other_items_still_need_a_catalogue(tmp_path):
 
 
 @weaver_test()
-def test_validations_need_a_catalogue(tmp_path):
+def test_a_model_with_validations_builds_without_a_catalogue(tmp_path):
+    """Its validations run from the project folder, in file mode."""
+
     root = project(tmp_path, False)
     tests = root / str(ITEM) / "assumptions"
     tests.mkdir()
@@ -106,12 +108,16 @@ def test_validations_need_a_catalogue(tmp_path):
         'EVALUATE FILTER(ROW("N", 1), FALSE())\n',
         encoding="utf-8",
     )
+    repository = parse_item_repository(Location(root.as_posix()))
     session = session_without_catalogue()
-    from weaver.errors import BuildError
+    model = session.semantic_model("Reporting_Dev")
+    model.definition = encode_definition(engine_model(repository))
 
-    with pytest.raises(BuildError, match="declares tests or assumptions"):
-        weaver.build(root, items=SELECTOR, session=session)
-    assert not session.semantic_model("Reporting_Dev").calls
+    result = weaver.build(root, items=SELECTOR, session=session)
+
+    assert result.succeeded, result.errors
+    assert [call[0] for call in model.calls][0] == "update_definition"
+    assert not session.tsql
 
 
 @weaver_test()
