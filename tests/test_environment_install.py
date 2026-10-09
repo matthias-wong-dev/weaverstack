@@ -156,6 +156,9 @@ class _LibraryClient:
         self.token = "token"
         self.timeout = 30
 
+    def wait_for_operation(self, response, *, timeout, poll_interval):
+        return {}
+
     def paged(self, path, *, key, not_found_empty=False):
         return list(self.staged if "/staging/" in path else self.installed)
 
@@ -605,6 +608,9 @@ class _DefinitionClient:
         self.token = "token"
         self.timeout = 30
 
+    def wait_for_operation(self, response, *, timeout, poll_interval):
+        return {}
+
     def paged(self, path, *, key, not_found_empty=False):
         return list(self.installed)
 
@@ -1024,3 +1030,72 @@ def test_a_spark_setting_retyped_is_still_a_change(monkeypatch, tmp_path):
 
     assert client.sent
     assert result.action == "updated"
+
+
+class _PublishClient:
+    """Answers publish details in sequence, after a 200 or a 202 submission."""
+
+    def __init__(self, details, *, status_code=200):
+        self.details = list(details)
+        self.status_code = status_code
+        self.reads = 0
+        self.waited = 0
+
+    def get_json(self, path):
+        self.reads += 1
+        current = self.details.pop(0) if len(self.details) > 1 else self.details[0]
+        return {"properties": {"publishDetails": current}}
+
+    def request(self, method, path, *, payload=None, expected=()):
+        assert path.endswith("/staging/publish?beta=false")
+        return _Response(self.status_code, payload={})
+
+    def wait_for_operation(self, response, *, timeout, poll_interval):
+        self.waited += 1
+        return {}
+
+
+PREVIOUS = {"state": "Failed", "targetVersion": "v1", "startTime": "t1"}
+
+
+@weaver_test()
+def test_a_previous_publications_terminal_state_does_not_end_the_wait(monkeypatch):
+    monkeypatch.setattr(env_mod.time, "sleep", lambda seconds: None)
+    client = _PublishClient(
+        [
+            PREVIOUS,
+            PREVIOUS,
+            {"state": "Success", "targetVersion": "v2", "startTime": "t2"},
+        ]
+    )
+
+    assert env_mod.publish_and_wait(_env(), client=client) == "Success"
+    assert client.reads == 3
+
+
+@weaver_test()
+def test_a_state_in_progress_ties_the_wait_without_a_version(monkeypatch):
+    monkeypatch.setattr(env_mod.time, "sleep", lambda seconds: None)
+    client = _PublishClient(
+        [{"state": "Success"}, {"state": "Running"}, {"state": "Failed"}]
+    )
+
+    assert env_mod.publish_and_wait(_env(), client=client) == "Failed"
+
+
+@weaver_test()
+def test_a_long_running_publish_settles_through_its_operation(monkeypatch):
+    monkeypatch.setattr(env_mod.time, "sleep", lambda seconds: None)
+    client = _PublishClient([PREVIOUS], status_code=202)
+
+    assert env_mod.publish_and_wait(_env(), client=client) == "Failed"
+    assert client.waited == 1
+
+
+@weaver_test()
+def test_a_publish_that_never_moves_from_the_previous_state_times_out(monkeypatch):
+    monkeypatch.setattr(env_mod.time, "sleep", lambda seconds: None)
+    client = _PublishClient([PREVIOUS])
+
+    with pytest.raises(FabricError, match="did not finish"):
+        env_mod.publish_and_wait(_env(), client=client, timeout=0.01)
