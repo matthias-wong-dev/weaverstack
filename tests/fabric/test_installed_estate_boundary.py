@@ -356,13 +356,13 @@ def probe_catalogue(schema, name, *, target):
 #: Fabric session. The values brought back are evidence captured by authored
 #: Python; the test process never reads ``_changes`` itself.
 CHANGE_FEED = r"""
-import shutil
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import notebookutils
+
 from weaver import Folder, lakehouse_for
 from weaver.declaration.metadata import PYTHON, parse_document
-from weaver.runtime.folder_load import _with_retry
 
 destination = lakehouse_for(resolver, target)
 
@@ -396,23 +396,26 @@ Incremental: true
 folder = Raw__ChangeFeedProbe(spark, lakehouse=destination).with_catalogue(
     probe_catalogue("Raw", "ChangeFeedProbe", target=destination.name)
 )
-reject = folder.path().with_name(folder.path().name + "_Reject")
+# Set up and observed through OneLake, as Weaver itself lists the folder: the
+# mount's listing can lag a delete.
+onelake = folder.spark_path()
+areas = (onelake, onelake + "_Staging", onelake + "_Reject")
 
 
-def clear(path):
-    _with_retry(lambda: shutil.rmtree(path) if path.exists() else None)
+def clear():
+    for area in areas:
+        if notebookutils.fs.exists(area):
+            notebookutils.fs.rm(area, True)
 
 
-for path in (folder.path(), folder._staging_path(), reject):
-    clear(path)
+clear()
 
 try:
     # Seed the prior physical state as setup. The one Weaver transition below
     # then classifies an insert, update and delete in one commit and produces one
     # evidence payload.
-    folder.path().mkdir(parents=True, exist_ok=True)
-    (folder.path() / "updated.csv").write_text("old", encoding="utf-8")
-    (folder.path() / "deleted.csv").write_text("delete me", encoding="utf-8")
+    notebookutils.fs.put(onelake + "/updated.csv", "old", True)
+    notebookutils.fs.put(onelake + "/deleted.csv", "delete me", True)
 
     # The seeded state is files Weaver never saw arrive, so managed history is
     # empty even though the Folder holds files its File key claims. The load
@@ -434,9 +437,11 @@ try:
     changed = consumer.files_since(bookmark)
     latest = consumer.latest_files()
     deleted = consumer.deleted_since(bookmark)
-    documents = sorted((folder.path() / "_changes").glob("*.json"))
+    documents = sorted(
+        info.name for info in notebookutils.fs.ls(onelake + "/_changes")
+    )
     boundary = datetime.strptime(
-        documents[-1].stem, "%Y-%m-%dT%H-%M-%S.%fZ"
+        documents[-1].removesuffix(".json"), "%Y-%m-%dT%H-%M-%S.%fZ"
     ).replace(tzinfo=timezone.utc)
 
     emit({
@@ -457,28 +462,29 @@ try:
                      for path in changed},
         "latest_contents": {path.name: path.read_text(encoding="utf-8")
                             for path in latest},
-        "deleted_exists": [path.exists() for path in deleted],
-        "change_documents": [path.name for path in documents],
+        "deleted_exists": [
+            notebookutils.fs.exists(f"{onelake}/{path.name}") for path in deleted
+        ],
+        "change_documents": documents,
         "committed_at": boundary.isoformat(),
         "strict_changed": [str(path) for path in consumer.files_since(boundary)],
         "strict_deleted": [str(path) for path in consumer.deleted_since(boundary)],
     })
 finally:
-    for path in (folder.path(), folder._staging_path(), reject):
-        clear(path)
+    clear()
 """
 
 
 #: One File-key outcome. The caller binds ``FAULT_TOLERANT`` so the two tests
 #: exercise separate transitions and receive separate evidence payloads.
 FILE_KEY_REJECTION = r"""
-import shutil
 from datetime import datetime, timezone
+
+import notebookutils
 
 from weaver import Folder, lakehouse_for
 from weaver.declaration.metadata import PYTHON, parse_document
 from weaver.errors import LoadError
-from weaver.runtime.folder_load import _with_retry
 
 destination = lakehouse_for(resolver, target)
 
@@ -506,15 +512,23 @@ File key: "*.csv"
 folder = Raw__FileKeyProbe(spark, lakehouse=destination).with_catalogue(
     probe_catalogue("Raw", "FileKeyProbe", target=destination.name)
 )
-reject = folder.path().with_name(folder.path().name + "_Reject")
+# Observed through OneLake, as Weaver itself lists the folder.
+onelake = folder.spark_path()
+reject = onelake + "_Reject"
+areas = (onelake, onelake + "_Staging", reject)
 
 
-def clear(path):
-    _with_retry(lambda: shutil.rmtree(path) if path.exists() else None)
+def clear():
+    for area in areas:
+        if notebookutils.fs.exists(area):
+            notebookutils.fs.rm(area, True)
 
 
-for path in (folder.path(), folder._staging_path(), reject):
-    clear(path)
+def listed(area):
+    return [info.name for info in notebookutils.fs.ls(area)] if notebookutils.fs.exists(area) else []
+
+
+clear()
 
 try:
     bookmark = datetime.now(timezone.utc)
@@ -529,18 +543,16 @@ try:
     emit({
         "raised": raised,
         "result": result.as_row(),
-        "good_published": (folder.path() / "good.csv").exists(),
-        "bad_published": (folder.path() / "bad.txt").exists(),
-        "bad_rejected": (reject / "bad.txt").exists(),
+        "good_published": "good.csv" in listed(onelake),
+        "bad_published": "bad.txt" in listed(onelake),
+        "bad_rejected": "bad.txt" in listed(reject),
         "good_contents": (folder.path() / "good.csv").read_text(encoding="utf-8")
-            if (folder.path() / "good.csv").exists() else None,
-        "change_documents": len(list((folder.path() / "_changes").glob("*.json")))
-            if (folder.path() / "_changes").exists() else 0,
+            if "good.csv" in listed(onelake) else None,
+        "change_documents": len(listed(onelake + "/_changes")),
         "changes": [path.name for path in changes],
     })
 finally:
-    for path in (folder.path(), folder._staging_path(), reject):
-        clear(path)
+    clear()
 """
 
 

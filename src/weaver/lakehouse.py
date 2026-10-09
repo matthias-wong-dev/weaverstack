@@ -5,7 +5,7 @@ from __future__ import annotations
 import io
 import threading
 from contextlib import contextmanager, redirect_stdout
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -40,11 +40,14 @@ class Lakehouse:
 
     ``destination`` is required to name catalogue-only objects such as views.
     Only :func:`default_lakehouse` may use the session's attached catalogue.
+    ``store`` reaches the Files area over OneLake; by default it is the
+    session's.
     """
 
     name: str
     spark_root: str
     destination: "FabricSparkTarget | AttachedLakehouse | None" = None
+    store: Any = field(default=None, compare=False, repr=False)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "spark_root", _root(self.spark_root, what="root"))
@@ -70,6 +73,22 @@ class Lakehouse:
         """
 
         return _join(_mounted(self.name, self.spark_root), FILES_AREA)
+
+    def files_store(self):
+        """The store Weaver lists and changes this Lakehouse's Files through.
+
+        A mount's listing can still show a file deleted through OneLake, so
+        Weaver's own file work goes through ``notebookutils.fs`` instead.
+        """
+
+        if self.store is not None:
+            return self.store
+        utils = _notebook_utils()
+        if utils is None:
+            raise LoadError(_outside_fabric(self.name))
+        from .fabric.store import FabricStore
+
+        return FabricStore(utils.fs)
 
     def folder_path(self, schema: str, name: str) -> Path:
         """Return the folder's session-scoped :class:`pathlib.Path`."""
@@ -233,10 +252,7 @@ def _mount(name: str, spark_root: str) -> str:
 
     utils = _notebook_utils()
     if utils is None:
-        raise LoadError(
-            f"Lakehouse {name!r} Files are unavailable outside a Fabric session. "
-            "Run this Folder load in Fabric."
-        )
+        raise LoadError(_outside_fabric(name))
 
     point = _MOUNT_POINT.format(item=_item_of(spark_root))
     try:
@@ -255,6 +271,13 @@ def _mount(name: str, spark_root: str) -> str:
         raise LoadError(f"Lakehouse {name!r} mount returned no filesystem path")
     _MOUNTS[spark_root] = local
     return local
+
+
+def _outside_fabric(name: str) -> str:
+    return (
+        f"Lakehouse {name!r} Files are unavailable outside a Fabric session. "
+        "Run this Folder load in Fabric."
+    )
 
 
 def _notebook_utils() -> Any:

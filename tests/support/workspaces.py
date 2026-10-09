@@ -216,14 +216,19 @@ __all__ = [
 ]
 
 
-def mounted_lakehouse(name: str, directory) -> "Lakehouse":
+def mounted_lakehouse(
+    name: str, directory, *, deleted: Iterable[str] = ()
+) -> "Lakehouse":
     """A Fabric Lakehouse whose Files area is this directory.
 
-    A Lakehouse lives in OneLake and its Files area is reached through a Fabric
-    mount, so authored Python can open and write there. That mount is the one
-    boundary a fast test may stand in for: registering the directory as the
-    mount point makes `files_root()` answer without a Fabric session, and every
-    other property of the Lakehouse stays what it is in production.
+    A Lakehouse lives in OneLake. Authored Python reaches its Files through a
+    Fabric mount, and Weaver lists and changes them through the session's
+    store. Those are the two boundaries a fast test may stand in for: the
+    directory is registered as the mount point and served as the store, and
+    every other property of the Lakehouse stays what it is in production.
+
+    ``deleted`` names paths beneath the item, such as ``Files/Sales/a.csv``,
+    that OneLake no longer has while the mount still lists them.
 
     Nothing here makes a directory into a Lakehouse. `spark_root` is a real
     OneLake address, and Spark paths are composed from it as they always are.
@@ -233,4 +238,99 @@ def mounted_lakehouse(name: str, directory) -> "Lakehouse":
 
     root = f"abfss://ws@onelake.dfs.fabric.microsoft.com/{name}"
     _MOUNTS[root] = str(directory)
-    return Lakehouse(name=name, spark_root=root)
+    return Lakehouse(
+        name=name,
+        spark_root=root,
+        store=OneLakeDirectory(root, directory, deleted=deleted),
+    )
+
+
+class OneLakeDirectory:
+    """A Lakehouse's OneLake storage, held in a directory.
+
+    The store a Fabric session reaches its Files through, addressed by the same
+    ``abfss://`` locations. Paths named in ``deleted`` stay in the directory,
+    which is what the mount shows, and are absent from every answer this store
+    gives, which is what OneLake says.
+    """
+
+    def __init__(self, root: str, directory, *, deleted: Iterable[str] = ()) -> None:
+        from weaver.store import FilesystemStore
+
+        self.root = root.rstrip("/")
+        self.directory = pathlib.Path(directory)
+        self.deleted = {path.strip("/") for path in deleted}
+        self._local = FilesystemStore()
+
+    def _relative(self, location) -> str:
+        value = location.value
+        if value != self.root and not value.startswith(f"{self.root}/"):
+            raise AssertionError(f"{value} is outside {self.root}")
+        return value[len(self.root) :].strip("/")
+
+    def _gone(self, location) -> bool:
+        relative = self._relative(location)
+        return any(
+            relative == path or relative.startswith(f"{path}/") for path in self.deleted
+        )
+
+    def _here(self, location):
+        from weaver.locations import Location
+
+        relative = self._relative(location)
+        path = self.directory / relative if relative else self.directory
+        return Location(str(path))
+
+    def exists(self, location) -> bool:
+        return not self._gone(location) and self._local.exists(self._here(location))
+
+    def is_directory(self, location) -> bool:
+        return not self._gone(location) and self._local.is_directory(
+            self._here(location)
+        )
+
+    def list(self, location, *, recursive: bool = False):
+        from dataclasses import replace
+
+        from weaver.store import StoreNotFoundError
+
+        if self._gone(location):
+            raise StoreNotFoundError(f"cannot list missing location {location.value}")
+        local = self._here(location).value
+        entries = []
+        for entry in self._local.list(self._here(location), recursive=recursive):
+            translated = location.join(
+                *entry.location.value[len(local) :].strip("/").split("/")
+            )
+            if not self._gone(translated):
+                entries.append(replace(entry, location=translated))
+        return entries
+
+    def read(self, location) -> bytes:
+        from weaver.store import StoreError
+
+        if self._gone(location):
+            raise StoreError(f"cannot read a location that does not exist: {location}")
+        return self._local.read(self._here(location))
+
+    def write(self, location, data: bytes) -> None:
+        self._local.write(self._here(location), data)
+
+    def delete(self, location, *, recursive: bool = False) -> None:
+        self._local.delete(self._here(location), recursive=recursive)
+
+    def make_directory(self, location) -> None:
+        self._local.make_directory(self._here(location))
+
+    def copy(self, source, destination) -> None:
+        self._local.copy(self._here(source), self._here(destination))
+
+    def move(self, source, destination) -> None:
+        self._local.move(self._here(source), self._here(destination))
+
+    def copy_file_to_local(self, source, destination: pathlib.Path) -> None:
+        from weaver.store import StoreError
+
+        if self._gone(source):
+            raise StoreError(f"cannot read a location that does not exist: {source}")
+        self._local.copy_file_to_local(self._here(source), destination)

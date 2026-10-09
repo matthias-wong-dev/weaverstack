@@ -262,7 +262,9 @@ def test_wholesale_reconciliation_never_inventories_changes(landing):
     landing.load()
 
     assert metadata.read_text(encoding="utf-8") == "metadata"
-    assert "_changes/keep.json" not in managed_relative_files(landing.path(), ("**/*",))
+    assert "_changes/keep.json" not in managed_relative_files(
+        landing._files(), ("**/*",)
+    )
 
 
 @weaver_test()
@@ -732,4 +734,87 @@ def test_adopted_files_are_visible_through_the_ordinary_history(landing):
 
     seen = landing.files_since(before)
     assert sorted(path.name for path in seen) == ["retained.csv"]
-    assert managed_relative_files(landing.path(), ("**/*.csv",)) == ["retained.csv"]
+    assert managed_relative_files(landing._files(), ("**/*.csv",)) == ["retained.csv"]
+
+
+# --- a mount that still lists a deleted file ---------------------------------
+#
+# A mount's listing can still show a file deleted through OneLake. The change
+# feed and the current listing answer from the store.
+
+
+def _over_a_stale_mount(landing, tmp_path, *gone: str) -> Sales__Landing:
+    """The same folder, where OneLake has lost ``gone`` and the mount has not."""
+
+    lakehouse = mounted_lakehouse(
+        "Sales", tmp_path, deleted=[f"Files/Sales/Landing/{name}" for name in gone]
+    )
+    return Sales__Landing(object(), lakehouse=lakehouse).with_catalogue(
+        never("Sales.Landing", target="Sales", files=True)
+    )
+
+
+@weaver_test()
+def test_the_change_feed_omits_a_file_only_the_mount_still_lists(landing, tmp_path):
+    _write_document(landing, _at(1), inserts=["kept.csv", "gone.csv"])
+    _place(landing, "kept.csv", "gone.csv")
+
+    stale = _over_a_stale_mount(landing, tmp_path, "gone.csv")
+
+    assert (stale.path() / "gone.csv").exists()
+    assert [path.name for path in stale.files_since(BOOKMARK)] == ["kept.csv"]
+    assert [path.name for path in stale.latest_files()] == ["kept.csv"]
+
+
+@weaver_test()
+def test_current_files_lists_what_onelake_holds(landing, tmp_path):
+    _place(landing, "a.csv", "gone.csv", "nested/b.csv", "notes.txt")
+    _write_document(landing, _at(1), inserts=["a.csv"])
+
+    stale = _over_a_stale_mount(landing, tmp_path, "gone.csv")
+
+    assert sorted(p.name for p in stale.path().glob("*.csv")) == ["a.csv", "gone.csv"]
+    assert stale.current_files("*.csv") == [stale.path() / "a.csv"]
+    assert stale.current_files("**/*.csv") == [
+        stale.path() / "a.csv",
+        stale.path() / "nested" / "b.csv",
+    ]
+    # Every file, and never Weaver's history.
+    assert [p.name for p in stale.current_files()] == ["a.csv", "b.csv", "notes.txt"]
+
+
+@weaver_test()
+def test_a_replaced_folder_copies_only_what_its_source_still_holds(landing, tmp_path):
+    """The defect this guards: a source file deleted through OneLake, still
+    listed by the mount, copied as an empty file and recorded as an update."""
+
+    class Sales__Copy(Folder):
+        def _document(self):
+            from weaver.declaration.metadata import PYTHON, parse_document
+
+            return parse_document(
+                "Folder ID: Sales.Copy\n\nDescription: A copy.\n\n"
+                'Lineage: Sales.Landing.\n\nFile key: "*.csv"\n\nIncremental: false',
+                language=PYTHON,
+            )
+
+        def read(self):
+            staging = self.staging_folder()
+            for path in Sales__Landing(self).current_files("*.csv"):
+                (staging.path / path.name).write_bytes(path.read_bytes())
+            return staging
+
+    _place(landing, "one.csv", "two.csv")
+    copy = Sales__Copy(object(), lakehouse=landing.lakehouse).with_catalogue(
+        never("Sales.Copy", "Sales.Landing", target="Sales", files=True)
+    )
+    copy.load()
+
+    stale = _over_a_stale_mount(landing, tmp_path, "one.csv")
+    (stale.path() / "one.csv").write_text("", encoding="utf-8")
+    again = Sales__Copy(object(), lakehouse=stale.lakehouse).with_catalogue(
+        never("Sales.Copy", "Sales.Landing", target="Sales", files=True)
+    )
+    again.load()
+
+    assert _document(again) == {"inserts": [], "updates": [], "deletes": ["one.csv"]}

@@ -142,6 +142,12 @@ constructed explicitly by the caller that crosses. Inside Fabric, `store_for`
 returns the session-native `FabricStore`. From a desktop that construction fails
 and does not substitute DFS.
 
+A Lakehouse's Files mount is for authored code: `Folder.path()` and the staging
+directory `read()` writes into. Weaver lists, compares, copies and deletes
+Folder files through `Lakehouse.files_store()`, because a mount's listing can
+still show a file deleted through OneLake. Authored code lists with
+`current_files`, `files_since` and `latest_files` for the same reason.
+
 `FilesystemStore` is named for its transport. A build reads its repository
 through one wherever it runs, because every incoming source tree is copied to a
 temporary filesystem snapshot before parsing. See `_temp_copy` in
