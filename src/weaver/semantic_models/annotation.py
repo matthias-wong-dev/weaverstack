@@ -22,7 +22,7 @@ from dataclasses import dataclass, field, replace
 from typing import Mapping, NoReturn
 from urllib.parse import unquote
 
-from ..errors import ConfigError
+from ..errors import ConfigError, WeaverError
 from .compiler import _COMMON, _SCHEMAS, _merge, escape, leaf_properties
 from .extension_expectations import requested_object
 from .fragments import expression_text, scalar
@@ -94,7 +94,11 @@ class Annotation:
     def error(self, message: str) -> NoReturn:
         """Fail Build with this declaration's file and line."""
 
-        raise ConfigError(f"{self._location}: {message}")
+        raise _DeclarationError(f"{self._location}: {message}")
+
+
+class _DeclarationError(ConfigError):
+    """An error an annotation raised through `Annotation.error`, already located."""
 
 
 def _unquote(text):
@@ -140,6 +144,11 @@ class AnnotationRegistry:
             )
         return cls
 
+    def file(self, cls):
+        """The project file defining `cls`, or None for Weaver's own."""
+
+        path = f"{DIRECTORY}/{cls.__name__}.py"
+        return path if path in self.sources else None
 
 
 def builtin_registry() -> AnnotationRegistry:
@@ -431,6 +440,18 @@ class _Compilation:
             if expected is not None:
                 self.requested = _merge(self.requested, expected)
 
+    def _failure(self, annotation, exc):
+        """Locate an unexpected failure inside an annotation's `apply`."""
+
+        cls = type(annotation)
+        file = self.registry.file(cls)
+        if file is None and isinstance(exc, WeaverError):
+            return ConfigError(f"{annotation._location}: {exc}")
+        where = f"{cls.__name__} ({file})" if file else cls.__name__
+        return ConfigError(
+            f"{annotation._location}: {where} raised {type(exc).__name__}: {exc}"
+        )
+
     def run(self, phase):
         declared = [
             (document, node)
@@ -457,7 +478,12 @@ class _Compilation:
             annotation._text = expression_text(document, node)
             annotation._location = f"{location}: {node.name}"
             annotation._compilation = self
-            annotation.apply(TmdlObject(self.editor, node.parent.path))
+            try:
+                annotation.apply(TmdlObject(self.editor, node.parent.path))
+            except _DeclarationError:
+                raise
+            except Exception as exc:
+                raise self._failure(annotation, exc) from exc
             self._settle(document, node)
             if phase == "post_schema":
                 references = prepare_annotations(

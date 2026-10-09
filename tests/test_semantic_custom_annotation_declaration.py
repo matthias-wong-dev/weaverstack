@@ -341,3 +341,33 @@ def test_a_table_name_with_a_space_cites_the_authored_file(tmp_path):
     ):
         compile_model(root)
 
+
+@weaver_test()
+def test_an_exception_inside_apply_names_the_annotation_and_declaration(tmp_path):
+    import re
+
+    source = """
+        from weaver.semantic_models import Annotation
+
+        class Acme__Broken(Annotation):
+            scopes = {"table"}
+
+            def apply(self, target):
+                target.columns["No such column"]
+    """
+    root = project(
+        tmp_path,
+        "table Sales\n\tannotation Acme.Broken = true\n\tcolumn Id\n",
+        {"Acme__Broken": source},
+    )
+    with pytest.raises(
+        ConfigError,
+        match="^"
+        + re.escape(
+            "SemanticModel/Reporting/Reporting.tmdl:2: Acme.Broken: Acme__Broken "
+            "(SemanticModel/annotations/Acme__Broken.py) raised KeyError: "
+        )
+        + ".*No such column",
+    ) as caught:
+        compile_model(root)
+    assert isinstance(caught.value.__cause__, KeyError)
