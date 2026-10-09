@@ -114,30 +114,51 @@ def test_naming_no_item_reaches_the_api_as_no_selection(captured, capsys):
 
 
 @weaver_test()
-def test_name_selects_one_installed_validation(captured, capsys):
+def test_name_selects_installed_validations(captured, capsys):
     _run("Lakehouse/Sales", "--name", "Sales.OrdersReconcile")
 
-    assert captured["name"] == "Sales.OrdersReconcile"
-    assert captured["file"] is None
+    assert captured["names"] == ["Sales.OrdersReconcile"]
+    assert captured["files"] is None
 
 
 @weaver_test()
-def test_file_runs_a_source_file(captured, capsys):
-    _run("Lakehouse/Sales", "--file", "tests/Sales.X.sql")
+def test_name_is_repeatable(captured, capsys):
+    _run("Lakehouse/Sales", "--name", "Sales.Orders.*", "--name", "Stock.Levels")
 
-    assert captured["file"] == "tests/Sales.X.sql"
-    assert captured["name"] is None
+    assert captured["names"] == ["Sales.Orders.*", "Stock.Levels"]
 
 
 @weaver_test()
-def test_name_and_file_are_mutually_exclusive(capsys):
-    """argparse refuses it, so no request that meant both can reach the API."""
+def test_file_is_repeatable(captured, capsys):
+    _run("--file", "tests/Sales.X.sql", "--file", "PowerBI/Commerce/tests")
 
-    with pytest.raises(SystemExit) as exit_info:
-        _run("Lakehouse/Sales", "--name", "Sales.X", "--file", "x.sql")
+    assert captured["files"] == ["tests/Sales.X.sql", "PowerBI/Commerce/tests"]
+    assert captured["names"] is None
 
-    assert exit_info.value.code == 2
-    assert "not allowed with" in capsys.readouterr().err
+
+@weaver_test()
+def test_name_narrows_the_files(captured, capsys):
+    _run("--file", "PowerBI/Commerce/tests", "--name", "Sales.Revenue.*")
+
+    assert captured["files"] == ["PowerBI/Commerce/tests"]
+    assert captured["names"] == ["Sales.Revenue.*"]
+
+
+@weaver_test()
+def test_source_names_the_project_folder(captured, capsys):
+    _run("PowerBI/Commerce", "--source", "reporting")
+
+    assert captured["items"] == ("PowerBI/Commerce",)
+    assert captured["source"] == "reporting"
+
+
+@weaver_test()
+def test_help_says_how_the_mode_is_chosen(capsys):
+    with pytest.raises(SystemExit):
+        main(["test", "--help"])
+
+    text = " ".join(capsys.readouterr().out.split())
+    assert "file mode when --file is given or no catalogue is configured" in text
 
 
 @weaver_test()
@@ -562,7 +583,7 @@ def test_dry_run_is_passed_through_with_file(captured, capsys):
     _run("Lakehouse/Sales", "--file", "tests/Sales.X.sql", "--dry-run")
 
     assert captured["dry_run"] is True
-    assert captured["file"] == "tests/Sales.X.sql"
+    assert captured["files"] == ["tests/Sales.X.sql"]
 
 
 @weaver_test()

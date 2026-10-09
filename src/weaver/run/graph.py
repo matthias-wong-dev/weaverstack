@@ -140,14 +140,17 @@ def _load_graph(request, state) -> RunGraph:
 
 
 def _test_graph(request, state) -> RunGraph:
+    from ..errors import ValidationError
+    from ..installed import refuse_uncertified_models
     from ..test_execution import primitive_kind
     from ..test_plan import ValidationEstate, validation_order
 
-    estate = ValidationEstate.from_catalogue(state.catalogue)
-    if request.name is not None:
-        selected = (estate.named(request.name, request.items),)
-    else:
-        selected = validation_order(estate.for_items(request.items))
+    dag = state.catalogue.dag()
+    refuse_uncertified_models(
+        dag, request.items, operation="Test", error=ValidationError
+    )
+    estate = ValidationEstate.of(dag)
+    selected = validation_order(estate.matching(request.names, request.items))
     return RunGraph(
         nodes=tuple(
             RunNode(

@@ -464,6 +464,27 @@ def installed_dag(catalogue: Catalogue) -> InstalledDag:
     return _build(catalogue)
 
 
+#: What an operation does to a model, for the refusal that names it.
+_DOING = {"Load": "loading", "Test": "testing"}
+
+
+def refuse_uncertified_models(
+    dag: InstalledDag,
+    items: Sequence[WeaverItemId],
+    *,
+    operation: str,
+    error: type[Exception],
+) -> None:
+    """Refuse a requested semantic model whose deployment is not certified."""
+
+    for item in items:
+        if item.item_type == SEMANTIC_MODEL and not dag.loadables(items=(item,)):
+            raise error(
+                f"{item} is not certified for {operation}. Build {item} before "
+                f"{_DOING[operation]} it."
+            )
+
+
 # --- artefact identities ------------------------------------------------------
 
 
@@ -1240,5 +1261,6 @@ __all__ = [
     "installed_shortcuts",
     "installed_targets",
     "primitive_candidates",
+    "refuse_uncertified_models",
     "stored_identity",
 ]

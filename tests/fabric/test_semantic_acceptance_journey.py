@@ -266,7 +266,7 @@ def test_semantic_model_build_load_test_health_lifecycle(
         "ObjectsAreSigned": "succeeded",
     }
     named = weaver.test(
-        str(ITEM), name="Acceptance.ObjectsReconcile", session=context.session
+        str(ITEM), names="Acceptance.ObjectsReconcile", session=context.session
     )
     (node,) = named.nodes
     assert named.succeeded and list(node.diagnostics) == []

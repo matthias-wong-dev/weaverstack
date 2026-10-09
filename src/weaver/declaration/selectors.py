@@ -16,19 +16,8 @@ def expand_item_selectors(values, *, repository, configured_items=()):
             raise BuildError(
                 f"a build item must be a string, got {type(value).__name__}"
             )
-        if value == "PowerBI" or value.startswith("PowerBI/"):
-            projects = repository.powerbi_projects
-            if value != "PowerBI":
-                name = value[len("PowerBI/") :]
-                if name not in projects:
-                    raise BuildError(f"{value}: Power BI project not found")
-                projects = {name: projects[name]}
-            matches = sorted(
-                {item for project in projects.values() for item in project.items}
-            )
-            if not matches:
-                raise BuildError(f"{value}: no items match this selector")
-            for item in matches:
+        if is_powerbi_selector(value):
+            for item in powerbi_items(value, repository=repository, error=BuildError):
                 expanded.setdefault(item, str(item))
         elif value in ITEM_TYPES:
             matches = sorted(item for item in known if item.item_type == value)
@@ -48,3 +37,26 @@ def expand_item_selectors(values, *, repository, configured_items=()):
             expanded.setdefault(item, value)
     expanded.update(explicit)
     return list(expanded.values())
+
+
+def is_powerbi_selector(value: str) -> bool:
+    """Whether ``value`` is ``PowerBI`` or ``PowerBI/<project>``."""
+
+    return value == "PowerBI" or value.startswith("PowerBI/")
+
+
+def powerbi_items(value: str, *, repository, error) -> tuple[WeaverItemId, ...]:
+    """The items of every Power BI project, or of the one ``value`` names."""
+
+    projects = repository.powerbi_projects
+    if value != "PowerBI":
+        name = value[len("PowerBI/") :]
+        if name not in projects:
+            raise error(f"{value}: Power BI project not found")
+        projects = {name: projects[name]}
+    matches = tuple(
+        sorted({item for project in projects.values() for item in project.items})
+    )
+    if not matches:
+        raise error(f"{value}: no items match this selector")
+    return matches

@@ -10,6 +10,8 @@ from __future__ import annotations
 import pytest
 from support.weaver_test import weaver_test
 
+from weaver.declaration.model import WeaverItemId
+
 # --- a build item -------------------------------------------------------------
 
 
@@ -234,11 +236,11 @@ def test_a_malformed_run_item_names_every_kind_a_run_accepts():
     from weaver.operations.items import parse_run_item
 
     with pytest.raises(CommandError) as refused:
-        parse_run_item("PowerBI", what="load")
+        parse_run_item("Sales", what="load")
 
     assert str(refused.value) == (
-        "a load item must be Lakehouse/Name, Warehouse/Name or SemanticModel/Name, "
-        "got 'PowerBI'"
+        "a load item must be Lakehouse/Name, Warehouse/Name, SemanticModel/Name, "
+        "PowerBI or PowerBI/<project>, got 'Sales'"
     )
 
 
@@ -392,3 +394,46 @@ def test_the_api_takes_one_item_a_sequence_or_none(
         getattr(module, operation)(written, session=session)
 
     assert [tuple(str(item) for item in items) for items in seen] == [selected]
+
+
+class _Project:
+    """The project folder ``requested_items`` reads Power BI projects from."""
+
+    def __init__(self, **projects):
+        from types import SimpleNamespace
+
+        self.repository = SimpleNamespace(
+            powerbi_projects={
+                name: SimpleNamespace(
+                    items=tuple(WeaverItemId.parse(item) for item in items)
+                )
+                for name, items in projects.items()
+            }
+        )
+
+
+@weaver_test()
+def test_power_bi_selectors_name_their_projects_semantic_models():
+    from weaver.operations.items import requested_items
+
+    project = _Project(
+        Commerce=("SemanticModel/Sales", "Report/Sales"),
+        Stock=("SemanticModel/Inventory",),
+    )
+
+    assert requested_items(["PowerBI"], what="test", project=project) == (
+        WeaverItemId.parse("SemanticModel/Inventory"),
+        WeaverItemId.parse("SemanticModel/Sales"),
+    )
+    assert requested_items(
+        ["PowerBI/Stock", "SemanticModel/Inventory"], what="load", project=project
+    ) == (WeaverItemId.parse("SemanticModel/Inventory"),)
+
+
+@weaver_test()
+def test_a_power_bi_selector_needs_a_project_folder():
+    from weaver.errors import CommandError
+    from weaver.operations.items import requested_items
+
+    with pytest.raises(CommandError, match="health does not accept PowerBI"):
+        requested_items(["PowerBI"], what="health")

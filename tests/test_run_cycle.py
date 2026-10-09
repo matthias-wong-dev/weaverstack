@@ -545,7 +545,7 @@ def test_a_request_hands_over_every_field_that_changes_behaviour():
 
     from dataclasses import fields
 
-    request = RunRequest.test([SALES], name="One", dry_run=True)
+    request = RunRequest.test([SALES], names=("One",), dry_run=True)
     handed = request.to_mapping()
 
     assert set(handed) == {field.name for field in fields(RunRequest)}

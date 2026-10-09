@@ -108,18 +108,24 @@ def _semantic_model_test_rows(repository, scope, validations) -> list[dict]:
     rows = []
     for identity in validations:
         source = repository.source_documents[identity]
-        definition = {"version": SEMANTIC_MODEL_TEST_VERSION, "dax": source.dax_body}
-        if source.document.expected_source is not None:
-            definition["expectedSource"] = source.document.expected_source
-            definition["expectedSql"] = source.document.expected_sql
         rows.append(
             {
                 **_identity(scope, identity),
-                "definition": json_text(definition),
+                "definition": json_text(semantic_test_definition(source)),
                 "signature": source.effective_signature,
             }
         )
     return rows
+
+
+def semantic_test_definition(source) -> dict:
+    """What a semantic validation run reads: its DAX and any Expected side."""
+
+    definition = {"version": SEMANTIC_MODEL_TEST_VERSION, "dax": source.dax_body}
+    if source.document.expected_source is not None:
+        definition["expectedSource"] = source.document.expected_source
+        definition["expectedSql"] = source.document.expected_sql
+    return definition
 
 
 def _dependency_rows(repository, scope, consumers) -> list[dict]:

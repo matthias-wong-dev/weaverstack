@@ -12,8 +12,8 @@ from ..build_bundle.incremental import BuildSelection
 from ..errors import BuildError, CommandError
 from ..locations import Location
 from ..sessions.host import inside_fabric_session as _inside_fabric_session
-from ..store import FilesystemStore, Store
 from ..workspaces import Workspace
+from .project import repository_source
 from .workspace import operation_workspace
 
 
@@ -120,7 +120,7 @@ def build(
         needs_catalogue=False,
     )
 
-    source_location, source_store = _repository_source(source, resolved_workspace)
+    source_location, source_store = repository_source(source, resolved_workspace)
 
     # Parse and validate the complete request before REST target resolution,
     # Spark startup or Livy work.
@@ -236,23 +236,6 @@ def _preflight(workspace: Workspace, bindings, *, session) -> None:
         environment=workspace.environment,
         client=session.resolver(workspace).client if session is not None else None,
     )
-
-
-def _repository_source(source, workspace: Workspace) -> tuple[Location, Store]:
-    if source is None:
-        if not _inside_fabric_session(workspace):
-            source = "."
-        else:
-            # Notebook Resources are exposed as the process-local working tree.
-            source = Path.cwd()
-    location = source if isinstance(source, Location) else Location(str(source))
-    if location.value.startswith("abfss://"):
-        if not _inside_fabric_session(workspace):
-            raise CommandError("an abfss source requires a Fabric session")
-        from ..fabric.store import FabricStore
-
-        return location, FabricStore()
-    return location, FilesystemStore()
 
 
 def _item_bindings(items, workspace: Workspace, *, repository=None):

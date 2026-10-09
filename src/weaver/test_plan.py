@@ -3,8 +3,9 @@
 Selection from the installed managed graph, whose validation nodes come from
 ``_.TestDictionary`` and whose runnable artefacts come from ``_.Registry``.
 
-Validations are selected by name and item. They are not ordered against one
-another. Each dispatches an installed procedure or module that reports counts.
+Validations are selected by item and by regular expressions over their names.
+They are not ordered against one another. Each dispatches an installed
+procedure or module that reports counts.
 """
 
 from __future__ import annotations
@@ -203,29 +204,30 @@ class ValidationEstate:
             if validation.logical.item in wanted
         )
 
-    def named(self, name: str, items: Sequence[WeaverItemId]) -> InstalledValidation:
-        """Resolve only within the selected items; never widen the scope for a match."""
+    def matching(
+        self, names: Sequence[str], items: Sequence[WeaverItemId]
+    ) -> tuple[InstalledValidation, ...]:
+        """The validations of the selected items that ``names`` match.
 
-        candidates = [
-            validation
-            for validation in self.for_items(items)
-            if validation.qualified.casefold() == name.casefold()
-        ]
-        if not candidates:
-            known = ", ".join(
-                sorted(validation.qualified for validation in self.for_items(items))
-            )
-            raise ValidationError(
-                f"no validation named {name!r} is installed in the requested "
-                f"items. Installed: {known or 'none'}"
-            )
-        if len(candidates) > 1:
-            found = ", ".join(str(validation.logical) for validation in candidates)
-            raise ValidationError(
-                f"{name!r} names more than one installed validation ({found}). "
-                "qualify the request with a single item"
-            )
-        return candidates[0]
+        Matching stays within the selected items, and no names selects them all.
+        """
+
+        from .selection import matching, name_patterns
+
+        candidates = self.for_items(items)
+        patterns = name_patterns(names, error=ValidationError)
+        if not patterns:
+            return candidates
+        known = ", ".join(sorted(each.qualified for each in candidates)) or "none"
+        return matching(
+            patterns,
+            candidates,
+            name=lambda validation: validation.qualified,
+            unmatched=lambda text: ValidationError(
+                f"no installed validation in the requested items matches {text!r}. "
+                f"Installed: {known}"
+            ),
+        )
 
 
 def validation_order(

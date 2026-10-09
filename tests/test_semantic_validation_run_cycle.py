@@ -8,7 +8,7 @@ from support.weaver_test import weaver_test
 from test_semantic_model_build_cycle import ITEM, DefinitionClient
 from test_semantic_model_load_cycle import answer_installed
 from test_semantic_source_build_cycle import source_session
-from test_semantic_validation_build_cycle import installed
+from test_semantic_validation_build_cycle import installed, with_validations
 
 import weaver
 
@@ -42,6 +42,8 @@ def run(
     expected_rows,
     name=None,
     primary_key=None,
+    items=str(ITEM),
+    source=None,
 ):
     catalogue = installed(tmp_path, monkeypatch)
     if primary_key is not None:
@@ -73,7 +75,7 @@ def run(
         session.answer_semantic_model(model["workspace_id"], model["item_id"], client)
         session.answer_tsql(found["RevenueReconciles"]["expectedSql"], expected_rows)
         answer_installed(session, catalogue.rows)
-        report = weaver.test(str(ITEM), name=name, session=session)
+        report = weaver.test(items, names=name, source=source, session=session)
         return report, session, client
 
 
@@ -142,6 +144,26 @@ def test_differences_and_violations_record_failed(tmp_path, monkeypatch):
         for node in report.to_mapping()["nodes"]
     }
     assert counts == {"RevenueReconciles": 2, "RevenueIsPositive": 2}
+
+
+@weaver_test()
+def test_a_power_bi_selector_runs_its_models_installed_validations(
+    tmp_path, monkeypatch
+):
+    report, session, _ = run(
+        tmp_path,
+        monkeypatch,
+        test_rows=MATCHING,
+        assumption_rows=[],
+        expected_rows=EXPECTED,
+        items="PowerBI/Commerce",
+        source=tmp_path / "project",
+    )
+    assert statuses(session) == {
+        "RevenueReconciles": "Succeeded",
+        "RevenueIsPositive": "Succeeded",
+    }
+    assert report.workflow_id
 
 
 @pytest.mark.parametrize(
@@ -272,3 +294,137 @@ def test_a_lakehouse_expected_source_runs_addressed_spark_sql():
             "SELECT Month, Revenue FROM Recent",
         )
         assert not session.tsql
+
+
+# --- file mode: from the project folder, with no catalogue --------------------
+
+
+class ModelQueries(DefinitionClient):
+    """Answers the Test's DAX and the Assumption's DAX by what each asks."""
+
+    def __init__(self, test_rows, assumption_rows):
+        super().__init__()
+        self.test_rows = test_rows
+        self.assumption_rows = assumption_rows
+
+    def query_dax(self, query):
+        self.calls.append(("query_dax", query))
+        return self.test_rows if "SUMMARIZECOLUMNS" in query else self.assumption_rows
+
+
+def expected_sql(root):
+    from weaver.declaration.repository import parse_item_repository
+    from weaver.locations import Location
+
+    repository = parse_item_repository(Location(str(root)))
+    (sql,) = [
+        source.document.expected_sql
+        for source in repository.source_documents.values()
+        if source.is_validation and source.document.expected_sql
+    ]
+    return sql
+
+
+def file_mode(tmp_path, *, test_rows=MATCHING, assumption_rows=(), **asked):
+    """Run ``weaver test`` with no catalogue, Serving mapped to Serving_Dev."""
+
+    from test_semantic_source_build_cycle import SOURCE
+
+    from weaver.workspaces import TargetDeclaration, Workspace
+
+    root = with_validations(tmp_path)
+    workspace = Workspace(
+        workspace="Demo",
+        targets={
+            ITEM: TargetDeclaration(physical="Reporting_Dev"),
+            SOURCE: TargetDeclaration(physical="Serving_Dev"),
+        },
+    )
+    with source_session(workspace=workspace) as session:
+        model = session.resolve_item("Reporting_Dev", item_type="SemanticModel")
+        client = ModelQueries(test_rows, list(assumption_rows))
+        session.answer_semantic_model(model.workspace_id, model.id, client)
+        session.answer_tsql(expected_sql(root), EXPECTED)
+        report = weaver.test(source=root, session=session, **asked)
+        return report, session, client
+
+
+@weaver_test()
+def test_file_mode_runs_project_validations_without_a_catalogue(tmp_path):
+    report, session, client = file_mode(tmp_path)
+
+    assert {node.logical_id: node.status for node in report.nodes} == {
+        "SemanticModel/Reporting/Sales.RevenueIsPositive": "passed",
+        "SemanticModel/Reporting/Sales.RevenueReconciles": "passed",
+    }
+    assert {node.physical_target for node in report.nodes} == {
+        "SemanticModel/Reporting_Dev"
+    }
+    assert [kind for kind, _ in client.calls].count("query_dax") == 2
+    # Nothing is recorded, and the Expected SQL ran in Serving's mapped target.
+    assert report.workflow_id is None
+    (expected,) = [call for call in session.calls if call.kind == "tsql"]
+    assert expected.detail["target"].warehouse.name == "Serving_Dev"
+    assert not session.spark_sql and not session.python
+
+
+@weaver_test()
+def test_file_mode_reports_a_difference_with_its_diagnostic_rows(tmp_path):
+    report, _, _ = file_mode(
+        tmp_path,
+        test_rows=[MATCHING[0], {"Sales[Month]": 2, "[Revenue]": 21}],
+        names=r"Sales\.RevenueRecon.*",
+    )
+
+    (node,) = report.nodes
+    assert node.status == "failed"
+    assert node.result.missing_count == 1
+    assert [row["_weaver_side"] for row in node.diagnostics] == ["expected", "actual"]
+
+
+@weaver_test()
+def test_file_mode_runs_only_the_files_given(tmp_path):
+    root = tmp_path / "project"
+    report, _, client = file_mode(
+        tmp_path,
+        files=[str(root / "PowerBI/Commerce/assumptions/Reporting/*.dax")],
+    )
+
+    assert [node.logical_id for node in report.nodes] == [
+        "SemanticModel/Reporting/Sales.RevenueIsPositive"
+    ]
+    assert [kind for kind, _ in client.calls] == ["query_dax"]
+
+
+@weaver_test()
+def test_file_mode_refuses_a_name_that_matches_no_validation(tmp_path):
+    from weaver.errors import CommandError
+
+    with pytest.raises(CommandError, match="matches 'Sales.Missing'"):
+        file_mode(tmp_path, names=["Sales.RevenueIsPositive", "Sales.Missing"])
+
+
+# --- catalogue mode: certified models only ------------------------------------
+
+
+@weaver_test()
+def test_catalogue_mode_refuses_a_model_that_is_not_certified(tmp_path, monkeypatch):
+    """Load's rule: an uncertified deployment is neither loaded nor tested."""
+
+    from weaver.catalogue.state import Catalogue
+    from weaver.errors import ValidationError
+
+    catalogue = installed(tmp_path, monkeypatch)
+    rows = dict(catalogue.rows[ITEM])
+    # A Build whose publication did not complete leaves no certified definition.
+    rows["SemanticModel"] = ()
+    catalogue = Catalogue({**catalogue.rows, ITEM: rows})
+    with source_session() as session:
+        answer_installed(session, catalogue.rows)
+        with pytest.raises(ValidationError) as refused:
+            weaver.test(str(ITEM), session=session)
+
+    assert str(refused.value) == (
+        "SemanticModel/Reporting is not certified for Test. Build "
+        "SemanticModel/Reporting before testing it."
+    )

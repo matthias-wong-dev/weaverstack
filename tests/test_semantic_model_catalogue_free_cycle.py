@@ -184,3 +184,52 @@ def test_load_without_a_catalogue_refreshes_only_named_models(items, options, me
     session = session_without_catalogue()
     with pytest.raises(CommandError, match=message):
         weaver.load(list(items), session=session, **options)
+
+
+def powerbi_project(tmp_path):
+    """``PowerBI/Commerce`` holding the Reporting model."""
+
+    root = project(tmp_path, False)
+    folder = root / "PowerBI/Commerce"
+    folder.mkdir(parents=True)
+    (root / str(ITEM) / f"{ITEM.item_name}.tmdl").rename(
+        folder / f"{ITEM.item_name}.tmdl"
+    )
+    (root / str(ITEM)).rmdir()
+    return root
+
+
+@pytest.mark.parametrize("selector", ["PowerBI", "PowerBI/Commerce"])
+@weaver_test()
+def test_load_without_a_catalogue_accepts_power_bi_selectors(tmp_path, selector):
+    root = powerbi_project(tmp_path)
+    session = session_without_catalogue(inventory=(("SemanticModel", "Reporting"),))
+
+    with session:
+        report = weaver.load(selector, source=root, dry_run=True, session=session)
+
+    assert [node.logical_id for node in report.nodes] == [str(ITEM)]
+
+
+@weaver_test()
+def test_an_unknown_power_bi_project_is_refused_by_name(tmp_path):
+    root = powerbi_project(tmp_path)
+
+    with pytest.raises(
+        CommandError, match="PowerBI/Missing: Power BI project not found"
+    ):
+        weaver.load("PowerBI/Missing", source=root, session=session_without_catalogue())
+
+
+@weaver_test()
+def test_a_named_model_loads_without_reading_a_project_folder(tmp_path):
+    """A source that is not a project is never read for an item named directly."""
+
+    session = session_without_catalogue(inventory=(("SemanticModel", "Reporting"),))
+
+    with session:
+        report = weaver.load(
+            str(ITEM), source=tmp_path / "absent", dry_run=True, session=session
+        )
+
+    assert [node.logical_id for node in report.nodes] == [str(ITEM)]

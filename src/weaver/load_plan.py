@@ -13,7 +13,6 @@ from typing import TYPE_CHECKING, Mapping, Sequence
 from .catalogue.state import Catalogue
 from .declaration.model import (
     OBJECT_SHAPE,
-    SEMANTIC_MODEL,
     WeaverDocumentId,
     WeaverItemId,
 )
@@ -26,8 +25,10 @@ from .installed import (
     WAREHOUSE_PROCEDURE,
     InstalledDag,
     InstalledNode,
+    refuse_uncertified_models,
 )
 from .load_report import DEPENDENCY_EXTERNAL, LoadMessage, info
+from .selection import name_patterns
 from .targets import PhysicalObjectRef, PhysicalTargetRef
 
 if TYPE_CHECKING:
@@ -173,11 +174,11 @@ def load_dag(
     """The physical load graph for one set of items.
 
     Dependencies order the selection but never enlarge it: an edge is kept only
-    where both ends were named. ``names`` narrows it to named loadables, an
-    operator override that adds neither nodes nor ordering edges. A Lakehouse
-    selector carries its area, ``Tables/Schema.Object`` or
-    ``Files/Schema.Object``, and a bare ``Schema.Object`` is accepted where it
-    reaches one object.
+    where both ends were named. ``names`` narrows it to the loadables its
+    regular expressions match, an operator override that adds neither nodes nor
+    ordering edges. A Lakehouse name carries its area, ``Tables/Schema.Object``
+    or ``Files/Schema.Object``, and a bare ``Schema.Object`` is accepted where
+    it reaches one object.
 
     ``selection`` is an execution filter over logical loadable identities,
     decided by the caller. Only the loadables it names run. The traversal
@@ -268,28 +269,18 @@ class _Planner:
         names: tuple[str, ...],
     ) -> tuple[InstalledNode, ...]:
         available = self.dag.loadables(items=requested)
-        for item in requested:
-            if item.item_type == SEMANTIC_MODEL and not any(
-                node.item == item for node in available
-            ):
-                raise LoadError(
-                    f"{item} is not certified for Load. Build {item} before loading it."
-                )
+        refuse_uncertified_models(
+            self.dag, requested, operation="Load", error=LoadError
+        )
         if not names:
             return self._chosen(available)
 
-        selected: list[InstalledNode] = []
-        seen: set[str] = set()
-        for written in names:
-            name = str(written).strip()
-            if not name:
-                raise LoadError("a load name must be a non-empty load selector")
-            node = self._one_loadable(name, available)
-            if node.node_id in seen:
-                continue
-            seen.add(node.node_id)
-            selected.append(node)
-        return self._chosen(tuple(selected))
+        chosen: set[str] = set()
+        for text, pattern in name_patterns(names, error=LoadError):
+            chosen.update(
+                node.node_id for node in self._matching(text, pattern, available)
+            )
+        return self._chosen(tuple(node for node in available if node.node_id in chosen))
 
     def _chosen(self, nodes: tuple[InstalledNode, ...]) -> tuple[InstalledNode, ...]:
         if self.selection is None:
@@ -299,40 +290,41 @@ class _Planner:
     def _is_chosen(self, node: InstalledNode) -> bool:
         return self.selection is None or node.identity in self.selection
 
-    def _one_loadable(
-        self, name: str, available: tuple[InstalledNode, ...]
-    ) -> InstalledNode:
-        """The single loadable one written selector names.
+    @staticmethod
+    def _matching(
+        text: str, pattern, available: tuple[InstalledNode, ...]
+    ) -> list[InstalledNode]:
+        """The loadables one pattern selects.
 
-        A Lakehouse holds a Folder and a table of one ``Schema.Object`` apart by
-        area, so the precise selector is ``load_key``. The bare ``Schema.Object``
-        remains accepted where it reaches one object.
+        A pattern matches the area-qualified ``load_key``, or the bare
+        ``Schema.Object`` where that names one object in an item: a Lakehouse
+        Folder and table of one ``Schema.Object`` are told apart only by area.
         """
 
-        folded = name.casefold()
-        precise = [node for node in available if node.load_key.casefold() == folded]
-        candidates = precise or [
-            node for node in available if (node.load_name or "").casefold() == folded
+        precise = [node for node in available if pattern.fullmatch(node.load_key)]
+        bare = [
+            node
+            for node in available
+            if node not in precise and pattern.fullmatch(node.load_name or "")
         ]
-        if not candidates:
+        areas: dict[tuple, set[str]] = {}
+        for node in bare:
+            key = (node.item, (node.load_name or "").casefold())
+            areas.setdefault(key, set()).add(node.load_key)
+        for keys in areas.values():
+            if len(keys) > 1:
+                raise LoadError(
+                    f"{text!r} names more than one installed loadable object: "
+                    f"{', '.join(sorted(keys))}. Choose an area-qualified name"
+                )
+        matched = precise + bare
+        if not matched:
             known = ", ".join(sorted({node.load_key for node in available}))
             raise LoadError(
-                f"no loadable object named {name!r} is installed in the "
-                f"requested items. Installed: {known or 'none'}"
+                f"no installed loadable object in the requested items matches "
+                f"{text!r}. Installed: {known or 'none'}"
             )
-        if len(candidates) == 1:
-            return candidates[0]
-        keys = sorted({node.load_key for node in candidates})
-        if len(keys) > 1:
-            raise LoadError(
-                f"{name!r} names more than one installed loadable object: "
-                f"{', '.join(keys)}. Choose an area-qualified name"
-            )
-        found = ", ".join(node.node_id for node in candidates)
-        raise LoadError(
-            f"{name!r} names more than one installed loadable object "
-            f"({found}). Qualify the request with a single item"
-        )
+        return matched
 
     def _refuse_ambiguity(self, items: tuple[WeaverItemId, ...]) -> None:
         """Stop if a target this request dispatches into holds a duplicated address.

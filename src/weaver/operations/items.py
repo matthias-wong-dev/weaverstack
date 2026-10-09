@@ -11,21 +11,43 @@ from ..declaration.model import (
     WAREHOUSE,
     WeaverItemId,
 )
+from ..declaration.selectors import is_powerbi_selector, powerbi_items
 from ..errors import CommandError, IdentityError
 
 
 def requested_items(
-    items: str | Sequence[str] | None, *, what: str
+    items: str | Sequence[str] | None, *, what: str, project=None
 ) -> tuple[WeaverItemId, ...]:
     """Return requested items in input order, deduplicated.
 
-    An empty result means every installed item after the catalogue is read.
+    ``PowerBI`` and ``PowerBI/<project>`` expand to the semantic models in
+    ``project``, a :class:`~weaver.operations.project.Project` read only for
+    them. An empty result means every installed item after the catalogue is
+    read.
     """
 
     if items is None:
         return ()
     values = (items,) if isinstance(items, str) else tuple(items)
-    return tuple(dict.fromkeys(parse_run_item(value, what=what) for value in values))
+    found: list[WeaverItemId] = []
+    for value in values:
+        if isinstance(value, str) and is_powerbi_selector(value.strip()):
+            found.extend(_powerbi_models(value.strip(), project=project, what=what))
+        else:
+            found.append(parse_run_item(value, what=what))
+    return tuple(dict.fromkeys(found))
+
+
+def _powerbi_models(value: str, *, project, what: str) -> tuple[WeaverItemId, ...]:
+    if project is None:
+        raise CommandError(f"{what} does not accept {value}; name the semantic models")
+    return tuple(
+        item
+        for item in powerbi_items(
+            value, repository=project.repository, error=CommandError
+        )
+        if item.item_type != REPORT
+    )
 
 
 def parse_run_item(text: object, *, what: str) -> WeaverItemId:
@@ -48,9 +70,22 @@ def parse_run_item(text: object, *, what: str) -> WeaverItemId:
         return WeaverItemId.parse(written)
     except IdentityError:
         raise CommandError(
-            f"a {what} item must be {LAKEHOUSE}/Name, {WAREHOUSE}/Name or "
-            f"{SEMANTIC_MODEL}/Name, got {text!r}"
+            f"a {what} item must be {LAKEHOUSE}/Name, {WAREHOUSE}/Name, "
+            f"{SEMANTIC_MODEL}/Name, PowerBI or PowerBI/<project>, got {text!r}"
         ) from None
+
+
+def uncatalogued_target(workspace, item: WeaverItemId):
+    """Where an item no catalogue records is deployed.
+
+    Its target in workspace configuration, or else the item's own name.
+    """
+
+    from ..targets import PhysicalTargetRef
+
+    if item in workspace.configured_items:
+        return PhysicalTargetRef.of(workspace.target_for(item))
+    return PhysicalTargetRef(kind=item.item_type.lower(), name=item.item_name)
 
 
 def run_scope(dag, items, *, what: str, catalogue: str | None = None):
@@ -127,4 +162,5 @@ __all__ = [
     "requested_items",
     "run_context_lines",
     "run_scope",
+    "uncatalogued_target",
 ]

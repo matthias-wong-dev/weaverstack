@@ -290,6 +290,14 @@ def test_repeated_names_reach_the_api_as_one_exact_selection(recorded):
 
 
 @weaver_test()
+def test_a_power_bi_selector_and_its_project_folder_reach_the_api(recorded):
+    main(["load", "PowerBI/Commerce", "--source", "reporting", "--workspace", "Demo"])
+
+    assert recorded[0]["items"] == ("PowerBI/Commerce",)
+    assert recorded[0]["source"] == "reporting"
+
+
+@weaver_test()
 def test_the_cautious_answers_are_the_defaults(recorded):
     main(_command())
 

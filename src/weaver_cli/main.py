@@ -91,6 +91,15 @@ Use it after deleting an item in Fabric, or to stop managing one. Unbinding an
 item that still exists asks for confirmation.\
 """
 
+TEST_DESCRIPTION = """\
+Run Tests and Assumptions for the selected items.
+
+Catalogue mode runs the validations installed in the Weaver catalogue and
+records their results. File mode runs validations from the project folder
+against the deployed objects and records nothing. Test uses file mode when
+--file is given or no catalogue is configured.\
+"""
+
 DOCTOR_DESCRIPTION = """\
 Check Microsoft Fabric connectivity.
 
@@ -498,8 +507,8 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="ITEM",
         help=(
             "Weaver items to load, as Lakehouse/Name, Warehouse/Name or "
-            "SemanticModel/Name. "
-            "Naming none loads every installed item."
+            "SemanticModel/Name. PowerBI or PowerBI/<project> names the semantic "
+            "models of the project folder. Naming none loads every installed item."
         ),
     )
     load.add_argument(
@@ -521,12 +530,13 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         metavar="NAME",
         help=(
-            "Load one installed object, as Tables/Schema.Object or "
-            "Files/Schema.Object in a Lakehouse and Schema.Object in a "
-            "Warehouse. A bare Schema.Object is accepted where it names one "
-            "object. Repeat to select more than one."
+            "Load only installed objects whose whole name matches this regular "
+            "expression: Tables/Schema.Object or Files/Schema.Object in a "
+            "Lakehouse, Schema.Object in a Warehouse. A bare Schema.Object is "
+            "accepted where it names one object. Repeat to select more."
         ),
     )
+    _add_source_arg(load)
     load.add_argument(
         "--fault-tolerant",
         action="store_true",
@@ -573,7 +583,10 @@ def build_parser() -> argparse.ArgumentParser:
     load.set_defaults(handler=handle_load, requires=_requires_run)
 
     validate = subcommands.add_parser(
-        "test", help="Run Tests and Assumptions installed for the selected items."
+        "test",
+        help="Run Tests and Assumptions for the selected items.",
+        description=TEST_DESCRIPTION,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     validate.add_argument(
         "items",
@@ -581,8 +594,8 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="ITEM",
         help=(
             "Weaver items to validate, as Lakehouse/Name, Warehouse/Name or "
-            "SemanticModel/Name. "
-            "Naming none validates every installed item."
+            "SemanticModel/Name. PowerBI or PowerBI/<project> names the semantic "
+            "models of the project folder. Naming none validates every item."
         ),
     )
     validate.add_argument(
@@ -598,17 +611,28 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         help=argparse.SUPPRESS,
     )
-    selection = validate.add_mutually_exclusive_group()
-    selection.add_argument(
+    validate.add_argument(
         "--name",
-        metavar="Schema.Object",
-        help="Run one installed validation and return diagnostic rows.",
+        dest="names",
+        action="append",
+        metavar="PATTERN",
+        help=(
+            "Run only validations whose whole Schema.Object matches this regular "
+            "expression, with their diagnostic rows. Repeat to select more."
+        ),
     )
-    selection.add_argument(
+    validate.add_argument(
         "--file",
+        dest="files",
+        action="append",
         metavar="PATH",
-        help="Compile and run a source file without installing it.",
+        help=(
+            "Run validations from source in file mode: a file, a directory or a "
+            "glob. A file outside the project folder runs against the one item "
+            "named. Repeat to select more."
+        ),
     )
+    _add_source_arg(validate)
     validate.add_argument(
         "--dry-run",
         action="store_true",
@@ -1126,6 +1150,17 @@ def _add_initialise_args(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_source_arg(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--source",
+        metavar="SOURCE",
+        help=(
+            "Project folder, or an abfss location inside a Fabric session. "
+            "Defaults to the current directory or Notebook Resources."
+        ),
+    )
+
+
 def _add_workspace_args(
     parser: argparse.ArgumentParser,
     *,
@@ -1345,6 +1380,7 @@ def _load_once(args: argparse.Namespace) -> int:
                 workspace,
                 items=run_items(args) or None,
                 names=args.names,
+                source=args.source,
                 fault_tolerant=args.fault_tolerant,
                 dry_run=args.dry_run,
                 reload=args.reload,
@@ -1384,6 +1420,7 @@ def _run_load(
     *,
     items,
     names=None,
+    source=None,
     fault_tolerant: bool,
     dry_run: bool,
     reload: bool = False,
@@ -1399,6 +1436,7 @@ def _run_load(
         return weaver.load(
             items,
             names=names,
+            source=source,
             fault_tolerant=fault_tolerant,
             dry_run=dry_run,
             reload=reload,
@@ -1580,8 +1618,9 @@ def _test_once(args: argparse.Namespace) -> int:
         report = _run_test(
             workspace,
             items=run_items(args) or None,
-            name=args.name,
-            file=args.file,
+            names=args.names,
+            files=args.files,
+            source=args.source,
             dry_run=args.dry_run,
             session=opened,
         )
@@ -1589,9 +1628,7 @@ def _test_once(args: argparse.Namespace) -> int:
     if args.json:
         print(
             _json_document(
-                _test_mapping(
-                    report, targeted=args.name is not None or args.file is not None
-                )
+                _test_mapping(report, targeted=bool(args.names or args.files))
             )
         )
     else:
@@ -1599,7 +1636,9 @@ def _test_once(args: argparse.Namespace) -> int:
     return 1 if report.status in (FAILED, INVALID) else 0
 
 
-def _run_test(workspace, *, items, name, file, dry_run: bool, session=None):
+def _run_test(
+    workspace, *, items, names, files, source=None, dry_run: bool, session=None
+):
     """Dispatch Warehouse validations over TDS and Lakehouse modules in-session."""
 
     from weaver.sessions.host import use_or_create_session
@@ -1607,8 +1646,9 @@ def _run_test(workspace, *, items, name, file, dry_run: bool, session=None):
     with use_or_create_session(session, workspace=workspace) as opened:
         return weaver.test(
             items,
-            name=name,
-            file=file,
+            names=names,
+            files=files,
+            source=source,
             dry_run=dry_run,
             session=opened,
             **_command_context(workspace),
