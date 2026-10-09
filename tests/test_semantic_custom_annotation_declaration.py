@@ -175,7 +175,8 @@ def test_value_helpers_and_located_errors(tmp_path):
     )
     with pytest.raises(
         ConfigError,
-        match=r"definition/tables/Sales.tmdl:3: Acme.Finance.Currency: unsupported currency USD",
+        match=r"^SemanticModel/Reporting/Reporting.tmdl:3: Acme.Finance.Currency: "
+        "unsupported currency USD$",
     ):
         compile_model(root)
 
@@ -320,3 +321,23 @@ def test_project_annotations_require_no_item_named_annotations(tmp_path):
     identities = {item.identity for item in parse(root).items}
     assert WeaverItemId.parse("SemanticModel/annotations") not in identities
     assert ITEM in identities
+
+
+@weaver_test()
+def test_a_table_name_with_a_space_cites_the_authored_file(tmp_path):
+    import re
+
+    root = project(
+        tmp_path, "table 'Notice SQL'\n\tannotation Weaver.Exclude = maybe\n"
+    )
+    with pytest.raises(
+        ConfigError,
+        match="^"
+        + re.escape(
+            "SemanticModel/Reporting/Reporting.tmdl:2: Weaver.Exclude: requires a "
+            "boolean true or false"
+        )
+        + "$",
+    ):
+        compile_model(root)
+

@@ -20,6 +20,7 @@ import types
 import uuid
 from dataclasses import dataclass, field, replace
 from typing import Mapping, NoReturn
+from urllib.parse import unquote
 
 from ..errors import ConfigError
 from .compiler import _COMMON, _SCHEMAS, _merge, escape, leaf_properties
@@ -112,24 +113,33 @@ class AnnotationRegistry:
     def namespaces(self):
         return {name.split(".", 1)[0].casefold() for name in self.classes}
 
-    def dispatch(self, document, node):
+    def claims(self, node):
+        """Whether `node` is in a namespace this registry defines."""
+
         namespace, dot, _ = node.name.partition(".")
-        if not dot or namespace.casefold() not in self.namespaces:
-            return None
+        return bool(dot) and namespace.casefold() in self.namespaces
+
+    def dispatch(self, node, location):
+        """The class a claimed annotation names.
+
+        `location` is the declaration's authored file and line.
+        """
+
+        namespace = node.name.partition(".")[0]
         cls = self.classes.get(node.name)
         if cls is None:
             raise ConfigError(
-                f"{document.path}:{node.header + 1}: {node.name}: "
-                f"unknown {namespace} annotation"
+                f"{location}: {node.name}: unknown {namespace} annotation"
             )
         if node.parent is None or node.parent.kind not in {
             scope.casefold() for scope in cls.scopes
         }:
             raise ConfigError(
-                f"{document.path}:{node.header + 1}: {node.name}: valid only at "
+                f"{location}: {node.name}: valid only at "
                 f"{' or '.join(sorted(cls.scopes))} scope"
             )
         return cls
+
 
 
 def builtin_registry() -> AnnotationRegistry:
@@ -306,6 +316,31 @@ def _without(requested, path):
     return result
 
 
+def declared_at(sources, provenance, document, node):
+    """The authored file and line declaring `node` in the effective package.
+
+    Provenance names the layer that last wrote an object; a native PBIP part is
+    its own authored file. Otherwise the effective path is the best location.
+    """
+
+    pointer = _pointer(node.path)
+    candidates = [
+        value["source"]
+        for key, value in provenance.items()
+        if pointer is not None
+        and (key == pointer or key.startswith(pointer + "/"))
+        and value.get("source")
+    ]
+    candidates += [path for path in sources if path.endswith("/" + document.path)]
+    wanted = folded(node.path)
+    for path in dict.fromkeys(candidates):
+        if path.endswith(".tmdl") and path in sources:
+            spans = Document(path, sources[path]).index.get(wanted)
+            if spans:
+                return f"{path}:{spans[0].header + 1}"
+    return f"{unquote(document.path)}:{node.header + 1}"
+
+
 class _Compilation:
     """One contribution's annotation run: the editor and what its edits imply."""
 
@@ -321,6 +356,9 @@ class _Compilation:
         self.source_bindings = dict(contribution.source_bindings)
 
         self._seen = 0
+
+    def located(self, document, node):
+        return declared_at(self.contribution.sources, self.provenance, document, node)
 
     def removed(self, path):
         """Forget a removed object and expect its absence on readback."""
@@ -404,8 +442,11 @@ class _Compilation:
         ]
         dispatched = set()
         for document, node in declared:
-            cls = self.registry.dispatch(document, node)
-            if cls is None or cls.phase != phase:
+            if not self.registry.claims(node):
+                continue
+            location = self.located(document, node)
+            cls = self.registry.dispatch(node, location)
+            if cls.phase != phase:
                 continue
             dispatched.add(node.name)
             if node.name == "Weaver.BaseSemanticModels":
@@ -414,7 +455,7 @@ class _Compilation:
                 continue
             annotation = object.__new__(cls)
             annotation._text = expression_text(document, node)
-            annotation._location = f"{document.path}:{node.header + 1}: {node.name}"
+            annotation._location = f"{location}: {node.name}"
             annotation._compilation = self
             annotation.apply(TmdlObject(self.editor, node.parent.path))
             self._settle(document, node)
@@ -477,15 +518,16 @@ def prepare_annotations(contribution, registry=None):
     editor = PackageEditor(contribution.parts)
     for document in editor.documents():
         for node in document.spans:
-            if node.kind != "annotation":
+            if node.kind != "annotation" or not registry.claims(node):
                 continue
-            cls = registry.dispatch(document, node)
-            if cls is None:
-                continue
+            location = declared_at(
+                contribution.sources, contribution.provenance, document, node
+            )
+            cls = registry.dispatch(node, location)
             if node.name == "Weaver.Source":
                 annotation = object.__new__(cls)
                 annotation._text = expression_text(document, node)
-                annotation._location = f"{document.path}:{node.header + 1}: {node.name}"
+                annotation._location = f"{location}: {node.name}"
                 references[node.parent.name] = annotation.reference
     return replace(
         contribution,
