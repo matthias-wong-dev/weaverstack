@@ -365,7 +365,8 @@ leaves the model's effective signature unchanged and resets only that validation
 TestStatus. Every selected model still deploys and resets its LoadStatus.
 `weaver test SemanticModel/Reporting`
 runs them, records TestStatus and Log, and Health treats them like any other
-validation: a refresh after a pass makes them stale until they run again.
+validation: a deployment or refresh after a pass makes them stale until they run
+again.
 
 ### Without a catalogue
 

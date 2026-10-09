@@ -288,3 +288,59 @@ def test_health_reports_a_model_behind_its_source(tmp_path, monkeypatch):
     (behind,) = (f for f in report.findings if f.object_id == "SemanticModel/Reporting")
     assert (behind.area, behind.code) == ("load", "load_stale_ancestor")
     assert "Warehouse/Serving/Cake.Summary" in behind.message
+
+
+@weaver_test()
+def test_health_reports_validations_stale_after_their_model_is_rebuilt(
+    tmp_path, monkeypatch
+):
+    """A rebuilt model is Pending, yet its validations' last pass is out of date."""
+
+    from datetime import datetime, timezone
+
+    from weaver.catalogue.state import Catalogue
+    from weaver.health import assess
+    from weaver.operations.health import HEALTH_TABLES
+
+    catalogue = installed(tmp_path, monkeypatch)
+    read = {table.name for table in HEALTH_TABLES}
+    rows = {
+        item: {name: rows for name, rows in tables.items() if name in read}
+        for item, tables in catalogue.rows.items()
+    }
+    passed = datetime(2026, 10, 7, 9, tzinfo=timezone.utc)
+    scope = {"item_type": ITEM.item_type, "item_name": ITEM.item_name}
+    rows[ITEM]["TestStatus"] = tuple(
+        {
+            **scope,
+            "schema_name": row["schema_name"],
+            "object_name": row["object_name"],
+            "test_type": row["test_type"],
+            "result": "succeeded",
+            "started_datetime": passed,
+            "completed_datetime": passed,
+        }
+        for row in rows[ITEM]["TestDictionary"]
+    )
+    rows[ITEM]["LoadStatus"] = (
+        {**scope, "schema_name": "", "object_name": "", "result": "pending"},
+    )
+    rows[ITEM]["Registry"] = tuple(
+        {**row, "build_datetime": "2026-10-07 10:00:00.000000"}
+        if row["schema_name"] == "" and row["object_name"] == ""
+        else row
+        for row in rows[ITEM]["Registry"]
+    )
+    now = datetime(2026, 10, 7, 8, tzinfo=timezone.utc)
+    report = assess(Catalogue(rows), as_of=now, generated_at=now, items=[ITEM])
+    stale = {
+        f.object_id: f.message
+        for f in report.tests.findings
+        if f.code == "test_stale_dependency"
+    }
+    assert stale == {
+        f"SemanticModel/Reporting/Sales.{name}": (
+            "SemanticModel/Reporting has been built since this validation passed"
+        )
+        for name in ("RevenueIsPositive", "RevenueReconciles")
+    }

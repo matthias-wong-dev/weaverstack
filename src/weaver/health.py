@@ -1002,34 +1002,44 @@ class _Assessment:
                 status,
             )
             return
-        moved = self._loaded_since(node, status.completed_at)
+        moved = self._changed_since(node, status.completed_at)
         if moved is not None:
+            ancestor, how = moved
             yield _finding(
                 TESTS,
                 TEST_STALE_DEPENDENCY,
                 AMBER,
                 node,
                 status.result,
-                f"{moved} has been loaded since this validation passed",
+                f"{ancestor} has been {how} since this validation passed",
                 status,
             )
 
-    def _loaded_since(self, node: InstalledNode, at: datetime | None) -> str | None:
-        """The managed ancestor that settled after this validation passed.
+    def _changed_since(
+        self, node: InstalledNode, at: datetime | None
+    ) -> tuple[str, str] | None:
+        """The managed ancestor loaded or built after this validation passed.
 
-        A new View definition puts the validations over it behind, as it does a
-        materialised consumer.
+        A rebuild resets an object's load state, so its Registry build instant
+        is what records the change until it loads again. A new View definition
+        puts the validations over it behind, as it does a materialised consumer.
         """
 
         if at is None:
             return None
-        moved = [
-            ancestor.node_id
-            for ancestor in self.dag.ancestors(node.identity)
-            if participates_in_load_state(ancestor)
-            and (self.load_health.established_at(ancestor.identity) or at) > at
-        ]
-        return sorted(moved)[0] if moved else None
+        moved = []
+        for ancestor in self.dag.ancestors(node.identity):
+            if not participates_in_load_state(ancestor):
+                continue
+            if (self.load_health.established_at(ancestor.identity) or at) > at:
+                moved.append((ancestor.node_id, "loaded"))
+            elif (self._built_at(ancestor.identity) or at) > at:
+                moved.append((ancestor.node_id, "built"))
+        return min(moved) if moved else None
+
+    def _built_at(self, identity) -> datetime | None:
+        registered = self.catalogue.registered.get(identity)
+        return None if registered is None else _instant(registered.build_datetime)
 
     # --- build ----------------------------------------------------------------
 
@@ -1193,6 +1203,17 @@ def _aware(at) -> datetime | None:
     if not isinstance(at, datetime):
         return None
     return at if at.tzinfo is not None else at.replace(tzinfo=timezone.utc)
+
+
+def _instant(value) -> datetime | None:
+    """A stored instant, native or serialised, as an aware UTC datetime."""
+
+    if isinstance(value, str) and value:
+        try:
+            value = datetime.fromisoformat(value)
+        except ValueError:
+            return None
+    return _aware(value)
 
 
 def _isoformat(at: datetime | None) -> str | None:

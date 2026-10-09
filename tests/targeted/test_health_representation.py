@@ -132,16 +132,20 @@ class _Estate:
         moved=None,
         declared: bool = True,
         is_static: bool = False,
+        built=None,
     ) -> "_Estate":
         """One installed object, with the state its most recent load left.
 
         ``loaded`` is when that load settled and ``moved`` is where it left the
-        bookmark, which is what says the object's data changed.
+        bookmark, which is what says the object's data changed. ``built`` is
+        when a build last certified it.
         """
 
         parsed = document_id(identity)
         tables = self._tables(parsed.item)
-        tables[REGISTRY.name].append(registry_row(parsed, object_type=object_type))
+        tables[REGISTRY.name].append(
+            registry_row(parsed, object_type=object_type, build_datetime=built)
+        )
         if declared and object_type in ("table", "view"):
             tables[TABLE_DICTIONARY.name].append(
                 _dictionary_row(parsed, object_type=object_type, is_static=is_static)
@@ -793,6 +797,38 @@ def test_a_validation_whose_data_moved_after_it_passed_is_stale():
 
     assert report.tests.status == AMBER
     assert codes(report.tests) == (TEST_STALE_DEPENDENCY,)
+
+
+@weaver_test()
+@pytest.mark.parametrize("built", [at(1), at(1).replace(tzinfo=None).isoformat()])
+def test_a_validation_whose_subject_was_rebuilt_after_it_passed_is_stale(built):
+    """A rebuild resets the subject to Pending, which settles nothing."""
+
+    report = (
+        _Estate()
+        .table(f"{RAW}/Tables/Sales.Order", result="pending", built=built)
+        .validation(f"{RAW}/Sales.Integrity", result="succeeded", ran=at(3))
+        .reads(f"{RAW}/Sales.Integrity", "Sales.Order")
+        .report()
+    )
+
+    (stale,) = about(report.tests, TEST_STALE_DEPENDENCY)
+    assert stale.message == (
+        f"{RAW}/Tables/Sales.Order has been built since this validation passed"
+    )
+
+
+@weaver_test()
+def test_a_validation_that_passed_after_its_subject_was_built_is_green():
+    report = (
+        _Estate()
+        .table(f"{RAW}/Tables/Sales.Order", loaded=at(4), moved=at(4), built=at(5))
+        .validation(f"{RAW}/Sales.Integrity", result="succeeded", ran=at(3))
+        .reads(f"{RAW}/Sales.Integrity", "Sales.Order")
+        .report()
+    )
+
+    assert report.tests.status == GREEN
 
 
 @weaver_test()
