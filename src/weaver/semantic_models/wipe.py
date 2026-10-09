@@ -125,7 +125,7 @@ def _preserved_partition(model, connections):
 
 
 def _explicit_import(model, partitions, connections):
-    from .binding import _SQL_RELATIONS
+    from .m_source import relation, sql_database
 
     if (
         len(connections) != 1
@@ -149,13 +149,11 @@ def _explicit_import(model, partitions, connections):
             expression = "\n".join(expression)
         if not isinstance(expression, str):
             return False
-        match = next(
-            (m for pattern in _SQL_RELATIONS if (m := pattern.fullmatch(expression))),
-            None,
-        )
-        if match is None:
+        found = relation(expression)
+        database = found and sql_database(list(found.root_tokens))
+        if not database:
             return False
-        values = [match[key][1:-1].replace('""', '"') for key in ("server", "database")]
+        values = [token.value for token in database]
         if any(not value or "#" in value or ";" in value for value in values):
             return False
         if ";".join(values).casefold() != path.casefold():

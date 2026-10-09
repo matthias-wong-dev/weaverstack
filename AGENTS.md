@@ -281,7 +281,8 @@ table publishes its exact producer in `_.Dependency`; two consuming tables keep
 separate rows even when they share a producer. The installed DAG reads those rows
 and derives the single model-refresh node's upstream edges. Lakehouse SQL endpoint
 refresh and Warehouse OneLake publication use the existing Load barriers. Sources
-with simple shared-M navigation can also publish observable managed edges.
+with simple shared-M navigation can also publish observable managed edges;
+`m_source` recognises one navigation behind step aliases and `Table` shaping.
 Unknown navigation contributes no guessed relation. Normal Load item/name
 selection still controls which producers run.
 
@@ -762,8 +763,7 @@ REST reset; dictionary claims are removed after verified readback. It uses no Sp
 Direct Lake source or one explicitly bound ShareableCloud SQL / Import source
 through a hidden `__WeaverSource` table with one native partition and no columns
 or measures. Direct Lake retains its deployed shared expressions. Import requires
-literal SQL database and relation navigation without transforms or shared
-expressions. Every Import partition must match the bound connection's physical
+a literal SQL database and one relation navigation, without shared expressions. Every Import partition must match the bound connection's physical
 source. Unsupported source or connection forms are refused before any selected
 target is changed. Semantic wipe never owns source data, shared connections or
 gateways.

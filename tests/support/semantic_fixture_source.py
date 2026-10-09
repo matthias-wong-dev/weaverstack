@@ -5,8 +5,8 @@ import json
 from dataclasses import dataclass, field
 
 from weaver.semantic_models import TmdlDefinition
-from weaver.semantic_models.binding import _SQL_RELATIONS
 from weaver.semantic_models.definition import decode_model, decode_parts, encode_parts
+from weaver.semantic_models.m_source import relation, sql_database
 from weaver.semantic_models.wipe import reset_definition
 
 # The fixed PBIP fixture has two source-free literal Import partitions.
@@ -179,14 +179,13 @@ class ConfiguredSemanticSource:
         )
 
     def require_metadata(self, metadata):
-        match = next(
-            pattern.fullmatch(self.expression)
-            for pattern in _SQL_RELATIONS
-            if pattern.fullmatch(self.expression)
-        )
+        found = relation(self.expression)
+        server, database = sql_database(list(found.root_tokens))
         expected = {
-            key: match[key][1:-1].replace('""', '"')
-            for key in ("server", "database", "schema", "object")
+            "server": server.value,
+            "database": database.value,
+            "schema": found.schema,
+            "object": found.object,
         }
         assert all(
             metadata[key].casefold() == value.casefold()

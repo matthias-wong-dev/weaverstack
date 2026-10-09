@@ -1,33 +1,11 @@
 """Observable shared-source relations and their existing Weaver identities."""
 
-import re
-
 from ..catalogue.claims import catalogue_columns
 from ..declaration.metadata import TABLE, VIEW
 from ..declaration.model import WeaverItemId
 from .fragments import source_table
+from .m_source import relation
 from .tmdl import Document
-
-_M_ID = r'(?:#"(?:[^"]|"")*"|[A-Za-z_][A-Za-z0-9_]*)'
-_M_TEXT = r'"(?:[^"]|"")*"'
-_NAVIGATION = rf"\{{\s*\[\s*Schema\s*=\s*(?P<schema>{_M_TEXT})\s*,\s*Item\s*=\s*(?P<object>{_M_TEXT})\s*\]\s*\}}\s*\[Data\]"
-_DIRECT = re.compile(rf"\s*(?P<expression>{_M_ID})\s*{_NAVIGATION}\s*", re.DOTALL)
-_LET = re.compile(
-    rf"\s*let\s+(?P<root>{_M_ID})\s*=\s*(?P<expression>{_M_ID})\s*,\s*(?P<result>{_M_ID})\s*=\s*(?P=root)\s*{_NAVIGATION}\s+in\s+(?P=result)\s*",
-    re.DOTALL,
-)
-
-
-def _m_value(value):
-    if value.startswith('#"'):
-        value = value[1:]
-    if value.startswith('"'):
-        value = value[1:-1].replace('""', '"')
-    return re.sub(
-        r"#\((#|lf|cr|tab)\)",
-        lambda m: {"#": "#", "lf": "\n", "cr": "\r", "tab": "\t"}[m[1]],
-        value,
-    )
 
 
 def source_relation(source):
@@ -40,13 +18,10 @@ def source_relation(source):
     if source.get("type") != "m":
         return None
     text = source.get("expression", "")
-    text = "\n".join(text) if isinstance(text, list) else text
-    match = _DIRECT.fullmatch(text) or _LET.fullmatch(text)
-    return (
-        tuple(_m_value(match[key]) for key in ("expression", "schema", "object"))
-        if match
-        else None
-    )
+    found = relation("\n".join(text) if isinstance(text, list) else text)
+    if found is None or found.root is None:
+        return None
+    return found.root, found.schema, found.object
 
 
 def managed_relations(repository, catalogue, bindings, source):

@@ -204,6 +204,25 @@ def m_code(text):
     return "".join(output)
 
 
+def _sql_database(authored, server, database):
+    """`Sql.Database` for server and database, keeping an authored options record."""
+
+    from .m_source import sql_database, tokens
+
+    authored = authored.strip()
+    found = sql_database(tokens(authored))
+    if found is None:
+        return f"Sql.Database({m_string(server)}, {m_string(database)})"
+    old_server, old_database = found
+    return (
+        authored[: old_server.start]
+        + m_string(server)
+        + authored[old_server.end : old_database.start]
+        + m_string(database)
+        + authored[old_database.end :]
+    )
+
+
 def bind_expression_sources(repository, sources):
     models = dict(repository.semantic_models)
     for item, observed in sources.items():
@@ -215,7 +234,17 @@ def bind_expression_sources(repository, sources):
             if source.get("generated"):
                 continue
             if source["connector"] == "sql":
-                expression = f"Sql.Database({m_string(source['server'])}, {m_string(source['database'])})"
+                authored = next(
+                    (
+                        expression_text(d, n)
+                        for d, n in editor.locations((("expression", name),))
+                        if n.value is not None
+                    ),
+                    "",
+                )
+                expression = _sql_database(
+                    authored, source["server"], source["database"]
+                )
             else:
                 expression = (
                     "let\n    Source = Lakehouse.Contents([]),\n"

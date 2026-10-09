@@ -169,13 +169,15 @@ weaver build ./reporting --item SemanticModel/Reporting \
 Expressions named `Warehouse/Serving` or `Lakehouse/Curated` resolve through the
 workspace's logical targets automatically. Generic names use explicit mappings.
 `data_sources` in workspace config supplies defaults, naming logical items that
-resolve through `targets`; repeatable `--data-source` options override them. SQL sources use the resolved SQL endpoint. Native
+resolve through `targets`; repeatable `--data-source` options override them. SQL sources use the resolved SQL endpoint, keeping an authored `Sql.Database`
+options record. Native
 `Lakehouse.Contents` expressions use workspace and Lakehouse IDs. Ordinary
 expressions with no mapping remain unchanged.
 
 Observable shared-expression navigation publishes exact managed Table/View
-and consuming-table dependencies for installed Load ordering. Unknown M
-navigation remains unknown; Build warns about each table that reads data through
+and consuming-table dependencies for installed Load ordering. A table query may
+rename steps, carry comments and shape the table with `Table` functions after
+its one navigation. Other M remains unknown; Build warns about each table that reads data through
 it without a `Weaver.Source`. A model with no recorded source refreshes after
 every other load in the same `weaver load`. Source mapping preserves authored columns,
 descriptions, partitions and storage modes.
