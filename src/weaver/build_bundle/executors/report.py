@@ -2,6 +2,7 @@ import json
 
 from ...errors import InstallError
 from ...report_definition import decode_report, verify_report
+from .base import read_back, readback_details
 
 
 class ReportDefinitionExecutor:
@@ -23,13 +24,14 @@ class ReportReadbackExecutor:
         if spec["target_id"] != context.target.bound.id:
             raise InstallError("Report readback requires its bound target")
         report = context.report_item(context.target.bound)
-        observed = report.get_definition()
+        observed = read_back(spec["item"], report.get_definition)
         binding = spec.get("binding")
-        verify_report(
+        differences = verify_report(
             spec["definition"],
             observed,
             binding=binding,
-            service_binding=report.get_binding() if binding is not None else None,
-            report_name=context.target.bound.name,
+            service_binding=read_back(spec["item"], report.get_binding, "model binding")
+            if binding is not None
+            else None,
         )
-        return {"report_definition": observed}
+        return readback_details({"report_definition": observed}, differences)

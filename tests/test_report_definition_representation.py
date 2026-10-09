@@ -96,17 +96,16 @@ def test_bound_report_recertifies_after_service_binding_encoder_change():
 
 
 @weaver_test()
-def test_report_verification_rejects_wrong_binding_and_changed_resource():
+def test_report_verification_rejects_a_wrong_binding_and_reports_a_changed_part():
     from weaver.errors import InstallError
     from weaver.report_definition import encode_report, verify_report
 
     bound = replace(contribution(), binding=BINDING)
     desired = encode_report(bound)
-    verify_report(desired, desired)
+    assert verify_report(desired, desired) == ()
     changed = json.loads(json.dumps(desired))
     changed["parts"][-1]["payload"] = "e30="
-    with pytest.raises(InstallError, match="Report"):
-        verify_report(desired, changed)
+    assert verify_report(desired, changed) == ("definition/version.json changed",)
     other = replace(
         bound, binding={**BINDING, "item_id": "ffffffff-bbbb-cccc-dddd-eeeeeeeeeeee"}
     )
@@ -148,32 +147,36 @@ def test_bound_report_readback_accepts_service_normalization_with_verified_ident
     ).encode()
     desired = encode_report(replace(authored, binding=BINDING))
     observed = service_normalized_report(desired)
-    verify_report(
-        desired,
-        observed,
-        binding=BINDING,
-        service_binding={"datasetId": MODEL, "datasetWorkspaceId": WORKSPACE},
-        report_name="Executive_Dev",
+    assert (
+        verify_report(
+            desired,
+            observed,
+            binding=BINDING,
+            service_binding={"datasetId": MODEL, "datasetWorkspaceId": WORKSPACE},
+        )
+        == ()
     )
 
 
 @pytest.mark.parametrize(
-    "change",
+    "change, outcome",
     [
-        "model",
-        "workspace",
-        "missing-workspace",
-        "connection-model",
-        "resource",
-        "platform-type",
-        "platform-name",
-        "platform-logical-id",
-        "pbir-version",
-        "as-authored",
+        ("model", None),
+        ("workspace", None),
+        ("missing-workspace", None),
+        ("connection-model", None),
+        ("resource", ("StaticResources/theme.json changed",)),
+        ("platform-type", (".platform changed",)),
+        ("platform-name", ()),
+        ("platform-logical-id", ()),
+        ("pbir-version", ("definition.pbir changed",)),
+        ("as-authored", ("definition.pbir datasetReference changed",)),
     ],
 )
 @weaver_test()
-def test_service_normalization_keeps_binding_and_native_content_guards(change):
+def test_service_normalization_keeps_binding_strict_and_reports_native_changes(
+    change, outcome
+):
     import base64
 
     from weaver.errors import InstallError
@@ -224,14 +227,79 @@ def test_service_normalization_keeps_binding_and_native_content_guards(change):
                 else:
                     props["config"]["logicalId"] = wrong
                 part["payload"] = base64.b64encode(json.dumps(props).encode()).decode()
-    with pytest.raises(InstallError):
-        verify_report(
+
+    def verify():
+        return verify_report(
             desired,
             observed,
             binding=None if change == "as-authored" else BINDING,
             service_binding=identity,
-            report_name="Executive_Dev",
         )
+
+    if outcome is None:
+        with pytest.raises(InstallError, match="binding"):
+            verify()
+    else:
+        assert verify() == outcome
+
+
+@weaver_test()
+def test_bound_report_trusts_fabric_binding_when_its_definition_names_no_model():
+    import base64
+
+    from weaver.report_definition import encode_report, verify_report
+
+    desired = encode_report(replace(contribution(), binding=BINDING))
+    observed = json.loads(json.dumps(desired))
+    for part in observed["parts"]:
+        if part["path"] == "definition.pbir":
+            props = json.loads(base64.b64decode(part["payload"]))
+            props["datasetReference"] = {
+                "byConnection": {"connectionString": "Data Source=pbiazure://x;"}
+            }
+            part["payload"] = base64.b64encode(json.dumps(props).encode()).decode()
+    identity = {"datasetId": MODEL, "datasetWorkspaceId": WORKSPACE}
+    assert (
+        verify_report(desired, observed, binding=BINDING, service_binding=identity)
+        == ()
+    )
+
+
+@weaver_test()
+def test_as_authored_report_naming_another_model_after_deployment_fails():
+    import base64
+
+    from weaver.errors import InstallError
+    from weaver.report_definition import encode_report, verify_report
+
+    authored = replace(
+        contribution(),
+        model=None,
+        parts={
+            **contribution().parts,
+            "definition.pbir": json.dumps(
+                {
+                    "version": "4.0",
+                    "datasetReference": {
+                        "byConnection": {
+                            "connectionString": f"Data Source=x;semanticModelId={MODEL};"
+                        }
+                    },
+                }
+            ).encode(),
+        },
+    )
+    desired = encode_report(authored)
+    observed = json.loads(json.dumps(desired))
+    for part in observed["parts"]:
+        if part["path"] == "definition.pbir":
+            part["payload"] = base64.b64encode(
+                base64.b64decode(part["payload"]).replace(
+                    MODEL.encode(), b"ffffffff-bbbb-cccc-dddd-eeeeeeeeeeee"
+                )
+            ).decode()
+    with pytest.raises(InstallError, match="authored model"):
+        verify_report(desired, observed)
 
 
 def as_authored_report():
@@ -286,9 +354,7 @@ def test_as_authored_report_readback_accepts_fabric_rename_and_json_rewrite():
     from weaver.report_definition import encode_report, verify_report
 
     desired = encode_report(as_authored_report())
-    verify_report(
-        desired, fabric_copy(desired, fabric_import), report_name="Executive_Dev"
-    )
+    assert verify_report(desired, fabric_copy(desired, fabric_import)) == ()
 
 
 @pytest.mark.parametrize(
@@ -305,14 +371,19 @@ def test_report_readback_compares_json_parts_by_value(rewrite):
     from weaver.report_definition import encode_report, verify_report
 
     desired = encode_report(as_authored_report())
-    verify_report(
-        desired,
-        fabric_copy(
+    assert (
+        verify_report(
             desired,
-            lambda path, content: (
-                content if path == "StaticResources/theme.json" else rewrite(content)
+            fabric_copy(
+                desired,
+                lambda path, content: (
+                    content
+                    if path == "StaticResources/theme.json"
+                    else rewrite(content)
+                ),
             ),
-        ),
+        )
+        == ()
     )
 
 
@@ -326,8 +397,7 @@ def test_report_readback_compares_json_parts_by_value(rewrite):
     ],
 )
 @weaver_test()
-def test_report_readback_names_the_first_differing_part(path, difference):
-    from weaver.errors import InstallError
+def test_report_readback_names_each_native_part_fabric_changed(path, difference):
     from weaver.report_definition import encode_report, verify_report
 
     def edit(part, content):
@@ -339,20 +409,19 @@ def test_report_readback_names_the_first_differing_part(path, difference):
         if part == "StaticResources/theme.json":
             return content.rstrip(b"\r\n")
         if part == ".platform":
-            return content.replace(b"Executive_Dev", b"Other")
+            return content.replace(b'"Report"', b'"Other"')
         return b'{"themeCollection":{"baseTheme":"Edited"}}'
 
     desired = encode_report(as_authored_report())
-    with pytest.raises(InstallError) as raised:
-        verify_report(desired, fabric_copy(desired, edit), report_name="Executive_Dev")
-    assert str(raised.value).endswith(f"{path} {difference}")
+    assert verify_report(desired, fabric_copy(desired, edit)) == (
+        f"{path} {difference}",
+    )
 
 
 @weaver_test()
 def test_report_readback_names_an_extra_part():
     import base64
 
-    from weaver.errors import InstallError
     from weaver.report_definition import encode_report, verify_report
 
     desired = encode_report(as_authored_report())
@@ -364,8 +433,44 @@ def test_report_readback_names_an_extra_part():
             "payload": base64.b64encode(b"{}").decode(),
         }
     )
-    with pytest.raises(InstallError, match="definition/pages/extra.json extra$"):
-        verify_report(desired, observed)
+    assert verify_report(desired, observed) == ("definition/pages/extra.json extra",)
+
+
+@weaver_test()
+def test_report_readback_reports_a_service_format_upgrade():
+    import base64
+
+    from weaver.report_definition import encode_report, verify_report
+
+    legacy = ReportContribution(
+        "PowerBI/Sales/Executive.Report",
+        None,
+        {
+            "definition.pbir": b'{"version": "4.0", "datasetReference": {}}',
+            "report.json": b'{"sections": []}',
+        },
+    )
+    desired = encode_report(legacy)
+    upgraded = {
+        "format": "PBIR",
+        "parts": [
+            {
+                "path": path,
+                "payloadType": "InlineBase64",
+                "payload": base64.b64encode(content).decode(),
+            }
+            for path, content in (
+                ("definition.pbir", b'{"version": "4.0", "datasetReference": {}}'),
+                ("definition/report.json", b"{}"),
+                ("definition/version.json", b'{"version": "2.0.0"}'),
+            )
+        ],
+    }
+    assert verify_report(desired, upgraded) == (
+        "definition/report.json extra",
+        "definition/version.json extra",
+        "report.json missing",
+    )
 
 
 def fabric_layout(content):
@@ -422,4 +527,4 @@ def test_as_authored_report_verifies_under_a_different_physical_name():
             props["metadata"]["displayName"] = "Executive_Dev"
             props["config"]["logicalId"] = "00000000-0000-0000-0000-000000000000"
             part["payload"] = base64.b64encode(json.dumps(props).encode()).decode()
-    verify_report(desired, observed, report_name="Executive_Dev")
+    assert verify_report(desired, observed) == ()

@@ -111,3 +111,26 @@ class ActionExecutor(Protocol):
         payload: bytes | None,
         context: InstallationContext,
     ) -> dict[str, Any] | SkippedExecution | None: ...
+
+
+def read_back(item, read, what="definition"):
+    """What Fabric returns for a deployed item, or a failure leaving it uncertified."""
+
+    from ...errors import ConfigError
+    from ...fabric.client import FabricError
+
+    try:
+        return read()
+    except (FabricError, ConfigError, KeyError) as exc:
+        raise InstallError(
+            f"{item} was deployed, but Fabric did not return its {what} to "
+            f"confirm it: {exc}. Build {item} again to certify it."
+        ) from exc
+
+
+def readback_details(details, differences):
+    """Action details naming the differences Build accepted from Fabric."""
+
+    if differences:
+        details["readback_differences"] = list(differences)
+    return details

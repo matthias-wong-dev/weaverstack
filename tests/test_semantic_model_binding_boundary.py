@@ -329,3 +329,54 @@ def test_build_says_what_it_bound_and_what_it_could_not_check():
         "that path. Create a connection for it in Fabric before refreshing.",
         "SemanticModel/Reporting measures were not checked: 401 Unauthorized",
     ]
+
+
+@weaver_test()
+def test_build_warns_once_per_item_about_what_fabric_rewrote():
+    from weaver.build_bundle.report import ActionResult
+    from weaver.operations.build import _present_semantic_outcomes
+
+    readback = ActionResult(
+        action_id="report_readback-Executive",
+        resource_node_id="Report/Executive/artifact:Definition/Executive.Report",
+        target_id="Executive",
+        executor="report_readback",
+        status="succeeded",
+        details={
+            "readback_differences": [
+                "definition/report.json changed",
+                "definition/pages/extra.json extra",
+                ".platform changed",
+                "StaticResources/theme.json missing",
+            ]
+        },
+    )
+    seen = SimpleNamespace(reported=[], warned=[])
+    session = SimpleNamespace(report=seen.reported.extend, warn=seen.warned.append)
+    _present_semantic_outcomes(
+        SimpleNamespace(action_results=lambda: [readback]), session
+    )
+    assert seen.warned == [
+        "Report/Executive: Fabric's copy differs from what Build deployed at "
+        "definition/report.json changed, definition/pages/extra.json extra, "
+        ".platform changed and 1 more. Fabric accepted the deployment, so Build "
+        "trusted it."
+    ]
+    assert not seen.reported
+
+
+@weaver_test()
+def test_a_readback_fabric_does_not_return_leaves_the_item_uncertified():
+    from weaver.build_bundle.executors.base import read_back
+    from weaver.errors import InstallError
+
+    def unavailable():
+        raise FabricError("getDefinition returned 500")
+
+    with pytest.raises(InstallError) as raised:
+        read_back("Report/Executive", unavailable)
+    assert str(raised.value) == (
+        "Report/Executive was deployed, but Fabric did not return its definition "
+        "to confirm it: getDefinition returned 500. Build Report/Executive again "
+        "to certify it."
+    )

@@ -281,9 +281,19 @@ def _item_bindings(items, workspace: Workspace, *, repository=None):
 
 
 def _present_semantic_outcomes(report, session) -> None:
-    """Say what deployment bound and which checks could not run."""
+    """Say what deployment bound, which checks could not run and what Fabric rewrote."""
 
     for action in report.action_results():
+        differences = (action.details or {}).get("readback_differences")
+        if differences:
+            item = "/".join(action.resource_node_id.split("/")[:2])
+            shown = ", ".join(differences[:3])
+            more = len(differences) - 3
+            session.warn(
+                f"{item}: Fabric's copy differs from what Build deployed at {shown}"
+                + (f" and {more} more" if more > 0 else "")
+                + ". Fabric accepted the deployment, so Build trusted it."
+            )
         details = action.details if action.executor == "semantic_model" else None
         if not details:
             continue
