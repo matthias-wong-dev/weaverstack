@@ -59,6 +59,10 @@ class LivySessionEnded(LivyRefused):
     """Fabric refused a request because it has ended the session."""
 
 
+#: Livy session states from which a session never accepts another statement.
+_ENDED_STATES = frozenset({"dead", "error", "killed", "success", "shutting_down"})
+
+
 class LivyOutcomeUnknown(LivyError, OutcomeUnknown):
     """A statement may have run, and how it ended is unknown."""
 
@@ -284,7 +288,7 @@ def _answered(method: str, url: str, response) -> LivyError:
 
     status = response.status_code
     message = f"{method} {url} returned {status}: {_response_message(response)}"
-    if status == 404 or (status == 400 and "terminal state" in message):
+    if status == 404:
         return LivySessionEnded(message)
     if 400 <= status < 500:
         return LivyRefused(message)
@@ -482,13 +486,33 @@ class LivySession:
             raise LivyError("The Livy session has not been started.")
         try:
             statement_url = self._submit(url, code, retry_submission=retry_submission)
-        except LivySessionEnded:
+        except LivyRefused:
+            if not self._ended(url):
+                raise
             self._replace(url)
             url = self.session_url
             if url is None:
                 raise LivyError("The Livy session was closed.") from None
-            statement_url = self._submit(url, code, retry_submission=retry_submission)
+            try:
+                statement_url = self._submit(
+                    url, code, retry_submission=retry_submission
+                )
+            except LivyRefused as exc:
+                if self._ended(url):
+                    raise LivySessionEnded(str(exc)) from exc
+                raise
         return self._follow(statement_url, timeout=timeout)
+
+    def _ended(self, url: str) -> bool:
+        """Whether Fabric has ended a session, read from its state."""
+
+        try:
+            state = _call("GET", url, self.token, expected=(200,))
+        except LivySessionEnded:
+            return True
+        except LivyError:
+            return False
+        return (state.get("state") or "").lower() in _ENDED_STATES
 
     def _run_on(
         self, url: str, code: str, *, timeout: float = DEFAULT_STATEMENT_TIMEOUT
