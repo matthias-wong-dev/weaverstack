@@ -322,7 +322,7 @@ class _Planner:
             known = ", ".join(sorted({node.load_key for node in available}))
             raise LoadError(
                 f"no installed loadable object in the requested items matches "
-                f"{text!r}. Installed: {known or 'none'}"
+                f"'{text}'. Installed: {known or 'none'}"
             )
         return matched
 

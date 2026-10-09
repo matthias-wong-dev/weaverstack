@@ -224,7 +224,7 @@ class ValidationEstate:
             candidates,
             name=lambda validation: validation.qualified,
             unmatched=lambda text: ValidationError(
-                f"no installed validation in the requested items matches {text!r}. "
+                f"no installed validation in the requested items matches '{text}'. "
                 f"Installed: {known}"
             ),
         )

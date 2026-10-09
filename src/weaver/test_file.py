@@ -92,7 +92,7 @@ def file_validations(files: Sequence[str], *, project, items: Sequence[WeaverIte
         if glob.has_magic(value):
             paths = sorted(Path(each) for each in glob.glob(value, recursive=True))
             if not paths:
-                raise CommandError(f"no file matches {value!r}")
+                raise CommandError(f"no file matches '{value}'")
         else:
             paths = [Path(value)]
             if not paths[0].exists():

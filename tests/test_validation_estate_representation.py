@@ -466,3 +466,13 @@ def test_two_items_sharing_one_target_do_not_select_each_others_validations():
 
     # Both installed in one Warehouse, and each request answers for its own item.
     assert len(estate.for_items([WAREHOUSE, other])) == 2
+
+
+@weaver_test()
+def test_a_pattern_that_selects_nothing_is_quoted_as_written(catalogue):
+    rows, _lake, _house = catalogue
+    estate = ValidationEstate.from_catalogue(rows)
+
+    with pytest.raises(ValidationError) as raised:
+        estate.matching([r"Sales\.Absent.*"], [LAKEHOUSE])
+    assert r"matches 'Sales\.Absent.*'" in str(raised.value)

@@ -248,7 +248,7 @@ def _named(validations, names: Sequence[str]):
         validations,
         name=lambda validation: validation.qualified,
         unmatched=lambda text: CommandError(
-            f"no validation to run matches {text!r}. Validations: {known}"
+            f"no validation to run matches '{text}'. Validations: {known}"
         ),
     )
 

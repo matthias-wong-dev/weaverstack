@@ -28,7 +28,7 @@ def name_patterns(
         try:
             found.append((text, re.compile(text, re.IGNORECASE)))
         except re.error as exc:
-            raise error(f"{text!r} is not a valid regular expression: {exc}") from None
+            raise error(f"'{text}' is not a valid regular expression: {exc}") from None
     return tuple(found)
 
 
