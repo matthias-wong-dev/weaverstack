@@ -312,6 +312,24 @@ def test_fabric_store_copies_and_moves_within_onelake():
 
 
 @weaver_test()
+def test_fabric_store_copies_one_file_to_the_driver_without_its_sidecar(tmp_path):
+    remote = "abfss://workspace-id@onelake.dfs.fabric.microsoft.com/lakehouse/Files/a"
+
+    class FileFs:
+        def cp(self, source, destination, recurse):
+            assert (source, recurse) == (remote, False)
+            local = Path(destination.removeprefix("file:"))
+            local.write_bytes(b"content")
+            (local.parent / f".{local.name}.crc").write_bytes(b"generated")
+            return True
+
+    FabricStore(FileFs()).copy_file_to_local(Location(remote), tmp_path / "a")
+
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["a"]
+    assert (tmp_path / "a").read_bytes() == b"content"
+
+
+@weaver_test()
 def test_fabric_store_reports_a_refused_copy_or_move():
     root = "abfss://workspace-id@onelake.dfs.fabric.microsoft.com/lakehouse/Files"
 

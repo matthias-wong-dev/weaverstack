@@ -178,6 +178,13 @@ class FilesystemStore:
                 f"Cannot move {source.value} to {destination.value}: {exc}"
             ) from exc
 
+    def copy_file_to_local(self, source: Location, destination: Path) -> None:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            shutil.copyfile(self._local(source), destination)
+        except OSError as exc:
+            raise StoreError(f"Cannot read {source.value}: {exc}") from exc
+
     def copy_to_local(self, source: Location, destination: Path) -> None:
         source_path = self._local(source)
         destination.parent.mkdir(parents=True, exist_ok=True)
