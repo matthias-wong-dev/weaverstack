@@ -204,3 +204,40 @@ def test_switch_refuses_measure_context_dependent_dynamic_format(tmp_path):
                 format_definition='IF(SELECTEDMEASURE() > 1, "0.0", "0")',
             )
         )
+
+
+@pytest.mark.parametrize("policy", [False, True])
+@weaver_test()
+def test_switch_names_every_measure_table_and_where_it_is_declared(tmp_path, policy):
+    import re
+
+    from support.semantic_models import policy_path
+
+    root = switch_model(tmp_path, ["Sales[Revenue]"])
+    model = root / str(ITEM) / f"{ITEM.item_name}.tmdl"
+    if policy:
+        policy_path(root).write_text(
+            "table Measures\n\tannotation Weaver.MeasureTable = true\n",
+            encoding="utf-8",
+        )
+        found = (
+            "Measures (PowerBI/policy.tmdl:2), "
+            "Metric (SemanticModel/Reporting/Reporting.tmdl:6). Keep "
+            "Weaver.MeasureTable on one table"
+        )
+    else:
+        model.write_text(
+            model.read_text().replace("\tannotation Weaver.MeasureTable = true\n", "")
+        )
+        found = "none. Add Weaver.MeasureTable = true to one table"
+    with pytest.raises(
+        ConfigError,
+        match="^"
+        + re.escape(
+            f"SemanticModel/Reporting/Reporting.tmdl:{8 if policy else 7}: "
+            "Weaver.Switch: requires one "
+            f"Weaver.MeasureTable selector; found {found}"
+        )
+        + "$",
+    ):
+        compile_source(root)

@@ -376,6 +376,12 @@ class _Compilation:
     def located(self, document, node):
         return declared_at(self.contribution.sources, self.provenance, document, node)
 
+    def declared(self, path):
+        """Where the object at `path` is declared, or None when it is not."""
+
+        found = self.editor.locations(path)
+        return self.located(*found[0]) if found else None
+
     def removed(self, path):
         """Forget a removed object and expect its absence on readback."""
 

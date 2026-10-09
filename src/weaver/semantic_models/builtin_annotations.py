@@ -200,7 +200,20 @@ class Weaver__Switch(Annotation):
             if "Weaver.MeasureTable" in [a.name for a in table.annotations]:
                 selectors.append(table.name)
         if len(selectors) != 1:
-            self.error("requires one Weaver.MeasureTable selector")
+            if not selectors:
+                self.error(
+                    "requires one Weaver.MeasureTable selector; found none. Add "
+                    "Weaver.MeasureTable = true to one table"
+                )
+            found = ", ".join(
+                f"{name} ({self._compilation.declared(path)})"
+                for name in selectors
+                for path in [(("table", name), ("annotation", "Weaver.MeasureTable"))]
+            )
+            self.error(
+                f"requires one Weaver.MeasureTable selector; found {found}. Keep "
+                "Weaver.MeasureTable on one table"
+            )
         references = [line.strip() for line in self._text.splitlines() if line.strip()]
         if not references:
             self.error("requires at least one measure reference")
