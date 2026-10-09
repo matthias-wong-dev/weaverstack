@@ -228,6 +228,20 @@ def test_a_malformed_run_item_is_refused(text):
         parse_run_item(text, what="load")
 
 
+@weaver_test()
+def test_a_malformed_run_item_names_every_kind_a_run_accepts():
+    from weaver.errors import CommandError
+    from weaver.operations.items import parse_run_item
+
+    with pytest.raises(CommandError) as refused:
+        parse_run_item("PowerBI", what="load")
+
+    assert str(refused.value) == (
+        "a load item must be Lakehouse/Name, Warehouse/Name or SemanticModel/Name, "
+        "got 'PowerBI'"
+    )
+
+
 @pytest.mark.parametrize("written", [None, [], ()])
 @weaver_test()
 def test_a_run_that_names_no_item_selects_none_here(written):

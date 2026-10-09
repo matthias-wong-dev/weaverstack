@@ -497,7 +497,8 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="*",
         metavar="ITEM",
         help=(
-            "Weaver items to load, as Lakehouse/Name or Warehouse/Name. "
+            "Weaver items to load, as Lakehouse/Name, Warehouse/Name or "
+            "SemanticModel/Name. "
             "Naming none loads every installed item."
         ),
     )
@@ -579,7 +580,8 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="*",
         metavar="ITEM",
         help=(
-            "Weaver items to validate, as Lakehouse/Name or Warehouse/Name. "
+            "Weaver items to validate, as Lakehouse/Name, Warehouse/Name or "
+            "SemanticModel/Name. "
             "Naming none validates every installed item."
         ),
     )
@@ -629,7 +631,8 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         metavar="ITEM",
         help=(
-            "Weaver item to report on, as Lakehouse/Name or Warehouse/Name. "
+            "Weaver item to report on, as Lakehouse/Name, Warehouse/Name or "
+            "SemanticModel/Name. "
             "Repeat to select more than one. Naming none reports on the whole "
             "installed estate."
         ),

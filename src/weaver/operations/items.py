@@ -7,6 +7,7 @@ from typing import Sequence
 from ..declaration.model import (
     LAKEHOUSE,
     REPORT,
+    SEMANTIC_MODEL,
     WAREHOUSE,
     WeaverItemId,
 )
@@ -28,7 +29,7 @@ def requested_items(
 
 
 def parse_run_item(text: object, *, what: str) -> WeaverItemId:
-    """Parse ``Lakehouse/Name`` or ``Warehouse/Name``.
+    """Parse ``Lakehouse/Name``, ``Warehouse/Name`` or ``SemanticModel/Name``.
 
     A value carrying ``=`` is the build grammar, refused by name so the message
     says where the physical target actually comes from.
@@ -47,7 +48,8 @@ def parse_run_item(text: object, *, what: str) -> WeaverItemId:
         return WeaverItemId.parse(written)
     except IdentityError:
         raise CommandError(
-            f"a {what} item must be {LAKEHOUSE}/Name or {WAREHOUSE}/Name, got {text!r}"
+            f"a {what} item must be {LAKEHOUSE}/Name, {WAREHOUSE}/Name or "
+            f"{SEMANTIC_MODEL}/Name, got {text!r}"
         ) from None
 
 
