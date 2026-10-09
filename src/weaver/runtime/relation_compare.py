@@ -27,7 +27,7 @@ from .test_compare import (
 
 @dataclass(frozen=True)
 class Relation:
-    """Named columns and positional rows. A side with no rows may name none."""
+    """Named columns and positional rows; absent columns carry no schema."""
 
     columns: tuple[str, ...]
     rows: tuple[tuple[Any, ...], ...]
@@ -53,11 +53,14 @@ def compare_rows(
 
     key = tuple(primary_key)
     _check_reserved_columns(expected, actual, what=what)
-    # Transport names no columns for an empty result, which then has no shape
-    # to disagree with.
-    if expected.rows and actual.rows:
-        _check_shape(expected, actual, key=key, what=what)
-    columns = expected.columns or actual.columns
+    for relation, side in ((expected, EXPECTED), (actual, ACTUAL)):
+        if not relation.columns:
+            raise ValidationError(
+                f"{what}: the {side} result has no column metadata. The Test "
+                "cannot validate its shape or Primary key."
+            )
+    _check_shape(expected, actual, key=key, what=what)
+    columns = expected.columns
     for relation, side in ((expected, EXPECTED), (actual, ACTUAL)):
         if relation.rows:
             _check_key(relation, side=side, key=key, what=what)

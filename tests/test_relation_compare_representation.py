@@ -114,14 +114,58 @@ def test_transport_forms_of_one_value_are_equal():
     assert len(compare_rows(expected, text)) == 2
 
 
+@pytest.mark.parametrize("key", [(), ("Month",)])
+@pytest.mark.parametrize("unknown_side", ["expected", "actual", "both"])
 @weaver_test()
-def test_an_empty_side_names_no_columns():
-    empty = Relation((), ())
-    assert sides(compare_rows(EXPECTED, empty, primary_key=("Month",))) == [
-        ("expected", 1, 1),
-        ("expected", 2, 2),
+def test_empty_transport_results_without_schema_are_refused(key, unknown_side):
+    unknown = Relation((), ())
+    expected = unknown if unknown_side in {"expected", "both"} else EXPECTED
+    actual = unknown if unknown_side in {"actual", "both"} else EXPECTED
+    with pytest.raises(ValidationError, match="no column metadata"):
+        compare_rows(expected, actual, primary_key=key, what="RevenueReconciles")
+
+
+@pytest.mark.parametrize("key", [(), ("Month",)])
+@weaver_test()
+def test_known_compatible_empty_relations_compare_equal(key):
+    empty = Relation(COLUMNS, ())
+    assert compare_rows(empty, empty, primary_key=key) == []
+
+
+@pytest.mark.parametrize("populated_side", ["expected", "actual"])
+@weaver_test()
+def test_one_known_empty_relation_keeps_discrepancy_pairing(populated_side):
+    empty = Relation(COLUMNS, ())
+    expected, actual = (
+        (EXPECTED, empty) if populated_side == "expected" else (empty, EXPECTED)
+    )
+    assert sides(compare_rows(expected, actual, primary_key=("Month",))) == [
+        (populated_side, 1, 1),
+        (populated_side, 2, 2),
     ]
-    assert compare_rows(empty, empty) == []
+
+
+@pytest.mark.parametrize("populated_side", ["expected", "actual", "neither"])
+@pytest.mark.parametrize(
+    "actual_columns, key, message",
+    [
+        (("Month",), (), "expected has 2 column"),
+        (("Revenue", "Month"), (), "same columns in a different order"),
+        (COLUMNS, ("Year",), "which expected does not return"),
+        (("Year", "Revenue"), ("Month",), "which actual does not return"),
+    ],
+)
+@weaver_test()
+def test_empty_relations_obey_shared_shape_and_key_guards(
+    populated_side, actual_columns, key, message
+):
+    expected = Relation(COLUMNS, ((1, 10),) if populated_side == "expected" else ())
+    actual = Relation(
+        actual_columns,
+        (tuple(range(len(actual_columns))),) if populated_side == "actual" else (),
+    )
+    with pytest.raises(ValidationError, match=message):
+        compare_rows(expected, actual, primary_key=key)
 
 
 @pytest.mark.parametrize(

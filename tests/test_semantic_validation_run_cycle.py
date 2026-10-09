@@ -33,8 +33,34 @@ def definitions(catalogue):
     }
 
 
-def run(tmp_path, monkeypatch, *, test_rows, assumption_rows, expected_rows, name=None):
+def run(
+    tmp_path,
+    monkeypatch,
+    *,
+    test_rows,
+    assumption_rows,
+    expected_rows,
+    name=None,
+    primary_key=None,
+):
     catalogue = installed(tmp_path, monkeypatch)
+    if primary_key is not None:
+        from weaver.catalogue.state import Catalogue
+
+        catalogue = Catalogue(
+            {
+                **catalogue.rows,
+                ITEM: {
+                    **catalogue.rows[ITEM],
+                    "TestDictionary": tuple(
+                        {**row, "primary_key": ", ".join(primary_key) or None}
+                        if row["object_name"] == "RevenueReconciles"
+                        else row
+                        for row in catalogue.rows[ITEM]["TestDictionary"]
+                    ),
+                },
+            }
+        )
     found = definitions(catalogue)
     with source_session() as session:
         client = QueryClient(
@@ -162,6 +188,30 @@ def test_reserved_columns_on_one_populated_side_record_error(
     (node,) = report.nodes
     assert not node.succeeded
     assert "reserved for diagnostics" in node.result.error_message
+
+
+@pytest.mark.parametrize("primary_key", [(), ("Month",)])
+@pytest.mark.parametrize("empty_side", ["expected", "actual", "both"])
+@weaver_test()
+def test_empty_results_without_schema_record_error(
+    tmp_path, monkeypatch, primary_key, empty_side
+):
+    report, session, _ = run(
+        tmp_path,
+        monkeypatch,
+        test_rows=[] if empty_side in {"actual", "both"} else MATCHING,
+        assumption_rows=[],
+        expected_rows=[] if empty_side in {"expected", "both"} else EXPECTED,
+        name="Sales.RevenueReconciles",
+        primary_key=primary_key,
+    )
+    assert statuses(session) == {"RevenueReconciles": "Error"}
+    (node,) = report.nodes
+    assert not node.succeeded
+    assert "no column metadata" in node.result.error_message
+    assert "RevenueReconciles" in node.result.error_message
+    assert not node.diagnostics
+    assert not session.spark_sql and not session.python
 
 
 @weaver_test()
