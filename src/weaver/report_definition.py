@@ -151,32 +151,30 @@ def verify_report(
                 or identifiers[0].casefold() != binding["item_id"].casefold()
             ):
                 raise InstallError("Report binding does not match the deployed model")
-            if ".platform" in expected and ".platform" in actual:
-                expected_platform = json.loads(
-                    expected.pop(".platform").decode("utf-8-sig")
-                )
-                actual_platform = json.loads(
-                    actual.pop(".platform").decode("utf-8-sig")
-                )
+        if ".platform" in expected and ".platform" in actual:
+            expected_platform = json.loads(
+                expected.pop(".platform").decode("utf-8-sig")
+            )
+            actual_platform = json.loads(actual.pop(".platform").decode("utf-8-sig"))
+            if expected_platform != actual_platform:
+                if actual_platform["metadata"]["displayName"] != report_name:
+                    raise InstallError(
+                        "Report platform metadata does not match its target"
+                    )
+                actual_platform["metadata"]["displayName"] = expected_platform[
+                    "metadata"
+                ]["displayName"]
+                if (
+                    actual_platform["config"]["logicalId"]
+                    == "00000000-0000-0000-0000-000000000000"
+                ):
+                    actual_platform["config"]["logicalId"] = expected_platform[
+                        "config"
+                    ]["logicalId"]
                 if expected_platform != actual_platform:
-                    if actual_platform["metadata"]["displayName"] != report_name:
-                        raise InstallError(
-                            "Report platform metadata does not match its bound target"
-                        )
-                    actual_platform["metadata"]["displayName"] = expected_platform[
-                        "metadata"
-                    ]["displayName"]
-                    if (
-                        actual_platform["config"]["logicalId"]
-                        == "00000000-0000-0000-0000-000000000000"
-                    ):
-                        actual_platform["config"]["logicalId"] = expected_platform[
-                            "config"
-                        ]["logicalId"]
-                    if expected_platform != actual_platform:
-                        raise InstallError(
-                            "Report platform metadata differs from deployed native parts"
-                        )
+                    raise InstallError(
+                        "Report platform metadata differs from deployed native parts"
+                    )
     except (KeyError, ValueError, TypeError, AttributeError) as exc:
         raise InstallError(f"Report binding readback is invalid: {exc}") from exc
     if expected_properties != actual_properties or expected != actual:

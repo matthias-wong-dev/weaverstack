@@ -232,3 +232,33 @@ def test_service_normalization_keeps_binding_and_native_content_guards(change):
             service_binding=identity,
             report_name="Executive_Dev",
         )
+
+
+@weaver_test()
+def test_as_authored_report_verifies_under_a_different_physical_name():
+    import base64
+
+    from weaver.report_definition import encode_report, verify_report
+
+    authored = replace(
+        contribution(),
+        model=None,
+        parts={
+            **contribution().parts,
+            ".platform": json.dumps(
+                {
+                    "metadata": {"type": "Report", "displayName": "Executive"},
+                    "config": {"version": "2.0", "logicalId": MODEL},
+                }
+            ).encode(),
+        },
+    )
+    desired = encode_report(authored)
+    observed = json.loads(json.dumps(desired))
+    for part in observed["parts"]:
+        if part["path"] == ".platform":
+            props = json.loads(base64.b64decode(part["payload"]))
+            props["metadata"]["displayName"] = "Executive_Dev"
+            props["config"]["logicalId"] = "00000000-0000-0000-0000-000000000000"
+            part["payload"] = base64.b64encode(json.dumps(props).encode()).decode()
+    verify_report(desired, observed, report_name="Executive_Dev")
