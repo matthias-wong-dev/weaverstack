@@ -24,9 +24,8 @@ class LAND__SourceEvents(Folder):
     def read(self):
         # The whole drop each time: the shortcut is the whole truth, so a file
         # that has gone from it goes from the copy too.
-        source = Source__Events(self).path()
         with self.staging_folder() as staging:
-            for path in sorted(source.glob("*.json")):
+            for path in Source__Events(self).current_files("*.json"):
                 shutil.copyfile(path, staging.path / path.name)
 
         return staging, []
