@@ -177,18 +177,20 @@ class SemanticModelClient:
                 return {**body, "request_id": request_id}
             if status not in {"Unknown", "NotStarted", "InProgress"}:
                 messages = "; ".join(_refresh_errors(body))
+                # Fabric's message stays whole; a hint is only appended. Known
+                # unreached paths need no reading of the message.
                 hint = ""
-                if any(
-                    word in messages.casefold()
-                    for word in ("connection", "gateway", "credential", "not bound")
-                ):
+                if unreached:
                     hint = (
                         " No connection has the path "
                         + ", ".join(unreached)
                         + ". Create a connection for it in Fabric, then load again."
-                        if unreached
-                        else " Check the model's data connection in Fabric settings; the connection owner can grant access or update credentials."
                     )
+                elif any(
+                    word in messages.casefold()
+                    for word in ("connection", "gateway", "credential", "not bound")
+                ):
+                    hint = " Check the model's data connection in Fabric settings; the connection owner can grant access or update credentials."
                 raise SemanticRefreshError(
                     f"Semantic model refresh {request_id} ended with status {status!r}"
                     + (f": {messages}" if messages else "")
@@ -300,7 +302,8 @@ class SemanticModelClient:
         """Measures the deployed model cannot evaluate, as (table, measure, reason).
 
         Fabric accepts a definition whose measures reference missing objects and
-        marks them in `INFO.VIEW.MEASURES()`. Evaluating one returns the reason.
+        marks them in `INFO.VIEW.MEASURES()`. Evaluating one confirms it and
+        returns the reason.
         """
 
         rows = self.query_dax(
@@ -311,14 +314,15 @@ class SemanticModelClient:
         invalid = []
         for row in rows:
             table, measure = str(row.get("[Table]")), str(row.get("[Measure]"))
-            reason = str(row.get("[State]"))
+            # The state only nominates a measure; failing to evaluate confirms it.
             try:
                 self.query_dax(
                     f'EVALUATE ROW("Value", {_dax_table(table)}[{_dax_member(measure)}])'
                 )
             except FabricError as exc:
-                reason = _dax_reason(str(exc)) or reason
-            invalid.append((table, measure, reason))
+                invalid.append(
+                    (table, measure, _dax_reason(str(exc)) or str(row.get("[State]")))
+                )
         return invalid
 
 

@@ -332,6 +332,52 @@ def test_build_says_what_it_bound_and_what_it_could_not_check():
 
 
 @weaver_test()
+def test_an_unreached_path_is_named_whatever_fabric_says():
+    from weaver.fabric.semantic_model import SemanticRefreshError
+
+    request_id = "11111111-2222-3333-4444-555555555555"
+    failed = {
+        "status": "Failed",
+        "serviceExceptionJson": json.dumps(
+            {"errorCode": "NewCode", "errorDescription": "Reworded by Fabric."}
+        ),
+    }
+    power_bi = Client(
+        response({}, 202, {"x-ms-request-id": request_id}), response(failed)
+    )
+    model = SemanticModelClient("ws", "model", fabric=Client(), power_bi=power_bi)
+    with pytest.raises(SemanticRefreshError) as raised:
+        model.refresh(timeout=10, unreached=(f"{SERVER};Landing",))
+    message = str(raised.value)
+    assert ": Reworded by Fabric.; (NewCode) No connection" in message
+    assert message.endswith(
+        f"No connection has the path {SERVER};Landing. Create a connection for it "
+        "in Fabric, then load again."
+    )
+
+
+@weaver_test()
+def test_unmatched_refresh_text_keeps_fabric_message_without_a_hint():
+    from weaver.fabric.semantic_model import SemanticRefreshError
+
+    request_id = "11111111-2222-3333-4444-555555555555"
+    failed = {
+        "status": "Failed",
+        "serviceExceptionJson": json.dumps({"errorDescription": "Reworded by Fabric."}),
+    }
+    power_bi = Client(
+        response({}, 202, {"x-ms-request-id": request_id}), response(failed)
+    )
+    model = SemanticModelClient("ws", "model", fabric=Client(), power_bi=power_bi)
+    with pytest.raises(SemanticRefreshError) as raised:
+        model.refresh(timeout=10)
+    assert str(raised.value) == (
+        f"Semantic model refresh {request_id} ended with status 'Failed': "
+        "Reworded by Fabric."
+    )
+
+
+@weaver_test()
 def test_build_warns_once_per_item_about_what_fabric_rewrote():
     from weaver.build_bundle.report import ActionResult
     from weaver.operations.build import _present_semantic_outcomes
