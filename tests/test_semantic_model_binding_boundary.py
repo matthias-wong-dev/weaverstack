@@ -76,6 +76,33 @@ def test_unbound_source_binds_to_the_connection_with_its_path():
 
 
 @weaver_test()
+def test_source_and_connection_types_match_without_regard_to_case():
+    unbound = {**source("Curated"), "datasourceType": "SQL"}
+    reached = connection("dev", f"{SERVER};curated")
+    reached["connectionDetails"]["type"] = "Sql"
+    model, _fabric = scripted([unbound], [reached])
+
+    assert model.bind_data_sources() == DataSourceBinding(bound=(f"{SERVER};Curated",))
+
+
+@weaver_test()
+def test_a_connection_page_token_is_sent_encoded():
+    from weaver.fabric.semantic_model import list_connections
+
+    seen = []
+
+    class Pages:
+        def get_json(self, path):
+            seen.append(path)
+            if path == "connections":
+                return {"value": [{"id": "a"}], "continuationToken": "a+b/c=="}
+            return {"value": [{"id": "b"}]}
+
+    assert [each["id"] for each in list_connections(Pages())] == ["a", "b"]
+    assert seen[1] == "connections?continuationToken=a%2Bb%2Fc%3D%3D"
+
+
+@weaver_test()
 def test_bound_sources_need_no_connection_lookup():
     model, fabric = scripted([source("Curated", bound=True)])
     assert model.bind_data_sources() == DataSourceBinding()

@@ -5,6 +5,7 @@ import hashlib
 import json
 
 from ..errors import CommandError, InstallError
+from ..fabric.semantic_model import is_sql_type
 from .definition import decode_model, decode_parts, encode_parts
 from .deployed import comparable, object_identity, verify_requested
 from .render import empty_parts
@@ -97,7 +98,7 @@ def _preserved_partition(model, connections):
         and connections[0].get("connectivityType") == "Automatic"
         and not connections[0].get("id")
         and not connections[0].get("gatewayId")
-        and connections[0].get("connectionDetails", {}).get("type") == "SQL"
+        and is_sql_type(connections[0].get("connectionDetails", {}).get("type"))
         and partitions
         and not model.get("dataSources")
         and all(
@@ -131,7 +132,7 @@ def _explicit_import(model, partitions, connections):
         len(connections) != 1
         or connections[0].get("connectivityType") != "ShareableCloud"
         or not connections[0].get("id")
-        or connections[0].get("connectionDetails", {}).get("type") != "SQL"
+        or not is_sql_type(connections[0].get("connectionDetails", {}).get("type"))
         or not partitions
         or model.get("dataSources")
         or model.get("expressions")

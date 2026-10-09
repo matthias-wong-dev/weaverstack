@@ -6,6 +6,7 @@ import math
 import re
 import time
 from dataclasses import dataclass
+from urllib.parse import quote
 
 from ..errors import ConfigError, reported_message
 from .client import FabricError
@@ -59,8 +60,16 @@ def list_connections(client) -> list[dict]:
         body = client.get_json(path)
         connections.extend(body.get("value", []))
         token = body.get("continuationToken")
-        path = f"connections?continuationToken={token}" if token else None
+        path = (
+            f"connections?continuationToken={quote(token, safe='')}" if token else None
+        )
     return connections
+
+
+def is_sql_type(kind) -> bool:
+    """Power BI says ``Sql`` and Fabric ``SQL`` for the same source type."""
+
+    return isinstance(kind, str) and kind.casefold() == "sql"
 
 
 class SemanticModelClient:
@@ -221,7 +230,8 @@ class SemanticModelClient:
         unbound = [
             source
             for source in self.data_sources()
-            if source.get("datasourceType") == "Sql" and not source.get("datasourceId")
+            if is_sql_type(source.get("datasourceType"))
+            and not source.get("datasourceId")
         ]
         if not unbound:
             return DataSourceBinding()
@@ -229,7 +239,7 @@ class SemanticModelClient:
             c
             for c in list_connections(self.fabric)
             if c.get("connectivityType") in _BINDABLE
-            and (c.get("connectionDetails") or {}).get("type") == "SQL"
+            and is_sql_type((c.get("connectionDetails") or {}).get("type"))
         ]
         bound, unreached = [], []
         for source in unbound:
