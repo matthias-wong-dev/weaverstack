@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .declaration.model import LAKEHOUSE, WAREHOUSE
+from .declaration.model import LAKEHOUSE, REPORT, SEMANTIC_MODEL, WAREHOUSE
 from .errors import WeaverError
 from .onboarding import (
     WORKSPACE_CONFIG_FILE,
@@ -199,7 +199,13 @@ def initialise(
                     client if client is not None else opened.resolver(addressed).client
                 )
                 state, found, physical, environment_item = _read_the_workspace(
-                    request, client=rest, wanted_items=wanted_items
+                    request,
+                    client=rest,
+                    wanted_items=wanted_items,
+                    example_written=(
+                        request.example_model is not None
+                        and (destination / "PowerBI" / request.example_model).exists()
+                    ),
                 )
 
             with opened.step("Reading the Environment", request.environment):
@@ -508,8 +514,14 @@ def _requested(request: ProjectRequest) -> tuple[_Requested, ...]:
     return tuple(wanted)
 
 
-def _read_the_workspace(request: ProjectRequest, *, client, wanted_items=None):
-    """Read all requested item identities from one workspace listing."""
+def _read_the_workspace(
+    request: ProjectRequest, *, client, wanted_items=None, example_written=False
+):
+    """Read all requested item identities from one workspace listing.
+
+    Build deploys the example's Power BI items over any of the same name, so a
+    new example must not share a name with one the workspace already has.
+    """
 
     from .fabric.resources import (
         FACET_TYPES,
@@ -538,6 +550,14 @@ def _read_the_workspace(request: ProjectRequest, *, client, wanted_items=None):
                 f"{wanted.role}, or use an existing {wanted.item_type}."
             )
         found[wanted.role] = bool(types)
+    name = request.example_model
+    if name is not None and not example_written:
+        if taken := sorted(by_name.get(name, set()) & {SEMANTIC_MODEL, REPORT}):
+            raise InitialiseError(
+                f"'{request.workspace}' already has a {' and a '.join(taken)} "
+                f"named '{name}'. Name the example's Power BI project with "
+                "--semantic-model."
+            )
 
     environment = next(
         (

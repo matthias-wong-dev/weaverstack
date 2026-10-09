@@ -25,6 +25,9 @@ WORKFLOW_NAME = "full"
 
 KEEP_FILE = ".gitkeep"
 
+#: The example's Power BI project when no SemanticModel name is given.
+EXAMPLE_MODEL = "Sales"
+
 
 @dataclass(frozen=True)
 class ProjectRequest:
@@ -73,6 +76,14 @@ class ProjectRequest:
         return f"{WAREHOUSE}/{self.catalogue}"
 
     @property
+    def example_model(self) -> str | None:
+        """The example's Power BI project, which needs a source item to read."""
+
+        if not self.example or not (self.lakehouse or self.warehouse):
+            return None
+        return self.semantic_model or EXAMPLE_MODEL
+
+    @property
     def items(self) -> tuple[str, ...]:
         """The Weaver items this project declares, Lakehouse first."""
 
@@ -83,6 +94,9 @@ class ProjectRequest:
             chosen.append(f"{WAREHOUSE}/{self.warehouse}")
         if self.semantic_model:
             chosen.append(f"{SEMANTIC_MODEL}/{self.semantic_model}")
+        if self.example_model:
+            chosen.append(f"{SEMANTIC_MODEL}/{self.example_model}")
+            chosen.append(f"{REPORT}/{self.example_model}")
         return tuple(dict.fromkeys(chosen + list(self.source_items)))
 
 
@@ -112,6 +126,9 @@ def project_files(request: ProjectRequest) -> dict[str, str]:
         files[f"{LAKEHOUSE}/{request.lakehouse}/Tables/{KEEP_FILE}"] = ""
     if request.warehouse and not request.example:
         files[f"{WAREHOUSE}/{request.warehouse}/{KEEP_FILE}"] = ""
+    if request.example_model:
+        # The example writes its own Power BI project.
+        return files
     if request.semantic_model:
         files[f"PowerBI/{request.semantic_model}/{request.semantic_model}.tmdl"] = (
             semantic_extension()
@@ -139,15 +156,7 @@ def _workspace_config(request: ProjectRequest) -> str:
         "",
         "targets:",
     ]
-    if request.lakehouse:
-        lines.append(f"  {LAKEHOUSE}/{request.lakehouse}: {_scalar(request.lakehouse)}")
-    if request.warehouse:
-        lines.append(f"  {WAREHOUSE}/{request.warehouse}: {_scalar(request.warehouse)}")
-    if request.semantic_model:
-        lines.append(
-            f"  {SEMANTIC_MODEL}/{request.semantic_model}: {_scalar(request.semantic_model)}"
-        )
-    for item in request.source_items:
+    for item in request.items:
         lines.append(f"  {item}: {_scalar(item.partition('/')[2])}")
     return "\n".join(lines) + "\n"
 
@@ -236,9 +245,10 @@ Commands inside the session reuse Fabric connections and the Spark session.
 
 ## Try the example
 
-Choose the Sales example during initialisation to include its source files. Run
-build, load and test together with `weaver workflow full`. To try the example
-later, initialise a new project folder with the example.
+Choose the Sales example during initialisation to include its source files and
+a Power BI project that reads them. Its Report describes how the example works.
+Run build, load and test together with `weaver workflow full`. To try the
+example later, initialise a new project folder with the example.
 
 ## Check connectivity
 

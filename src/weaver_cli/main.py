@@ -66,7 +66,7 @@ Set up a Weaver project and its Fabric items.
 Choose a catalogue Warehouse, Environment, Lakehouse and/or Warehouse.
 Missing items are created.
 
-Optionally add Sales example source files.\
+Optionally add the Sales example, with a Power BI model and Report.\
 """
 
 WIPE_DESCRIPTION = """\
@@ -1120,14 +1120,15 @@ def _add_initialise_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--semantic-model",
         metavar="NAME",
-        help="Add PowerBI/NAME/NAME.tmdl. Build creates the SemanticModel.",
+        help="Add PowerBI/NAME/NAME.tmdl, or name the example's Power BI project. "
+        "Build creates the SemanticModel.",
     )
     parser.add_argument(
         "--example",
         dest="example",
         action="store_true",
         default=None,
-        help="Add Sales example source files.",
+        help="Add the Sales example: source files and a Power BI project that reads them.",
     )
     parser.add_argument(
         "--no-example",
