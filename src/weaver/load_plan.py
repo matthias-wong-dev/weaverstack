@@ -184,6 +184,9 @@ def load_dag(
     continues through the ones it leaves out, so two selected loadables keep the
     order the graph gives them. ``None`` selects every loadable the requested
     items own.
+
+    A semantic model that records no managed source waits for every other node
+    in the plan. One that records sources waits for those alone.
     """
 
     requested = tuple(dict.fromkeys(items))
@@ -225,6 +228,7 @@ class _Planner:
             visited: set[str] = set()
             for node in seeds:
                 self._select(node, visited, allowed_items=allowed_items)
+            self._order_untraced_models_last()
         dag = LoadDag(
             nodes=tuple(sorted(self.nodes.values(), key=lambda node: node.sort_key)),
             edges=tuple(sorted(self.edges)),
@@ -235,6 +239,27 @@ class _Planner:
         # to whoever consumes the graph.
         dag.order()
         return dag
+
+    def _order_untraced_models_last(self) -> None:
+        """Make each untraced semantic model wait for every other load node.
+
+        Nothing loads from a semantic model, so these edges cannot form a cycle.
+        """
+
+        models = {
+            node_id: node
+            for node_id, node in self.nodes.items()
+            if node.primitive_kind == SEMANTIC_REFRESH
+        }
+        untraced = [
+            node_id
+            for node_id, node in models.items()
+            if self.dag.is_untraced_model(self.dag.node(node.logical_id))
+        ]
+        others = [node_id for node_id in self.nodes if node_id not in models]
+        self.edges.update(
+            (upstream, model) for model in untraced for upstream in others
+        )
 
     def _seeds(
         self,

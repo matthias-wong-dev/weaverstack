@@ -172,7 +172,8 @@ expressions with no mapping remain unchanged.
 Observable shared-expression navigation publishes exact managed Table/View
 and consuming-table dependencies for installed Load ordering. Unknown M
 navigation remains unknown; Build warns about each table that reads data through
-it without a `Weaver.Source`. Source mapping preserves authored columns,
+it without a `Weaver.Source`. A model with no recorded source refreshes after
+every other load in the same `weaver load`. Source mapping preserves authored columns,
 descriptions, partitions and storage modes.
 
 ### Weaver annotations

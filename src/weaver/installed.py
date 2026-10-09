@@ -326,6 +326,15 @@ class InstalledDag:
     def reads(self, node) -> tuple[InstalledEdge, ...]:
         return self._reads.get(str(node), ())
 
+    def is_untraced_model(self, node: InstalledNode) -> bool:
+        """Whether a semantic model records no read of a managed object.
+
+        Such a model may read anything, so Load orders it after the rest of
+        the plan.
+        """
+
+        return node.artefact_kind == SEMANTIC_REFRESH and not self.reads(node.identity)
+
     def node(self, identity) -> InstalledNode:
         node = self.by_id.get(str(identity))
         if node is None:
