@@ -429,7 +429,7 @@ def test_json_stdout_is_json_and_nothing_else(captured, capsys):
 
     payload = json.loads(capsys.readouterr().out)
 
-    assert payload["format_version"] == 2
+    assert payload["format_version"] == 3
     assert payload["status"] == RED
     assert payload["sections"]["tests"]["status"] == RED
     assert payload["sections"]["load"]["status"] == GREEN
@@ -510,7 +510,6 @@ def _estate() -> "object":
             WeaverItemId.parse(UNSELECTED): _rows(UNSELECTED, "Inventory_WH"),
         },
         load_history=LoadHistory(
-            workflow_ids=("workflow-1",),
             statistics=(
                 _statistic(SELECTED, 1200),
                 _statistic(UNSELECTED, 98000),

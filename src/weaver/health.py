@@ -103,10 +103,10 @@ VIEW_OBJECT_TYPE = "view"
 #: The validation outcomes that make a subject Red.
 _TEST_RED = (FAILED, ERROR, BLOCKED)
 
-#: The format version of :meth:`HealthReport.to_mapping`. Version 2 replaced
-#: ``latest_load``, one workflow read from ``_.Log``, with ``current_load``,
-#: the workflows behind current ``_.LoadStatus`` state.
-FORMAT_VERSION = 2
+#: The format version of :meth:`HealthReport.to_mapping`. Version 3 summarises
+#: ``current_load`` over the Load section's subjects, so a View a build records
+#: is not counted as loaded.
+FORMAT_VERSION = 3
 
 
 def worst(severities) -> str:
@@ -223,31 +223,9 @@ def _effective_history(local, *, source, statuses, mirrored):
         if _row_identity(row) in mirrored
     )
     if not statuses and not rows:
-        # Bootstrap on both sides. Nothing has settled a load, and a report
-        # carries no window at all.
+        # Bootstrap on both sides. Nothing has settled a load.
         return None
-    counts: dict[str, int] = {}
-    for status in statuses.values():
-        counts[status.result] = counts.get(status.result, 0) + 1
-    started = [status.started_at for status in statuses.values() if status.started_at]
-    completed = [
-        status.completed_at for status in statuses.values() if status.completed_at
-    ]
-    return LoadHistory(
-        workflow_ids=tuple(
-            sorted(
-                {
-                    status.workflow_id
-                    for status in statuses.values()
-                    if status.workflow_id
-                }
-            )
-        ),
-        started_at=min(started) if started else None,
-        completed_at=max(completed) if completed else None,
-        counts=MappingProxyType(counts),
-        statistics=tuple(rows),
-    )
+    return LoadHistory(statistics=tuple(rows))
 
 
 def _row_identity(
@@ -375,8 +353,8 @@ class LoadActivity:
 class CurrentLoad:
     """What the estate's current load state is, and when it was reached.
 
-    All of it summarises ``_.LoadStatus``, so it covers every current object
-    including the ones no statistic describes. ``counts`` are those objects'
+    All of it summarises ``_.LoadStatus`` for the objects the Load section
+    assesses, including the ones no statistic describes. ``counts`` are those objects'
     results. ``workflow_ids`` are the workflows the state came from, sorted:
     a partial load leaves the objects it did not touch explained by the load
     that last did, so current state spans as many workflows as it took.
@@ -462,14 +440,22 @@ class HealthReport:
         }
 
 
-def current_load(history) -> CurrentLoad | None:
-    if history is None:
+def current_load(statuses, subjects) -> CurrentLoad | None:
+    """The current load state of ``subjects``, from their ``_.LoadStatus``."""
+
+    chosen = [statuses[node.identity] for node in subjects if node.identity in statuses]
+    if not chosen:
         return None
+    counts: dict[str, int] = {}
+    for status in chosen:
+        counts[status.result] = counts.get(status.result, 0) + 1
+    started = [_aware(s.started_at) for s in chosen if s.started_at]
+    completed = [_aware(s.completed_at) for s in chosen if s.completed_at]
     return CurrentLoad(
-        workflow_ids=tuple(history.workflow_ids),
-        started_at=_aware(history.started_at),
-        completed_at=_aware(history.completed_at),
-        counts=MappingProxyType(dict(history.counts)),
+        workflow_ids=tuple(sorted({s.workflow_id for s in chosen if s.workflow_id})),
+        started_at=min(started) if started else None,
+        completed_at=max(completed) if completed else None,
+        counts=MappingProxyType(counts),
     )
 
 
@@ -903,7 +889,7 @@ def assess(
         tests=evaluation.tests(),
         build=evaluation.build(),
         targets=tuple(str(target) for target in (selected or dag.targets)),
-        current_load=current_load(history),
+        current_load=current_load(effective.statuses, evaluation.load_subjects()),
         load_activity=load_activity(
             history, targets=dag.installations, items=items or None
         ),
@@ -945,12 +931,13 @@ class _Assessment:
 
     # --- load -----------------------------------------------------------------
 
+    def load_subjects(self) -> tuple[InstalledNode, ...]:
+        return self._subjects(
+            tuple(node for node in self.dag.nodes if is_load_subject(node))
+        )
+
     def load(self) -> HealthSection:
-        return self.load_health.assess(
-            self._subjects(
-                tuple(node for node in self.dag.nodes if is_load_subject(node))
-            )
-        ).to_health_section()
+        return self.load_health.assess(self.load_subjects()).to_health_section()
 
     # --- tests ----------------------------------------------------------------
 

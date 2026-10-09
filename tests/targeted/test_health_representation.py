@@ -1062,10 +1062,6 @@ def test_the_mapping_is_json_safe():
         .validation(f"{RAW}/Sales.Integrity", result="failed", ran=at(1))
         .report(
             load_history=LoadHistory(
-                workflow_ids=("workflow-1",),
-                started_at=at(30),
-                completed_at=at(29),
-                counts={"succeeded": 1},
                 statistics=(_statistic("Sales.Order", rows_read=5412),),
             )
         )
@@ -1085,7 +1081,7 @@ def test_arrays_stay_present_when_empty():
     )
 
     assert mapping["sections"]["tests"]["findings"] == []
-    assert mapping["current_load"] is None
+    assert mapping["load_activity"] == []
 
 
 # --- the bounded activity window ----------------------------------------------
@@ -1094,7 +1090,7 @@ def test_arrays_stay_present_when_empty():
 def _window(*statistics) -> LoadHistory:
     """One catalogue's load history, in the shape its read carries."""
 
-    return LoadHistory(workflow_ids=("workflow-1",), statistics=tuple(statistics))
+    return LoadHistory(statistics=tuple(statistics))
 
 
 def _statistic(name: str, *, item: str = RAW, duration_ms=None, **counts) -> dict:
@@ -1198,7 +1194,7 @@ def test_counts_are_preserved_exactly():
 def test_a_catalogue_read_without_a_window_reports_no_activity():
     report = _Estate().table(f"{RAW}/Tables/Sales.Order", loaded=at(1)).report()
 
-    assert report.current_load is None
+    assert report.current_load.counts == {"succeeded": 1}
     assert report.load_activity == ()
 
 
