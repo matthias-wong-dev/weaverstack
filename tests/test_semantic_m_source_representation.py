@@ -121,3 +121,85 @@ def test_a_mapped_sql_expression_keeps_its_options_record(authored, expected):
     from weaver.semantic_models.expressions import _sql_database
 
     assert _sql_database(authored, "new.example", "New") == expected
+
+
+def lineage_contribution():
+    from types import SimpleNamespace
+
+    reference = "Warehouse/Serving/Ref.Country"
+    return SimpleNamespace(
+        expression_sources={
+            "Warehouse/Serving": {
+                "connector": "sql",
+                "relations": [
+                    {
+                        "schema": "Ref",
+                        "object": "Country",
+                        "reference": reference,
+                        "object_type": "table",
+                    }
+                ],
+            }
+        },
+        source_bindings={
+            "Country": {
+                "expression": "Warehouse/Serving",
+                "schema": "Ref",
+                "object": "Country",
+                "reference": reference,
+                "mode": "import",
+                "access": "sql",
+            }
+        },
+        source_references={},
+        signature="signature",
+        table_names=("Country",),
+        artifact_signatures={},
+    )
+
+
+def deployed(expression):
+    return {
+        "model": {
+            "tables": [
+                {
+                    "name": "Country",
+                    "partitions": [
+                        {
+                            "name": "Country",
+                            "mode": "import",
+                            "source": partition(expression),
+                        }
+                    ],
+                }
+            ]
+        }
+    }
+
+
+@weaver_test()
+def test_fabric_rewriting_traced_m_is_a_difference_and_lineage_stands():
+    from weaver.catalogue.semantic import project_semantic_model
+    from weaver.declaration.model import WeaverItemId
+    from weaver.semantic_models.lineage import verify_lineage
+
+    contribution = lineage_contribution()
+    traced = deployed(
+        'let\n    Source = #"Warehouse/Serving",\n'
+        f"    Data = {NAVIGATION}\nin\n    Data"
+    )
+    assert verify_lineage(contribution, traced) == ()
+    rewritten = deployed(
+        'Value.Buffer(#"Warehouse/Serving"{[Schema="Ref",Item="Country"]}[Data])'
+    )
+    assert verify_lineage(contribution, rewritten) == (
+        "/model/tables/Country/partitions",
+    )
+    rows = project_semantic_model(
+        WeaverItemId.parse("SemanticModel/Reporting"), contribution, deployed=rewritten
+    )
+    (dependency,) = rows["Dependency"]
+    assert dependency["referencing_object_name"] == "Country"
+    assert dependency["dependency_reference"] == "Warehouse/Serving/Ref.Country"
+    (table,) = rows["SemanticModelTable"]
+    assert (table["source_mode"], table["source_access"]) == ("import", "sql")

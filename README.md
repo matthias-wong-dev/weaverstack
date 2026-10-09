@@ -149,7 +149,10 @@ assert result.succeeded, result.errors
 
 Build sends the effective TMDL package to Fabric. After deployment it reads
 TMSL back from Fabric, verifies requested edits and publishes the observed model
-to the five semantic catalogue tables. A measure Fabric cannot evaluate fails the
+to the five semantic catalogue tables. Names compare without case or quoting,
+and expressions without regard to indentation or line endings. An annotation
+Fabric dropped or changed, or any other whitespace change to an expression, is a
+warning rather than a failure. A measure Fabric cannot evaluate fails the
 Build and is named with Fabric's reason; without permission to query the model,
 Build reports that the check did not run. Failed updates or readback checks leave
 the selected model uncertified. Every selected model compiles and deploys, even

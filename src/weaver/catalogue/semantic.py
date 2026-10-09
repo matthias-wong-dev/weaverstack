@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from ..semantic_models.deployed import _RELATIONSHIP_DEFAULTS
+from ..semantic_models.deployed import _RELATIONSHIP_DEFAULTS, object_identity
 from .tables import (
     DEPENDENCY,
     REGISTRY,
@@ -33,18 +33,21 @@ def _text(value):
 
 
 def project_semantic_model(item, contribution, *, deployed=None):
-    from ..semantic_models.lineage import dependency_references, observed_bindings
+    from ..semantic_models.lineage import dependency_references
 
     model = {"model": {}} if deployed is None else deployed
     bindings = dict(contribution.source_bindings)
-    if deployed is not None and contribution.expression_sources:
+    if deployed is not None:
+        # Lineage comes from the definition Weaver deployed, kept for the
+        # tables Fabric reports; Fabric's copy of the M is not reparsed.
+        present = {
+            object_identity(table.get("name")): table.get("name")
+            for table in deployed["model"].get("tables", ())
+        }
         bindings = {
-            **observed_bindings(deployed, contribution.expression_sources),
-            **{
-                name: value
-                for name, value in contribution.source_bindings.items()
-                if name in contribution.source_references
-            },
+            present[object_identity(name)]: value
+            for name, value in bindings.items()
+            if object_identity(name) in present
         }
     common = {
         "item_type": item.item_type,

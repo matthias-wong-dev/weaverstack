@@ -122,10 +122,16 @@ def observed_bindings(model, expressions):
 
 
 def verify_lineage(contribution, model):
-    from ..errors import InstallError
+    """Tables whose deployed source Weaver cannot trace to the relation it planned.
+
+    Fabric may rewrite a partition's M, so a table listed here is a difference
+    to report, not a failure. The planned lineage stands.
+    """
+
+    from .compiler import escape
 
     if not contribution.expression_sources:
-        return
+        return ()
     actual = observed_bindings(model, contribution.expression_sources)
     planned = set(
         dependency_references(
@@ -138,10 +144,10 @@ def verify_lineage(contribution, model):
         )
     )
     missing = planned - set(dependency_references({}, actual))
-    if missing:
-        raise InstallError(
-            f"Semantic readback does not confirm mapped table lineage: {sorted(missing)}"
-        )
+    return tuple(
+        f"/model/tables/{escape(table)}/partitions"
+        for table in sorted({table for table, _ in missing})
+    )
 
 
 def dependency_references(references, bindings):

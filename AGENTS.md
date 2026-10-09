@@ -216,7 +216,12 @@ authored source rewrites. Its explicit single-model option remains scoped.
 and freezes its workspace/item IDs in the bundle. Definition updates permit
 required clearing of processed semantic data; source data is outside that action. Declared success edges require deployment before effective-definition
 readback and all five semantic catalogue projections before Registry publication. The readback
-checks requested properties and inferred calculated columns. Publication also
+checks requested properties and inferred calculated columns. Requested values are
+strict; names compare by `deployed.object_identity`, expressions by layout, and
+annotations, unrequested scalars and whitespace-only text changes return as
+`readback_differences`, which Build presents as one warning per item. Report
+readback is strict only for the model binding. Lineage is published from the
+deployed plan; Fabric's copy of the M is never reparsed into dependencies. Publication also
 requires the shared physical completion gate. Failed or uncertain deployment
 and failed readback cannot certify a model; independent physical branches continue.
 Catalogue identity upgrades precede preparation and publication through the same

@@ -9,6 +9,7 @@ from ...errors import InstallError
 from ...semantic_models.definition import decode_model, decode_parts
 from ...semantic_models.source import SemanticContribution
 from ..semantic import SEMANTIC_TABLES
+from .base import read_back, readback_details
 
 
 class SemanticModelExecutor:
@@ -74,15 +75,14 @@ class SemanticReadbackExecutor:
         spec = json.loads(payload)
         if spec["target_id"] != context.target.bound.id:
             raise InstallError("Semantic readback requires its bound target")
-        model = decode_model(
-            context.semantic_model(context.target.bound).get_definition()
-        )
+        client = context.semantic_model(context.target.bound)
+        model = read_back(spec["item"], lambda: decode_model(client.get_definition()))
         from ...semantic_models.deployed import verify_requested
 
-        verify_requested(
+        differences = verify_requested(
             spec["requested"], model, owned=spec["owned"], absent=spec.get("absent", ())
         )
-        return {"semantic_definition": model}
+        return readback_details({"semantic_definition": model}, differences)
 
 
 class SemanticCatalogueExecutor:
@@ -91,10 +91,11 @@ class SemanticCatalogueExecutor:
     def execute(self, action, payload, context):
         spec = json.loads(payload)
         target = context.resolved(spec["target_id"]).bound
-        model = decode_model(context.semantic_model(target).get_definition())
+        client = context.semantic_model(target)
+        model = read_back(spec["item"], lambda: decode_model(client.get_definition()))
         from ...semantic_models.deployed import verify_requested
 
-        verify_requested(
+        differences = verify_requested(
             spec["requested"], model, owned=spec["owned"], absent=spec.get("absent", ())
         )
         item = WeaverItemId.parse(spec["item"])
@@ -116,7 +117,7 @@ class SemanticCatalogueExecutor:
             raise InstallError(f"{item}: semantic payload signature does not match")
         from ...semantic_models.lineage import verify_lineage
 
-        verify_lineage(contribution, model)
+        differences += verify_lineage(contribution, model)
         rows = project_semantic_model(item, contribution, deployed=model)
         scope = InstallationScope(item.item_type, item.item_name)
         for table in SEMANTIC_TABLES:
@@ -124,4 +125,4 @@ class SemanticCatalogueExecutor:
             statement = render_merge(table, rows[table.name], scope=scope)
             if statement:
                 context.sql.execute_script(statement)
-        return {"semantic_definition": model}
+        return readback_details({"semantic_definition": model}, differences)

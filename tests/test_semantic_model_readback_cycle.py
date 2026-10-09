@@ -49,7 +49,6 @@ def test_role_members_must_be_empty_before_build_can_certify_removal(tmp_path):
     [
         ("model", "discourageImplicitMeasures", True),
         ("table", "isHidden", True),
-        ("table", "description", "Removed description"),
     ],
 )
 @weaver_test()
@@ -121,3 +120,24 @@ def test_multiline_text_equivalence_allows_build_certification(tmp_path, field):
         "MERGE" in statement and "[_].[SemanticModel]" in statement
         for statement in session.tsql
     )
+
+
+@weaver_test()
+def test_an_unrequested_scalar_fabric_returns_is_a_warning(tmp_path):
+    _, repository, bindings, session, state = prepared(tmp_path)
+    deployed = engine_model(repository)
+    deployed["model"]["tables"][0]["description"] = "Service description"
+    deployed["model"]["sourceQueryCulture"] = "en-AU"
+    session.semantic_model("Reporting_Dev").definition = encode_definition(deployed)
+    bundle = bundle_for(tmp_path, repository, bindings, state, "service-property")
+    report = execute_bundle(bundle, session)
+    assert report.succeeded, report.to_mapping()
+    (differences,) = [
+        action.details["readback_differences"]
+        for action in report.action_results()
+        if (action.details or {}).get("readback_differences")
+    ]
+    assert differences == [
+        "/model/sourceQueryCulture",
+        "/model/tables/Calendar/description",
+    ]

@@ -172,7 +172,9 @@ def test_item_false_disables_organisation_foreign_key_policy(tmp_path):
 
 
 @weaver_test()
-def test_executed_pbip_annotation_must_survive_observed_readback(tmp_path, monkeypatch):
+def test_a_dropped_annotation_warns_while_its_edit_is_verified(
+    tmp_path, monkeypatch, capsys
+):
     from support.semantic_models import probe_model
     from test_semantic_source_build_cycle import (
         SubmittedDefinition,
@@ -199,6 +201,34 @@ def test_executed_pbip_annotation_must_survive_observed_readback(tmp_path, monke
         result = weaver.build(
             root, items=f"{ITEM}=SemanticModel/Reporting_Dev", session=session
         )
-        assert not result.succeeded
-        assert any("annotations" in (e.message or "") for e in result.errors)
-        assert not published().get(ITEM, {}).get("SemanticModel")
+        assert result.succeeded
+        assert published().get(ITEM, {}).get("SemanticModel")
+    warned = capsys.readouterr().err
+    assert "annotations/Weaver.AutoHideColumns" in warned
+    assert "Build trusted it" in warned
+
+
+@weaver_test()
+def test_an_annotated_edit_fabric_did_not_keep_fails_readback(tmp_path):
+    from support.semantic_models import probe_model
+    from test_semantic_source_build_cycle import (
+        SubmittedDefinition,
+        answer_catalogue,
+        read_bindings,
+        source_catalogue,
+        source_session,
+    )
+
+    import weaver
+
+    root = annotated_project(tmp_path, "Weaver.AutoHideColumns", "pbip")
+    with source_session() as session:
+        session.answer_semantic_model(
+            "Demo", "Reporting_Dev", SubmittedDefinition(probe_model())
+        )
+        answer_catalogue(session, source_catalogue(), read_bindings())
+        result = weaver.build(
+            root, items=f"{ITEM}=SemanticModel/Reporting_Dev", session=session
+        )
+    assert not result.succeeded
+    assert any("ProductId/isHidden" in (e.message or "") for e in result.errors)
