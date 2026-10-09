@@ -277,11 +277,11 @@ table Metric
 ### Project annotations
 
 A project adds annotations of its own, one class per file, in
-`SemanticModel/annotations/`. They apply to every semantic model in the
+`PowerBI/annotations/`. They apply to every semantic model in the
 project and use the same live TMDL objects as Weaver's annotations:
 
 ```python
-# SemanticModel/annotations/DWG__HideIntegerColumns.py
+# PowerBI/annotations/DWG__HideIntegerColumns.py
 from weaver.semantic_models import Annotation
 
 

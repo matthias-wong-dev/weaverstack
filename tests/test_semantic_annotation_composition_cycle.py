@@ -36,7 +36,7 @@ def test_composition_directive_never_executes_and_inherited_phases_run_once(
     )
     write(
         tmp_path,
-        "SemanticModel/annotations/Acme__Schema.py",
+        "PowerBI/annotations/Acme__Schema.py",
         """
 from weaver.semantic_models import Annotation
 class Acme__Schema(Annotation):
@@ -50,7 +50,7 @@ class Acme__Schema(Annotation):
     )
     write(
         tmp_path,
-        "SemanticModel/annotations/Acme__Post.py",
+        "PowerBI/annotations/Acme__Post.py",
         """
 from weaver.semantic_models import Annotation
 class Acme__Post(Annotation):
@@ -62,7 +62,7 @@ class Acme__Post(Annotation):
     )
     write(
         tmp_path,
-        "SemanticModel/annotations/Acme__Policy.py",
+        "PowerBI/annotations/Acme__Policy.py",
         """
 from weaver.semantic_models import Annotation
 class Acme__Policy(Annotation):

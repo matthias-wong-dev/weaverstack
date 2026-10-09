@@ -56,7 +56,7 @@ def test_final_annotations_and_sorted_part_codec_preserve_effective_order(tmp_pa
     )
     write(
         tmp_path,
-        "SemanticModel/annotations/ACME__FinalTables.py",
+        "PowerBI/annotations/ACME__FinalTables.py",
         'from weaver.semantic_models import Annotation\nclass ACME__FinalTables(Annotation):\n    scopes = {"model"}\n    def apply(self, target):\n        target.tables["Alpha"].remove()\n        target.tables.add("Last")\n',
     )
     item = WeaverItemId("SemanticModel", "Revenue")

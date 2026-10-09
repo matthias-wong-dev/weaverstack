@@ -255,7 +255,7 @@ def test_public_build_executes_default_annotations_once_after_source_generation(
         "model Model\n\tannotation ACME.Columns = true\n\tannotation Weaver.AutoHideColumns = Id\n\n"
         + path.read_text()
     )
-    custom = root / "SemanticModel/annotations/ACME__Columns.py"
+    custom = root / "PowerBI/annotations/ACME__Columns.py"
     custom.parent.mkdir(parents=True)
     custom.write_text(
         'from weaver.semantic_models import Annotation\nimport builtins\nclass ACME__Columns(Annotation):\n    scopes = {"model"}\n    def apply(self, target):\n        builtins._stage_a_annotations.append(("custom", tuple(c.name for c in target.tables["Sales"].columns)))\n'

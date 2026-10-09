@@ -3,7 +3,7 @@
 ``annotation DWG.HideIntegerColumns = true`` runs the `Annotation` subclass named
 ``DWG__HideIntegerColumns``: ``__`` in a class name is ``.`` in TMDL. Weaver's
 own annotations hold the ``Weaver`` namespace. A project adds its own in
-``SemanticModel/annotations/<ClassName>.py``, one class per file, and they apply
+``PowerBI/annotations/<ClassName>.py``, one class per file, and they apply
 to every semantic model in the project. Once a project defines a namespace, an
 undefined annotation in it is an error; other annotations stay native.
 
@@ -29,7 +29,7 @@ from .fragments import expression_text, scalar
 from .objects import TmdlObject
 from .tmdl import Document, PackageEditor, folded, quote_name
 
-DIRECTORY = "SemanticModel/annotations"
+DIRECTORY = "PowerBI/annotations"
 _SEGMENT = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9_]*[A-Za-z0-9])?\Z")
 _KINDS = {key.casefold(): key for key in _SCHEMAS}
 _COLLECTION_OF = {

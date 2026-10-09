@@ -28,7 +28,7 @@ def test_composed_source_final_annotations_metadata_and_order_have_one_owner(tmp
     )
     write(
         tmp_path,
-        "SemanticModel/annotations/ACME__Final.py",
+        "PowerBI/annotations/ACME__Final.py",
         "from weaver.semantic_models import Annotation\nclass ACME__Final(Annotation):\n    scopes = {'model'}\n    def apply(self, target):\n        assert set(t.name for t in target.tables) == {'Sales', 'Zebra', 'Alpha', 'Middle'}\n        assert 'Id' in target.tables['Sales'].columns\n        target.tables.add('Metadata').partitions.add('Metadata', 'calculated', mode='import').set_expression('source', '{1}')\n",
     )
     repository = parse(tmp_path)

@@ -19,7 +19,6 @@ from typing import Iterable, Mapping, TypeVar
 
 from ..errors import DiscoveryError
 from ..locations import Location
-from ..semantic_models.annotation import DIRECTORY as ANNOTATION_DIRECTORY
 from ..semantic_models.annotation import discover_annotations
 from ..semantic_models.source import SemanticContribution, read_semantic_contribution
 from ..sql_statements import sql_parse_cache
@@ -597,13 +596,10 @@ def _read_authored_repository(root: Location, store: Store) -> RepositoryPart:
     # surrounding project and does not participate in discovery or signatures.
     entries = [entry for entry in discovered if entry[0].split("/", 1)[0] in ITEM_TYPES]
 
-    # SemanticModel/annotations holds the project's annotation classes, not a model.
     item_ids = {
         WeaverItemId(*relative.split("/"))
         for relative, is_directory in entries
-        if is_directory
-        and len(relative.split("/")) == 2
-        and relative != ANNOTATION_DIRECTORY
+        if is_directory and len(relative.split("/")) == 2
     }
 
     for relative, is_directory in entries:

@@ -8,7 +8,6 @@ from support.weaver_test import weaver_test
 from test_semantic_annotation_declaration import ITEM
 from test_semantic_annotation_origins_representation import NAMES
 
-from weaver.declaration.model import WeaverItemId
 from weaver.declaration.repository import parse_item_repository
 from weaver.errors import ConfigError
 from weaver.locations import Location
@@ -44,8 +43,8 @@ def project(tmp_path, extension, annotations=None, *, name="project"):
     folder.mkdir(parents=True)
     (folder / f"{folder.name}.tmdl").write_text(extension, encoding="utf-8")
     for stem, source in (annotations or {}).items():
-        path = root / "SemanticModel/annotations" / f"{stem}.py"
-        path.parent.mkdir(exist_ok=True)
+        path = root / "PowerBI/annotations" / f"{stem}.py"
+        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(textwrap.dedent(source), encoding="utf-8")
     return root
 
@@ -263,7 +262,7 @@ def test_invalid_annotation_files_fail_at_discovery(tmp_path, stem, source, diag
         {stem: "from weaver.semantic_models import Annotation\n" + source},
     )
     with pytest.raises(
-        ConfigError, match=rf"SemanticModel/annotations/{stem}.py: .*{diagnostic}"
+        ConfigError, match=rf"PowerBI/annotations/{stem}.py: .*{diagnostic}"
     ):
         parse(root)
 
@@ -307,7 +306,7 @@ def test_implementation_change_recompiles_without_changing_desired_state(tmp_pat
         '                column.isHidden = column.dataType == "int64" or None\n',
     )
     assert refactored != HIDE_INTEGERS
-    path = root / "SemanticModel/annotations/DWG__HideIntegerColumns.py"
+    path = root / "PowerBI/annotations/DWG__HideIntegerColumns.py"
     path.write_text(textwrap.dedent(refactored), encoding="utf-8")
     second = parse(root)
     second_compiled = compile_model(root)
@@ -321,13 +320,23 @@ def test_implementation_change_recompiles_without_changing_desired_state(tmp_pat
 
 
 @weaver_test()
-def test_project_annotations_require_no_item_named_annotations(tmp_path):
+def test_project_annotations_are_not_a_power_bi_project(tmp_path):
     root = project(
         tmp_path, "model Model\n", {"DWG__HideIntegerColumns": HIDE_INTEGERS}
     )
-    identities = {item.identity for item in parse(root).items}
-    assert WeaverItemId.parse("SemanticModel/annotations") not in identities
-    assert ITEM in identities
+    repository = parse(root)
+    assert "annotations" not in repository.powerbi_projects
+    assert {item.identity for item in repository.items} >= {ITEM}
+
+
+@weaver_test()
+def test_an_annotation_file_under_semantic_model_is_refused(tmp_path):
+    root = project(tmp_path, "model Model\n")
+    outside = root / "SemanticModel/annotations/DWG__HideIntegerColumns.py"
+    outside.parent.mkdir(parents=True)
+    outside.write_text(textwrap.dedent(HIDE_INTEGERS), encoding="utf-8")
+    with pytest.raises(ConfigError, match="SemanticModel/annotations/DWG__Hide"):
+        parse_item_repository(Location(root.as_posix()))
 
 
 @weaver_test()
@@ -372,7 +381,7 @@ def test_an_exception_inside_apply_names_the_annotation_and_declaration(tmp_path
         match="^"
         + re.escape(
             "SemanticModel/Reporting/Reporting.tmdl:2: Acme.Broken: Acme__Broken "
-            "(SemanticModel/annotations/Acme__Broken.py) raised KeyError: "
+            "(PowerBI/annotations/Acme__Broken.py) raised KeyError: "
         )
         + ".*No such column",
     ) as caught:

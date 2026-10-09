@@ -250,7 +250,7 @@ def test_model_contribution_claims_explain_inputs_without_changing_effective_gat
     write(tmp_path, "PowerBI/Sales/Revenue.tmdl", "model Model\n\tculture: en-GB\n")
     write(
         tmp_path,
-        "SemanticModel/annotations/ACME__Noop.py",
+        "PowerBI/annotations/ACME__Noop.py",
         'from weaver.semantic_models.annotation import Annotation\nclass ACME__Noop(Annotation):\n    scopes = {"model"}\n    def apply(self, target):\n        pass\n',
     )
     item = WeaverItemId("SemanticModel", "Revenue")

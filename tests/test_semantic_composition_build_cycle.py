@@ -59,7 +59,7 @@ def variant_project(root):
         write(root, f"PowerBI/Sales/{name}.Report/report.json", b"{}\r\n")
     write(
         root,
-        "SemanticModel/annotations/ACME__Observe.py",
+        "PowerBI/annotations/ACME__Observe.py",
         'import builtins\nfrom weaver.semantic_models import Annotation\nclass ACME__Observe(Annotation):\n    scopes = {"model"}\n    def apply(self, target):\n        builtins._weaver_composition_calls.append((target.culture, tuple(t.name for t in target.tables)))\n',
     )
 

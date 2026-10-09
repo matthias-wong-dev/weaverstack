@@ -83,7 +83,7 @@ A variant-only Build reads its base definitions but deploys only selected items:
 weaver build ./reporting --item SemanticModel/Executive --item Report/Executive --non-interactive
 ```
 
-Custom annotation classes live in `SemanticModel/annotations/` and subclass
+Custom annotation classes live in `PowerBI/annotations/` and subclass
 `weaver.semantic_models.Annotation`. They run once on each selected model's
 fully composed, target-bound input, before source metadata/generation. They do
 not execute on unselected bases. Final signatures and catalogue table ordinals

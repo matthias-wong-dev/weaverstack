@@ -25,7 +25,7 @@ def source_bound_annotation(tmp_path, body, *, tables=""):
     )
     write(
         tmp_path,
-        "SemanticModel/annotations/ACME__AfterSource.py",
+        "PowerBI/annotations/ACME__AfterSource.py",
         "from weaver.semantic_models import Annotation\n"
         "class ACME__AfterSource(Annotation):\n"
         '    scopes = {"model"}\n'

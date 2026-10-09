@@ -84,13 +84,17 @@ def artifact_paths(paths, suffix):
 
 
 def discover_projects(paths, directories=()):
+    from .semantic_models.annotation import DIRECTORY as ANNOTATIONS
+
     projects = {}
     entries = set(paths) | set(directories)
     for name in sorted(
         {
             p.split("/")[1]
             for p in entries
-            if p.startswith("PowerBI/") and len(p.split("/")) > 2
+            if p.startswith("PowerBI/")
+            and len(p.split("/")) > 2
+            and not p.startswith(ANNOTATIONS + "/")
         }
     ):
         prefix = f"PowerBI/{name}/"

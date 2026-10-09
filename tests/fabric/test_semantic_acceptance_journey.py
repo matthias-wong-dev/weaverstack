@@ -151,7 +151,7 @@ def _project(root, *, source_metadata, native_source=None):
         ),
         encoding="utf-8",
     )
-    annotations = root / "SemanticModel/annotations"
+    annotations = root / "PowerBI/annotations"
     annotations.mkdir(parents=True)
     (annotations / "Acceptance__HideSignatures.py").write_text(
         ANNOTATION, encoding="utf-8"
