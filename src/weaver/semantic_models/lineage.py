@@ -176,3 +176,49 @@ def dependency_references(references, bindings):
             if reference := source.get("reference"):
                 result.add((table, reference))
     return tuple(sorted(result))
+
+
+#: Partition sources that compute their rows rather than read them.
+_COMPUTED = frozenset({"calculated", "calculationgroup"})
+
+
+def _traced(source, expressions):
+    relation = source_relation(source)
+    if not relation or relation[0] not in expressions:
+        return False
+    _, schema, name = relation
+    matches = [
+        r
+        for r in expressions[relation[0]].get("relations", ())
+        if r["schema"] == schema and r["object"] == name
+    ]
+    return len(matches) == 1
+
+
+def untraced_tables(contribution):
+    """Tables without Weaver.Source that read data from an untraced partition."""
+
+    declared = {name.casefold() for name in contribution.source_references}
+    return tuple(
+        name
+        for name in contribution.table_names
+        if name.casefold() not in declared
+        and any(
+            str(partition["source"].get("type")).casefold() not in _COMPUTED
+            and not _traced(partition["source"], contribution.expression_sources)
+            for partition in source_table(contribution.parts, name).get(
+                "partitions", ()
+            )
+        )
+    )
+
+
+def untraced_warning(item, contribution):
+    tables = untraced_tables(contribution)
+    if not tables:
+        return None
+    noun = "table" if len(tables) == 1 else "tables"
+    return (
+        f"{item}: {noun} {', '.join(tables)} read data that is not traced to a "
+        "managed Table or View. Add Weaver.Source to name each table's source"
+    )

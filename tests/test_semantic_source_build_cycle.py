@@ -926,6 +926,53 @@ def test_native_tables_without_source_create_no_inferred_item_edges(
         )
 
 
+@pytest.mark.parametrize("catalogued", [True, False])
+@weaver_test()
+def test_build_warns_about_tables_whose_source_is_not_traced(tmp_path, catalogued):
+    root = source_project(tmp_path)
+    path = root / str(ITEM) / f"{ITEM.item_name}.tmdl"
+    native = (
+        "\tpartition {0} = m\n\t\tmode: import\n\t\tsource = "
+        'Value.NativeQuery(#"Warehouse/Serving", "SELECT Id FROM Cake.Sales")\n'
+    )
+    path.write_text(
+        path.read_text()
+        + "\ntable Notices\n"
+        + native.format("Notices")
+        + "\ntable Missing\n\tpartition Missing = entity\n\t\tmode: directLake\n"
+        "\t\tsource\n\t\t\tschemaName: Cake\n\t\t\tentityName: NoSuch\n"
+        "\t\t\texpressionSource: 'Warehouse/Serving'\n"
+        + "\ntable Declared\n\tannotation Weaver.Source = Warehouse/Serving/Cake.Sales\n"
+        + native.format("Declared")
+        + '\ntable Computed\n\tpartition Computed = calculated\n\t\tsource = ROW("Value", 1)\n'
+        + "\ntable Bare\n\tmeasure Count = 1\n"
+    )
+    workspace = Workspace(
+        workspace="Demo",
+        catalogue="Warehouse/Catalogue" if catalogued else None,
+        targets={SOURCE: TargetDeclaration(physical="Serving_Dev")},
+    )
+    with source_session(workspace=workspace) as session:
+        if catalogued:
+            answer_catalogue(session, source_catalogue(), read_bindings())
+        result = weaver.build(
+            root,
+            items=f"{ITEM}=SemanticModel/Reporting_Dev",
+            bundle_only=True,
+            bundle_path=tmp_path / "bundle",
+            session=session,
+        )
+        assert result.succeeded
+        assert session.warnings == (
+            [
+                f"{ITEM}: tables Notices, Missing read data that is not traced to a "
+                "managed Table or View. Add Weaver.Source to name each table's source"
+            ]
+            if catalogued
+            else []
+        )
+
+
 @weaver_test()
 def test_health_tables_carry_the_model_source_bindings(tmp_path, monkeypatch):
     from weaver.operations.health import HEALTH_TABLES

@@ -352,6 +352,7 @@ def _run_build(
                 catalogue_binding=catalogue_binding,
                 execution=execution,
                 output=output,
+                warn=session.warn,
             )
         if present_selection:
             session.report(
@@ -384,6 +385,7 @@ def _run_build(
                 catalogue_binding=catalogue_binding,
                 execution=execution,
                 output=Location((Path(temporary) / "bundle").as_posix()),
+                warn=session.warn,
             )
         if present_selection:
             session.report(

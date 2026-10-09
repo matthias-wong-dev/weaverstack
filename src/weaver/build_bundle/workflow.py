@@ -702,6 +702,7 @@ def build_repository_bundle(
     execution: ExecutionIdentity,
     source_store: Store,
     output: Location,
+    warn=None,
 ) -> BuildBundle:
     """Build a bundle without target access or mutation."""
 
@@ -712,6 +713,7 @@ def build_repository_bundle(
         catalogue_binding=catalogue_binding,
         execution=execution,
         source_store=source_store,
+        warn=warn,
     ).build(output=output)
 
 

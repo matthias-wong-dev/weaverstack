@@ -399,6 +399,9 @@ def test_build_reports_selection_after_the_bundle_and_before_installation(
         def report(self, lines):
             events.append(("report", tuple(lines)))
 
+        def warn(self, message):
+            events.append(("warn", message))
+
     class Installer:
         def __init__(self, *_args, **_kwargs):
             pass
