@@ -9,6 +9,7 @@ from typing import Sequence
 
 from ..catalogue.state import READABLE_TABLES
 from ..catalogue.tables import LOAD_STATUS
+from ..config import CATALOGUE_HINT
 from ..declaration.model import SEMANTIC_MODEL, WeaverItemId
 from ..errors import CommandError, LoadError
 from ..health import assess_load, resolve_as_of
@@ -153,9 +154,8 @@ def _refuse_without_catalogue(requested, *, names, stale, reload) -> None:
         raise CommandError(
             "Loading "
             + (", ".join(others) or "every installed item")
-            + " needs a Weaver catalogue: pass catalogue='Warehouse/Weaver', or "
-            "give one in workspace configuration. Without one, name the semantic "
-            "models to refresh"
+            + f" needs a Weaver catalogue. {CATALOGUE_HINT}. Without one, name the "
+            "semantic models to refresh"
         )
     if names or stale or reload:
         raise CommandError(

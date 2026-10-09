@@ -574,6 +574,7 @@ def test_a_workspace_without_a_catalogue_says_both_ways_to_give_one(
 
     message = str(raised.value)
     assert "catalogue=" in message
+    assert "--catalogue" in message
     assert "workspace configuration" in message
 
 

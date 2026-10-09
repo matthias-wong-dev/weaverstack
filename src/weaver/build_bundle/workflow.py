@@ -21,6 +21,7 @@ from ..catalogue.state import (
     read_catalogue_state,
     reconcile_catalogue_state,
 )
+from ..config import CATALOGUE_HINT
 from ..declaration.model import SEMANTIC_MODEL, WeaverItemId, WeaverRepository
 from ..declaration.repository import parse_item_repository
 from ..errors import BuildError, DiscoveryError
@@ -171,19 +172,22 @@ def require_catalogue_for(bindings: ItemBindings) -> None:
         raise BuildError(
             "Building "
             + (", ".join(others) or "this selection")
-            + " needs a Weaver catalogue: pass catalogue='Warehouse/Weaver', or "
-            "give one in workspace configuration. Semantic models build without one"
+            + f" needs a Weaver catalogue. {CATALOGUE_HINT}. Semantic models build "
+            "without one"
         )
 
 
 def _require_separate_semantic_build(bindings: ItemBindings) -> None:
     from ..catalogue.builtin import BUILTIN_ITEM
 
-    powerbi = sorted(
+    powerbi = [
         str(item)
-        for item in bindings.by_item
+        for item in sorted(
+            bindings.by_item,
+            key=lambda item: (item.item_type != SEMANTIC_MODEL, str(item)),
+        )
         if item.item_type in {SEMANTIC_MODEL, "Report"}
-    )
+    ]
     sources = sorted(
         str(item)
         for item in bindings.by_item
@@ -214,8 +218,7 @@ def validate_build_request(
         if validated:
             raise BuildError(
                 f"{', '.join(validated)} declares tests or assumptions, which need "
-                "a Weaver catalogue: pass catalogue='Warehouse/Weaver', or give one "
-                "in workspace configuration"
+                f"a Weaver catalogue. {CATALOGUE_HINT}"
             )
     if not bindings.entries:
         raise BuildError("Select at least one Weaver item to build")
@@ -278,8 +281,7 @@ def read_build_state(
         if references:
             raise BuildError(
                 f"{references[0]} generates tables from managed sources, which needs "
-                "a Weaver catalogue: pass catalogue='Warehouse/Weaver', or give one "
-                "in workspace configuration"
+                f"a Weaver catalogue. {CATALOGUE_HINT}"
             )
 
     # Check occupancy before the slower per-target inventory and Spark reads.
@@ -337,7 +339,21 @@ def read_build_state(
         ):
             rows = catalogue.rows.get(model, {}).get(INSTALLATION.name, ())
             if len(rows) != 1:
-                raise BuildError(f"{model} has no installed binding; build it first")
+                linked = sorted(
+                    str(i)
+                    for i, c in repository.reports.items()
+                    if i in bindings.by_item and c.model == model
+                )
+                together = " ".join(f"--item {i}" for i in [str(model), *linked])
+                raise BuildError(
+                    f"{', '.join(linked)} uses {model}, which "
+                    + (
+                        "is not installed in the catalogue"
+                        if catalogued
+                        else "has no catalogue record to deploy against"
+                    )
+                    + f". Build them together: {together}"
+                )
             row = rows[0]
             resolved = session.resolve_item(
                 row["target_name"], item_type="SemanticModel", workspace=workspace

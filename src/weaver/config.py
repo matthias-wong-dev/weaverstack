@@ -17,6 +17,12 @@ from .workspaces import (
     Workspace,
 )
 
+#: The next action when an operation needs a catalogue and none is configured.
+CATALOGUE_HINT = (
+    "Name its Warehouse with catalogue: in workspace configuration, "
+    "--catalogue Warehouse/<name> on the command line, or catalogue= in Python"
+)
+
 _KEYS = {
     "workspace",
     "environment",

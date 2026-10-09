@@ -9,6 +9,13 @@ from ..errors import BuildError
 from ..targets import LAKEHOUSE_TARGET
 from .serialization import checked_mapping
 
+_KIND_NAMES = {
+    "lakehouse": "Lakehouse",
+    "warehouse": "Warehouse",
+    "semanticmodel": "SemanticModel",
+    "report": "Report",
+}
+
 if TYPE_CHECKING:
     from ..spark import FabricSparkTarget
 
@@ -58,7 +65,9 @@ class BoundTarget:
     @property
     def display(self) -> str:
         kind = (self.kind or "").strip()
-        return f"{kind.title()}/{self.name}" if kind else str(self.name)
+        if not kind:
+            return str(self.name)
+        return f"{_KIND_NAMES.get(kind.casefold(), kind.title())}/{self.name}"
 
     def to_mapping(self) -> dict[str, Any]:
         mapping: dict[str, Any] = {

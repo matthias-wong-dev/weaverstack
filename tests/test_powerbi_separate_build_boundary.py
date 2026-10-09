@@ -52,6 +52,10 @@ def test_a_semantic_model_builds_apart_from_its_sources(tmp_path, source_type, p
                 session=session,
             )
         assert f"Build {source_type}/Serving, then" in str(raised.value)
+        if powerbi in {"both", "PowerBI/Reporting"}:
+            assert str(raised.value).endswith(
+                "then SemanticModel/Reporting, Report/Executive"
+            )
         assert not events and not model.calls and not report.calls
         assert not session.tsql and not session.spark_sql and not session.python
         assert not session._resolver.client.requested
@@ -72,3 +76,35 @@ def test_model_and_report_still_build_together(tmp_path):
         assert result.succeeded, result.errors
         assert events == ["model_update", "model_read", "report_update", "report_read"]
         assert not session.tsql and not session.spark_sql and not session.python
+
+
+@weaver_test()
+def test_a_report_alone_names_the_model_to_build_with_it(tmp_path):
+    root, session, events, model, report = prepared_project(tmp_path)
+    with session:
+        with pytest.raises(BuildError) as raised:
+            weaver.build(
+                root, items="Report/Executive=Report/Executive_Dev", session=session
+            )
+    assert str(raised.value) == (
+        "Report/Executive uses SemanticModel/Reporting, which has no catalogue "
+        "record to deploy against. Build them together: "
+        "--item SemanticModel/Reporting --item Report/Executive"
+    )
+    assert not events
+
+
+@weaver_test()
+def test_a_bound_target_names_its_kind_as_users_write_it():
+    from weaver.mutation.targets import BoundTarget
+
+    names = [
+        BoundTarget(id=kind, kind=kind, item_id="id", item_name="Sales").display
+        for kind in ("semanticmodel", "report", "lakehouse", "warehouse")
+    ]
+    assert names == [
+        "SemanticModel/Sales",
+        "Report/Sales",
+        "Lakehouse/Sales",
+        "Warehouse/Sales",
+    ]
