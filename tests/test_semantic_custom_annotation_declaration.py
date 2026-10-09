@@ -246,6 +246,13 @@ def test_annotations_in_an_undefined_namespace_stay_native(tmp_path):
             "must implement apply",
         ),
         ("DWG__Foo", "raise ValueError('broken')\n", "ValueError: broken"),
+        (
+            "DWG__Foo",
+            "class DWG__Foo(Annotation):\n    scopes = {'table', 'tabel'}\n"
+            "    def apply(self, target): pass\n",
+            "DWG__Foo.scopes names 'tabel', which is not a TMDL object kind. Use "
+            "annotation, column,",
+        ),
     ],
 )
 @weaver_test()

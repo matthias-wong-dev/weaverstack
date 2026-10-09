@@ -203,6 +203,13 @@ def discover_annotations(root, store, paths) -> AnnotationRegistry:
                 f"{path}: set {stem}.scopes to the TMDL object kinds it annotates, "
                 'for example {"table"}'
             )
+        unknown = sorted(s for s in scopes if s.casefold() not in _KINDS)
+        if unknown:
+            raise ConfigError(
+                f"{path}: {stem}.scopes names {', '.join(map(repr, unknown))}, "
+                "which is not a TMDL object kind. Use "
+                + ", ".join(sorted(_KINDS.values(), key=str.casefold))
+            )
         if cls.apply is Annotation.apply:
             raise ConfigError(f"{path}: {stem} must implement apply(self, target)")
         if cls.phase not in ("schema", "post_schema"):
