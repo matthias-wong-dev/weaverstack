@@ -1,6 +1,7 @@
 """Native Report parts with deployment-only service binding."""
 
 import base64
+import hashlib
 import json
 import re
 
@@ -100,6 +101,65 @@ def validate_service_report(definition):
         raise ConfigError(f"Invalid Report service binding: {exc}") from exc
 
 
+_NOT_JSON = object()
+_ZERO_ID = "00000000-0000-0000-0000-000000000000"
+
+
+def _json_value(content):
+    try:
+        return json.loads(content.decode("utf-8-sig"))
+    except (UnicodeDecodeError, ValueError):
+        return _NOT_JSON
+
+
+def part_digest(content):
+    """Hash a Report part, a JSON part by its parsed value.
+
+    Fabric rewrites JSON parts without changing their value, for example by
+    dropping a final newline.
+    """
+    value = _json_value(content)
+    if value is not _NOT_JSON:
+        content = json.dumps(
+            value, sort_keys=True, ensure_ascii=False, separators=(",", ":")
+        ).encode()
+    return hashlib.sha256(content).hexdigest()
+
+
+def _same_part(expected, actual):
+    value = _json_value(expected)
+    if value is _NOT_JSON:
+        return expected == actual
+    return value == _json_value(actual)
+
+
+def _first_difference(expected, actual):
+    for path in sorted(set(expected) | set(actual)):
+        if path not in actual:
+            return f"{path} missing"
+        if path not in expected:
+            return f"{path} extra"
+        if not _same_part(expected[path], actual[path]):
+            return f"{path} changed"
+    return None
+
+
+def _normalise_platform(expected, actual, report_name):
+    """Undo Fabric's ``.platform`` rename to the target and its zero logicalId."""
+    if ".platform" not in expected or ".platform" not in actual:
+        return
+    wanted, seen = _json_value(expected[".platform"]), _json_value(actual[".platform"])
+    try:
+        if seen["metadata"]["displayName"] != report_name:
+            return
+        seen["metadata"]["displayName"] = wanted["metadata"]["displayName"]
+        if seen.get("config", {}).get("logicalId") == _ZERO_ID:
+            seen["config"]["logicalId"] = wanted["config"]["logicalId"]
+    except (KeyError, TypeError, AttributeError):
+        return
+    actual[".platform"] = json.dumps(seen).encode()
+
+
 def verify_report(
     desired, observed, *, binding=None, service_binding=None, report_name=None
 ):
@@ -151,33 +211,15 @@ def verify_report(
                 or identifiers[0].casefold() != binding["item_id"].casefold()
             ):
                 raise InstallError("Report binding does not match the deployed model")
-        if ".platform" in expected and ".platform" in actual:
-            expected_platform = json.loads(
-                expected.pop(".platform").decode("utf-8-sig")
-            )
-            actual_platform = json.loads(actual.pop(".platform").decode("utf-8-sig"))
-            if expected_platform != actual_platform:
-                if actual_platform["metadata"]["displayName"] != report_name:
-                    raise InstallError(
-                        "Report platform metadata does not match its target"
-                    )
-                actual_platform["metadata"]["displayName"] = expected_platform[
-                    "metadata"
-                ]["displayName"]
-                if (
-                    actual_platform["config"]["logicalId"]
-                    == "00000000-0000-0000-0000-000000000000"
-                ):
-                    actual_platform["config"]["logicalId"] = expected_platform[
-                        "config"
-                    ]["logicalId"]
-                if expected_platform != actual_platform:
-                    raise InstallError(
-                        "Report platform metadata differs from deployed native parts"
-                    )
     except (KeyError, ValueError, TypeError, AttributeError) as exc:
         raise InstallError(f"Report binding readback is invalid: {exc}") from exc
-    if expected_properties != actual_properties or expected != actual:
+    _normalise_platform(expected, actual, report_name)
+    difference = (
+        "definition.pbir changed"
+        if expected_properties != actual_properties
+        else _first_difference(expected, actual)
+    )
+    if difference:
         raise InstallError(
-            "Report definition readback differs from deployed native parts"
+            f"Report definition readback differs from deployed native parts: {difference}"
         )

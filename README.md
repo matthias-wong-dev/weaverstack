@@ -78,7 +78,8 @@ weaver build ./reporting \
 Build verifies the deployed model before updating its selected Reports, then
 verifies each Report's definition and model binding before catalogue publication.
 A model deployment rebuilds its selected consuming Reports. A Report-only edit
-rebuilds that Report. Unchanged catalogue-backed Report-only builds perform no work;
+rebuilds that Report; JSON parts compare by value, so whitespace and line endings
+alone are not edits. Unchanged catalogue-backed Report-only builds perform no work;
 every selected model deploys even with an unchanged signature.
 Catalogue-free model and Report builds deploy and verify on every invocation.
 A linked Report-only selection needs its model's certified

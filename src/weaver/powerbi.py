@@ -46,16 +46,13 @@ class ReportContribution:
 
     @property
     def source_signature(self):
-        import hashlib
-
+        from .report_definition import part_digest
         from .semantic_models.compiler import content_signature
 
         return content_signature(
             {
                 "model": str(self.model) if self.model else None,
-                "parts": {
-                    p: hashlib.sha256(b).hexdigest() for p, b in self.parts.items()
-                },
+                "parts": {p: part_digest(b) for p, b in self.parts.items()},
             }
         )
 

@@ -234,6 +234,167 @@ def test_service_normalization_keeps_binding_and_native_content_guards(change):
         )
 
 
+def as_authored_report():
+    return ReportContribution(
+        "PowerBI/Sales/Executive.Report",
+        None,
+        {
+            "definition.pbir": b'{\r\n  "version": "4.0",\r\n  "datasetReference": '
+            b'{"byConnection": {"connectionString": "external"}}\r\n}\r\n',
+            "definition/version.json": b'{"version":"4.0.0"}\n',
+            "definition/report.json": b'{\r\n  "themeCollection": {}\r\n}\r\n',
+            "definition/pages/Overview/page.json": b'{"name": "Overview"}\n',
+            "StaticResources/theme.json": b"\x00\xff\r\n",
+            ".platform": json.dumps(
+                {
+                    "metadata": {"type": "Report", "displayName": "Executive"},
+                    "config": {"version": "2.0", "logicalId": MODEL},
+                },
+                indent=2,
+            ).encode()
+            + b"\n",
+        },
+    )
+
+
+def fabric_copy(desired, edit):
+    import base64
+
+    observed = json.loads(json.dumps(desired))
+    for part in list(observed["parts"]):
+        content = edit(part["path"], base64.b64decode(part["payload"]))
+        if content is None:
+            observed["parts"].remove(part)
+        else:
+            part["payload"] = base64.b64encode(content).decode()
+    return observed
+
+
+def fabric_import(path, content):
+    """Fabric's JSON rewrite: compact LF output with no final newline."""
+    if path == "StaticResources/theme.json":
+        return content
+    value = json.loads(content)
+    if path == ".platform":
+        value["metadata"]["displayName"] = "Executive_Dev"
+        value["config"]["logicalId"] = "00000000-0000-0000-0000-000000000000"
+    return json.dumps(value).encode()
+
+
+@weaver_test()
+def test_as_authored_report_readback_accepts_fabric_rename_and_json_rewrite():
+    from weaver.report_definition import encode_report, verify_report
+
+    desired = encode_report(as_authored_report())
+    verify_report(
+        desired, fabric_copy(desired, fabric_import), report_name="Executive_Dev"
+    )
+
+
+@pytest.mark.parametrize(
+    "rewrite",
+    [
+        lambda content: content.rstrip(b"\r\n"),
+        lambda content: content.replace(b"\r\n", b"\n"),
+        lambda content: content.replace(b"\n", b"\r\n").replace(b"\r\r", b"\r"),
+    ],
+    ids=["final-newline", "lf", "crlf"],
+)
+@weaver_test()
+def test_report_readback_compares_json_parts_by_value(rewrite):
+    from weaver.report_definition import encode_report, verify_report
+
+    desired = encode_report(as_authored_report())
+    verify_report(
+        desired,
+        fabric_copy(
+            desired,
+            lambda path, content: (
+                content if path == "StaticResources/theme.json" else rewrite(content)
+            ),
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    "path, difference",
+    [
+        ("definition/report.json", "changed"),
+        ("definition/pages/Overview/page.json", "missing"),
+        ("StaticResources/theme.json", "changed"),
+        (".platform", "changed"),
+    ],
+)
+@weaver_test()
+def test_report_readback_names_the_first_differing_part(path, difference):
+    from weaver.errors import InstallError
+    from weaver.report_definition import encode_report, verify_report
+
+    def edit(part, content):
+        content = fabric_import(part, content)
+        if part != path:
+            return content
+        if difference == "missing":
+            return None
+        if part == "StaticResources/theme.json":
+            return content.rstrip(b"\r\n")
+        if part == ".platform":
+            return content.replace(b"Executive_Dev", b"Other")
+        return b'{"themeCollection":{"baseTheme":"Edited"}}'
+
+    desired = encode_report(as_authored_report())
+    with pytest.raises(InstallError) as raised:
+        verify_report(desired, fabric_copy(desired, edit), report_name="Executive_Dev")
+    assert str(raised.value).endswith(f"{path} {difference}")
+
+
+@weaver_test()
+def test_report_readback_names_an_extra_part():
+    import base64
+
+    from weaver.errors import InstallError
+    from weaver.report_definition import encode_report, verify_report
+
+    desired = encode_report(as_authored_report())
+    observed = json.loads(json.dumps(desired))
+    observed["parts"].append(
+        {
+            "path": "definition/pages/extra.json",
+            "payloadType": "InlineBase64",
+            "payload": base64.b64encode(b"{}").decode(),
+        }
+    )
+    with pytest.raises(InstallError, match="definition/pages/extra.json extra$"):
+        verify_report(desired, observed)
+
+
+def fabric_layout(content):
+    return json.dumps(json.loads(content), separators=(",", ":")).encode()
+
+
+@weaver_test()
+def test_report_signature_ignores_json_layout_but_not_json_values():
+    authored = as_authored_report()
+    relaid = replace(
+        authored,
+        parts={
+            p: b if p == "StaticResources/theme.json" else fabric_layout(b)
+            for p, b in authored.parts.items()
+        },
+    )
+    assert relaid.source_signature == authored.source_signature
+    edited = replace(
+        authored,
+        parts={**authored.parts, "definition/report.json": b'{"themeCollection":[]}'},
+    )
+    assert edited.source_signature != authored.source_signature
+    resource = replace(
+        authored,
+        parts={**authored.parts, "StaticResources/theme.json": b"\x00\xff\n"},
+    )
+    assert resource.source_signature != authored.source_signature
+
+
 @weaver_test()
 def test_as_authored_report_verifies_under_a_different_physical_name():
     import base64
