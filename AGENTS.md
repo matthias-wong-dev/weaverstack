@@ -743,6 +743,8 @@ DurableJournal / MutationJournal   checkpoint recovery and receipts
 ArchiveStaging / select_staging    a separate carrier Lakehouse
 procedural Wipe and Mirror runs    create_onelake_shortcuts / await_addressable
 per-batch settlement chains        the native-session lane
+initialise(reports=...)            Power BI item creation in initialise
+SemanticModel/annotations
 ```
 
 The `provision` scope went when the suite moved to fixed items. Standing the

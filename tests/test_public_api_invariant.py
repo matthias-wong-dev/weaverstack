@@ -154,3 +154,12 @@ def test_running_validations_has_one_python_contract():
 
     assert "strict" not in parameters
     assert "report" not in inspect.signature(ValidationError).parameters
+
+
+@weaver_test()
+def test_initialise_creates_no_power_bi_item():
+    """Build creates SemanticModel and Report items; initialise only scaffolds."""
+
+    import inspect
+
+    assert "reports" not in inspect.signature(weaver.initialise).parameters
