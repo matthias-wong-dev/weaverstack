@@ -628,7 +628,7 @@ def _execute(plan: WipePlan, workspace, *, session):
     items: list[WipeItemResult] = []
     reports: list[WipeReport] = []
     for target in plan.targets:
-        produced = _reports(target, mutation, outcomes)
+        produced = _reports(target, mutation, outcomes, session=session)
         reports.extend(produced)
         items.append(
             WipeItemResult(
@@ -642,7 +642,7 @@ def _execute(plan: WipePlan, workspace, *, session):
     return items, reports, unbound
 
 
-def _reports(target, mutation, outcomes) -> tuple[WipeReport, ...]:
+def _reports(target, mutation, outcomes, *, session) -> tuple[WipeReport, ...]:
     """Per-area reports in the shape the dry run gives, from action results."""
 
     from ..build_bundle.executors.wipe import (
@@ -659,6 +659,13 @@ def _reports(target, mutation, outcomes) -> tuple[WipeReport, ...]:
             if action.target_id == f"semanticmodel-{target.physical_name}"
         )
         value = outcomes[action.id].value
+        differences = value.get("readback_differences")
+        if differences:
+            session.warn(
+                f"{target}: Fabric's copy of the preserved source differs from "
+                f"what the wipe wrote at {', '.join(differences)}. Fabric accepted "
+                "the reset, so the wipe trusted it."
+            )
         return (
             WipeReport(
                 str(target),

@@ -89,6 +89,22 @@ def object_identity(name):
     return text.casefold()
 
 
+def comparable(value, key=""):
+    """``value`` with names and text in the form :func:`verify_requested` compares."""
+
+    if isinstance(value, dict):
+        return {k: comparable(v, k) for k, v in value.items()}
+    if isinstance(value, list):
+        if key in _TEXT and all(isinstance(v, str) for v in value):
+            return _layout("\n".join(value))
+        return [comparable(v) for v in value]
+    if isinstance(value, str) and key in _TEXT:
+        return _layout(value)
+    if isinstance(value, str) and key in _NAMES:
+        return object_identity(value)
+    return value
+
+
 def _layout(text):
     lines = [line.rstrip() for line in text.replace("\r\n", "\n").split("\n")]
     return textwrap.dedent("\n".join(lines).replace("\r", "\n")).strip("\n")

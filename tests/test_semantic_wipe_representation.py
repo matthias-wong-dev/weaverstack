@@ -220,6 +220,46 @@ def test_preserved_readback_requires_only_the_source_shell_and_same_connection(f
 
 
 @weaver_test()
+def test_preserved_readback_tolerates_service_normalisation_and_names_rewrites():
+    from weaver.semantic_models.wipe import reset_definition, verify_reset
+
+    original, parts, connections = _preserved_inputs()
+    spec = reset_definition(
+        "Reporting",
+        original,
+        parts=parts,
+        preserve_data_source=True,
+        connections=connections,
+    )
+    partition = copy.deepcopy(original["model"]["tables"][0]["partitions"][0])
+    partition["name"] = "'source'"
+    expressions = copy.deepcopy(original["model"]["expressions"])
+    text = expressions[0]["expression"]
+    if isinstance(text, list):
+        text = "\n".join(text)
+    expressions[0]["expression"] = text.replace(", ", ",")
+    expressions[0]["lineageTag"] = "assigned-by-fabric"
+    actual = {
+        "model": {
+            "culture": "EN-us",
+            "tables": [
+                {
+                    "name": "'__weaversource'",
+                    "isHidden": True,
+                    "partitions": [partition],
+                }
+            ],
+            "expressions": expressions,
+        }
+    }
+    listed = [{**connections[0], "displayName": "Assigned", "privacyLevel": "None"}]
+
+    differences = verify_reset(spec, actual, listed)
+
+    assert differences == ("/model/expressions/Warehouse~1Serving/expression",)
+
+
+@weaver_test()
 def test_plain_readback_refuses_residual_content_or_connections():
     from weaver.errors import InstallError
     from weaver.semantic_models.wipe import reset_definition, verify_reset

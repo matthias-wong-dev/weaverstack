@@ -6,7 +6,7 @@ import json
 
 from ..errors import CommandError, InstallError
 from .definition import decode_model, decode_parts, encode_parts
-from .deployed import canonical_model
+from .deployed import comparable, object_identity, verify_requested
 from .render import empty_parts
 from .tmdl import PackageEditor
 
@@ -162,11 +162,25 @@ def _explicit_import(model, partitions, connections):
 
 
 def connection_signature(connections):
+    """A digest of what binds a model to its sources, and nothing else Fabric lists."""
+
     values = sorted(
-        json.dumps(value, sort_keys=True, separators=(",", ":"))
+        json.dumps(_binding(value), sort_keys=True, separators=(",", ":"))
         for value in connections
     )
     return hashlib.sha256(json.dumps(values).encode()).hexdigest()
+
+
+def _binding(connection):
+    details = connection.get("connectionDetails") or {}
+    path = details.get("path")
+    return {
+        "connectivityType": connection.get("connectivityType"),
+        "id": connection.get("id"),
+        "gatewayId": connection.get("gatewayId"),
+        "type": details.get("type"),
+        "path": path.casefold() if isinstance(path, str) else path,
+    }
 
 
 def prepare_reset(client, name, *, preserve_data_source):
@@ -185,24 +199,72 @@ def prepare_reset(client, name, *, preserve_data_source):
         connections=connections,
     )
     spec.update(workspace_id=client.workspace_id, model_id=client.model_id)
-    spec["before_definition"] = _digest(canonical_model(observed))
-    spec["before_connection"] = connection_signature(connections)
     spec["removed"] = [
         f"{kind}/{value['name']}"
-        for kind in (
-            "tables",
-            "relationships",
-            "roles",
-            "perspectives",
-            "cultures",
-            "expressions",
-            "dataSources",
-            "functions",
-        )
+        for kind in _REMOVED
         for value in observed["model"].get(kind, [])
         if kind != "expressions" or not preserve_data_source
     ]
+    spec["before"] = _dependencies(observed, connections, preserve_data_source)
     return spec
+
+
+_REMOVED = (
+    "tables",
+    "relationships",
+    "roles",
+    "perspectives",
+    "cultures",
+    "expressions",
+    "dataSources",
+    "functions",
+)
+
+
+def _dependencies(observed, connections, preserve_data_source):
+    """A digest of what a prepared wipe writes back or reports removing.
+
+    Names compare as Fabric may recase or quote them, and preserved M or DAX
+    by layout, so service normalisation is not drift.
+    """
+
+    model = observed["model"]
+    value = {
+        "culture": _culture(model.get("culture")),
+        "removed": sorted(
+            [kind, object_identity(member.get("name") or "")]
+            for kind in _REMOVED
+            for member in model.get(kind, [])
+            if isinstance(member, dict)
+        ),
+    }
+    if preserve_data_source:
+        value["partitions"] = sorted(
+            (
+                [
+                    object_identity(table.get("name") or ""),
+                    object_identity(partition.get("name") or ""),
+                    comparable({key: partition.get(key) for key in ("mode", "source")}),
+                ]
+                for table in model.get("tables", [])
+                for partition in table.get("partitions", [])
+            ),
+            key=lambda each: each[:2],
+        )
+        value["expressions"] = sorted(
+            (
+                [
+                    object_identity(expression.get("name") or ""),
+                    comparable(
+                        {key: expression.get(key) for key in ("kind", "expression")}
+                    ),
+                ]
+                for expression in model.get("expressions", [])
+            ),
+            key=lambda each: each[0],
+        )
+        value["connection"] = connection_signature(connections)
+    return _digest(value)
 
 
 def _digest(value):
@@ -212,9 +274,8 @@ def _digest(value):
 
 
 def verify_prepared(spec, observed, connections):
-    if (
-        _digest(canonical_model(observed)) != spec["before_definition"]
-        or connection_signature(connections) != spec["before_connection"]
+    if spec["before"] != _dependencies(
+        observed, connections, spec["preserve_data_source"]
     ):
         raise CommandError(
             "Semantic model or connection changed after wipe preparation; plan the wipe again"
@@ -222,29 +283,72 @@ def verify_prepared(spec, observed, connections):
 
 
 def verify_reset(spec, observed, connections):
+    """Raise unless the reset model is the empty shell Weaver wrote.
+
+    Returns the paths of preserved source content Fabric rewrote.
+    """
+
     model = observed["model"]
     expected = spec["expected"]
-    if model.get("culture") != expected["culture"]:
+    if _culture(model.get("culture")) != _culture(expected["culture"]):
         raise InstallError("Semantic wipe changed the model culture")
     tables = model.get("tables", [])
     if len(tables) != len(expected["tables"]):
         raise InstallError("Semantic wipe readback retains unexpected tables")
     for table, wanted in zip(tables, expected["tables"]):
-        if table.get("name") != wanted["name"] or table.get("isHidden") is not True:
+        if (
+            object_identity(table.get("name")) != object_identity(wanted["name"])
+            or table.get("isHidden") is not True
+        ):
             raise InstallError(
                 "Semantic wipe readback differs from the hidden source table"
             )
         if table.get("columns") or table.get("measures"):
             raise InstallError("Semantic wipe readback retains table content")
-        if canonical_model(
-            {"model": {"tables": [{"partitions": table.get("partitions", [])}]}}
-        ) != canonical_model(
-            {"model": {"tables": [{"partitions": wanted["partitions"]}]}}
-        ):
-            raise InstallError("Semantic wipe readback changed the source partition")
-    if canonical_model(
-        {"model": {"expressions": model.get("expressions", [])}}
-    ) != canonical_model({"model": {"expressions": expected["expressions"]}}):
+    expressions = model.get("expressions", [])
+    if _names(expressions) != _names(expected["expressions"]):
         raise InstallError("Semantic wipe readback changed the source expressions")
+    for table, wanted in zip(tables, expected["tables"]):
+        if _names(table.get("partitions", [])) != _names(wanted["partitions"]):
+            raise InstallError("Semantic wipe readback changed the source partition")
+    try:
+        differences = verify_requested(
+            {
+                "tables": [
+                    {"name": wanted["name"], "partitions": wanted["partitions"]}
+                    for wanted in expected["tables"]
+                ],
+                "expressions": expected["expressions"],
+            },
+            {
+                "model": {
+                    "tables": [
+                        {
+                            "name": table["name"],
+                            "partitions": table.get("partitions", []),
+                        }
+                        for table in tables
+                    ],
+                    "expressions": expressions,
+                }
+            },
+        )
+    except InstallError as exc:
+        raise InstallError(
+            f"Semantic wipe readback changed the source partition or expressions: {exc}"
+        ) from exc
     if connection_signature(connections) != spec["connection_signature"]:
         raise InstallError("Semantic wipe readback changed the connection")
+    return differences
+
+
+def _culture(value):
+    return value.casefold() if isinstance(value, str) else value
+
+
+def _names(members):
+    return sorted(
+        object_identity(member.get("name") or "")
+        for member in members
+        if isinstance(member, dict)
+    )

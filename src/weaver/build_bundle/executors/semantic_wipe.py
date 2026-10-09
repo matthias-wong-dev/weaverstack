@@ -5,6 +5,7 @@ import json
 from ...errors import InstallError
 from ...semantic_models.definition import decode_model, decode_parts
 from ...semantic_models.wipe import verify_prepared, verify_reset
+from .base import readback_details
 
 
 class SemanticWipeExecutor:
@@ -30,8 +31,11 @@ class SemanticWipeExecutor:
         )
         client.update_definition(spec["definition"], allow_purge_data=True)
         observed = decode_model(client.get_definition())
-        verify_reset(spec, observed, client.get_connections())
-        return {
-            "removed": spec["removed"],
-            "retained_sources": spec["retained_sources"],
-        }
+        differences = verify_reset(spec, observed, client.get_connections())
+        return readback_details(
+            {
+                "removed": spec["removed"],
+                "retained_sources": spec["retained_sources"],
+            },
+            differences,
+        )

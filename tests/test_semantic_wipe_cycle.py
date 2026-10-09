@@ -151,6 +151,43 @@ def test_public_preserve_path_keeps_the_verified_source_shell():
 
 
 @weaver_test()
+def test_a_preserved_source_fabric_reformatted_is_a_warning():
+    from test_semantic_wipe_representation import _preserved_inputs
+
+    from weaver.semantic_models.definition import encode_parts
+
+    session, client = setup()
+    original, parts, connections = _preserved_inputs()
+    client.before, client.native, client.connections = (
+        original,
+        encode_parts(parts),
+        connections,
+    )
+    partition = copy.deepcopy(original["model"]["tables"][0]["partitions"][0])
+    partition["name"] = "Source"
+    expressions = copy.deepcopy(original["model"]["expressions"])
+    text = expressions[0]["expression"]
+    expressions[0]["expression"] = (
+        "\n".join(text) if isinstance(text, list) else text
+    ).replace(", ", ",")
+    client.after = {
+        "model": {
+            "culture": "en-US",
+            "expressions": expressions,
+            "tables": [
+                {"name": "__WeaverSource", "isHidden": True, "partitions": [partition]}
+            ],
+        }
+    }
+
+    result = wipe("SemanticModel/Reporting", session=session, preserve_data_source=True)
+
+    assert result.emptied == ("SemanticModel/Reporting",)
+    assert len(session.warnings) == 1
+    assert "Warehouse~1Serving/expression" in session.warnings[0]
+
+
+@weaver_test()
 def test_readback_failure_is_a_failed_wipe_not_an_emptied_result():
     from weaver.errors import CommandError
 
@@ -233,24 +270,65 @@ def test_catalogue_certification_is_removed_before_semantic_reset(fail_readback)
     )
 
 
-@pytest.mark.parametrize("drift", ["definition", "connection"])
 @weaver_test()
-def test_model_drift_after_preparation_refuses_before_reset(drift):
+def test_model_drift_after_preparation_refuses_before_reset():
     from weaver.errors import CommandError
 
     session, client = setup()
     execute = session.execute_mutation
 
     def changed(plan, payloads):
-        if drift == "definition":
-            client.before["model"]["description"] = "Another deployment"
-        else:
-            client.connections = [
-                {"connectivityType": "ShareableCloud", "id": "different"}
-            ]
+        client.before["model"]["tables"].append({"name": "Added"})
         return execute(plan, payloads)
 
     session.execute_mutation = changed
     with pytest.raises(CommandError, match="changed after wipe preparation"):
         wipe("SemanticModel/Reporting", session=session)
     assert not client.updated
+
+
+@weaver_test()
+def test_a_preserved_source_rebound_after_preparation_refuses_before_reset():
+    from test_semantic_wipe_representation import _preserved_inputs
+
+    from weaver.errors import CommandError
+    from weaver.semantic_models.definition import encode_parts
+
+    session, client = setup()
+    original, parts, connections = _preserved_inputs()
+    client.before, client.native, client.connections = (
+        original,
+        encode_parts(parts),
+        connections,
+    )
+    execute = session.execute_mutation
+
+    def rebound(plan, payloads):
+        client.connections = [
+            {**connections[0], "connectionDetails": {"type": "SQL", "path": "other"}}
+        ]
+        return execute(plan, payloads)
+
+    session.execute_mutation = rebound
+    with pytest.raises(CommandError, match="changed after wipe preparation"):
+        wipe("SemanticModel/Reporting", session=session, preserve_data_source=True)
+    assert not client.updated
+
+
+@weaver_test()
+def test_service_fields_the_wipe_does_not_use_are_not_drift():
+    """A wipe depends on the names it removes, not every field Fabric returns."""
+
+    session, client = setup()
+    execute = session.execute_mutation
+
+    def restamped(plan, payloads):
+        client.before["model"]["description"] = "Another deployment"
+        client.before["model"]["culture"] = "EN-us"
+        client.before["model"]["tables"] = [{"name": "'old'", "lineageTag": "new"}]
+        return execute(plan, payloads)
+
+    session.execute_mutation = restamped
+    result = wipe("SemanticModel/Reporting", session=session)
+    assert result.emptied == ("SemanticModel/Reporting",)
+    assert client.updated
