@@ -10,7 +10,6 @@ from test_semantic_source_build_cycle import (
     answer_catalogue,
     capture_publication,
     loadable_source_catalogue,
-    read_bindings,
     source_session,
 )
 
@@ -165,6 +164,12 @@ def test_generated_source_roundtrip_retains_known_physical_barrier(
 def test_authored_source_build_roundtrip_keeps_order_without_physical_barriers(
     tmp_path, monkeypatch, kind, mode
 ):
+    from weaver.build_bundle.targets import (
+        ItemBindings,
+        effective_item_bindings,
+        parse_build_item,
+    )
+
     sources = source_rows(kind)
     source = next(iter(sources.rows))
     reference = f"{source}/{'Tables/' if kind == 'Lakehouse' else ''}Cake.Sales"
@@ -207,7 +212,20 @@ def test_authored_source_build_roundtrip_keeps_order_without_physical_barriers(
         session.answer_semantic_model(
             "Demo", "Reporting_Dev", SubmittedDefinition(observed)
         )
-        answer_catalogue(session, sources, read_bindings())
+        answer_catalogue(
+            session,
+            sources,
+            effective_item_bindings(
+                ItemBindings(
+                    (
+                        parse_build_item(f"{ITEM}=SemanticModel/Reporting_Dev"),
+                        parse_build_item(f"{source}={kind}/Serving_Dev"),
+                    )
+                ),
+                control_item="Catalogue",
+                workspace_name="Demo",
+            ),
+        )
         published = capture_publication(monkeypatch, session)
         result = weaver.build(
             root, items=f"{ITEM}=SemanticModel/Reporting_Dev", session=session

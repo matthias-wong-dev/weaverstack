@@ -357,6 +357,15 @@ def declared_at(sources, provenance, document, node):
     return f"{unquote(document.path)}:{node.header + 1}"
 
 
+def declared_location(contribution, path):
+    """Where the object at `path` is declared, or None when it is not."""
+
+    found = PackageEditor(contribution.parts).locations(path)
+    if not found:
+        return None
+    return declared_at(contribution.sources, contribution.provenance, *found[0])
+
+
 class _Compilation:
     """One contribution's annotation run: the editor and what its edits imply."""
 

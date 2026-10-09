@@ -201,15 +201,28 @@ def test_authored_source_build_preserves_native_definition_without_catalogue_met
             ],
         },
     }
+    from test_semantic_source_build_cycle import SOURCE
+
+    from weaver.workspaces import TargetDeclaration
+
+    # The source is installed with no dictionary, or is a configured target.
     workspace = Workspace(
-        workspace="Demo", catalogue="Warehouse/Catalogue" if catalogued else None
+        workspace="Demo",
+        catalogue="Warehouse/Catalogue" if catalogued else None,
+        targets={} if catalogued else {SOURCE: TargetDeclaration("Serving_Dev")},
     )
+    registry = {
+        SOURCE: {
+            key: source_catalogue().rows[SOURCE][key]
+            for key in ("Installation", "Registry")
+        }
+    }
     with source_session(workspace=workspace) as session:
         session.answer_semantic_model(
             "Demo", "Reporting_Dev", SubmittedDefinition(observed)
         )
         if catalogued:
-            answer_catalogue(session, Catalogue({}), read_bindings())
+            answer_catalogue(session, Catalogue(registry), read_bindings())
         result = weaver.build(
             root, items=f"{ITEM}=SemanticModel/Reporting_Dev", session=session
         )

@@ -200,7 +200,8 @@ Weaver's own annotations are
 [`semantic_models/builtin_annotations.py`](src/weaver/semantic_models/builtin_annotations.py):
 
 - `Weaver.Source` on a table names `Warehouse/<item>/<schema>.<object>` or
-  `Lakehouse/<item>/Tables/<schema>.<object>`. It declares logical lineage and
+  `Lakehouse/<item>/Tables/<schema>.<object>`, an installed or selected managed
+  Table or View. It declares logical lineage and
   associates available catalogue metadata. Authored partitions, source expressions,
   modes, columns, types and mappings remain intact. Only missing descriptions are
   enriched, matching columns by `sourceColumn`, or by name when absent.
@@ -375,7 +376,8 @@ weaver load SemanticModel/Reporting --workspace Analytics
 
 Build deploys each selected model and verifies its readback. With no catalogue
 Load records nothing. Authored tables can retain logical `Weaver.Source` annotations
-without catalogue metadata. Source generation, Lakehouse and Warehouse operations,
+without catalogue metadata; each names a configured or mapped target, or a Table
+or View the project declares. Source generation, Lakehouse and Warehouse operations,
 installed lineage, Tests and Assumptions, and `load --stale`, `--name` or `--reload`
 need a catalogue.
 

@@ -332,7 +332,11 @@ def test_refined_columns_read_a_selected_source_view_unless_it_is_rebuilt(
 @pytest.mark.parametrize(
     "failure, diagnostic",
     [
-        ("missing_object", "no managed Table or View"),
+        (
+            "missing_object",
+            r"Reporting.tmdl:2: Weaver.Source Warehouse/Serving/Cake.Missing is not "
+            "an installed or selected Table or View",
+        ),
         ("missing_columns", "no source columns"),
         ("unsupported_type", "unsupported type"),
         ("missing_column", "Cake.Sales has no column Missing"),
@@ -366,6 +370,125 @@ def test_source_annotation_refuses_unresolved_generation_before_mutation(
         )
         assert not any("MERGE" in statement for statement in session.tsql)
         assert not session.spark_sql and not session.python
+
+
+LINEAGE_ONLY = '\tpartition Native = calculated\n\t\tsource = ROW("Value", 1)\n'
+
+
+def refused_before_deployment(session):
+    assert not any(
+        kind == "update_definition"
+        for kind, _ in session.semantic_model("Reporting_Dev").calls
+    )
+    assert not any("MERGE" in statement for statement in session.tsql)
+
+
+@pytest.mark.parametrize(
+    "reference", ["Warehouse/Serving/Cake.Missing", "Warehouse/Absent/Cake.Sales"]
+)
+@weaver_test()
+def test_lineage_only_source_must_name_an_installed_relation(tmp_path, reference):
+    import re
+
+    from weaver.errors import BuildError
+
+    root = source_project(tmp_path, value=reference)
+    path = root / str(ITEM) / f"{ITEM.item_name}.tmdl"
+    path.write_text(path.read_text() + LINEAGE_ONLY)
+    item = reference.rsplit("/", 1)[0]
+    with source_session() as session:
+        answer_catalogue(session, source_catalogue(), read_bindings())
+        with pytest.raises(
+            BuildError,
+            match="^"
+            + re.escape(
+                f"SemanticModel/Reporting/Reporting.tmdl:2: Weaver.Source {reference} "
+                "is not an installed or selected Table or View. Correct the "
+                f"reference, or build {item} first"
+            )
+            + "$",
+        ):
+            weaver.build(
+                root, items=f"{ITEM}=SemanticModel/Reporting_Dev", session=session
+            )
+        refused_before_deployment(session)
+
+
+@pytest.mark.parametrize(
+    "reference, configured, declared, refusal",
+    [
+        ("Warehouse/Serving/Cake.Sales", True, False, None),
+        ("Warehouse/Serving/Cake.Sales", False, True, None),
+        (
+            "Warehouse/Serving/Cake.Sales",
+            False,
+            False,
+            "names Warehouse/Serving, which is not a project item or configured "
+            "target. Correct the reference, or add a targets: entry for "
+            "Warehouse/Serving",
+        ),
+        (
+            "Warehouse/Serving/Cake.Missing",
+            True,
+            True,
+            "is not a Table or View that Warehouse/Serving declares. Correct the "
+            "reference",
+        ),
+    ],
+)
+@weaver_test()
+def test_lineage_only_source_without_a_catalogue_names_a_known_item(
+    tmp_path, reference, configured, declared, refusal
+):
+    import re
+
+    from test_semantic_source_build_cycle import SOURCE
+
+    from weaver.errors import BuildError
+    from weaver.workspaces import TargetDeclaration, Workspace
+
+    root = source_project(tmp_path, value=reference)
+    path = root / str(ITEM) / f"{ITEM.item_name}.tmdl"
+    path.write_text(path.read_text() + LINEAGE_ONLY)
+    if declared:
+        folder = root / str(SOURCE)
+        folder.mkdir(parents=True)
+        (folder / "Cake.yml").write_text(
+            "Schema ID: Cake\nDescription: Cake records.\n", encoding="utf-8"
+        )
+        (folder / "Cake.Sales.sql").write_text(
+            "/*\nTable ID: Cake.Sales\nDescription: Sales facts.\n"
+            "Lineage: Constant\nPrimary key: Id\nSchema:\n  Id: bigint\n*/\n"
+            "SELECT CAST(1 AS BIGINT) AS Id\n",
+            encoding="utf-8",
+        )
+    workspace = Workspace(
+        workspace="Demo",
+        targets={SOURCE: TargetDeclaration("Serving_Dev")} if configured else {},
+    )
+    with source_session(workspace=workspace) as session:
+        if refusal is None:
+            result = weaver.build(
+                root,
+                items=f"{ITEM}=SemanticModel/Reporting_Dev",
+                bundle_only=True,
+                bundle_path=tmp_path / "bundle",
+                session=session,
+            )
+            assert result.succeeded
+            return
+        with pytest.raises(
+            BuildError,
+            match=re.escape(
+                f"SemanticModel/Reporting/Reporting.tmdl:2: Weaver.Source {reference} "
+                + refusal
+            )
+            + "$",
+        ):
+            weaver.build(
+                root, items=f"{ITEM}=SemanticModel/Reporting_Dev", session=session
+            )
+        refused_before_deployment(session)
 
 
 @weaver_test()
