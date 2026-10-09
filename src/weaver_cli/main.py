@@ -2063,11 +2063,20 @@ def _build_once(args: argparse.Namespace) -> int:
         print(json.dumps(payload, indent=2))
     else:
         _print_build(result)
-        for error in result.errors:
-            # Show the operation and source before lower-level diagnostics.
+        for block in failure_blocks(result.errors):
             print()
-            print(_indented(error.describe()), file=sys.stderr)
+            print(_indented(block), file=sys.stderr)
     return 0 if result.succeeded else 1
+
+
+def failure_blocks(errors) -> list[str]:
+    """One block per failed action, or one for a cause every action shares."""
+
+    shared = {error.message for error in errors}
+    if len(errors) > 1 and len(shared) == 1:
+        return [f"{len(errors)} actions failed: {shared.pop()}"]
+    # Each names the operation and source before lower-level diagnostics.
+    return [error.describe() for error in errors]
 
 
 def _print_action_counts(report, *, indent: str = "  ") -> None:

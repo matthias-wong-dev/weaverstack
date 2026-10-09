@@ -92,6 +92,76 @@ def test_lost_remote_response_is_uncertain_without_replay(tmp_path):
 
 
 @weaver_test()
+def test_a_declined_build_is_a_known_failure_with_its_fix(tmp_path, monkeypatch):
+    from dataclasses import replace
+    from types import SimpleNamespace
+
+    from weaver.locations import Location
+    from weaver.mutation import MutationExecution
+    from weaver.mutation.bundle import compute_bundle_id
+    from weaver.store import FilesystemStore
+
+    plan = sealed((_action(),))
+    plan = replace(
+        plan,
+        bundle_id="",
+        execution=MutationExecution(
+            workspace_name="Demo", spark_home_target_id="sales"
+        ),
+    )
+    plan = replace(plan, bundle_id=compute_bundle_id(plan))
+    calls = []
+
+    def declined(source, **options):
+        calls.append(options)
+        return "receipt"
+
+    carriers = []
+    pack = install_archive.pack_mutation
+
+    def packed(*args, **kwargs):
+        carriers.append(pack(*args, **kwargs))
+        return carriers[-1]
+
+    store = FilesystemStore()
+    monkeypatch.setattr(store, "read", lambda location: b"")
+    monkeypatch.setattr(install_archive, "pack_mutation", packed)
+    monkeypatch.setattr(
+        install_archive,
+        "read_receipt",
+        lambda receipt, data: {
+            "status": "declined",
+            "mutated": False,
+            "reason": "it is missing mssql_python",
+            "archive_sha256": carriers[-1].sha256,
+        },
+    )
+    scope = SimpleNamespace(
+        transport_store=store,
+        resolver=SimpleNamespace(files_root=lambda item: Location(tmp_path.as_posix())),
+        livy_run=declined,
+    )
+    session = SimpleNamespace(
+        scope=lambda workspace: scope,
+        require_spark_home=lambda *args, **kwargs: None,
+        foreground_livy=lambda scope: None,
+        direct_delta_workers=16,
+        workspace=None,
+    )
+
+    report = install_archive.execute_mutation_in_fabric(session, plan)
+
+    (result,) = report.results
+    assert result.status == "failed"
+    assert result.error == (
+        "Fabric's Spark session cannot run this build: it is missing mssql_python. "
+        "Publish the project's Environment with weaver fabric environment publish, "
+        "then build again."
+    )
+    assert session.archive_mutations[0]["status"] == "declined"
+
+
+@weaver_test()
 def test_carrier_is_staged_in_the_spark_home_lakehouse(tmp_path):
     from dataclasses import replace
     from types import SimpleNamespace
