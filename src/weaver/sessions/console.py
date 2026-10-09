@@ -26,6 +26,9 @@ RED = "\x1b[31m"
 AMBER = "\x1b[33m"
 DIM = "\x1b[2m"
 
+#: Marks work that found nothing to do, apart from success and failure.
+SKIPPED_MARK = "○"
+
 
 def _colour_enabled(stream) -> bool:
     import os
@@ -206,11 +209,13 @@ class ConsoleSession(Session):
             else:
                 if event == "failed":
                     mark = "✗"
+                elif frame.skipped:
+                    mark = SKIPPED_MARK
                 elif frame.kind == TASK or frame.concurrent:
                     mark = "✓"
                 else:
                     mark = " "
-                colour = RED if event == "failed" else GREEN if mark == "✓" else ""
+                colour = {"✗": RED, "✓": GREEN, SKIPPED_MARK: DIM}.get(mark, "")
                 label = f"{self._named(frame):<{self._width() - 2}}"
                 duration = f"{_duration(frame.elapsed):>{self.DURATION_WIDTH}}"
                 print(

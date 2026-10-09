@@ -580,6 +580,40 @@ def test_a_plan_shows_what_each_node_waits_for(capsys):
 
 
 @weaver_test()
+def test_skipped_loads_are_marked_and_counted_alike_in_both_summaries(capsys):
+    from dataclasses import replace
+
+    from weaver.load_report import SKIPPED
+    from weaver.operations.load import _raise_for_failure
+    from weaver.sessions.console import SKIPPED_MARK
+
+    base = _report().nodes[0]
+    skip = LoadResult(succeeded=True, is_static_skip=True)
+    nodes = (
+        *(replace(base, node_id=f"ok{i}") for i in range(5)),
+        replace(base, node_id="failed", status=FAILED, result=None),
+        *(
+            replace(base, node_id=f"static{i}", status=SKIPPED, result=skip)
+            for i in range(3)
+        ),
+    )
+    report = replace(_report(), status=TASK_FAILED, nodes=nodes)
+
+    _cli_module()._print_load(report)
+    with pytest.raises(LoadError) as raised:
+        _raise_for_failure(report)
+
+    printed = capsys.readouterr().out
+    marked = [line for line in printed.splitlines() if "static" in line]
+    assert len(marked) == 3
+    assert all(line.lstrip().startswith(SKIPPED_MARK) for line in marked)
+    summary = printed.split("Load summary", 1)[1].split("Rows", 1)[0].split()
+    printed_counts = dict(zip(summary[1::2], map(int, summary[::2]), strict=True))
+    assert printed_counts == {"succeeded": 5, "failed": 1, "blocked": 0, "skipped": 3}
+    assert "Load summary: 5 succeeded, 1 failed, 3 skipped" in str(raised.value)
+
+
+@weaver_test()
 def test_load_rollup_calls_missing_row_counts_unknown(capsys):
     from dataclasses import replace
 

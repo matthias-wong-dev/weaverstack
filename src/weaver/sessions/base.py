@@ -77,6 +77,8 @@ class ReportingFrame:
     started: float = field(default_factory=time.monotonic)
     elapsed: float | None = None
     failed: bool = False
+    #: The work found nothing to do, as a Static object's load does once loaded.
+    skipped: bool = False
     #: Runs beside other frames of its Step, off the frame stack.
     concurrent: bool = False
     #: What the work produced, for presentation beside its duration.
@@ -101,6 +103,8 @@ class ReportingFrame:
             mapping["detail"] = self.detail
         if self.failed:
             mapping["failed"] = True
+        if self.skipped:
+            mapping["skipped"] = True
         return mapping
 
 

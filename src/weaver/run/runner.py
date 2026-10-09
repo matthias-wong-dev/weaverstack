@@ -69,6 +69,10 @@ def _conclude(frame, node, outcome) -> None:
         return
     if outcome.status == FAILED:
         frame.failed = True
+    if outcome.status == SKIPPED:
+        frame.skipped = True
+        frame.note = "skipped"
+        return
     if getattr(node, "installed", None) is not None:
         frame.note = findings(outcome.result) if frame.failed else None
     elif not frame.failed and node.primitive_kind not in (

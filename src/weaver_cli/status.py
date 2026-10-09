@@ -68,11 +68,15 @@ def semantic_colour(status: str) -> str:
 
 
 def status_symbol(status: str) -> str:
+    from weaver.sessions.console import SKIPPED_MARK
+
     folded = str(status).casefold()
     if folded in {"passed", "succeeded", "succeeded_with_rejects"}:
         return "✓"
     if folded in {"failed", "invalid", "error"}:
         return "✗"
+    if folded == "skipped":
+        return SKIPPED_MARK
     return " "
 
 
