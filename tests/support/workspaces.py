@@ -112,6 +112,39 @@ class InventoryClient:
         )
 
 
+class CreatingInventoryClient(InventoryClient):
+    """An inventory that holds each SemanticModel and Report created in it.
+
+    ``created`` records ``(type, name, definition)`` in creation order.
+    """
+
+    _CREATES = {"semanticModels": "SemanticModel", "reports": "Report"}
+
+    def __init__(self, workspace: str, items: Iterable[tuple[str, str]]) -> None:
+        super().__init__(workspace, items)
+        self.created: list[tuple[str, str, dict]] = []
+
+    def request(self, method: str, path: str, **options):
+        kind = self._CREATES.get(path.rsplit("/", 1)[-1]) if method == "POST" else None
+        if kind is None:
+            return super().request(method, path, **options)
+        self.requested.append(f"{method} {path}")
+        payload = options["payload"]
+        self.items.append((kind, payload["displayName"]))
+        self.created.append((kind, payload["displayName"], payload["definition"]))
+        return _Created(_identifier(kind, payload["displayName"]))
+
+
+class _Created:
+    status_code = 201
+
+    def __init__(self, item_id: str) -> None:
+        self._item_id = item_id
+
+    def json(self):
+        return {"id": self._item_id}
+
+
 class _Response:
     """The little of a REST response the resolver reads."""
 

@@ -170,7 +170,7 @@ def build(
                 },
             )
         validate_build_request(repository, bindings, catalogue_binding=control)
-        _preflight(resolved_workspace, bindings, session=session)
+        preflight = _preflight(resolved_workspace, bindings, session=session)
         with use_or_create_session(session, workspace=resolved_workspace) as opened:
             # Fabric requires a Lakehouse attachment before Spark starts, and
             # the bundle freezes the same one.
@@ -187,6 +187,17 @@ def build(
             )
             opened.report(_build_context_lines(resolved_workspace, selected))
             with opened.task("Build", resolved_workspace.workspace) as frame:
+                from ..fabric.powerbi_items import create_powerbi_items
+
+                create_powerbi_items(
+                    bindings,
+                    repository,
+                    session=opened,
+                    workspace=resolved_workspace,
+                    physical=preflight.workspace if preflight else None,
+                    inventory=preflight.inventory if preflight else None,
+                    bundle_only=bundle_only,
+                )
                 result = _run_build(resolved_workspace, session=opened, **arguments)
                 frame.failed = not result.succeeded
                 return result
@@ -222,14 +233,14 @@ def _build_context_lines(workspace: Workspace, bindings) -> tuple[str, ...]:
     return tuple(lines)
 
 
-def _preflight(workspace: Workspace, bindings, *, session) -> None:
+def _preflight(workspace: Workspace, bindings, *, session):
     """On desktop, verify all targets in one REST call before opening Spark."""
 
     if _inside_fabric_session(workspace):
-        return
+        return None
     from ..fabric.preflight import preflight_fabric_targets
 
-    preflight_fabric_targets(
+    return preflight_fabric_targets(
         bindings,
         workspace=workspace.workspace,
         control_item=workspace.catalogue_item if workspace.catalogue else None,

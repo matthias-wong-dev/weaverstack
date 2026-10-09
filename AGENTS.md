@@ -56,7 +56,8 @@ Session         ConsoleSession   desktop → Fabric
 initialise      resolve request → read the workspace's items → create the
                 missing ones → write the project → optionally publish the Environment
 
-build           resolve request → read BuildState → Builder → MutationExecutor
+build           resolve request → create missing Power BI items → read BuildState
+                → Builder → MutationExecutor
 load / test     resolve request → read RunState   → Runner
 health          resolve request → read Catalogue  → HealthReport
 doctor          authenticate → list workspaces → discover items → probe OneLake, TDS and Spark
@@ -69,8 +70,13 @@ conversion into the physical target vocabulary, one implementation of graph
 mechanics, and one installed graph. Anything more complicated needs a concrete
 reason.
 
-`initialise` is the only operation that creates a Fabric item. A build's
-preflight reads and never creates, so the two do not overlap. A command naming
+Two operations create Fabric items, and their kinds do not overlap.
+`initialise` creates the catalogue Warehouse, the Environment, Lakehouses and
+Warehouses. Build creates each selected SemanticModel and Report target that is
+missing, in `weaver.fabric.powerbi_items`, before it reads build state, and
+creates nothing else; a missing Lakehouse or Warehouse target fails its
+preflight. A bundle-only Build creates nothing and refuses a missing target,
+because a bundle freezes each target's item ID. A command naming
 no workspace and inheriting none reads `workspace-config.yml` in the directory
 it was run from, which is the last resort in `weaver.config.resolve_workspace`.
 

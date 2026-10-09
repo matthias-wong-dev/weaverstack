@@ -138,23 +138,6 @@ def test_semantic_target_is_not_dispatched_to_warehouse_or_lakehouse_wipe():
     assert set(payloads) == {actions[0].payload}
 
 
-@weaver_test()
-def test_missing_semantic_target_does_not_create_an_item(tmp_path):
-    from test_semantic_model_build_cycle import project, session_for
-
-    session = session_for()
-    session.resolver().client.items = [("Warehouse", "Catalogue")]
-    with pytest.raises(weaver.errors.BuildError, match="initialise"):
-        weaver.build(
-            project(tmp_path, False),
-            items="SemanticModel/Reporting=SemanticModel/Reporting_Dev",
-            session=session,
-        )
-    assert not any(
-        path.startswith("POST") for path in session.resolver().client.requested
-    )
-
-
 @pytest.mark.parametrize(
     "cultures,name,expected",
     [

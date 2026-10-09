@@ -12,22 +12,6 @@ from weaver.mutation.validation import validate_mutation_plan
 
 
 @weaver_test()
-def test_report_missing_preflight_never_creates_items(tmp_path):
-    root, session, *_ = prepared_project(tmp_path)
-    session.resolver().client.items = [("SemanticModel", "Reporting_Dev")]
-    with pytest.raises(BuildError, match="Report.*not found"):
-        weaver.build(
-            root,
-            items=[
-                f"{ITEM}=SemanticModel/Reporting_Dev",
-                "Report/Executive=Report/Executive_Dev",
-            ],
-            session=session,
-        )
-    assert not any(p.startswith("POST") for p in session.resolver().client.requested)
-
-
-@weaver_test()
 def test_report_wipe_refuses_before_any_service_or_catalogue_write(tmp_path):
     _, session, *_ = prepared_project(tmp_path)
     with pytest.raises(CommandError, match="Report wipe"):

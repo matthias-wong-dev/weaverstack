@@ -87,8 +87,9 @@ Catalogue-free model and Report builds deploy and verify on every invocation.
 A linked Report-only selection needs its model's certified
 catalogue installation. An as-authored Report is independently certified.
 
-Targets must already exist. Python `weaver.initialise(..., reports={name: definition})`
-creates or reuses typed Reports from complete service-bound native definitions.
+Build creates each selected SemanticModel and Report target that does not exist
+yet, models first, then deploys them. A new linked Report needs its model in the
+same Build. A bundle-only Build creates nothing and refuses a missing target.
 Report updates use `updateMetadata=false`. Report wipe and destructive mutations
 are unsupported. Reports are excluded from Load, Test and refresh execution.
 
@@ -119,9 +120,7 @@ weaver initialise \
 weaver build ./reporting --item SemanticModel/Reporting --non-interactive
 ```
 
-`initialise` creates or reuses the typed item and writes its target configuration.
-Build updates an existing item; it never creates one. A different physical name
-can be selected with
+A different physical name can be selected with
 `--item SemanticModel/Reporting=SemanticModel/Reporting_Dev`.
 
 Power BI items are built as a separate step from Lakehouse and Warehouse items.
