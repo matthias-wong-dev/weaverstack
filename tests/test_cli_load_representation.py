@@ -538,6 +538,48 @@ def test_terminal_failure_summary_uses_load_and_helper_categories():
 
 
 @weaver_test()
+def test_a_plan_shows_what_each_node_waits_for(capsys):
+    from dataclasses import replace
+
+    from weaver.load_report import VALIDATED
+
+    base = replace(_report().nodes[0], status=VALIDATED, executed=False, result=None)
+    loads = [
+        replace(base, node_id=f"load:Warehouse/Sales/Sales.T{i}") for i in range(5)
+    ]
+    model = replace(
+        base, node_id="load:SemanticModel/Sales", primitive_kind="semantic_refresh"
+    )
+    traced = replace(
+        base, node_id="load:SemanticModel/Orders", primitive_kind="semantic_refresh"
+    )
+    edges = (
+        *((load.node_id, model.node_id) for load in reversed(loads)),
+        (loads[1].node_id, traced.node_id),
+    )
+    report = replace(
+        _report(),
+        dry_run=True,
+        nodes=(*loads, model, traced),
+        edges=edges,
+    )
+
+    _cli_module()._print_load(report)
+
+    lines = capsys.readouterr().out.splitlines()
+    after = {
+        lines[index - 1].split()[-1]: line.strip()
+        for index, line in enumerate(lines)
+        if line.strip().startswith("after ")
+    }
+    assert after == {
+        model.node_id: "after load:Warehouse/Sales/Sales.T0, "
+        "load:Warehouse/Sales/Sales.T1, load:Warehouse/Sales/Sales.T2 and 2 more",
+        traced.node_id: "after load:Warehouse/Sales/Sales.T1",
+    }
+
+
+@weaver_test()
 def test_load_rollup_calls_missing_row_counts_unknown(capsys):
     from dataclasses import replace
 

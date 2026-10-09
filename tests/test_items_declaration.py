@@ -266,6 +266,24 @@ def test_an_empty_scope_covers_every_installed_item():
     assert set(installed) == set(items)
 
 
+@pytest.mark.parametrize("what", ["load", "test"])
+@weaver_test()
+def test_an_empty_scope_leaves_out_reports(what):
+    from weaver.operations.items import run_scope
+
+    dag = _installed(
+        {
+            "Warehouse/Curated": "Cur",
+            "SemanticModel/Sales": "Sales",
+            "Report/Sales": "Sales",
+        }
+    )
+
+    items, _ = run_scope(dag, (), what=what)
+
+    assert [str(item) for item in items] == ["SemanticModel/Sales", "Warehouse/Curated"]
+
+
 @weaver_test()
 def test_an_explicit_scope_restricts_to_what_was_named():
     from weaver.operations.items import requested_items, run_scope

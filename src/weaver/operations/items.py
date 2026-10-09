@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from typing import Sequence
 
-from ..declaration.model import LAKEHOUSE, WAREHOUSE, WeaverItemId
+from ..declaration.model import (
+    LAKEHOUSE,
+    REPORT,
+    WAREHOUSE,
+    WeaverItemId,
+)
 from ..errors import CommandError, IdentityError
 
 
@@ -73,9 +78,16 @@ def run_context_lines(workspace, items, installed) -> tuple[str, ...]:
 def installed_items(
     dag, *, what: str, catalogue: str | None = None
 ) -> tuple[WeaverItemId, ...]:
-    """Return items in ``_.Installation`` in identity order."""
+    """Return items in ``_.Installation`` in identity order.
 
-    items = tuple(sorted(dag.installations, key=str))
+    A Report is left out: it has nothing to load or test.
+    """
+
+    items = tuple(
+        sorted(
+            (item for item in dag.installations if item.item_type != REPORT), key=str
+        )
+    )
     if not items:
         where = f" in catalogue {catalogue}" if catalogue else ""
         raise CommandError(

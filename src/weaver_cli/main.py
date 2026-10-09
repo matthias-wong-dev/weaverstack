@@ -1420,6 +1420,7 @@ def _print_load(report) -> None:
     listed = [node for node in report.nodes if report.dry_run or _needs_attention(node)]
     if listed:
         print()
+    waits_for = _waits_for(report)
     for node in listed:
         mark = _status_symbol(node.status)
         colour = _status_colour(node.status)
@@ -1429,6 +1430,10 @@ def _print_load(report) -> None:
         print(
             f"  {_style(mark, colour)} {_style(status, colour)} {node.node_id}{counts}"
         )
+        if report.dry_run and waits_for.get(node.node_id):
+            after = f"after {_first_few(waits_for[node.node_id])}"
+            # Under the node ID.
+            print(f"{'':<29}{_style(after, _DIM)}")
         for message in node.messages:
             if message.severity != "info":
                 message_colour = _RED if message.severity == "error" else _AMBER
@@ -1442,6 +1447,25 @@ def _print_load(report) -> None:
             print(f"\n{prefix} {message.message}")
     if report.workflow_id:
         print(f"\n  Workflow: {_style(report.workflow_id, _DIM)}")
+
+
+def _waits_for(report) -> dict[str, list[str]]:
+    """Each node's direct upstream nodes, in the order the plan lists them."""
+
+    position = {node.node_id: index for index, node in enumerate(report.nodes)}
+    found: dict[str, list[str]] = {}
+    for upstream, downstream in report.edges:
+        found.setdefault(downstream, []).append(upstream)
+    return {
+        node_id: sorted(upstreams, key=lambda each: position.get(each, len(position)))
+        for node_id, upstreams in found.items()
+    }
+
+
+def _first_few(names, shown: int = 3) -> str:
+    if len(names) <= shown + 1:
+        return ", ".join(names)
+    return f"{', '.join(names[:shown])} and {len(names) - shown} more"
 
 
 def _needs_attention(node) -> bool:
