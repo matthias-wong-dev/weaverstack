@@ -98,6 +98,9 @@ class ShortcutExecutor:
         made = dict(state["made"])
         for position, detail in submitted.created.items():
             made[str(pending[position])] = detail
+        reported = {
+            str(pending[i]): submitted.reported.get(i, "") for i in submitted.waiting
+        }
         pending = [pending[i] for i in submitted.waiting]
         if pending:
             # A Warehouse table can reach OneLake after its transaction settles.
@@ -106,7 +109,7 @@ class ShortcutExecutor:
             if now >= deadline:
                 raise sources_not_published(
                     context.target.bound.name,
-                    [frozen[i]["shortcut"] for i in pending],
+                    {frozen[i]["shortcut"]: reported[str(i)] for i in pending},
                 )
             return Waiting(
                 {**state, "pending": pending, "made": made, "deadline": deadline},

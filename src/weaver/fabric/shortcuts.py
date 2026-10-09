@@ -7,7 +7,7 @@ resubmits members whose sources are still reaching OneLake.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Mapping, Sequence
 from urllib.parse import quote
 
@@ -22,8 +22,11 @@ OVERWRITE_POLICY = "CreateOrOverwrite"
 SOURCE_TIMEOUT = 120.0
 SOURCE_POLL_INTERVAL = 5.0
 
-#: A missing source is retried; an occupied path fails immediately.
-_SOURCE_MISSING = "Target path doesn't exist"
+#: Fabric's ``errorCode`` for a target path not yet in OneLake. It also covers
+#: other invalid requests, which are retried until ``SOURCE_TIMEOUT`` and then
+#: fail with Fabric's message.
+_SOURCE_PENDING = "RequestBodyValidationFailed"
+#: Fabric's ``errorCode`` for a path already holding something.
 _PATH_OCCUPIED = "NameConflictError"
 
 _SUCCEEDED = "Succeeded"
@@ -82,12 +85,13 @@ class ShortcutRequest:
 class BulkSubmission:
     """One bulk call's outcome by request position.
 
-    ``waiting`` holds the positions whose sources are still being published to
-    OneLake; submit them again.
+    ``waiting`` holds the positions whose sources may still be being published
+    to OneLake; submit them again. ``reported`` holds Fabric's message for each.
     """
 
     created: Mapping[int, dict]
     waiting: tuple[int, ...]
+    reported: Mapping[int, str] = field(default_factory=dict)
 
 
 #: Fabric refuses a bulk request of more than 100 shortcuts with a 400.
@@ -128,10 +132,12 @@ def submit_shortcuts(
         outcomes = [each.result() for each in submitted]
     created: dict[int, dict] = {}
     waiting: list[int] = []
+    reported: dict[int, str] = {}
     for start, outcome in zip(starts, outcomes):
         created.update({start + i: detail for i, detail in outcome.created.items()})
         waiting.extend(start + i for i in outcome.waiting)
-    return BulkSubmission(created=created, waiting=tuple(waiting))
+        reported.update({start + i: text for i, text in outcome.reported.items()})
+    return BulkSubmission(created=created, waiting=tuple(waiting), reported=reported)
 
 
 def _submit(destination: Item, requests, *, client) -> BulkSubmission:
@@ -160,6 +166,7 @@ def _submit(destination: Item, requests, *, client) -> BulkSubmission:
     members = _members(response, client=client)
     created: dict[int, dict] = {}
     waiting: list[int] = []
+    reported: dict[int, str] = {}
     for position, request in enumerate(requests):
         member = members.get(request.key)
         if member is None:
@@ -171,16 +178,23 @@ def _submit(destination: Item, requests, *, client) -> BulkSubmission:
         if not member.get("error") and member.get("status") == _SUCCEEDED:
             created[position] = _detail(destination, request)
             continue
-        _refuse_permanent(destination, request, member)
+        reported[position] = _refuse_permanent(destination, request, member)
         waiting.append(position)
-    return BulkSubmission(created=created, waiting=tuple(waiting))
+    return BulkSubmission(created=created, waiting=tuple(waiting), reported=reported)
 
 
-def sources_not_published(destination: str, shortcuts) -> CommandError:
+def sources_not_published(
+    destination: str, reported: Mapping[str, str]
+) -> CommandError:
+    """``reported`` maps each shortcut to Fabric's last message for it."""
+
+    detail = "; ".join(
+        f"{shortcut}: {reported[shortcut]}" if reported[shortcut] else shortcut
+        for shortcut in sorted(reported)
+    )
     return CommandError(
-        f"could not create the shortcut(s) {', '.join(sorted(shortcuts))} in "
-        f"{destination}: their sources did not appear in OneLake within "
-        f"{SOURCE_TIMEOUT:.0f}s."
+        f"could not create the shortcut(s) in {destination}: Fabric still "
+        f"refused them after {SOURCE_TIMEOUT:.0f}s. {detail}"
     )
 
 
@@ -225,24 +239,26 @@ def _members(response, *, client: FabricClient) -> dict[tuple[str, str], dict]:
     return outcomes
 
 
-def _refuse_permanent(destination: Item, request: ShortcutRequest, member) -> None:
-    """Raise unless the source is still being published to OneLake."""
+def _refuse_permanent(destination: Item, request: ShortcutRequest, member) -> str:
+    """Raise unless the source may still be being published to OneLake.
+
+    Returns Fabric's message for a member to submit again.
+    """
 
     error = member.get("error") or {}
+    code = error.get("errorCode")
     reported = (
-        " ".join(
-            part for part in (error.get("errorCode"), error.get("message")) if part
-        )
+        " ".join(part for part in (code, error.get("message")) if part)
         or f"Fabric reported status {member.get('status')!r}"
     )
-    if _PATH_OCCUPIED in reported:
+    if code == _PATH_OCCUPIED:
         raise CommandError(
             f"{destination.name} already holds something at {request.qualified}, "
             "so a shortcut cannot be created there. Remove it, or point the "
-            "shortcut at another name."
+            f"shortcut at another name. Fabric reported: {reported}"
         )
-    if _SOURCE_MISSING in reported:
-        return
+    if code == _SOURCE_PENDING:
+        return reported
     raise CommandError(
         f"could not create the shortcut {request.qualified} in "
         f"{destination.name}: {reported}"

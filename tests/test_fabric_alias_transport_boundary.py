@@ -220,6 +220,40 @@ def test_a_source_still_being_published_is_returned_for_another_submission():
 
 
 @weaver_test()
+def test_a_pending_source_is_read_from_the_error_code_not_its_wording():
+    """Fabric's message may change; its error code decides the wait."""
+
+    reworded = {"errorCode": "RequestBodyValidationFailed", "message": "No target"}
+    client = _Client(
+        responses=[_Response(200, body=_members(("Tables/_", "Bookmark", reworded)))]
+    )
+
+    result = submit_shortcuts(
+        _lakehouse("Curated", "dest1"),
+        [_request("Bookmark", "Tables/_/Bookmark", path="Tables/_")],
+        client=client,
+    )
+
+    assert result.waiting == (0,)
+    assert result.reported == {0: "RequestBodyValidationFailed No target"}
+
+
+@weaver_test()
+def test_a_missing_target_message_under_another_code_is_not_a_wait():
+    other = {"errorCode": "Forbidden", "message": "Target path doesn't exist"}
+    client = _Client(
+        responses=[_Response(200, body=_members(("Tables/_", "Bookmark", other)))]
+    )
+
+    with pytest.raises(CommandError, match="Forbidden"):
+        submit_shortcuts(
+            _lakehouse("Curated", "dest1"),
+            [_request("Bookmark", "Tables/_/Bookmark", path="Tables/_")],
+            client=client,
+        )
+
+
+@weaver_test()
 def test_an_occupied_path_is_reported_rather_than_retried():
     """Something that is not a shortcut standing at the name is not a wait."""
 
