@@ -608,9 +608,6 @@ class _DefinitionClient:
         self.token = "token"
         self.timeout = 30
 
-    def wait_for_operation(self, response, *, timeout, poll_interval):
-        return {}
-
     def paged(self, path, *, key, not_found_empty=False):
         return list(self.installed)
 
