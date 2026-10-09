@@ -361,7 +361,7 @@ def test_source_absent_load_uses_published_dependencies_for_order_and_blocking(
         monkeypatch.setattr(session, "sql_executor", executor)
         model = session.semantic_model("Reporting_Dev")
 
-        def refresh():
+        def refresh(**_):
             order.append("refresh")
             return {**COMPLETED, "requestId": REQUEST_ID}
 

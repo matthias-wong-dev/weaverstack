@@ -51,8 +51,16 @@ def dispatch_primitive(
 
         model = session.semantic_model(node.bound_item, workspace=workspace)
         # A new or redeployed model has no data connection until one is bound.
-        model.bind_data_sources()
-        return SemanticRefreshResult.from_response(model.refresh())
+        binding = model.bind_data_sources()
+        for path in binding.unreached:
+            # Single sign-on can still reach the source, so this does not stop.
+            session.warn(
+                f"{node.logical_id} reads {path}, and no connection has that "
+                "path. If the refresh fails, create a connection for it."
+            )
+        return SemanticRefreshResult.from_response(
+            model.refresh(unreached=binding.unreached)
+        )
     if getattr(node, "installed", None) is not None:
         return _validation(node, session, workspace, open_runtime, collect, isolated)
     if kind == WAREHOUSE_PROCEDURE:

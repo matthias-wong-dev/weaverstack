@@ -67,8 +67,10 @@ class DefinitionClient:
         return self.definition
 
     def bind_data_sources(self):
+        from weaver.fabric.semantic_model import DataSourceBinding
+
         self.calls.append(("bind_data_sources", None))
-        return ()
+        return DataSourceBinding()
 
     def update_definition(self, definition, **options):
         self.calls.append(("update_definition", {"definition": definition, **options}))

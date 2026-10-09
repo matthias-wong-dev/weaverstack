@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 import re
 import time
+from dataclasses import dataclass
 
 from ..errors import ConfigError, reported_message
 from .client import FabricError
@@ -38,6 +39,14 @@ class SemanticRefreshError(FabricError):
 
 class ConnectionBindingError(FabricError):
     """A semantic model data source has no single connection to bind to."""
+
+
+@dataclass(frozen=True)
+class DataSourceBinding:
+    """The ``server;database`` paths bound, and those no connection reaches."""
+
+    bound: tuple[str, ...] = ()
+    unreached: tuple[str, ...] = ()
 
 
 #: Connections that a data source reference can be bound to.
@@ -101,7 +110,15 @@ class SemanticModelClient:
         )
         return self.fabric.wait_for_operation(response, timeout=timeout)
 
-    def refresh(self, *, timeout: float = 900, poll_interval: float = 2) -> dict:
+    def refresh(
+        self, *, timeout: float = 900, poll_interval: float = 2, unreached=()
+    ) -> dict:
+        """Refresh the model and wait for the outcome.
+
+        ``unreached`` are the ``server;database`` paths no connection reaches,
+        which a connection failure names as the fix.
+        """
+
         if not math.isfinite(timeout) or not 1 <= timeout < 86400:
             raise ConfigError(
                 "Semantic model refresh timeout must be at least one second and less than 24 hours"
@@ -165,7 +182,13 @@ class SemanticModelClient:
                     word in messages.casefold()
                     for word in ("connection", "gateway", "credential", "not bound")
                 ):
-                    hint = " Check the model's data connection in Fabric settings; the connection owner can grant access or update credentials."
+                    hint = (
+                        " No connection has the path "
+                        + ", ".join(unreached)
+                        + ". Create a connection for it in Fabric, then load again."
+                        if unreached
+                        else " Check the model's data connection in Fabric settings; the connection owner can grant access or update credentials."
+                    )
                 raise SemanticRefreshError(
                     f"Semantic model refresh {request_id} ended with status {status!r}"
                     + (f": {messages}" if messages else "")
@@ -185,13 +208,12 @@ class SemanticModelClient:
             "value", []
         )
 
-    def bind_data_sources(self) -> tuple[str, ...]:
+    def bind_data_sources(self) -> DataSourceBinding:
         """Bind each unbound SQL data source to the one connection that reaches it.
 
         A connection reaches a data source when its path is the source's
         ``server;database``. A source no connection reaches keeps the
-        connection Fabric gave it, such as single sign-on. Returns the bound
-        paths.
+        connection Fabric gave it, such as single sign-on.
         """
 
         unbound = [
@@ -200,14 +222,14 @@ class SemanticModelClient:
             if source.get("datasourceType") == "Sql" and not source.get("datasourceId")
         ]
         if not unbound:
-            return ()
+            return DataSourceBinding()
         connections = [
             c
             for c in list_connections(self.fabric)
             if c.get("connectivityType") in _BINDABLE
             and (c.get("connectionDetails") or {}).get("type") == "SQL"
         ]
-        bound = []
+        bound, unreached = [], []
         for source in unbound:
             details = source.get("connectionDetails") or {}
             server, database = details.get("server"), details.get("database")
@@ -219,6 +241,7 @@ class SemanticModelClient:
                 == path.casefold()
             ]
             if not matches:
+                unreached.append(path)
                 continue
             if len(matches) > 1:
                 names = ", ".join(sorted(str(c.get("displayName")) for c in matches))
@@ -241,7 +264,7 @@ class SemanticModelClient:
                 retry_transient=False,
             )
             bound.append(path)
-        return tuple(bound)
+        return DataSourceBinding(bound=tuple(bound), unreached=tuple(unreached))
 
     def query_dax(self, query: str) -> list[dict]:
         response = self.power_bi.request(

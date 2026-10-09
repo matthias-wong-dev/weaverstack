@@ -8,6 +8,7 @@ from test_semantic_model_rest_boundary import Client, response
 
 from weaver.fabric.semantic_model import (
     ConnectionBindingError,
+    DataSourceBinding,
     SemanticModelClient,
     _refresh_errors,
 )
@@ -54,7 +55,9 @@ def test_unbound_source_binds_to_the_connection_with_its_path():
             connection("personal", f"{SERVER};DEV_Curated", kind="PersonalCloud"),
         ],
     )
-    assert model.bind_data_sources() == (f"{SERVER};DEV_Curated",)
+    assert model.bind_data_sources() == DataSourceBinding(
+        bound=(f"{SERVER};DEV_Curated",)
+    )
     (_, (method, path, request)) = fabric.calls
     assert (method, path) == (
         "POST",
@@ -73,14 +76,16 @@ def test_unbound_source_binds_to_the_connection_with_its_path():
 @weaver_test()
 def test_bound_sources_need_no_connection_lookup():
     model, fabric = scripted([source("Curated", bound=True)])
-    assert model.bind_data_sources() == ()
+    assert model.bind_data_sources() == DataSourceBinding()
     assert not fabric.calls
 
 
 @weaver_test()
-def test_a_source_no_connection_reaches_keeps_its_own():
+def test_a_source_no_connection_reaches_keeps_its_own_and_is_named():
     model, fabric = scripted([source("DEV_Curated")], [])
-    assert model.bind_data_sources() == ()
+    assert model.bind_data_sources() == DataSourceBinding(
+        unreached=(f"{SERVER};DEV_Curated",)
+    )
     assert all(call[0] == "GET" for call in fabric.calls)
 
 
@@ -174,3 +179,81 @@ def test_build_binds_after_deploying_only_when_asked(tmp_path, bind):
             repository.semantic_models[item], bind_data_sources=not bind
         ).signature
     )
+
+
+DEFAULT_CONNECTION = {
+    "status": "Failed",
+    "serviceExceptionJson": json.dumps(
+        {
+            "errorCode": "Premium_ASWL_Error",
+            "errorDescription": "This semantic model uses a default data connection "
+            "without explicit connection credentials.",
+        }
+    ),
+}
+
+
+@weaver_test()
+def test_a_connection_failure_names_the_path_no_connection_reaches():
+    from weaver.fabric.semantic_model import SemanticRefreshError
+
+    request_id = "11111111-2222-3333-4444-555555555555"
+    power_bi = Client(
+        response({}, 202, {"x-ms-request-id": request_id}),
+        response(DEFAULT_CONNECTION),
+    )
+    model = SemanticModelClient("ws", "model", fabric=Client(), power_bi=power_bi)
+    with pytest.raises(SemanticRefreshError) as failed:
+        model.refresh(timeout=10, unreached=(f"{SERVER};DEV_Landing",))
+    message = str(failed.value)
+    assert message.endswith(
+        f"No connection has the path {SERVER};DEV_Landing. Create a connection "
+        "for it in Fabric, then load again."
+    )
+    assert "connection owner" not in message
+
+
+@weaver_test()
+def test_load_warns_before_refreshing_a_model_with_a_source_no_connection_reaches():
+    from test_semantic_model_build_cycle import session_for
+    from test_semantic_model_load_cycle import (
+        ITEM,
+        MODEL_ID,
+        REQUEST_ID,
+        WORKSPACE_ID,
+        answer_installed,
+        installed_rows,
+    )
+
+    import weaver
+    from weaver.errors import LoadError
+
+    datasources = response({"value": [source("DEV_Landing")]})
+    datasources.datasources = True
+    power_bi = Client(
+        datasources,
+        response({}, 202, {"x-ms-request-id": REQUEST_ID}),
+        response(DEFAULT_CONNECTION),
+    )
+    fabric = Client(response({"value": [connection("dev", f"{SERVER};DEV_Curated")]}))
+    model = SemanticModelClient(
+        WORKSPACE_ID, MODEL_ID, fabric=fabric, power_bi=power_bi
+    )
+    session = session_for()
+    session.answer_semantic_model(WORKSPACE_ID, MODEL_ID, model)
+    answer_installed(session, installed_rows())
+    warned = []
+    session.warn = lambda message: warned.append((message, list(power_bi.calls)))
+    with session:
+        with pytest.raises(LoadError) as failed:
+            weaver.load(str(ITEM), session=session)
+
+    path = f"{SERVER};DEV_Landing"
+    ((message, calls),) = warned
+    assert message == (
+        f"SemanticModel/Reporting reads {path}, and no connection has that path. "
+        "If the refresh fails, create a connection for it."
+    )
+    assert not [call for call in calls if call[0] == "POST"]
+    assert f"No connection has the path {path}." in str(failed.value)
+    assert not [call for call in fabric.calls if call[0] == "POST"]
