@@ -284,6 +284,26 @@ def _pure(items):
     return True
 
 
+def reads_data(text, shared=()):
+    """Whether M may read data from outside the model.
+
+    It does when it calls a function outside the shaping library, such as
+    ``Sql.Database`` or ``Web.Contents``, or names one of the model's ``shared``
+    expressions. Literals such as ``#table(...)`` and local steps read nothing.
+    """
+
+    if not isinstance(text, str):
+        text = "\n".join(text) if isinstance(text, list) else ""
+    names = {name.casefold() for name in shared}
+    for token in tokens(text):
+        if token.kind in {"name", "quoted"} and token.value.casefold() in names:
+            return True
+        if token.kind == "name" and "." in token.text:
+            if token.text.partition(".")[0] not in _SHAPING:
+                return True
+    return False
+
+
 def relation(text):
     """The one SQL relation an M expression reads, or None when that is unclear."""
 

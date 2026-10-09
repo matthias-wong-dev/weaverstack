@@ -203,3 +203,23 @@ def test_fabric_rewriting_traced_m_is_a_difference_and_lineage_stands():
     assert dependency["dependency_reference"] == "Warehouse/Serving/Ref.Country"
     (table,) = rows["SemanticModelTable"]
     assert (table["source_mode"], table["source_access"]) == ("import", "sql")
+
+
+@pytest.mark.parametrize(
+    "expression, reads",
+    [
+        ("#table(type table [Column1 = text], {})", False),
+        ('let\n    Source = #table({"Id"}, {{1}, {2}})\nin\n    Source', False),
+        ('Table.FromRows({{1, "Cake"}}, {"Id", "Name"})', False),
+        ('Sql.Database("server", "Serving")', True),
+        ('Web.Contents("https://example.com/sales.csv")', True),
+        ('Value.NativeQuery(#"Warehouse/Serving", "SELECT 1")', True),
+        ("let\n    Source = Serving\nin\n    Source", True),
+        ('Unknown.Function("x")', True),
+    ],
+)
+@weaver_test()
+def test_only_m_that_can_reach_outside_the_model_reads_data(expression, reads):
+    from weaver.semantic_models.m_source import reads_data
+
+    assert reads_data(expression, shared=("Serving", "Warehouse/Serving")) is reads

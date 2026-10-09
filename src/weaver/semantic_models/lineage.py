@@ -4,7 +4,7 @@ from ..catalogue.claims import catalogue_columns
 from ..declaration.metadata import TABLE, VIEW
 from ..declaration.model import WeaverItemId
 from .fragments import source_table
-from .m_source import relation
+from .m_source import reads_data, relation
 from .tmdl import Document
 
 
@@ -180,17 +180,36 @@ def untraced_tables(contribution):
     """Tables without Weaver.Source that read data from an untraced partition."""
 
     declared = {name.casefold() for name in contribution.source_references}
+    shared = _expression_names(contribution)
     return tuple(
         name
         for name in contribution.table_names
         if name.casefold() not in declared
         and any(
-            str(partition["source"].get("type")).casefold() not in _COMPUTED
+            _reads(partition["source"], shared)
             and not _traced(partition["source"], contribution.expression_sources)
             for partition in source_table(contribution.parts, name).get(
                 "partitions", ()
             )
         )
+    )
+
+
+def _reads(source, shared):
+    kind = str(source.get("type")).casefold()
+    if kind in _COMPUTED:
+        return False
+    if kind == "m":
+        return reads_data(source.get("expression", ""), shared)
+    return True
+
+
+def _expression_names(contribution):
+    from .objects import TmdlDefinition
+
+    return tuple(
+        expression.name
+        for expression in TmdlDefinition(contribution.parts).model.expressions
     )
 
 
