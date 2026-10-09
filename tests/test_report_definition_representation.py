@@ -34,7 +34,7 @@ def contribution(schema="2.0.0"):
     )
 
 
-@pytest.mark.parametrize("schema", ["1.0.0", "2.0.0"])
+@pytest.mark.parametrize("schema", ["1.0.0", "2.0.0", "3.1.0"])
 @weaver_test()
 def test_report_binding_changes_only_effective_definition_bytes(schema):
     from weaver.report_definition import decode_report, encode_report
@@ -53,14 +53,28 @@ def test_report_binding_changes_only_effective_definition_bytes(schema):
     assert set(reference) == {"byConnection"}
     connection = reference["byConnection"]
     expected_connection = f"Data Source=powerbi://api.powerbi.com/v1.0/myorg/{WORKSPACE};Initial Catalog={MODEL};"
-    if schema == "2.0.0":
+    if schema != "1.0.0":
         expected_connection += f"semanticModelId={MODEL};"
     assert connection["connectionString"] == expected_connection
-    if schema == "2.0.0":
+    if schema != "1.0.0":
         assert set(connection) == {"connectionString"}
     else:
         assert connection["pbiModelDatabaseName"] == MODEL
         assert connection["connectionType"] == "pbiServiceXmlaStyleLive"
+
+
+@weaver_test()
+def test_a_report_with_no_model_reference_is_refused_naming_its_file():
+    from weaver.errors import ConfigError
+    from weaver.report_definition import encode_report
+
+    authored = contribution()
+    parts = dict(authored.parts)
+    parts["definition.pbir"] = json.dumps({"version": "4.0"}).encode()
+    unbindable = replace(authored, parts=parts, binding=BINDING)
+
+    with pytest.raises(ConfigError, match=r"Executive\.Report/definition\.pbir"):
+        encode_report(unbindable)
 
 
 @weaver_test()

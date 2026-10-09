@@ -16,7 +16,8 @@ def service_reference(binding, schema):
     connection = {
         "connectionString": f"Data Source=powerbi://api.powerbi.com/v1.0/myorg/{binding['workspace_id']};Initial Catalog={binding['item_id']};"
     }
-    if schema.endswith("/1.0.0/schema.json"):
+    if re.search(r"/1\.\d+\.\d+/schema\.json$", str(schema)):
+        # Schema 1 requires these properties beside the connection string.
         connection.update(
             pbiServiceModelId=None,
             pbiModelVirtualServerName="sobe_wowvirtualserver",
@@ -24,10 +25,8 @@ def service_reference(binding, schema):
             name="EntityDataSource",
             connectionType="pbiServiceXmlaStyleLive",
         )
-    elif schema.endswith("/2.0.0/schema.json"):
-        connection["connectionString"] += f"semanticModelId={binding['item_id']};"
     else:
-        raise ConfigError(f"Unsupported Report definition schema {schema!r}")
+        connection["connectionString"] += f"semanticModelId={binding['item_id']};"
     return {"byConnection": connection}
 
 
@@ -37,6 +36,15 @@ def encode_report(contribution):
         raise ConfigError("Report deployment needs a resolved semantic model binding")
     if contribution.model is not None:
         definition = json.loads(parts["definition.pbir"].decode("utf-8-sig"))
+        reference = definition.get("datasetReference")
+        if not isinstance(reference, dict) or not (
+            {"byPath", "byConnection"} & set(reference)
+        ):
+            raise ConfigError(
+                f"{contribution.path}/definition.pbir has no datasetReference with "
+                "byPath or byConnection, so Weaver cannot bind the Report to its "
+                "model. Save the Report from Power BI Desktop with a model reference."
+            )
         definition["datasetReference"] = service_reference(
             contribution.binding, definition.get("$schema", "")
         )
