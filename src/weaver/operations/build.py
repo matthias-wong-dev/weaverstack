@@ -280,6 +280,31 @@ def _item_bindings(items, workspace: Workspace, *, repository=None):
     )
 
 
+def _present_semantic_outcomes(report, session) -> None:
+    """Say what deployment bound and which checks could not run."""
+
+    for action in report.action_results():
+        details = action.details if action.executor == "semantic_model" else None
+        if not details:
+            continue
+        model = action.resource_node_id
+        sources = details.get("data_sources") or {}
+        if sources.get("bound"):
+            session.report(
+                [f"{model} data sources bound: {', '.join(sources['bound'])}"]
+            )
+        for path in sources.get("unreached", ()):
+            session.warn(
+                f"{model} reads {path}, and no connection has that path. Create a "
+                "connection for it in Fabric before refreshing."
+            )
+        check = str(details.get("measure_check", ""))
+        if check.startswith("not run"):
+            session.warn(
+                f"{model} measures were not checked: {check[len('not run: ') :]}"
+            )
+
+
 def _result_from_item_build(source, bindings, result) -> BuildResult:
     report = result.report
     return BuildResult(
@@ -398,6 +423,7 @@ def _run_build(
             )
         with session.step("Install"):
             report = execute_bundle(bundle, session)
+        _present_semantic_outcomes(report, session)
         result = BuildResult(
             source=source,
             items=tuple(str(binding.item) for binding in requested_bindings.entries),

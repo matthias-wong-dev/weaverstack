@@ -29,9 +29,15 @@ class SemanticModelExecutor:
             spec["definition"],
             allow_purge_data=spec["allow_purge_data"],
         )
+        details = {}
         if spec.get("bind_data_sources"):
-            client.bind_data_sources()
-        return {"measure_check": require_valid_measures(client, spec["item"])}
+            binding = client.bind_data_sources()
+            details["data_sources"] = {
+                "bound": list(getattr(binding, "bound", ())),
+                "unreached": list(getattr(binding, "unreached", ())),
+            }
+        details["measure_check"] = require_valid_measures(client, spec["item"])
+        return details
 
 
 def require_valid_measures(client, item) -> str:

@@ -295,3 +295,37 @@ def test_deployment_with_an_invalid_measure_fails_naming_it():
         "'Sales'[Margin]: Column 'Cost' in table 'Sales' cannot be found. Fix the "
         "DAX or restore what it references, then build again."
     )
+
+
+@weaver_test()
+def test_build_says_what_it_bound_and_what_it_could_not_check():
+    from weaver.build_bundle.report import ActionResult
+    from weaver.operations.build import _present_semantic_outcomes
+
+    deployed = ActionResult(
+        action_id="semantic_model-Reporting",
+        resource_node_id="SemanticModel/Reporting",
+        target_id="Reporting",
+        executor="semantic_model",
+        status="succeeded",
+        details={
+            "data_sources": {
+                "bound": [f"{SERVER};Serving"],
+                "unreached": [f"{SERVER};Landing"],
+            },
+            "measure_check": "not run: 401 Unauthorized",
+        },
+    )
+    seen = SimpleNamespace(reported=[], warned=[])
+    session = SimpleNamespace(report=seen.reported.extend, warn=seen.warned.append)
+    _present_semantic_outcomes(
+        SimpleNamespace(action_results=lambda: [deployed]), session
+    )
+    assert seen.reported == [
+        f"SemanticModel/Reporting data sources bound: {SERVER};Serving"
+    ]
+    assert seen.warned == [
+        f"SemanticModel/Reporting reads {SERVER};Landing, and no connection has "
+        "that path. Create a connection for it in Fabric before refreshing.",
+        "SemanticModel/Reporting measures were not checked: 401 Unauthorized",
+    ]

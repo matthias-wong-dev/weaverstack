@@ -403,9 +403,9 @@ Source mapping changes the definition, naming each source by its Warehouse or
 Lakehouse name. Before refreshing, Load binds every unbound SQL data source to
 the one cloud or gateway connection whose path is that source's
 `server;database`; `weaver build --bind-data-sources` does the same after
-deploying. A source no connection reaches keeps the connection Fabric gave it,
-such as single sign-on, and Load warns with the `server;database` a connection
-needs. A source several connections reach fails, naming them.
+deploying and lists what it bound. A source no connection reaches keeps the
+connection Fabric gave it, such as single sign-on, and Build and Load warn with
+the `server;database` a connection needs. A source several connections reach fails, naming them.
 Weaver creates no connections or credentials.
 
 `policy.tmdl` and `<model-name>.tmdl` merge by native structure. An object is
