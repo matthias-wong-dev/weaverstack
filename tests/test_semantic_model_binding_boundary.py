@@ -50,15 +50,15 @@ def scripted(sources, connections=None):
 @weaver_test()
 def test_unbound_source_binds_to_the_connection_with_its_path():
     model, fabric = scripted(
-        [source("DEV_Curated")],
+        [source("Serving_Dev")],
         [
             connection("prod", f"{SERVER};Curated"),
-            connection("dev", f"{SERVER.upper()};dev_curated"),
-            connection("personal", f"{SERVER};DEV_Curated", kind="PersonalCloud"),
+            connection("dev", f"{SERVER.upper()};serving_dev"),
+            connection("personal", f"{SERVER};Serving_Dev", kind="PersonalCloud"),
         ],
     )
     assert model.bind_data_sources() == DataSourceBinding(
-        bound=(f"{SERVER};DEV_Curated",)
+        bound=(f"{SERVER};Serving_Dev",)
     )
     (_, (method, path, request)) = fabric.calls
     assert (method, path) == (
@@ -69,7 +69,7 @@ def test_unbound_source_binds_to_the_connection_with_its_path():
         "connectionBinding": {
             "id": "dev",
             "connectivityType": "ShareableCloud",
-            "connectionDetails": {"type": "SQL", "path": f"{SERVER};DEV_Curated"},
+            "connectionDetails": {"type": "SQL", "path": f"{SERVER};Serving_Dev"},
         }
     }
     assert request["retry_transient"] is False
@@ -111,9 +111,9 @@ def test_bound_sources_need_no_connection_lookup():
 
 @weaver_test()
 def test_a_source_no_connection_reaches_keeps_its_own_and_is_named():
-    model, fabric = scripted([source("DEV_Curated")], [])
+    model, fabric = scripted([source("Serving_Dev")], [])
     assert model.bind_data_sources() == DataSourceBinding(
-        unreached=(f"{SERVER};DEV_Curated",)
+        unreached=(f"{SERVER};Serving_Dev",)
     )
     assert all(call[0] == "GET" for call in fabric.calls)
 
@@ -121,15 +121,15 @@ def test_a_source_no_connection_reaches_keeps_its_own_and_is_named():
 @weaver_test()
 def test_a_source_several_connections_reach_fails_in_one_line():
     connections = [
-        connection("a", f"{SERVER};DEV_Curated", name="First"),
-        connection("b", f"{SERVER};DEV_Curated", name="Second"),
+        connection("a", f"{SERVER};Serving_Dev", name="First"),
+        connection("b", f"{SERVER};Serving_Dev", name="Second"),
     ]
     message = "several connections reach it: First, Second. Keep one."
-    model, fabric = scripted([source("DEV_Curated")], connections)
+    model, fabric = scripted([source("Serving_Dev")], connections)
     with pytest.raises(ConnectionBindingError) as failed:
         model.bind_data_sources()
     text = str(failed.value)
-    assert text.startswith(f"The model reads database DEV_Curated on {SERVER}")
+    assert text.startswith(f"The model reads database Serving_Dev on {SERVER}")
     assert message in text and "\n" not in text
     assert all(call[0] == "GET" for call in fabric.calls)
 
@@ -233,10 +233,10 @@ def test_a_connection_failure_names_the_path_no_connection_reaches():
     )
     model = SemanticModelClient("ws", "model", fabric=Client(), power_bi=power_bi)
     with pytest.raises(SemanticRefreshError) as failed:
-        model.refresh(timeout=10, unreached=(f"{SERVER};DEV_Landing",))
+        model.refresh(timeout=10, unreached=(f"{SERVER};Landing_Dev",))
     message = str(failed.value)
     assert message.endswith(
-        f"No connection has the path {SERVER};DEV_Landing. Create a connection "
+        f"No connection has the path {SERVER};Landing_Dev. Create a connection "
         "for it in Fabric, then load again."
     )
     assert "connection owner" not in message
@@ -257,14 +257,14 @@ def test_load_warns_before_refreshing_a_model_with_a_source_no_connection_reache
     import weaver
     from weaver.errors import LoadError
 
-    datasources = response({"value": [source("DEV_Landing")]})
+    datasources = response({"value": [source("Landing_Dev")]})
     datasources.datasources = True
     power_bi = Client(
         datasources,
         response({}, 202, {"x-ms-request-id": REQUEST_ID}),
         response(DEFAULT_CONNECTION),
     )
-    fabric = Client(response({"value": [connection("dev", f"{SERVER};DEV_Curated")]}))
+    fabric = Client(response({"value": [connection("dev", f"{SERVER};Serving_Dev")]}))
     model = SemanticModelClient(
         WORKSPACE_ID, MODEL_ID, fabric=fabric, power_bi=power_bi
     )
@@ -277,7 +277,7 @@ def test_load_warns_before_refreshing_a_model_with_a_source_no_connection_reache
         with pytest.raises(LoadError) as failed:
             weaver.load(str(ITEM), session=session)
 
-    path = f"{SERVER};DEV_Landing"
+    path = f"{SERVER};Landing_Dev"
     ((message, calls),) = warned
     assert message == (
         f"SemanticModel/Reporting reads {path}, and no connection has that path. "
