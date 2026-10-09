@@ -84,7 +84,7 @@ def semantic_stage(repository, item, target, *, catalogue_target=None):
         index=0,
         description="Publish deployed semantic definitions"
         if publishing
-        else "Build item documents",
+        else "Deploy semantic definitions",
         payloads={filename: content},
         provides={} if publishing else {action.id: (object_key(item),)},
         requires={action.id: requirements},

@@ -74,7 +74,9 @@ def report_stages(repository, item, target):
             PlannedStage(
                 phase=BUILD,
                 slug="build-objects",
-                description="Build item documents",
+                description="Verify deployed Report definitions"
+                if executor == "report_readback"
+                else "Deploy Report definitions",
                 payloads={filename: content},
                 provides={action.id: (object_key(WeaverDocumentId.report_root(item)),)}
                 if executor == "report_readback"
