@@ -179,7 +179,7 @@ def _warehouse_procedure(
             procedure, inputs=inputs, outputs=PROCEDURE_RESULT_PARAMETERS
         )
     except SqlError as exc:
-        _refuse_outdated_procedure(node, procedure, exc)
+        _refuse_outdated_procedure(node, sql, procedure, inputs, exc)
         raise
     result = LoadResult.from_row(logical_result_row(row))
     if publication is not None:
@@ -187,20 +187,25 @@ def _warehouse_procedure(
     return result
 
 
-#: What a Warehouse says when a procedure is called with a parameter it predates.
-_UNKNOWN_PARAMETER = ("too many arguments", "return_refusal")
-
-
-def _refuse_outdated_procedure(node, procedure: str, exc: Exception) -> None:
-    """Name the rebuild when the installed procedure predates this contract.
+def _refuse_outdated_procedure(node, sql, procedure: str, inputs, exc) -> None:
+    """Name the rebuild when the installed procedure lacks a parameter passed.
 
     Argument binding fails before the procedure body runs, so nothing loaded.
+    The installed parameters are read from the Warehouse, so a failed call is
+    not judged from its message.
     """
 
     from ..errors import LoadError
 
-    message = str(exc).casefold()
-    if not any(part in message for part in _UNKNOWN_PARAMETER):
+    try:
+        rows = sql.query(
+            "select name from sys.parameters where object_id = object_id(?)",
+            [procedure],
+        )
+    except Exception:
+        return
+    installed = {str(row["name"]).lstrip("@").casefold() for row in rows}
+    if not installed or all(name.casefold() in installed for name, _ in inputs):
         return
     raise LoadError(
         f"{node.node_id} cannot run: {procedure} was installed by an older "
