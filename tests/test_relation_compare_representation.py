@@ -80,6 +80,13 @@ def test_incomparable_shapes_and_keys_are_refused(actual, key, message):
         compare_rows(EXPECTED, actual, primary_key=key)
 
 
+@pytest.mark.parametrize("reserved", ["_weaver_side", "_weaver_sk"])
+@weaver_test()
+def test_reserved_columns_are_refused_with_both_row_sets_empty(reserved):
+    with pytest.raises(ValidationError, match="reserved for diagnostics"):
+        compare_rows(Relation((reserved,), ()), Relation((reserved,), ()))
+
+
 @weaver_test()
 def test_transport_forms_of_one_value_are_equal():
     expected = Relation(

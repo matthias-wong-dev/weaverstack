@@ -528,7 +528,10 @@ class _Planner:
                 if producer.target.is_lakehouse and edge.source_access == "sql":
                     crossing = producer.target
                 elif (
-                    producer.object_type == "table" and edge.source_mode == "directLake"
+                    producer.target.kind == "warehouse"
+                    and producer.object_type == "table"
+                    and edge.source_access == "sql"
+                    and edge.source_mode == "directLake"
                 ):
                     crossing = ONELAKE_PUBLICATION
             producers.append((producer, crossing))

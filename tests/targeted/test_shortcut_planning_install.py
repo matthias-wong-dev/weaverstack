@@ -601,6 +601,24 @@ def test_a_schema_shortcut_is_created_directly_under_tables(tmp_path):
 
 
 @weaver_test()
+def test_build_selection_includes_schema_shortcuts_and_ordinary_documents(tmp_path):
+    repository = _direct(
+        tmp_path,
+        'Reference = Shortcut(shortcut_type="schema", target_type="physical", '
+        'target="Lakehouse/Reference/DWG", workspace="Shared Data")\n',
+    )
+    shortcut = repository.shortcuts[0].destination
+    ordinary = document_id(f"{CONSUMER}/Tables/DWG.Report")
+    selected = {shortcut, ordinary}
+    selection = select_build(
+        repository, {}, selected=selected, inventories=inventories()
+    )
+    assert set(selection.impact.new) == selected
+    assert set(selection.selected_for_build) == selected
+    assert selection.selected_for_drop == ()
+
+
+@weaver_test()
 def test_a_schema_shortcut_asks_for_no_schema_of_its_own(tmp_path):
     """It is the namespace, and the item it points at owns what is inside."""
 

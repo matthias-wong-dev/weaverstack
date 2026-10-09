@@ -65,18 +65,25 @@ def _quoted(column: str) -> str:
     return f"`{column}`"
 
 
-def _check_shape(
-    expected: Any, actual: Any, *, key: tuple[str, ...], what: str
-) -> None:
-
-    left, right = list(expected.columns), list(actual.columns)
-
-    reserved = [column for column in left + right if column in RESERVED_COLUMNS]
+def _check_reserved_columns(expected: Any, actual: Any, *, what: str) -> None:
+    reserved = [
+        column
+        for column in (*expected.columns, *actual.columns)
+        if column in RESERVED_COLUMNS
+    ]
     if reserved:
         raise ValidationError(
             f"{what}: {', '.join(sorted(set(reserved)))} is reserved for "
             "diagnostics. Rename the Test column."
         )
+
+
+def _check_shape(
+    expected: Any, actual: Any, *, key: tuple[str, ...], what: str
+) -> None:
+
+    left, right = list(expected.columns), list(actual.columns)
+    _check_reserved_columns(expected, actual, what=what)
 
     if len(left) != len(right):
         raise ValidationError(

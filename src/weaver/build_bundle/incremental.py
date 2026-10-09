@@ -340,7 +340,8 @@ def select_build(
     models = {
         identity
         for identity in selected
-        if identity.shape == MODEL_SHAPE or identity.item in repository.reports
+        if (isinstance(identity, WeaverDocumentId) and identity.shape == MODEL_SHAPE)
+        or identity.item in repository.reports
     }
     selected_for_drop = set(impact.impacted) - prohibited - untouched - models
     refreshed = (set(impact.impacted) & pointers) - prohibited

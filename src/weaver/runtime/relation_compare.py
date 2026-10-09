@@ -15,7 +15,14 @@ from decimal import Decimal, InvalidOperation
 from typing import Any, Sequence
 
 from ..errors import ValidationError
-from .test_compare import ACTUAL, EXPECTED, SIDE_COLUMN, SK_COLUMN, _check_shape
+from .test_compare import (
+    ACTUAL,
+    EXPECTED,
+    SIDE_COLUMN,
+    SK_COLUMN,
+    _check_reserved_columns,
+    _check_shape,
+)
 
 
 @dataclass(frozen=True)
@@ -45,6 +52,7 @@ def compare_rows(
     """
 
     key = tuple(primary_key)
+    _check_reserved_columns(expected, actual, what=what)
     # Transport names no columns for an empty result, which then has no shape
     # to disagree with.
     if expected.rows and actual.rows:

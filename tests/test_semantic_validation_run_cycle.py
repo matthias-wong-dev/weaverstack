@@ -142,6 +142,28 @@ def test_a_validation_that_cannot_run_records_error(
     }
 
 
+@pytest.mark.parametrize("reserved", ["_weaver_side", "_weaver_sk"])
+@pytest.mark.parametrize("populated", ["expected", "actual"])
+@weaver_test()
+def test_reserved_columns_on_one_populated_side_record_error(
+    tmp_path, monkeypatch, reserved, populated
+):
+    expected = [{"Month": 1, "Revenue": 10, reserved: "user"}]
+    actual = [{"Sales[Month]": 1, "[Revenue]": 11, f"[{reserved}]": "user"}]
+    report, session, _ = run(
+        tmp_path,
+        monkeypatch,
+        test_rows=actual if populated == "actual" else [],
+        assumption_rows=[],
+        expected_rows=expected if populated == "expected" else [],
+        name="Sales.RevenueReconciles",
+    )
+    assert statuses(session) == {"RevenueReconciles": "Error"}
+    (node,) = report.nodes
+    assert not node.succeeded
+    assert "reserved for diagnostics" in node.result.error_message
+
+
 @weaver_test()
 def test_a_named_test_returns_paired_diagnostics(tmp_path, monkeypatch):
     report, _, _ = run(
