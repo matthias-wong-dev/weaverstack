@@ -6,15 +6,14 @@ generated files use the same parsers as authored projects.
 
 The catalogue Warehouse holds Weaver's `_` schema and no authored objects, so it
 gets no folder here. Item folders are empty when no example was asked for, and a
-`.gitkeep` keeps them in version control.
+`.gitkeep` keeps them in version control. Power BI projects go under `PowerBI/`.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from dataclasses import field as dataclass_field
 
-from ..declaration.model import LAKEHOUSE, SEMANTIC_MODEL, WAREHOUSE
+from ..declaration.model import LAKEHOUSE, REPORT, SEMANTIC_MODEL, WAREHOUSE
 from ..errors import CommandError
 from ..targets import validate_name
 
@@ -36,16 +35,12 @@ class ProjectRequest:
     warehouse: str | None = None
     example: bool = False
     semantic_model: str | None = None
-    reports: dict = dataclass_field(default_factory=dict)
+    #: Power BI items found in the project folder.
     source_items: tuple[str, ...] = ()
+    #: Lakehouse and Warehouse items the project folder already declares.
+    adopted_items: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        from ..report_definition import validate_service_report
-
-        for name, definition in self.reports.items():
-            validate_name(name, what="Report")
-            validate_fabric_name(name, "Report")
-            validate_service_report(definition)
         for field in ("workspace", "catalogue", "environment"):
             object.__setattr__(
                 self, field, validate_name(getattr(self, field), what=field)
@@ -91,10 +86,25 @@ class ProjectRequest:
         return tuple(dict.fromkeys(chosen + list(self.source_items)))
 
 
+def build_commands(request: ProjectRequest) -> tuple[str, ...]:
+    """The project's Build commands: sources first, then Power BI items."""
+
+    items = (*request.items, *request.adopted_items)
+    if not any(item.split("/", 1)[0] in {SEMANTIC_MODEL, REPORT} for item in items):
+        return ("build",)
+    sources = [
+        kind
+        for kind in (LAKEHOUSE, WAREHOUSE)
+        if any(item.startswith(f"{kind}/") for item in items)
+    ]
+    first = ("build " + " ".join(f"--item {kind}" for kind in sources),)
+    return (*(first if sources else ()), "build --item PowerBI")
+
+
 def project_files(request: ProjectRequest) -> dict[str, str]:
     files = {
         WORKSPACE_CONFIG_FILE: _workspace_config(request),
-        WORKFLOW_FILE: _workflow(),
+        WORKFLOW_FILE: _workflow(build_commands(request)),
         "README.md": _readme(request),
     }
     if request.lakehouse and not request.example:
@@ -106,6 +116,8 @@ def project_files(request: ProjectRequest) -> dict[str, str]:
         files[f"PowerBI/{request.semantic_model}/{request.semantic_model}.tmdl"] = (
             semantic_extension()
         )
+    elif not request.source_items:
+        files[f"PowerBI/{KEEP_FILE}"] = ""
     return files
 
 
@@ -140,11 +152,11 @@ def _workspace_config(request: ProjectRequest) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _workflow() -> str:
-    return """workflows:
+def _workflow(builds) -> str:
+    steps = "".join(f"    - {build}\n" for build in builds)
+    return f"""workflows:
   full:
-    - build
-    - load
+{steps}    - load
     - test
     - health
   load-only:
@@ -152,13 +164,13 @@ def _workflow() -> str:
     - test
     - health
   build-only:
-    - build
-  wipe-all:
+{steps}  wipe-all:
     - wipe
 """
 
 
 def _readme(request: ProjectRequest) -> str:
+    builds = "\n".join(f"weaver {build}" for build in build_commands(request))
     return f"""# Weaver project
 
 This project describes data objects in the Microsoft Fabric workspace
@@ -173,6 +185,9 @@ and the physical target for each project item.
 packages to its `Libraries/PublicLibraries/environment.yml`. Fabric compute
 settings and custom libraries are kept in the same Environment definition.
 
+`PowerBI/<project>/` holds Power BI Desktop projects. Build creates their
+semantic models and Reports in Fabric.
+
 `workflow.yml` defines repeatable workflows: `full`, `load-only`, `build-only`
 and `wipe-all`. Wipe removes all user objects from the configured targets and
 asks for confirmation.
@@ -180,7 +195,7 @@ asks for confirmation.
 ## The basic workflow
 
 ```bash
-weaver build
+{builds}
 weaver load
 weaver test
 weaver health

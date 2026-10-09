@@ -48,15 +48,7 @@ def test_initialise_existing_named_project_expands_models_reports_and_actual_tar
     dry = weaver.initialise(
         tmp_path, workspace="Demo", session=session, client=client, dry_run=True
     )
-    assert {
-        (r.role, r.name, r.status)
-        for r in dry.resources
-        if r.role in {"SemanticModel", "Report"}
-    } == {
-        (kind, name, "existing")
-        for kind, name in client.items
-        if kind in {"SemanticModel", "Report"}
-    }
+    assert {r.role for r in dry.resources} == {"Catalogue", "Environment"}
     actual = weaver.initialise(
         tmp_path, workspace="Demo", session=session, client=client
     )
@@ -70,76 +62,43 @@ def test_initialise_existing_named_project_expands_models_reports_and_actual_tar
 
 
 @weaver_test()
-def test_initialise_discovered_models_precede_bound_report_creation(
-    tmp_path, monkeypatch
-):
-    import json
+def test_initialise_builds_sources_then_power_bi_items(tmp_path, monkeypatch):
+    import yaml
 
-    from support.workspaces import _identifier
-
-    from weaver.report_definition import decode_report
-    from weaver.semantic_models.definition import decode_parts
+    from weaver_cli.workflow import load_workflow
 
     variant_project(tmp_path)
-
-    class CreatingClient(CreationClient):
-        def request(self, method, path, **kwargs):
-            response = super().request(method, path, **kwargs)
-            kind = "SemanticModel" if path.endswith("/semanticModels") else "Report"
-            self.items.append((kind, kwargs["payload"]["displayName"]))
-            return response
-
-    client = CreatingClient()
+    client = CreationClient()
     monkeypatch.setattr(
         "weaver.fabric.environment.read_definition",
         lambda *a, **k: EnvironmentDefinition(
             {EXTERNAL_LIBRARIES: b"dependencies:\n  - pip:\n      - weaverstack\n"}
         ),
     )
-    session = TestSession(resolver=SimpleNamespace(client=client))
-    dry = weaver.initialise(
-        tmp_path, workspace="Demo", session=session, client=client, dry_run=True
-    )
-    assert (
-        len(
-            [
-                r
-                for r in dry.resources
-                if r.role in {"SemanticModel", "Report"} and r.status == "planned"
-            ]
-        )
-        == 5
-    )
-    assert not client.writes
     result = weaver.initialise(
-        tmp_path, workspace="Demo", session=session, client=client
+        tmp_path,
+        workspace="Demo",
+        lakehouse="Landing",
+        session=TestSession(resolver=SimpleNamespace(client=client)),
+        client=client,
     )
-    assert result.succeeded
-    assert [w[2]["payload"]["displayName"] for w in client.writes] == [
-        "Executive",
-        "Normal",
-        "Public",
-        "Executive",
-        "Public",
+
+    builds = ["build --item Lakehouse", "build --item PowerBI"]
+    assert load_workflow("full", file=tmp_path / "workflow.yml")[0] == [
+        *builds,
+        "load",
+        "test",
+        "health",
     ]
-    cultures = {"Executive": "en-GB", "Normal": "en-AU", "Public": "en-NZ"}
-    for _, path, options in client.writes:
-        name = options["payload"]["displayName"]
-        definition = options["payload"]["definition"]
-        if path.endswith("/semanticModels"):
-            assert (
-                f"culture: {cultures[name]}".encode()
-                in decode_parts(definition)["definition/model.tmdl"]
-            )
-        else:
-            binding = json.loads(decode_report(definition)["definition.pbir"])[
-                "datasetReference"
-            ]["byConnection"]["connectionString"]
-            assert _identifier("SemanticModel", name) in binding
-    assert not any(
-        p.parent.name == name
-        for name in ("Executive", "Normal", "Public")
-        for p in (tmp_path / "PowerBI").glob("*/*.tmdl")
+    assert load_workflow("build-only", file=tmp_path / "workflow.yml")[0] == builds
+    assert result.next_commands[1:3] == tuple(f"weaver {b}" for b in builds)
+    assert "weaver build --item PowerBI" in (tmp_path / "README.md").read_text()
+    assert [w[1].rsplit("/", 1)[1] for w in client.writes] == ["lakehouses"]
+    assert (
+        yaml.safe_load((tmp_path / "workspace-config.yml").read_text())["targets"][
+            "Report/Executive"
+        ]
+        == "Executive"
     )
 
 
@@ -160,47 +119,6 @@ def test_noninteractive_initialise_cli_accepts_existing_named_powerbi_project(tm
         ]
     )
     assert collect(args, ask=False) is False
-
-
-@weaver_test()
-def test_initialise_as_authored_report_has_no_binding_requirement(
-    tmp_path, monkeypatch
-):
-    import json
-
-    from weaver.report_definition import decode_report
-
-    write(tmp_path, "PowerBI/Independent/A.tmdl", "model Model\n")
-    write(tmp_path, "PowerBI/Independent/B.tmdl", "model Model\n")
-    authored = json.dumps(
-        {
-            "version": "4.0",
-            "datasetReference": {"byConnection": {"connectionString": "external"}},
-        }
-    ).encode()
-    write(tmp_path, "PowerBI/Independent/Analyst.Report/definition.pbir", authored)
-    write(tmp_path, "PowerBI/Independent/Analyst.Report/report.json", b"{}\r\n")
-    client = CreationClient()
-    client.items.extend([("SemanticModel", "A"), ("SemanticModel", "B")])
-    monkeypatch.setattr(
-        "weaver.fabric.environment.read_definition",
-        lambda *a, **k: EnvironmentDefinition(
-            {EXTERNAL_LIBRARIES: b"dependencies:\n  - pip:\n      - weaverstack\n"}
-        ),
-    )
-    result = weaver.initialise(
-        tmp_path,
-        workspace="Demo",
-        session=TestSession(resolver=SimpleNamespace(client=client)),
-        client=client,
-    )
-    assert result.succeeded
-    (request,) = client.writes
-    assert request[1].endswith("/reports")
-    assert decode_report(request[2]["payload"]["definition"]) == {
-        "definition.pbir": authored,
-        "report.json": b"{}\r\n",
-    }
 
 
 @weaver_test()

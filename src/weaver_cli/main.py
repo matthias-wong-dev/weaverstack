@@ -1117,7 +1117,11 @@ def _add_initialise_args(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument("--lakehouse", help="Lakehouse for Delta tables and files.")
     parser.add_argument("--warehouse", help="Warehouse for SQL tables and views.")
-    parser.add_argument("--semantic-model", help="SemanticModel for the project.")
+    parser.add_argument(
+        "--semantic-model",
+        metavar="NAME",
+        help="Add PowerBI/NAME/NAME.tmdl. Build creates the SemanticModel.",
+    )
     parser.add_argument(
         "--example",
         dest="example",

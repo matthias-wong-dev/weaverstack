@@ -99,19 +99,6 @@ def decode_report(definition):
         raise ConfigError(f"Invalid Report definition: {exc}") from exc
 
 
-def validate_service_report(definition):
-    parts = decode_report(definition)
-    try:
-        authored = json.loads(parts["definition.pbir"].decode("utf-8-sig"))
-        reference = authored["datasetReference"]
-        if set(reference) != {"byConnection"} or not reference["byConnection"].get(
-            "connectionString"
-        ):
-            raise ValueError("expected a service-bound Report definition")
-    except (KeyError, TypeError, ValueError, AttributeError) as exc:
-        raise ConfigError(f"Invalid Report service binding: {exc}") from exc
-
-
 _NOT_JSON = object()
 _GUID = r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}"
 

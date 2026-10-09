@@ -98,11 +98,10 @@ Build selectors expand before target binding: `SemanticModel`, `Warehouse`,
 Power BI projects, and `PowerBI/<project>` selects one. Exact selections retain
 their physical target overrides. Build source items first, then Power BI items.
 
-To adopt an existing `PowerBI` source tree, run ordinary `initialise` against its
-project folder without `--semantic-model`. It creates or reuses every discovered
-logical model and Report at its configured typed target, preserves authored
-files, and writes default target entries when there is no workspace config.
-An explicit `--semantic-model Name` still provisions just that named model.
+`initialise` creates no Power BI item. Run against a project folder with a
+`PowerBI` source tree, it preserves authored files, adds a target entry for each
+discovered model and Report, and writes a workflow that builds the sources, then
+`--item PowerBI`. `--semantic-model Name` adds `PowerBI/Name/Name.tmdl`.
 
 Rename organisation `extension.tmdl` to `PowerBI/policy.tmdl` and project
 `extension.tmdl` to `<model-name>.tmdl` before building.
@@ -114,7 +113,7 @@ weaver initialise \
   --workspace Analytics \
   --project-folder ./reporting \
   --semantic-model Reporting \
-  --catalogue-item Catalogue \
+  --catalogue Catalogue \
   --environment Weaver \
   --non-interactive
 weaver build ./reporting --item SemanticModel/Reporting --non-interactive

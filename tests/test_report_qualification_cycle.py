@@ -203,7 +203,7 @@ def test_qualification_cli_imports_under_src_only_pythonpath():
         text=True,
     )
     assert result.returncode == 0, result.stderr
-    assert "--report" in result.stdout and "--provision" in result.stdout
+    assert "--report" in result.stdout
 
 
 @weaver_test()

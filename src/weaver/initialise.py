@@ -1,7 +1,8 @@
 """Create a Weaver project and its declared Fabric items.
 
 Environment publication is optional. Examples are source files for a later
-build, load and test. The first build creates the catalogue tables.
+build, load and test. The first build creates the catalogue tables. Power BI
+items are scaffolded here and created by Build.
 """
 
 from __future__ import annotations
@@ -11,11 +12,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .declaration.model import LAKEHOUSE, SEMANTIC_MODEL, WAREHOUSE
+from .declaration.model import LAKEHOUSE, WAREHOUSE
 from .errors import WeaverError
 from .onboarding import (
     WORKSPACE_CONFIG_FILE,
     ProjectRequest,
+    build_commands,
     environment_definition_files,
     example_files,
     project_files,
@@ -72,6 +74,7 @@ class InitialiseReport:
     dry_run: bool = False
     environment_publication: str = "deferred"
     environment_definition: str = "written"
+    builds: tuple[str, ...] = ("build",)
 
     @property
     def created(self) -> tuple[str, ...]:
@@ -89,7 +92,7 @@ class InitialiseReport:
     def next_commands(self) -> tuple[str, ...]:
         return (
             "weaver workflow full",
-            "weaver build",
+            *(f"weaver {build}" for build in self.builds),
             "weaver load",
             "weaver test",
             "weaver health",
@@ -119,7 +122,6 @@ def initialise(
     lakehouse: str | None = None,
     warehouse: str | None = None,
     semantic_model: str | None = None,
-    reports: dict | None = None,
     example: bool = False,
     publish_environment: bool = False,
     install_weaver: bool | None = None,
@@ -129,6 +131,7 @@ def initialise(
 ) -> InitialiseReport:
     """Validate and create a project and its requested Fabric items.
 
+    ``semantic_model`` adds ``PowerBI/<name>/<name>.tmdl`` for Build to create.
     ``example`` adds source files. ``publish_environment`` publishes the
     Environment after writing the project.
     """
@@ -145,21 +148,23 @@ def initialise(
         )
         publish_environment = publish_environment or install_weaver
     destination = Path(project_folder).resolve()
-    repository = None
     source_items = ()
     configured = None
-    if semantic_model is None and (destination / "PowerBI").is_dir():
-        repository = powerbi_repository(destination)
+    adopted = set()
+    repository = None if semantic_model else powerbi_repository(destination)
+    if repository is not None:
         source_items = tuple(
             str(item)
             for item in sorted(
                 set(repository.semantic_models) | set(repository.reports)
             )
         )
+        adopted.update(item.identity for item in repository.items)
         if (destination / WORKSPACE_CONFIG_FILE).is_file():
             from .config import load_workspace
 
             configured = load_workspace(destination / WORKSPACE_CONFIG_FILE)
+            adopted.update(configured.configured_items)
     request = ProjectRequest(
         workspace=_workspace_name(workspace, session=session),
         catalogue=catalogue
@@ -177,11 +182,11 @@ def initialise(
         lakehouse=lakehouse,
         warehouse=warehouse,
         semantic_model=semantic_model,
-        reports=reports or {},
         example=example,
         source_items=source_items,
+        adopted_items=_sources(adopted),
     )
-    wanted_items = _requested(request, configured=configured)
+    wanted_items = _requested(request)
 
     from .sessions.host import use_or_create_session
 
@@ -247,6 +252,7 @@ def initialise(
                     example=ExampleOutcome(generated=request.example),
                     dry_run=True,
                     environment_definition=definition_status,
+                    builds=build_commands(request),
                 )
 
             resources.extend(
@@ -256,10 +262,7 @@ def initialise(
                     physical=physical,
                     session=opened,
                     client=rest,
-                    destination=destination,
                     wanted_items=wanted_items,
-                    repository=repository,
-                    configured=configured,
                 )
             )
             with opened.step("Writing the project files", str(destination)):
@@ -315,6 +318,29 @@ def initialise(
         environment_publication=publication,
         environment_definition=definition_status,
         dry_run=False,
+        builds=build_commands(request),
+    )
+
+
+def _has_powerbi_sources(destination: Path) -> bool:
+    """Whether ``PowerBI/`` holds more than its scaffolded ``.gitkeep``."""
+
+    folder = destination / "PowerBI"
+    return folder.is_dir() and any(
+        path.is_file() and path.relative_to(folder).as_posix() != ".gitkeep"
+        for path in folder.rglob("*")
+    )
+
+
+def _sources(items) -> tuple[str, ...]:
+    from .catalogue.builtin import BUILTIN_ITEM
+
+    return tuple(
+        sorted(
+            str(item)
+            for item in items
+            if item.item_type in {LAKEHOUSE, WAREHOUSE} and item != BUILTIN_ITEM
+        )
     )
 
 
@@ -343,7 +369,7 @@ def powerbi_repository(destination):
     from .locations import Location
 
     root = Path(destination).resolve()
-    if not (root / "PowerBI").is_dir():
+    if not _has_powerbi_sources(root):
         return None
     return parse_item_repository(Location(root.as_posix()))
 
@@ -466,18 +492,9 @@ class _Requested:
     role: str
     name: str
     item_type: str
-    logical: object = None
-
-    @property
-    def key(self):
-        return (
-            f"{self.role}/{self.name}"
-            if self.role in {"Report", SEMANTIC_MODEL}
-            else self.role
-        )
 
 
-def _requested(request: ProjectRequest, *, configured=None) -> tuple[_Requested, ...]:
+def _requested(request: ProjectRequest) -> tuple[_Requested, ...]:
     from .fabric.resources import ENVIRONMENT
     from .fabric.resources import LAKEHOUSE as LAKEHOUSE_ITEM
     from .fabric.resources import WAREHOUSE as WAREHOUSE_ITEM
@@ -487,27 +504,7 @@ def _requested(request: ProjectRequest, *, configured=None) -> tuple[_Requested,
         wanted.append(_Requested(LAKEHOUSE, request.lakehouse, LAKEHOUSE_ITEM))
     if request.warehouse:
         wanted.append(_Requested(WAREHOUSE, request.warehouse, WAREHOUSE_ITEM))
-    if request.semantic_model:
-        wanted.append(
-            _Requested(SEMANTIC_MODEL, request.semantic_model, SEMANTIC_MODEL)
-        )
     wanted.append(_Requested(ENVIRONMENT_ROLE, request.environment, ENVIRONMENT))
-    wanted.extend(
-        _Requested("Report", name, "Report") for name in sorted(request.reports)
-    )
-    from .declaration.model import WeaverItemId
-
-    for value in sorted(
-        request.source_items, key=lambda value: (value.startswith("Report/"), value)
-    ):
-        item = WeaverItemId.parse(value)
-        name = (
-            configured.targets[item].physical
-            if configured is not None and item in configured.targets
-            else item.item_name
-        )
-        if not any(w.item_type == item.item_type and w.name == name for w in wanted):
-            wanted.append(_Requested(item.item_type, name, item.item_type, item))
     return tuple(wanted)
 
 
@@ -540,7 +537,7 @@ def _read_the_workspace(request: ProjectRequest, *, client, wanted_items=None):
                 f"{_article(other)} {other}. Choose another name for the "
                 f"{wanted.role}, or use an existing {wanted.item_type}."
             )
-        found[wanted.key] = bool(types)
+        found[wanted.role] = bool(types)
 
     environment = next(
         (
@@ -562,37 +559,12 @@ def _planned(
         FabricItemOutcome(
             role=wanted.role,
             name=wanted.name,
-            status=EXISTING if found[wanted.key] else PLANNED,
+            status=EXISTING if found[wanted.role] else PLANNED,
         )
         for wanted in (
             wanted_items if wanted_items is not None else _requested(request)
         )
     )
-
-
-def _project_culture(destination: Path, name: str) -> str | None:
-    """The culture of the project's model of this name, or the one they share.
-
-    Fabric fixes a semantic model's culture at creation and rejects a
-    definition in another culture, so the empty model starts in the project's.
-    """
-
-    from .declaration.repository import parse_item_repository
-    from .locations import Location
-    from .semantic_models.objects import TmdlDefinition
-
-    if not destination.is_dir():
-        return None
-    repository = parse_item_repository(Location(destination.as_posix()))
-    cultures = {}
-    for item, contribution in repository.semantic_models.items():
-        culture = TmdlDefinition(contribution.parts).model.culture
-        if isinstance(culture, str) and culture:
-            cultures[item.item_name] = culture
-    if name in cultures:
-        return cultures[name]
-    shared = set(cultures.values())
-    return shared.pop() if len(shared) == 1 else None
 
 
 def _create_missing(
@@ -602,10 +574,7 @@ def _create_missing(
     physical,
     session,
     client,
-    destination: Path,
     wanted_items=None,
-    repository=None,
-    configured=None,
 ) -> tuple[FabricItemOutcome, ...]:
     from .fabric.resources import LAKEHOUSE as LAKEHOUSE_ITEM
     from .fabric.resources import create_lakehouse, create_warehouse
@@ -614,7 +583,7 @@ def _create_missing(
     for wanted in wanted_items if wanted_items is not None else _requested(request):
         if wanted.role == ENVIRONMENT_ROLE:
             continue
-        if found[wanted.key]:
+        if found[wanted.role]:
             made.append(FabricItemOutcome(wanted.role, wanted.name, EXISTING))
             continue
         create = (
@@ -622,76 +591,7 @@ def _create_missing(
         )
         try:
             with session.step(f"Creating the {wanted.role} {wanted.name}", wanted.name):
-                if wanted.item_type == SEMANTIC_MODEL:
-                    from .fabric.resources import create_semantic_model
-                    from .onboarding.project import semantic_extension
-                    from .semantic_models.definition import encode_parts
-                    from .semantic_models.extensions import apply_extensions
-                    from .semantic_models.source import SemanticContribution
-
-                    seed = apply_extensions(
-                        SemanticContribution({}, {}, {}),
-                        wanted.name,
-                        (
-                            (
-                                semantic_extension().encode("utf-8"),
-                                f"PowerBI/{wanted.name}/{wanted.name}.tmdl",
-                            ),
-                        ),
-                    )
-                    parts = dict(seed.parts)
-                    culture = _project_culture(
-                        destination,
-                        wanted.logical.item_name
-                        if wanted.logical is not None
-                        else wanted.name,
-                    )
-                    if culture:
-                        from .semantic_models.objects import TmdlDefinition
-
-                        edited = TmdlDefinition(parts)
-                        edited.model.culture = culture
-                        parts = edited.parts
-                    definition = encode_parts(parts)
-                    create_semantic_model(
-                        physical, wanted.name, definition=definition, client=client
-                    )
-                elif wanted.item_type == "Report":
-                    from .fabric.resources import create_report, find_item
-
-                    if wanted.logical is None:
-                        definition = request.reports[wanted.name]
-                    else:
-                        from dataclasses import replace
-
-                        from .report_definition import encode_report
-
-                        contribution = repository.reports[wanted.logical]
-                        if contribution.model is not None:
-                            model_name = configured.targets[contribution.model].physical
-                            model = find_item(
-                                physical,
-                                model_name,
-                                item_type=SEMANTIC_MODEL,
-                                client=client,
-                            )
-                            contribution = replace(
-                                contribution,
-                                binding={
-                                    "workspace_id": model.workspace_id,
-                                    "item_id": model.id,
-                                },
-                            )
-                        definition = encode_report(contribution)
-
-                    create_report(
-                        physical,
-                        wanted.name,
-                        definition=definition,
-                        client=client,
-                    )
-                else:
-                    create(physical, wanted.name, client=client)
+                create(physical, wanted.name, client=client)
         except WeaverError as exc:
             raise _creation_error(wanted.role, wanted.name, exc) from exc
         made.append(FabricItemOutcome(wanted.role, wanted.name, CREATED))
@@ -703,8 +603,6 @@ _ROLE_ORDER = (
     ENVIRONMENT_ROLE,
     LAKEHOUSE,
     WAREHOUSE,
-    SEMANTIC_MODEL,
-    "Report",
 )
 
 
