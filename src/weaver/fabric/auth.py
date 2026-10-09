@@ -341,19 +341,9 @@ def _authenticate_arguments(required, kwargs) -> dict:
     return arguments
 
 
-#: What `azure-identity` says on Linux when it will not encrypt the cache and was
-#: not allowed to write it in the clear. The message is the only signal: the
-#: `ValueError` it raises carries the libsecret failure as its cause, and that
-#: cause is an arbitrary platform exception.
-_UNENCRYPTABLE = ("allow_unencrypted_storage", "Cache encryption is impossible")
-
-#: `msal_extensions.build_encrypted_persistence` on a platform it has no store
-#: for. Matched on the message, because the type it raises is `RuntimeError`.
-_UNSUPPORTED = "Unsupported platform"
-
-#: The library that holds the token, and the only missing import that says this
-#: machine cannot keep one.
-_EXTENSIONS = "msal_extensions"
+#: Where secure token storage is built. An error raised through these modules
+#: is the cache's, whatever its message says.
+_CACHE_MODULES = ("azure.identity._persistent_cache", "msal_extensions")
 
 
 def _is_cache_unavailable(exc: BaseException) -> bool:
@@ -363,15 +353,24 @@ def _is_cache_unavailable(exc: BaseException) -> bool:
         return True
     if _is_persistence_error(exc):
         return True
-    message = str(exc)
     if isinstance(exc, ImportError):
         # Only the library that holds the token. Any other missing import is a
         # broken installation, and signing in again would not mend it.
-        return getattr(exc, "name", None) == _EXTENSIONS or _EXTENSIONS in message
-    if isinstance(exc, ValueError):
-        return any(naming in message for naming in _UNENCRYPTABLE)
-    if isinstance(exc, RuntimeError):
-        return _UNSUPPORTED in message
+        return (getattr(exc, "name", None) or "").split(".")[0] == "msal_extensions"
+    if isinstance(exc, (ValueError, RuntimeError)):
+        return _raised_through_the_cache(exc)
+    return False
+
+
+def _raised_through_the_cache(exc: BaseException) -> bool:
+    traceback = exc.__traceback__
+    while traceback is not None:
+        module = traceback.tb_frame.f_globals.get("__name__", "")
+        if any(
+            module == name or module.startswith(name + ".") for name in _CACHE_MODULES
+        ):
+            return True
+        traceback = traceback.tb_next
     return False
 
 
