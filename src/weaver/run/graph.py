@@ -115,6 +115,8 @@ def _load_graph(request, state) -> RunGraph:
         items=request.items,
         selection=request.selected,
         names=request.names,
+        ancestors=request.ancestors,
+        descendants=request.descendants,
     )
     return RunGraph(
         nodes=tuple(

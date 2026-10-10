@@ -387,6 +387,17 @@ folder. `--name` repeats, and each value is a regular expression matched
 against the whole object name, ignoring case; one that matches nothing is an
 error.
 
+For Load, `--ancestors` and `--descendants` recursively expand the selected
+loadables through installed dependencies, within the requested items. Each
+direction starts from the original selection; both flags run their union in
+dependency order, with required endpoint and publication barriers. Plain
+`--name` keeps its operator override: only matching loads run, without dependency
+ordering. The Python options are `ancestors=True` and `descendants=True`.
+
+```bash
+weaver load Warehouse/Reporting --name 'Sales.Summary' --ancestors --workspace Analytics
+```
+
 ### Without a catalogue
 
 A workspace with no catalogue still builds and refreshes semantic models:
@@ -401,7 +412,7 @@ Load records nothing. Authored tables can retain logical `Weaver.Source` annotat
 without catalogue metadata; each names a configured or mapped target, or a Table
 or View the project declares. Tests and Assumptions run in file mode. Source
 generation, Lakehouse and Warehouse operations, installed lineage, and
-`load --stale`, `--name` or `--reload` need a catalogue.
+`load --stale`, `--name`, `--reload`, `--ancestors` or `--descendants` need a catalogue.
 
 ### Load and connections
 

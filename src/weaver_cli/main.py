@@ -531,13 +531,23 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         metavar="NAME",
         help=(
-            "Load only installed objects whose whole name matches this regular "
+            "Select installed objects whose whole name matches this regular "
             "expression: Tables/Schema.Object or Files/Schema.Object in a "
             "Lakehouse, Schema.Object in a Warehouse. A bare Schema.Object is "
             "accepted where it names one object. Repeat to select more."
         ),
     )
     _add_source_arg(load)
+    load.add_argument(
+        "--ancestors",
+        action="store_true",
+        help="Include recursive upstream loads within the selected items.",
+    )
+    load.add_argument(
+        "--descendants",
+        action="store_true",
+        help="Include recursive downstream loads within the selected items.",
+    )
     load.add_argument(
         "--fault-tolerant",
         action="store_true",
@@ -562,7 +572,7 @@ def build_parser() -> argparse.ArgumentParser:
     load.add_argument(
         "--stale",
         action="store_true",
-        help="Load only the objects whose load health is not green.",
+        help="Select the objects whose load health is not green.",
     )
     load.add_argument(
         "--as-of",
@@ -1390,6 +1400,8 @@ def _load_once(args: argparse.Namespace) -> int:
                 items=run_items(args) or None,
                 names=args.names,
                 source=args.source,
+                ancestors=args.ancestors,
+                descendants=args.descendants,
                 fault_tolerant=args.fault_tolerant,
                 dry_run=args.dry_run,
                 reload=args.reload,
@@ -1429,6 +1441,8 @@ def _run_load(
     *,
     items,
     names=None,
+    ancestors: bool = False,
+    descendants: bool = False,
     source=None,
     fault_tolerant: bool,
     dry_run: bool,
@@ -1445,6 +1459,8 @@ def _run_load(
         return weaver.load(
             items,
             names=names,
+            ancestors=ancestors,
+            descendants=descendants,
             source=source,
             fault_tolerant=fault_tolerant,
             dry_run=dry_run,

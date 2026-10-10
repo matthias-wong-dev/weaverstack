@@ -97,10 +97,10 @@ class RunRequest:
 
     kind: str
     items: tuple
-    #: Regular expressions over installed names; only what they match runs.
+    #: Regular expressions selecting original installed loadables or validations.
     names: tuple[str, ...] = ()
-    #: The installed loadables this run may execute, by logical identity.
-    #: ``None`` runs every loadable the requested items own. ``load`` only.
+    #: Original Load seeds, by logical identity, before expansion.
+    #: ``None`` selects every loadable the requested items own. ``load`` only.
     selected: tuple | None = None
     #: Continue through settled dependency failures, and report each outcome.
     fault_tolerant: bool = False
@@ -113,6 +113,9 @@ class RunRequest:
     #: ``load`` only. It waives nothing else: null and unique key checks, fault
     #: tolerance, selection and bookmarks are untouched.
     ignore_stability_threshold: bool = False
+    #: Recursively expand original Load seeds within the requested items.
+    ancestors: bool = False
+    descendants: bool = False
 
     def __post_init__(self) -> None:
         from ..errors import CommandError
@@ -121,6 +124,8 @@ class RunRequest:
             raise CommandError(f"{self.kind} needs at least one item")
         if self.selected is not None and self.kind != LOAD:
             raise CommandError("selected= applies only to loads")
+        if (self.ancestors or self.descendants) and self.kind != LOAD:
+            raise CommandError("ancestors and descendants apply only to loads")
         if self.reload and self.kind != LOAD:
             raise CommandError("reload applies only to loads")
         if self.ignore_stability_threshold and self.kind != LOAD:
@@ -158,6 +163,8 @@ class RunRequest:
             dry_run=bool(payload.get("dry_run")),
             reload=bool(payload.get("reload")),
             ignore_stability_threshold=bool(payload.get("ignore_stability_threshold")),
+            ancestors=bool(payload.get("ancestors")),
+            descendants=bool(payload.get("descendants")),
         )
 
     def to_mapping(self) -> dict:
@@ -172,6 +179,8 @@ class RunRequest:
             "dry_run": self.dry_run,
             "reload": self.reload,
             "ignore_stability_threshold": self.ignore_stability_threshold,
+            "ancestors": self.ancestors,
+            "descendants": self.descendants,
         }
 
 
