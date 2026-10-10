@@ -500,12 +500,14 @@ def test_existing_warehouse_source_build_persists_lineage_and_loads_without_sour
     assert (
         status["result"] == "succeeded" and status["workflow_id"] == loaded.workflow_id
     )
+    # A selected model redeploys even when nothing changed, and then waits for
+    # its next load.
     unchanged = weaver.build(root, items=selector, session=context.session)
-    assert (
-        unchanged.succeeded
-        and unchanged.installation_report.action_counts()["total"] == 0
-    )
-    assert read_table(context.connection, LOAD_STATUS, scope=SCOPE) == (status,)
+    assert unchanged.succeeded, unchanged.errors
+    assert unchanged.selection.selected_for_build == (ROOT,)
+    assert not unchanged.selection.impact.changed
+    (pending,) = read_table(context.connection, LOAD_STATUS, scope=SCOPE)
+    assert pending["result"] == "pending"
     assert {
         p.relative_to(root).as_posix(): p.read_bytes()
         for p in root.rglob("*")

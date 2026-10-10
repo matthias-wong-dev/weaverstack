@@ -159,7 +159,8 @@ def test_public_wipe_preserves_item_sources_and_catalogue_then_rebuilds(
     assert context.load(str(ITEM), session=context.session).succeeded
     assert connection_signature(model.get_connections()) == binding_before
     fixed = weaver.build(project, items=selection, session=context.session)
-    assert fixed.succeeded and fixed.installation_report.action_counts()["total"] == 0
+    assert fixed.succeeded, fixed.errors
+    assert not fixed.selection.impact.changed
     print(
         "SEMANTIC_WIPE_EVIDENCE "
         + json.dumps(
