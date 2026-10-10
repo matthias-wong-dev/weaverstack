@@ -8,7 +8,8 @@ from pathlib import Path
 import pytest
 from support.weaver_test import weaver_test
 
-TESTS = Path(__file__).parent / "js"
+# Named files: Node on the Windows runner reads a directory argument as a module.
+TESTS = sorted((Path(__file__).parent / "js").glob("*.test.js"))
 
 
 def _node() -> str | None:
@@ -21,7 +22,7 @@ def test_the_renderer_logic_passes_its_node_tests():
     if node is None:
         pytest.skip("Node.js is not on PATH; set WEAVER_NODE to run the renderer tests")
     result = subprocess.run(
-        [node, "--test", str(TESTS)],
+        [node, "--test", *map(str, TESTS)],
         capture_output=True,
         text=True,
         timeout=120,
