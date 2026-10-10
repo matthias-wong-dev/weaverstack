@@ -453,6 +453,130 @@ def test_mixed_selection_preserves_bindings_without_recording(
 
 
 @weaver_test()
+@pytest.mark.parametrize("selected", ["lakehouse", "mixed", "warehouse", "dax"])
+@pytest.mark.parametrize("default", [None, "Other"])
+def test_reused_source_scope_carries_current_operation_bindings(
+    tmp_path, transport, selected, default
+):
+    from test_semantic_validation_build_cycle import with_validations
+
+    from weaver.config import load_workspace
+
+    root = with_validations(tmp_path)
+    for item, name in (
+        ("Lakehouse/Sales", "Sales.Match"),
+        ("Warehouse/Reporting", "Sales.Warehouse"),
+    ):
+        path = root / item / "tests" / (name + ".sql")
+        path.parent.mkdir(parents=True)
+        path.write_bytes(SOURCE.replace("Sales.Match", name).encode("utf-8"))
+    config = tmp_path / "workspace.yml"
+    current_text = (
+        "workspace: Requested\nenvironment: Runtime/Selected\n"
+        "targets:\n  Lakehouse/Sales: Sales_New\n"
+        "  Warehouse/Reporting: Reporting_WH\n"
+        "  SemanticModel/Reporting: Model_Dev\n"
+        "  Warehouse/Serving: Serving_WH\n"
+    )
+    config.write_text(
+        current_text.replace("Sales_New", "Sales_Old")
+        .replace("Reporting_WH", "Reporting_Old")
+        .replace("Model_Dev", "Model_Old")
+        .replace("Serving_WH", "Serving_Old"),
+        encoding="utf-8",
+    )
+    prior = load_workspace(config)
+    items = {
+        "lakehouse": "Lakehouse/Sales",
+        "mixed": None,
+        "warehouse": "Warehouse/Reporting",
+        "dax": "SemanticModel/Reporting",
+    }[selected]
+    with transport.client(default) as session:
+        original_default = session.workspace
+        planned = weaver.test(
+            items, source=root, workspace_config=config, session=session, dry_run=True
+        )
+        assert planned.status == PLANNED
+        assert planned.workflow_id is None
+        assert planned.nodes and all(not node.executed for node in planned.nodes)
+        scope = session.scope(prior)
+        cached_workspace = scope.workspace
+        resources = (scope.resolver, scope.store, scope.livy)
+        assert scope.workspace == prior
+        assert len(session._scopes) == 1
+        assert scope.livy.attempts == 0
+        assert not transport.calls and not transport.programs
+        assert transport.store.files == {}
+
+        config.write_text(current_text, encoding="utf-8")
+        current = load_workspace(config)
+        assert current != prior
+        assert session.scope(current) is scope
+        report = weaver.test(
+            items, source=root, workspace_config=config, session=session
+        )
+        assert session.scope(current) is scope
+        assert len(session._scopes) == 1
+        assert scope.workspace is cached_workspace
+        assert all(
+            retained is original
+            for retained, original in zip(
+                (scope.resolver, scope.store, scope.livy), resources, strict=True
+            )
+        )
+        assert session.workspace is original_default
+        expected = {
+            "Lakehouse/Sales/Sales.Match": "Lakehouse/Sales_New",
+            "Warehouse/Reporting/Sales.Warehouse": "Warehouse/Reporting_WH",
+            "SemanticModel/Reporting/Sales.RevenueReconciles": "SemanticModel/Model_Dev",
+            "SemanticModel/Reporting/Sales.RevenueIsPositive": "SemanticModel/Model_Dev",
+        }
+        expected = {
+            logical: physical
+            for logical, physical in expected.items()
+            if items is None or logical.startswith(items + "/")
+        }
+        assert {
+            node.logical_id: node.physical_target for node in report.nodes
+        } == expected
+        assert report.status == PASSED, report.nodes
+        assert report.workflow_id is None
+        assert all(node.executed and node.result.succeeded for node in report.nodes)
+        needs_spark = selected in ("lakehouse", "mixed")
+        assert len(transport.programs) == int(needs_spark)
+        if needs_spark:
+            ((program, dispatched_workspace),) = transport.programs
+            assert dispatched_workspace == current
+            assert not program.resubmit
+            (remote,) = transport.opened
+            assert remote.workspace == current
+            assert remote.workspace.workspace == "Requested"
+            assert str(remote.workspace.environment) == "Runtime/Selected"
+            sql = next(call[1] for call in transport.calls if call[0] == "spark_sql")
+            assert "`Requested`.`Sales_New`.`Sales`.`Input`" in sql
+            assert "Sales_Old" not in sql
+        else:
+            assert scope.livy.attempts == 0
+            assert not transport.opened
+            assert not [call for call in transport.calls if call[0] == "spark_sql"]
+        for kind, target in (
+            ("warehouse", "Reporting_WH"),
+            ("model", "Model_Dev"),
+            ("expected", "Serving_WH"),
+        ):
+            calls = [call for call in transport.calls if call[0] == kind]
+            assert bool(calls) == (
+                selected in ("mixed", "warehouse")
+                if kind == "warehouse"
+                else selected in ("mixed", "dax")
+            )
+            assert all(call[1] == target and call[2] == current for call in calls)
+    assert transport.store.files == {}
+    assert all(session.closed for session in transport.opened)
+
+
+@weaver_test()
 def test_unsupported_python_is_invalid_after_transport(tmp_path, selection, transport):
     source = selection["files"]
     source.unlink()

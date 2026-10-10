@@ -45,6 +45,7 @@ def send(session, run, *, workspace=None):
     from ..targets import ItemRef
     from ..workspaces import CARRIER_AREA
 
+    workspace = session.workspace_or_default(workspace)
     scope = session.scope(workspace)
     home = scope.spark_home
     if home is None:
@@ -59,7 +60,7 @@ def send(session, run, *, workspace=None):
     try:
         store.write(stage / REQUEST, json.dumps(run.arguments()).encode("utf-8"))
         program = _program(
-            run, scope.workspace, abfss_path(stage), workflow_id=session.workflow_id
+            run, workspace, abfss_path(stage), workflow_id=session.workflow_id
         )
         following = _Following(session, store, stage / PROGRESS)
         try:

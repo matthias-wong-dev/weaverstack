@@ -640,7 +640,8 @@ imports a deployed module, so it opens no runtime scope.
 
 Source Tests use the same Session run boundary. A desktop sends parsed validation
 metadata and SQL or DAX bodies, with the requested workspace, Environment and
-target mappings. A NotebookSession executes them in-process. Source runs retain
+target mappings resolved for the current operation, independently of cached
+resource scopes. A NotebookSession executes them in-process. Source runs retain
 selection, comparison and diagnostic semantics and write no catalogue state.
 Warehouse-only, DAX-only and dry-run source selections start no Spark session.
 
