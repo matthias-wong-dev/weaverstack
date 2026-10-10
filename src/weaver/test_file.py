@@ -238,7 +238,9 @@ def _execute(session, *, workspace, validation, target, collect, common):
         elif target.kind == LAKEHOUSE_TARGET:
             result, diagnostics = _run_spark(session, document, target)
         else:
-            result, diagnostics = _run_warehouse(session, document, target)
+            result, diagnostics = _run_warehouse(
+                session, document, target, workspace=workspace
+            )
     except Exception as exc:  # noqa: BLE001 - any failure is the run's evidence
         message = f"{type(exc).__name__}: {exc}"
         failed = (
@@ -295,14 +297,16 @@ def _run_semantic(session, workspace, validation: SourceValidation, target):
     )
 
 
-def _run_warehouse(session, document, target: PhysicalTargetRef):
+def _run_warehouse(session, document, target: PhysicalTargetRef, *, workspace):
     """Run the generated batch directly so no procedure is left behind."""
 
     from .declaration.tsql_validation import generate_tsql_validation_batch
     from .targets import ItemRef as _ItemRef
     from .targets import WarehouseTarget as _WarehouseTarget
 
-    executor = session.sql_executor(_WarehouseTarget(_ItemRef(target.name)))
+    executor = session.sql_executor(
+        _WarehouseTarget(_ItemRef(target.name)), workspace=workspace
+    )
     if executor is None:
         raise ValidationError(
             f"a SQL capability is required to run this validation against {target}"
