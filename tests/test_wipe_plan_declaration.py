@@ -25,6 +25,7 @@ from weaver.operations.wipe import (
     UNBIND,
     WipeReport,
     WipeTarget,
+    installations,
     installed_targets,
 )
 from weaver.sessions.testing import TestSession
@@ -429,6 +430,39 @@ def test_a_discovered_estate_still_puts_the_catalogue_last(monkeypatch):
     )
 
     assert _names(_plan()) == ["Lakehouse/Landing_Dev", "Warehouse/Weaver"]
+
+
+@weaver_test()
+def test_a_recorded_report_is_left_as_is_and_its_claim_goes_with_the_catalogue(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        _operations(),
+        "_installed_estate",
+        lambda *_a, **_k: installations(
+            _Installations(
+                [
+                    ("Lakehouse", "Sales", "Landing_Dev"),
+                    ("Report", "Executive", "Executive_Dev"),
+                ]
+            )
+        ),
+    )
+
+    plan = _plan()
+    assert _names(plan) == ["Lakehouse/Landing_Dev", "Warehouse/Weaver"]
+    assert [str(target) for target in plan.left] == ["Report/Executive_Dev"]
+    lines = [" ".join(line.split()) for line in plan.describe().splitlines()]
+    assert lines[lines.index("Left as is") + 1] == (
+        "Report/Executive → Report/Executive_Dev"
+    )
+    assert plan.to_mapping()["left"] == [
+        {
+            "target": "Report/Executive_Dev",
+            "catalogue": False,
+            "items": ["Report/Executive"],
+        }
+    ]
 
 
 def _configured(tmp_path, targets: str):

@@ -1061,8 +1061,7 @@ class _References:
             if (
                 str(producer) != row.reference
                 or row.referenced != expected
-                or node is None
-                or node.object_type not in {"table", "view"}
+                or (node is not None and node.object_type not in {"table", "view"})
                 or row.source_mode
                 not in {"directLake", "import", "directQuery", "dual"}
                 or row.source_access not in {"sql", None}
@@ -1072,6 +1071,13 @@ class _References:
             raise CatalogueStateError(
                 f"{row.consumer} table {row.semantic_table!r}: invalid installed .source {row.reference!r}: {exc}. Build the model again."
             ) from exc
+        if node is None:
+            raise CatalogueStateError(
+                f"{row.consumer.item} table {row.semantic_table!r} reads "
+                f"{row.reference}, which is not installed. Build {producer.item}, "
+                f"then build {row.consumer.item} again. If the project no longer "
+                f"has {row.consumer.item}, remove it with weaver unbind."
+            )
         return (producer, None), {
             "mode": row.source_mode,
             "access": row.source_access,
@@ -1087,7 +1093,9 @@ class _References:
                 or producer not in self._objects
             ):
                 raise CatalogueStateError(
-                    f"{consumer}: model {reference!r} is not installed; build the model again"
+                    f"{consumer.item} reads model {reference}, which is not installed. "
+                    f"Build the model, then build {consumer.item} again. If the "
+                    f"project no longer has {consumer.item}, remove it with weaver unbind."
                 )
             return producer, None
         if "/" in reference:

@@ -79,6 +79,7 @@ A resolved catalogue is emptied last for Warehouse and Lakehouse selections.
 Pass --unbind to keep it and remove its claims for the emptied targets.
 
 SemanticModel-only selections keep the catalogue and remove their own claims.
+Recorded Reports hold no data and are left as they are.
 Semantic wipe retains the Fabric item. --preserve-data-source keeps one Automatic
 SQL / Direct Lake source in a hidden columnless table. Unsupported source and
 connection forms are refused before mutation.\
@@ -735,7 +736,10 @@ def build_parser() -> argparse.ArgumentParser:
         "targets",
         nargs="+",
         metavar="TARGET",
-        help="Physical items to unbind: Lakehouse/Name, Warehouse/Name or SemanticModel/Name.",
+        help=(
+            "Physical items to unbind: Lakehouse/Name, Warehouse/Name, "
+            "SemanticModel/Name or Report/Name."
+        ),
     )
     _add_workspace_args(unbind, include_environment=False)
     unbind.add_argument(
