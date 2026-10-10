@@ -4,9 +4,8 @@ import hashlib
 import json
 
 import pytest
+from support.semantic_projects import ITEM, SCOPE, annotation_project
 from support.weaver_test import weaver_test
-from test_semantic_annotation_public_cycle import _project
-from test_semantic_model_public_cycle import ITEM, SCOPE
 from test_semantic_model_public_cycle import (
     scratch_build_context as scratch_build_context,
 )
@@ -38,7 +37,7 @@ def test_public_wipe_preserves_item_sources_and_catalogue_then_rebuilds(
 ):
     context = scratch_build_context
     folder = tmp_path / "project" / str(ITEM)
-    _project(folder, "source-extension")
+    annotation_project(folder, "source-extension")
     project = folder.parent.parent
     selection = f"{ITEM}=SemanticModel/{context.target}"
     built = weaver.build(project, items=selection, session=context.session)

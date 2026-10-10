@@ -8,9 +8,8 @@ Tests run real DAX against the model and real T-SQL against the catalogue.
 
 import json
 
+from support.semantic_projects import ITEM, SCOPE, SOURCE_TEXT
 from support.weaver_test import weaver_test
-from test_semantic_annotation_public_cycle import SOURCE_TEXT
-from test_semantic_model_public_cycle import ITEM, SCOPE
 from test_semantic_model_public_cycle import (
     semantic_build_context as semantic_build_context,
 )

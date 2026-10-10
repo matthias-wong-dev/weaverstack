@@ -5,12 +5,12 @@ import os
 import shutil
 import time
 from contextlib import contextmanager
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 from support.semantic_fixture_source import ConfiguredSemanticSource
 from support.semantic_models import policy_path
+from support.semantic_projects import ITEM, PBIP, ROOT, SCOPE
 from support.weaver_test import register_session, weaver_test
 from test_semantic_model_boundary import _settle_refreshes
 
@@ -18,7 +18,7 @@ import weaver
 from weaver.catalogue.connection import catalogue_connection
 from weaver.catalogue.reader import read_table
 from weaver.catalogue.reconcile import prune_installation
-from weaver.catalogue.render import InstallationScope, render_delete_scope
+from weaver.catalogue.render import render_delete_scope
 from weaver.catalogue.tables import (
     BOOKMARK,
     CATALOGUE_TABLES,
@@ -37,17 +37,12 @@ from weaver.catalogue.tables import (
     SEMANTIC_MODEL_TABLE,
 )
 from weaver.catalogue.tsql import literal
-from weaver.declaration.model import WeaverDocumentId, WeaverItemId
 from weaver.fabric.resolution import FabricResolver
 from weaver.fabric.resources import WAREHOUSE, find_item
 from weaver.semantic_models.definition import decode_model
 from weaver.sessions import ConsoleSession
 from weaver.workspaces import Workspace
 
-ITEM = WeaverItemId.parse("SemanticModel/RefreshAcceptance")
-ROOT = WeaverDocumentId.model_root(ITEM)
-SCOPE = InstallationScope(ITEM.item_type, ITEM.item_name)
-PBIP = Path(__file__).parents[1] / "fixtures/semantic_model/Probe"
 OWNED_TABLES = (*PROJECTED_TABLES, *CURRENT_STATE_TABLES, LOAD_STATISTIC)
 
 
