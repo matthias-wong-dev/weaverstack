@@ -353,3 +353,103 @@ def test_an_illegal_physical_name_is_a_configuration_error():
         parse_workspace(
             {"workspace": "Analytics", "targets": {"Lakehouse/Landing": "Landing/Dev"}}
         )
+
+
+@weaver_test()
+def test_catalogue_browser_binds_the_built_in_model_and_report(tmp_path):
+    from weaver.catalogue_browser import BROWSER_MODEL, BROWSER_REPORT
+    from weaver.targets import ReportTarget, SemanticModelTarget
+
+    config = tmp_path / "workspace-config.yml"
+    config.write_text(
+        "workspace: Analytics\n"
+        "catalogue: Warehouse/Weaver\n"
+        "catalogue_browser: Estate Browser\n"
+        "targets:\n"
+        "  SemanticModel/Sales: Sales\n",
+        encoding="utf-8",
+    )
+    workspace = resolve_workspace(workspace_config=config)
+
+    assert workspace.catalogue_browser == "Estate Browser"
+    assert workspace.target_for(BROWSER_MODEL) == SemanticModelTarget.parse(
+        "Estate Browser"
+    )
+    assert workspace.target_for(BROWSER_REPORT) == ReportTarget.parse("Estate Browser")
+    assert set(workspace.configured_items) == {
+        BROWSER_MODEL,
+        BROWSER_REPORT,
+        _item("SemanticModel/Sales"),
+    }
+    # targets: stays what was written.
+    assert set(workspace.targets) == {_item("SemanticModel/Sales")}
+
+
+@weaver_test()
+def test_without_catalogue_browser_nothing_of_it_is_bound():
+    from weaver.catalogue_browser import BROWSER_ITEMS
+
+    workspace = parse_workspace(
+        {"workspace": "Analytics", "catalogue": "Warehouse/Weaver"}
+    )
+    assert workspace.catalogue_browser is None
+    assert not set(BROWSER_ITEMS) & set(workspace.configured_items)
+
+
+@pytest.mark.parametrize(
+    ("payload", "named"),
+    [
+        (
+            {"workspace": "Analytics", "catalogue_browser": "Estate Browser"},
+            "no catalogue is configured",
+        ),
+        (
+            {
+                "workspace": "Analytics",
+                "catalogue": "Warehouse/Weaver",
+                "catalogue_browser": "Estate Browser",
+                "targets": {"SemanticModel/Catalogue Browser": "Estate Browser"},
+            },
+            "SemanticModel/Catalogue Browser is the built-in Catalogue Browser",
+        ),
+        (
+            {
+                "workspace": "Analytics",
+                "catalogue": "Warehouse/Weaver",
+                "catalogue_browser": "Estate Browser",
+                "targets": {"Report/Sales": "estate browser"},
+            },
+            "Report/Sales deploys to estate browser",
+        ),
+        (
+            {
+                "workspace": "Analytics",
+                "catalogue": "Warehouse/Weaver",
+                "catalogue_browser": 7,
+            },
+            "catalogue_browser",
+        ),
+    ],
+    ids=["no catalogue", "reserved item", "shared Fabric item", "not a name"],
+)
+@weaver_test()
+def test_catalogue_browser_configuration_is_refused_when_it_cannot_deploy(
+    payload, named
+):
+    with pytest.raises(ConfigError, match=named):
+        parse_workspace(payload)
+
+
+@weaver_test()
+def test_another_items_target_may_share_the_browsers_name_in_another_kind():
+    """Names are unique per type, so a Warehouse may share the Browser's name."""
+
+    workspace = parse_workspace(
+        {
+            "workspace": "Analytics",
+            "catalogue": "Warehouse/Weaver",
+            "catalogue_browser": "Estate",
+            "targets": {"Warehouse/Estate": "Estate"},
+        }
+    )
+    assert workspace.catalogue_browser == "Estate"

@@ -245,6 +245,33 @@ def _target_declarations(
     return MappingProxyType(resolved)
 
 
+def _validate_browser(workspace: "Workspace") -> None:
+    from .catalogue_browser import BROWSER_ITEMS
+
+    name = workspace.catalogue_browser
+    if not workspace.catalogue:
+        raise ConfigError(
+            f"catalogue_browser: {name} reads the Weaver catalogue, and no catalogue "
+            "is configured. Add catalogue: Warehouse/<name> to workspace "
+            "configuration."
+        )
+    for item, declaration in workspace.targets.items():
+        if item in BROWSER_ITEMS:
+            raise ConfigError(
+                f"targets: {item} is the built-in Catalogue Browser, which "
+                "catalogue_browser: deploys. Remove this targets: entry."
+            )
+        if (
+            item.item_type in {SEMANTIC_MODEL, REPORT}
+            and declaration.physical.casefold() == name.casefold()
+        ):
+            raise ConfigError(
+                f"targets: {item} deploys to {declaration.physical}, which "
+                "catalogue_browser: names for the Catalogue Browser. Choose another "
+                "Fabric item for one of them."
+            )
+
+
 @dataclass(frozen=True, kw_only=True)
 class Workspace:
     """Fabric resource configuration, independent of where Weaver runs."""
@@ -258,6 +285,8 @@ class Workspace:
     execution: ExecutionSettings = field(default_factory=ExecutionSettings)
     targets: Mapping[WeaverItemId, TargetDeclaration] = field(default_factory=dict)
     data_sources: Mapping[str, str] = field(default_factory=dict)
+    #: The Fabric item the built-in Catalogue Browser model and Report deploy to.
+    catalogue_browser: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -276,6 +305,13 @@ class Workspace:
         if not isinstance(self.execution, ExecutionSettings):
             raise ConfigError("execution must be ExecutionSettings")
         object.__setattr__(self, "targets", _target_declarations(self.targets))
+        if self.catalogue_browser is not None:
+            object.__setattr__(
+                self,
+                "catalogue_browser",
+                validate_name(self.catalogue_browser, what="catalogue_browser"),
+            )
+            _validate_browser(self)
         from .semantic_models.expressions import source_mappings
 
         if not isinstance(self.data_sources, Mapping):
@@ -301,11 +337,24 @@ class Workspace:
     def catalogue_ref(self) -> CatalogueRef:
         return CatalogueRef(workspace=self.workspace, name=self.catalogue_item.name)
 
+    @property
+    def bound_targets(self) -> Mapping[WeaverItemId, TargetDeclaration]:
+        """``targets``, with the Catalogue Browser's items when it is configured."""
+
+        if self.catalogue_browser is None:
+            return self.targets
+        from .catalogue_browser import BROWSER_ITEMS
+
+        declaration = TargetDeclaration(self.catalogue_browser)
+        return MappingProxyType(
+            {**self.targets, **dict.fromkeys(BROWSER_ITEMS, declaration)}
+        )
+
     def target_for(self, item: WeaverItemId):
         return self._declaration(item).target_for(item)
 
     def _declaration(self, item: WeaverItemId) -> TargetDeclaration:
-        declaration = self.targets.get(item)
+        declaration = self.bound_targets.get(item)
         if declaration is None:
             raise ConfigError(
                 f"No target is configured for {item} in this Workspace. "
@@ -316,7 +365,7 @@ class Workspace:
 
     @property
     def configured_items(self) -> tuple[WeaverItemId, ...]:
-        return tuple(sorted(self.targets, key=str))
+        return tuple(sorted(self.bound_targets, key=str))
 
     @property
     def configured_lakehouses(self) -> tuple[str, ...]:

@@ -346,11 +346,11 @@ def _refuse_unconfigured_installations(recorded, workspace: Workspace) -> None:
     Without ``targets:``, the catalogue is the only guidance and is followed.
     """
 
-    if not workspace.targets:
+    if not workspace.bound_targets:
         return
     configured = {
         str(item): declaration.physical
-        for item, declaration in workspace.targets.items()
+        for item, declaration in workspace.bound_targets.items()
     }
     differ = []
     for item, target in recorded:
@@ -369,7 +369,7 @@ def _refuse_unconfigured_installations(recorded, workspace: Workspace) -> None:
             + " ".join(
                 f"{item.item_type}/{declaration.physical}"
                 for item, declaration in sorted(
-                    workspace.targets.items(), key=lambda pair: str(pair[0])
+                    workspace.bound_targets.items(), key=lambda pair: str(pair[0])
                 )
             )
         )

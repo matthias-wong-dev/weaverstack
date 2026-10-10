@@ -481,6 +481,27 @@ def test_a_configured_wipe_follows_installations_the_configuration_binds(
 
 
 @weaver_test()
+def test_a_configured_wipe_follows_the_catalogue_browser_it_configures(
+    tmp_path, monkeypatch
+):
+    configuration = _configured(tmp_path, "  Lakehouse/Landing: DEV_Landing\n")
+    configuration.write_text(
+        configuration.read_text() + "catalogue_browser: Estate Browser\n",
+        encoding="utf-8",
+    )
+    _recorded(
+        monkeypatch,
+        ("Warehouse/_weaver", "Warehouse/Weaver"),
+        ("Lakehouse/Landing", "Lakehouse/DEV_Landing"),
+        ("SemanticModel/Catalogue Browser", "SemanticModel/Estate Browser"),
+    )
+
+    plan = plan_wipe(workspace_config=configuration, session=_session())
+
+    assert "SemanticModel/Estate Browser" in _names(plan)
+
+
+@weaver_test()
 def test_a_wipe_names_an_item_once_where_it_is_installed_under_its_own_name(
     tmp_path, monkeypatch
 ):
