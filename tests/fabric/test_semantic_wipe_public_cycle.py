@@ -8,7 +8,7 @@ from support.weaver_test import weaver_test
 from test_semantic_annotation_public_cycle import _project
 from test_semantic_model_public_cycle import ITEM, SCOPE
 from test_semantic_model_public_cycle import (
-    semantic_build_context as semantic_build_context,
+    scratch_build_context as scratch_build_context,
 )
 
 import weaver
@@ -34,10 +34,9 @@ def _fingerprint(value):
 @weaver_test(remote=True, resources={"rest", "tds"})
 @pytest.mark.parametrize("preserve", [False, True], ids=["plain", "preserve"])
 def test_public_wipe_preserves_item_sources_and_catalogue_then_rebuilds(
-    semantic_build_context, tmp_path, preserve
+    scratch_build_context, tmp_path, preserve
 ):
-    context = semantic_build_context
-    context.source.require_preservation(preserve)
+    context = scratch_build_context
     folder = tmp_path / "project" / str(ITEM)
     _project(folder, "source-extension")
     project = folder.parent.parent

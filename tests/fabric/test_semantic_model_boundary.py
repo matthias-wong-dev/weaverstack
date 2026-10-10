@@ -64,9 +64,18 @@ def restored_semantic_model(fixed_semantic_model, semantic_model_session, tmp_pa
         print("SEMANTIC_SOURCE_EVIDENCE " + json.dumps(source.evidence))
 
 
+@pytest.fixture
+def scratch_model(scratch_semantic_model):
+    """The scratch model, settled before and after a test reshapes it."""
+
+    _settle_refreshes(scratch_semantic_model)
+    yield scratch_semantic_model
+    _settle_refreshes(scratch_semantic_model)
+
+
 @weaver_test(remote=True, resources={"rest"})
-def test_pbip_definition_mutation_refresh_and_dax_round_trip(restored_semantic_model):
-    model = restored_semantic_model
+def test_pbip_definition_mutation_refresh_and_dax_round_trip(scratch_model):
+    model = scratch_model
     source_hashes = _source_hashes()
     folder = FIXTURE / "Probe.SemanticModel"
     parts = {"definition.pbism": (folder / "definition.pbism").read_bytes()}

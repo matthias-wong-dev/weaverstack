@@ -274,24 +274,30 @@ def test_public_fixture_wipe_forwards_preservation_and_session(monkeypatch):
 
 
 @weaver_test()
-def test_plain_public_cycle_refuses_configured_target_before_first_build(
-    tmp_path, monkeypatch
-):
+def test_reshaping_cycles_use_the_scratch_model_not_the_configured_one(monkeypatch):
+    """The guard refuses these shapes, so they run where nothing is guarded."""
+
     import importlib
+    import inspect
     from pathlib import Path
 
-    import weaver
-
     monkeypatch.syspath_prepend(str(Path(__file__).parent / "fabric"))
-    cycle = importlib.import_module("test_semantic_wipe_public_cycle")
-    _, source = contract()
-    calls = []
-    monkeypatch.setattr(weaver, "build", lambda *a, **k: calls.append("build"))
-    with pytest.raises(AssertionError, match="preserve_data_source"):
-        cycle.test_public_wipe_preserves_item_sources_and_catalogue_then_rebuilds(
-            SimpleNamespace(source=source), tmp_path, False
-        )
-    assert not calls
+    reshaping = {
+        "test_semantic_wipe_public_cycle": (
+            "test_public_wipe_preserves_item_sources_and_catalogue_then_rebuilds"
+        ),
+        "test_semantic_annotation_public_cycle": (
+            "test_public_annotation_build_readback_load_and_fixed_point"
+        ),
+        "test_semantic_model_public_cycle": (
+            "test_existing_warehouse_source_build_persists_lineage_and_loads_without_source"
+        ),
+    }
+    for module, name in reshaping.items():
+        test = getattr(importlib.import_module(module), name)
+        parameters = inspect.signature(test).parameters
+        assert "scratch_build_context" in parameters, name
+        assert "semantic_build_context" not in parameters, name
 
 
 @weaver_test()

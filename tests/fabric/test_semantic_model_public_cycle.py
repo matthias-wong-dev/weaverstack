@@ -4,6 +4,7 @@ import json
 import os
 import shutil
 import time
+from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -64,6 +65,36 @@ def _owned_counts(connection):
 def semantic_build_context(
     fabric_workspace_item, fabric_client, fixed_semantic_model_name, tmp_path
 ):
+    """The owner-configured model, guarded and restored around the test."""
+
+    with _build_context(
+        fabric_workspace_item,
+        fabric_client,
+        fixed_semantic_model_name,
+        tmp_path,
+        guarded=True,
+    ) as context:
+        yield context
+
+
+@pytest.fixture
+def scratch_build_context(
+    fabric_workspace_item, fabric_client, scratch_semantic_model_name, tmp_path
+):
+    """The scratch model, which a test may reshape however it needs."""
+
+    with _build_context(
+        fabric_workspace_item,
+        fabric_client,
+        scratch_semantic_model_name,
+        tmp_path,
+        guarded=False,
+    ) as context:
+        yield context
+
+
+@contextmanager
+def _build_context(fabric_workspace_item, fabric_client, name, tmp_path, *, guarded):
     # Unlike self-provisioning fixtures, this path only finds the permanent estate.
     catalogue_name = os.environ.get("WEAVER_PYTEST_WEAVER", "PYTEST_WEAVER")
     find_item(
@@ -87,14 +118,11 @@ def semantic_build_context(
         assert not missing, (
             f"Initialise the fixed catalogue outside pytest before this test: {missing}"
         )
-        model = session.semantic_model(fixed_semantic_model_name)
+        model = session.semantic_model(name)
         claims = read_table(connection, INSTALLATION)
         assert not any(
             row["item_type"] == ITEM.item_type
-            and (
-                row["target_name"] == fixed_semantic_model_name
-                or row["item_id"] == model.model_id
-            )
+            and (row["target_name"] == name or row["item_id"] == model.model_id)
             for row in claims
         ), "The fixed semantic item must have no existing catalogue owner"
         assert all(row["rows"] == 0 for row in _owned_counts(connection)), (
@@ -102,38 +130,50 @@ def semantic_build_context(
         )
         history_predicate = (
             f"[Target type] = {literal(ITEM.item_type)} AND "
-            f"[Target name] = {literal(fixed_semantic_model_name)}"
+            f"[Target name] = {literal(name)}"
         )
         history = read_table(connection, LOG, predicate=history_predicate)
         retained_log_ids = {row["log_sk"] for row in history}
         _settle_refreshes(model)
-        source = ConfiguredSemanticSource.capture(model)
-        original = source.original
-        backup = tmp_path / "original-definition.json"
-        backup.write_text(json.dumps(original), encoding="utf-8")
-        print(f"Original semantic definition: {backup}")
-        source.attach(session)
+        source = None
+        if guarded:
+            source = ConfiguredSemanticSource.capture(model)
+            backup = tmp_path / "original-definition.json"
+            backup.write_text(json.dumps(source.original), encoding="utf-8")
+            print(f"Original semantic definition: {backup}")
+            source.attach(session)
         try:
             yield SimpleNamespace(
                 session=session,
                 connection=connection,
                 model=model,
-                target=fixed_semantic_model_name,
+                target=name,
                 source=source,
-                wipe=source.wipe,
-                load=lambda *a, **k: source.run("load", weaver.load, *a, **k),
+                wipe=weaver.wipe if source is None else source.wipe,
+                load=(
+                    weaver.load
+                    if source is None
+                    else lambda *a, **k: source.run("load", weaver.load, *a, **k)
+                ),
             )
         finally:
-            source.detach(session)
+            touched = True
+            if source is not None:
+                source.detach(session)
+                touched = source.touched
             try:
-                source.restore(_settle_refreshes)
-                if source.touched:
-                    print(
-                        f"Restored semantic model {model.workspace_id}/{model.model_id}"
-                    )
+                if source is None:
+                    _settle_refreshes(model)
+                else:
+                    source.restore(_settle_refreshes)
+                    if touched:
+                        print(
+                            f"Restored semantic model {model.workspace_id}/{model.model_id}"
+                        )
             finally:
-                print("SEMANTIC_SOURCE_EVIDENCE " + json.dumps(source.evidence))
-                if source.touched:
+                if source is not None:
+                    print("SEMANTIC_SOURCE_EVIDENCE " + json.dumps(source.evidence))
+                if touched:
                     _cleanup_catalogue(
                         session, connection, history_predicate, retained_log_ids, claims
                     )
@@ -330,7 +370,7 @@ def test_public_build_catalogue_load_dax_and_unchanged_build(
         LOG,
         predicate=f"[Workflow ID] = {literal(report.workflow_id)}",
     )
-    assert any(node.result.request_id in row["details"] for row in logs)
+    assert any(node.result.request_id in (row["details"] or "") for row in logs)
     assert not read_table(context.connection, BOOKMARK, scope=SCOPE)
     assert not read_table(context.connection, LOAD_STATISTIC, scope=SCOPE)
     unchanged = weaver.build(root, items=selector, session=context.session)
@@ -381,9 +421,9 @@ def test_public_build_catalogue_load_dax_and_unchanged_build(
     "shared", [False, True], ids=["extension-source", "shared-expression"]
 )
 def test_existing_warehouse_source_build_persists_lineage_and_loads_without_source(
-    semantic_build_context, tmp_path, shared
+    scratch_build_context, tmp_path, shared
 ):
-    context = semantic_build_context
+    context = scratch_build_context
     folder = tmp_path / "project" / str(ITEM)
     folder.mkdir(parents=True)
     if shared:

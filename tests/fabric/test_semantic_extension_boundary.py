@@ -4,9 +4,7 @@ import json
 
 from support.weaver_test import weaver_test
 from test_semantic_extension_representation import ITEM, ORG, base_parts
-from test_semantic_model_boundary import (
-    restored_semantic_model as restored_semantic_model,
-)
+from test_semantic_model_boundary import scratch_model as scratch_model
 
 from weaver.semantic_models.definition import decode_model, encode_parts
 from weaver.semantic_models.deployed import verify_requested
@@ -14,8 +12,8 @@ from weaver.semantic_models.extensions import merge_extensions
 
 
 @weaver_test(remote=True, resources={"rest"})
-def test_native_extension_merge_deploys_and_reads_back(restored_semantic_model):
-    model = restored_semantic_model
+def test_native_extension_merge_deploys_and_reads_back(scratch_model):
+    model = scratch_model
     before = base_parts()
     layers = [(ORG, "SemanticModel/extension.tmdl")]
     for local in (False, True):

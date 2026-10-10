@@ -145,6 +145,9 @@ FIXED_ITEMS = {
     "warehouse_producer": "PYTEST_HOUSE",
     "warehouse": "PYTEST_WH_1",
     "semantic_model": "PYTEST_SM",
+    # A model the suite reshapes freely. What it deploys reads no source that
+    # needs a connection, so it needs no setup beyond existing.
+    "scratch_semantic_model": "PYTEST_SM_SCRATCH",
     # Where a mirrored item is built, one per kind. Emptied by every mirror.
     "warehouse_mirror": "PYTEST_WH_MIRROR",
     "lakehouse_mirror": "PYTEST_LH_MIRROR",
@@ -768,6 +771,16 @@ def fixed_semantic_model_name():
 @pytest.fixture
 def fixed_semantic_model(semantic_model_session, fixed_semantic_model_name):
     return semantic_model_session.semantic_model(fixed_semantic_model_name)
+
+
+@pytest.fixture
+def scratch_semantic_model_name():
+    return _fixed_name("scratch_semantic_model")
+
+
+@pytest.fixture
+def scratch_semantic_model(semantic_model_session, scratch_semantic_model_name):
+    return semantic_model_session.semantic_model(scratch_semantic_model_name)
 
 
 @pytest.fixture

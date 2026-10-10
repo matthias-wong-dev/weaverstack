@@ -13,7 +13,7 @@ from test_semantic_model_public_cycle import (
     SCOPE,
 )
 from test_semantic_model_public_cycle import (
-    semantic_build_context as semantic_build_context,
+    scratch_build_context as scratch_build_context,
 )
 
 import weaver
@@ -132,9 +132,9 @@ def _project(folder, form):
 @weaver_test(remote=True, resources={"rest", "tds"})
 @pytest.mark.parametrize("form", ["source-extension", "pbip", "overlays"])
 def test_public_annotation_build_readback_load_and_fixed_point(
-    semantic_build_context, tmp_path, form
+    scratch_build_context, tmp_path, form
 ):
-    context = semantic_build_context
+    context = scratch_build_context
     folder = tmp_path / "project" / str(ITEM)
     edit_target = _project(folder, form)
     project = folder.parent.parent
@@ -241,7 +241,8 @@ def test_public_annotation_build_readback_load_and_fixed_point(
         and loaded.nodes[0].result.end_time
     )
     assert any(
-        request_id in row["details"] for row in read_table(context.connection, LOG)
+        request_id in (row["details"] or "")
+        for row in read_table(context.connection, LOG)
     )
     status = read_table(context.connection, LOAD_STATUS, predicate=SCOPE.predicate)
     assert len(status) == 1 and status[0]["result"] == "succeeded"
