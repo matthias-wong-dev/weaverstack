@@ -365,10 +365,13 @@ are in.
 There is one `build`, one `load` and one `test`. Every build action runs in the
 mutation executor wherever that is, and the state a build plans against is read the same
 way: the catalogue over TDS, a Lakehouse's views over Spark SQL, a Lakehouse's
-objects from storage, a Warehouse over TDS. A desktop `weaver build` therefore
-needs no published wheel, because its Spark SQL and TableBuilder submissions
-import no Weaver, and no Fabric Environment either, because they run on the
-workspace default. Loads and tests of deployed Python modules use an Environment.
+objects from storage, a Warehouse over TDS. A desktop `weaver build` needs no
+published wheel, because a plan that attaches Spark carries Weaver's runtime in
+its carrier. That plan does need Weaver's dependencies in the Spark session, so
+a Lakehouse build needs the published Environment; a build with no Spark work
+needs none. A session without them declines the carrier before any action runs,
+and Build reports that once, naming what is missing. Loads and tests of
+deployed Python modules use an Environment.
 `install` asks
 for nothing: a bundle carries the workspace, the catalogue, the Environment and
 the Lakehouse a Spark session attaches to, frozen when it was generated, and the
