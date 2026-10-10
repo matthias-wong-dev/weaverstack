@@ -229,6 +229,20 @@ def test_a_report_that_differs_from_its_receipt_is_refused():
         _send(session, _run(session))
 
 
+@weaver_test()
+def test_lost_source_run_reports_uncertainty_without_catalogue_guidance():
+    from dataclasses import replace
+
+    session = Fabric(lost=True)
+    run = replace(_run(session), records_catalogue=False)
+    with pytest.raises(OutcomeUnknown) as failure:
+        _send(session, run)
+    assert "may have run" in str(failure.value)
+    assert "catalogue" not in str(failure.value)
+    assert len(session.programs) == 1
+    assert not session.programs[0].resubmit
+
+
 # --- what the operator sees ---------------------------------------------------
 
 

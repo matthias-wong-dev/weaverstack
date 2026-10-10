@@ -38,6 +38,46 @@ class SourceValidation:
     #: Where it was read, for the report.
     path: str
 
+    def to_mapping(self) -> dict:
+        import yaml
+
+        return {
+            "item": str(self.item),
+            "path": self.path,
+            "source": {
+                "relative_path": self.source.relative_path,
+                "language": self.source.language,
+                "metadata": yaml.safe_dump(self.source.document.raw),
+                "sql_body": self.source.sql_body,
+                "dax_body": self.source.dax_body,
+            },
+        }
+
+    @classmethod
+    def from_mapping(cls, value: dict) -> SourceValidation:
+        from .declaration.metadata import parse_document
+        from .declaration.source import SourceDocument
+
+        item = WeaverItemId.parse(value["item"])
+        source = value["source"]
+        document = parse_document(source["metadata"], language=source["language"])
+        if not document.is_validation:
+            raise CommandError("a source validation must declare a Test or Assumption")
+        return cls(
+            item,
+            SourceDocument(
+                relative_path=source["relative_path"],
+                language=source["language"],
+                text="",
+                source_hash="",
+                document=document,
+                item_type=item.item_type,
+                sql_body=source["sql_body"],
+                dax_body=source["dax_body"],
+            ),
+            value["path"],
+        )
+
     @property
     def logical(self) -> WeaverDocumentId:
         return WeaverDocumentId.validation(self.item, self.source.object_id)
@@ -236,7 +276,9 @@ def _execute(session, *, workspace, validation, target, collect, common):
         if validation.item.item_type == SEMANTIC_MODEL:
             result, diagnostics = _run_semantic(session, workspace, validation, target)
         elif target.kind == LAKEHOUSE_TARGET:
-            result, diagnostics = _run_spark(session, document, target)
+            result, diagnostics = _run_spark(
+                session, document, target, workspace=workspace
+            )
         else:
             result, diagnostics = _run_warehouse(
                 session, document, target, workspace=workspace
@@ -336,10 +378,10 @@ def _run_warehouse(session, document, target: PhysicalTargetRef, *, workspace):
     )
 
 
-def _run_spark(session, document, target: PhysicalTargetRef):
+def _run_spark(session, document, target: PhysicalTargetRef, *, workspace):
     """Run the Spark SQL program through the same runtime as an installed module."""
 
-    from . import tokens
+    from .declaration.spark_sql_module import addressed
     from .lakehouse import lakehouse_for
     from .runtime.spark_sql_validation import (
         read_spark_sql_assumption,
@@ -348,25 +390,26 @@ def _run_spark(session, document, target: PhysicalTargetRef):
     from .runtime.test_compare import compare
     from .targets import ItemRef
 
-    if session.spark() is None:
+    spark = session.spark(workspace)
+    if spark is None:
         raise ValidationError("running a Spark SQL validation needs a Spark session")
     if document.language != SPARK_SQL:
         raise CommandError(
             f"a {document.language} validation cannot run against {target}"
         )
 
-    lakehouse = lakehouse_for(session.resolver(), ItemRef(target.name))
+    lakehouse = lakehouse_for(session.resolver(workspace), ItemRef(target.name))
     # Addressed exactly as an installed module's program is, so a file run reads
     # the same tables the installed one would.
-    sql = tokens.expand(_addressed(document.sql_body or ""), lakehouse.destination)
+    sql = addressed(document.sql_body or "", lakehouse.destination)
     what = document.object_id.qualified
 
     if document.document.kind == ASSUMPTION:
-        frame = read_spark_sql_assumption(session.spark(), sql=sql, what=what)
+        frame = read_spark_sql_assumption(spark, sql=sql, what=what)
         rows = tuple(row.asDict() for row in frame.collect())
         return AssumptionResult(violation_count=len(rows)), rows
 
-    expected, actual = read_spark_sql_test(session.spark(), sql=sql, what=what)
+    expected, actual = read_spark_sql_test(spark, sql=sql, what=what)
     frame = compare(
         expected, actual, primary_key=document.document.primary_key, what=what
     )
@@ -379,12 +422,6 @@ def _run_spark(session, document, target: PhysicalTargetRef):
         ),
         rows,
     )
-
-
-def _addressed(body: str) -> str:
-    from .declaration.spark_sql_module import addressed
-
-    return addressed(body)
 
 
 __all__ = [

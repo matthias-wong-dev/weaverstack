@@ -638,6 +638,12 @@ known failure that leaves the session in use. A run with no Spark
 work runs on the client, over TDS, and starts no Spark session. A client never
 imports a deployed module, so it opens no runtime scope.
 
+Source Tests use the same Session run boundary. A desktop sends parsed validation
+metadata and SQL or DAX bodies, with the requested workspace, Environment and
+target mappings. A NotebookSession executes them in-process. Source runs retain
+selection, comparison and diagnostic semantics and write no catalogue state.
+Warehouse-only, DAX-only and dry-run source selections start no Spark session.
+
 ## Architecture invariants
 
 Enforced by `tests/test_core_boundary.py`:
