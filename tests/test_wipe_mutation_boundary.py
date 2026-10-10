@@ -12,7 +12,8 @@ from weaver import plan_wipe
 from weaver import wipe as public_wipe
 from weaver.errors import CommandError
 from weaver.fabric.shortcuts import Shortcut
-from weaver.store import FilesystemStore
+from weaver.locations import Location
+from weaver.store import FilesystemStore, StoreError
 from weaver.targets import ItemRef
 from weaver.wipe_plan import wipe_mutation_plan
 
@@ -171,6 +172,46 @@ def test_a_path_still_being_released_may_refuse_access_before_it_goes(estate):
     assert events.index("detach Tables/Sales/Portable") < events.index(
         "delete Tables/Sales"
     )
+
+
+class _Refusing(FilesystemStore):
+    def __init__(self, error):
+        self.error = error
+
+    def exists(self, location):
+        raise self.error
+
+
+@weaver_test()
+@pytest.mark.parametrize(
+    "error",
+    [
+        StoreError("HEAD returned 403: denied", status_code=403),
+        RuntimeError("Py4JJavaError: Operation failed: reworded"),
+    ],
+    ids=["status", "no-status"],
+)
+def test_a_refused_release_check_is_waited_on_and_its_message_kept(error):
+    from weaver.physical_wipe import DetachedShortcuts, held, unreleased
+
+    location = Location("abfss://ws@onelake.dfs.fabric.microsoft.com/lh/Tables/S/P")
+
+    reason = held(_Refusing(error), [location])
+
+    assert reason is not None and str(error) in reason
+    report = str(unreleased(DetachedShortcuts(("shortcut:S/P",), (location,)), reason))
+    assert str(error) in report
+
+
+@weaver_test()
+def test_a_release_check_refused_with_another_status_fails_at_once():
+    from weaver.physical_wipe import held
+
+    location = Location("abfss://ws@onelake.dfs.fabric.microsoft.com/lh/Tables/S/P")
+    error = StoreError("HEAD returned 401: expired", status_code=401)
+
+    with pytest.raises(StoreError, match="401"):
+        held(_Refusing(error), [location])
 
 
 @weaver_test()

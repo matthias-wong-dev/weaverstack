@@ -7,7 +7,7 @@ import shutil
 import pytest
 from support.semantic_models import probe_model, shared_source_tmdl, source_model
 from support.weaver_test import weaver_test
-from support.workspaces import InventoryClient, _identifier
+from support.workspaces import InventoryClient
 from test_semantic_model_build_cycle import ITEM, DefinitionClient, answer_catalogue
 from test_semantic_model_load_cycle import COMPLETED, REQUEST_ID, answer_installed
 
@@ -112,7 +112,7 @@ def source_project(tmp_path):
     root = tmp_path / "project"
     folder = root / str(ITEM)
     folder.mkdir(parents=True)
-    (folder / "extension.tmdl").write_text(shared_source_tmdl(), encoding="utf-8")
+    (folder / f"{folder.name}.tmdl").write_text(shared_source_tmdl(), encoding="utf-8")
     return root
 
 
@@ -250,15 +250,14 @@ def test_public_build_binds_sources_and_publishes_object_dependencies(
         assert {
             (row["referenced_item_type"], row["referenced_item_name"]) for row in deps
         } == {("Warehouse", "Serving")}
-        source = session.resolve_item("Serving_Dev", item_type="Warehouse")
         objects = {row["table_name"]: row for row in rows["SemanticModelTable"]}
-        metadata = json.loads(objects["Sales"]["source_binding"])
-        assert metadata["reference"] == "Warehouse/Serving/Cake.Sales"
-        assert metadata["object_type"] == "table"
-        assert metadata["item_type"] == "Warehouse"
-        assert metadata["item_id"] == source.id
-        assert metadata["workspace_id"] == source.workspace_id
-        assert json.loads(objects["Summary"]["source_binding"])["object_type"] == "view"
+        assert {name: row["source_access"] for name, row in objects.items()} == {
+            "Sales": "sql",
+            "SalesAgain": "sql",
+            "Summary": "sql",
+        }
+        # Only Installation names the physical item.
+        assert "Serving_Dev" not in json.dumps(objects)
         assert not session.python and not session.spark_sql
 
 
@@ -362,7 +361,7 @@ def test_source_absent_load_uses_published_dependencies_for_order_and_blocking(
         monkeypatch.setattr(session, "sql_executor", executor)
         model = session.semantic_model("Reporting_Dev")
 
-        def refresh():
+        def refresh(**_):
             order.append("refresh")
             return {**COMPLETED, "requestId": REQUEST_ID}
 
@@ -416,7 +415,7 @@ def test_pbip_source_rebind_retains_authored_mode_and_properties(tmp_path, mode)
     (folder / "Probe.SemanticModel/definition/expressions.tmdl").write_text(
         'expression \'Warehouse/Serving\' = Sql.Database("previous", "database")\n'
     )
-    (folder / "extension.tmdl").write_text("model Model\n", encoding="utf-8")
+    (folder / f"{folder.name}.tmdl").write_text("model Model\n", encoding="utf-8")
     parsed = parse_item_repository(Location(root.as_posix()))
     authored = probe_model()
     prior_sales = next(t for t in authored["model"]["tables"] if t["name"] == "Sales")
@@ -491,7 +490,7 @@ def test_direct_lake_pbip_rebind_keeps_partition_properties_and_unmapped_express
     untouched_bytes = expression_file.read_bytes().split(
         b"expression 'Warehouse/Serving'", 1
     )[0]
-    (folder / "extension.tmdl").write_text("model Model\n", encoding="utf-8")
+    (folder / f"{folder.name}.tmdl").write_text("model Model\n", encoding="utf-8")
     with source_session() as session:
         observed = probe_model()
         sales = next(t for t in observed["model"]["tables"] if t["name"] == "Sales")
@@ -541,14 +540,13 @@ def test_direct_lake_pbip_rebind_keeps_partition_properties_and_unmapped_express
 
 @weaver_test()
 @pytest.mark.parametrize("failed_source", [False, True])
-def test_selected_declared_source_shape_orders_public_build(
+def test_declared_source_build_precedes_model_deployment(
     tmp_path, monkeypatch, failed_source
 ):
-    from weaver.build_bundle.bundle import load_bundle
     from weaver.declaration.model import WeaverDocumentId
 
     root = source_project(tmp_path)
-    (root / str(ITEM) / "extension.tmdl").write_text(
+    (root / str(ITEM) / f"{ITEM.item_name}.tmdl").write_text(
         shared_source_tmdl(
             relations={"Sales": "Sales"},
             descriptions={"Sales": "Sales facts."},
@@ -577,12 +575,12 @@ def test_selected_declared_source_shape_orders_public_build(
                 notes=False,
             )
         )
+        from weaver.build_bundle.bundle import load_bundle
+
+        published = capture_publication(monkeypatch, session)
         result = weaver.build(
             root,
-            items=[
-                "Warehouse/Serving=Warehouse/Serving_Dev",
-                f"{ITEM}=SemanticModel/Reporting_Dev",
-            ],
+            items="Warehouse/Serving=Warehouse/Serving_Dev",
             bundle_only=True,
             bundle_path=tmp_path / "bundle",
             session=session,
@@ -594,17 +592,7 @@ def test_selected_declared_source_shape_orders_public_build(
             for i, a in enumerate(actions)
             if a.resource_node_id == str(identity) and a.executor == "tsql"
         )
-        semantic_index = next(
-            i for i, a in enumerate(actions) if a.executor == "semantic_model"
-        )
-        # Display order is independent of the shared executor's prerequisite graph.
-        from weaver.graph import Graph
-
-        success = Graph(
-            (a.id for a in actions),
-            ((dep, a.id) for a in actions for dep in a.depends_on),
-        )
-        assert actions[source_index].id in success.ancestors(actions[semantic_index].id)
+        assert not any(a.executor == "semantic_model" for a in actions)
         assert not any(
             "Cake" in s and "INFORMATION_SCHEMA.COLUMNS" in s for s in session.tsql
         )
@@ -643,9 +631,17 @@ def test_selected_declared_source_shape_orders_public_build(
             assert not session.semantic_model("Reporting_Dev").calls
             assert not any("MERGE INTO [_].[Registry]" in s for s in session.tsql)
         else:
+            assert not session.semantic_model("Reporting_Dev").calls
+            source_rows = published()
+            assert SOURCE in source_rows
+            answer_catalogue(session, Catalogue(source_rows), read_bindings())
+            model_result = weaver.build(
+                root, items=f"{ITEM}=SemanticModel/Reporting_Dev", session=session
+            )
+            assert model_result.succeeded, model_result.errors
             assert [
                 method for method, _ in session.semantic_model("Reporting_Dev").calls
-            ] == ["update_definition", "get_definition"]
+            ] == ["update_definition", "invalid_measures", "get_definition"]
 
 
 @weaver_test()
@@ -679,13 +675,10 @@ def test_environment_rebinding_and_unchanged_public_build_use_source_signatures(
                 rows = published()
             signatures.append(rows[ITEM]["Registry"][0]["signature"])
             bindings.append(
-                json.loads(
-                    next(
-                        r["source_binding"]
-                        for r in rows[ITEM]["SemanticModelTable"]
-                        if r["table_name"] == "Sales"
-                    )
-                )
+                [
+                    {k: v for k, v in r.items() if k != "signature"}
+                    for r in rows[ITEM]["SemanticModelTable"]
+                ]
             )
             definitions.append(
                 decode_model(session.semantic_model("Reporting_Dev").definition)
@@ -714,18 +707,17 @@ def test_environment_rebinding_and_unchanged_public_build_use_source_signatures(
                 root, items=f"{ITEM}=SemanticModel/Reporting_Dev", session=session
             )
             assert second.succeeded, second.errors
-            assert not second.selection.selected_for_build
-            assert second.installation_report.action_counts()["total"] == 0
-            assert not client.calls
+            assert second.selection.selected_for_build
+            assert not second.selection.impact.changed
+            assert [method for method, _ in client.calls] == [
+                "update_definition",
+                "invalid_measures",
+                "get_definition",
+            ]
     assert signatures[0] != signatures[1]
     assert definitions[0] != definitions[1]
-    assert (
-        bindings[0]["reference"]
-        == bindings[1]["reference"]
-        == "Warehouse/Serving/Cake.Sales"
-    )
-    assert bindings[0]["item_id"] != bindings[1]["item_id"]
-    assert bindings[0]["workspace_id"] != bindings[1]["workspace_id"]
+    # The catalogue's semantic rows are the same in every environment.
+    assert bindings[0] == bindings[1]
 
 
 @weaver_test()
@@ -741,7 +733,7 @@ def test_lakehouse_source_keeps_tables_identity_and_plans_sql_readiness(
     from weaver.load_plan import load_dag
 
     root = source_project(tmp_path)
-    (root / str(ITEM) / "extension.tmdl").write_text(
+    (root / str(ITEM) / f"{ITEM.item_name}.tmdl").write_text(
         shared_source_tmdl(
             logical="Lakehouse/Curated",
             relations={"Customer": "Customer"},
@@ -836,16 +828,11 @@ def test_lakehouse_source_keeps_tables_identity_and_plans_sql_readiness(
         (edge,) = rows[ITEM]["Dependency"]
         assert edge["dependency_reference"] == "Lakehouse/Curated/Tables/Cake.Customer"
         assert edge["referenced_schema_name"] == "Tables/Cake"
-        binding = json.loads(
-            next(
-                r["source_binding"]
-                for r in rows[ITEM]["SemanticModelTable"]
-                if r["table_name"] == "Customer"
-            )
+        customer = next(
+            r for r in rows[ITEM]["SemanticModelTable"] if r["table_name"] == "Customer"
         )
-        assert binding["item_type"] == "Lakehouse"
-        assert binding["item_id"] == _identifier("Lakehouse", "Serving_Dev")
-        assert binding["database"] == "Serving_Dev"
+        assert customer["source_access"] == "sql"
+        assert "Serving_Dev" not in json.dumps(customer)
         table = decode_model(session.semantic_model("Reporting_Dev").definition)[
             "model"
         ]["tables"][0]
@@ -915,7 +902,7 @@ def test_native_tables_without_source_create_no_inferred_item_edges(
         folder,
         dirs_exist_ok=True,
     )
-    (folder / "extension.tmdl").write_text(
+    (folder / f"{folder.name}.tmdl").write_text(
         "/// Authored model\nmodel Model\n", encoding="utf-8"
     )
     with source_session() as session:
@@ -937,6 +924,53 @@ def test_native_tables_without_source_create_no_inferred_item_edges(
         ]
         assert not any(
             "/connectionString" in path for path in session.resolver().client.requested
+        )
+
+
+@pytest.mark.parametrize("catalogued", [True, False])
+@weaver_test()
+def test_build_warns_about_tables_whose_source_is_not_traced(tmp_path, catalogued):
+    root = source_project(tmp_path)
+    path = root / str(ITEM) / f"{ITEM.item_name}.tmdl"
+    native = (
+        "\tpartition {0} = m\n\t\tmode: import\n\t\tsource = "
+        'Value.NativeQuery(#"Warehouse/Serving", "SELECT Id FROM Cake.Sales")\n'
+    )
+    path.write_text(
+        path.read_text()
+        + "\ntable Notices\n"
+        + native.format("Notices")
+        + "\ntable Missing\n\tpartition Missing = entity\n\t\tmode: directLake\n"
+        "\t\tsource\n\t\t\tschemaName: Cake\n\t\t\tentityName: NoSuch\n"
+        "\t\t\texpressionSource: 'Warehouse/Serving'\n"
+        + "\ntable Declared\n\tannotation Weaver.Source = Warehouse/Serving/Cake.Sales\n"
+        + native.format("Declared")
+        + '\ntable Computed\n\tpartition Computed = calculated\n\t\tsource = ROW("Value", 1)\n'
+        + "\ntable Bare\n\tmeasure Count = 1\n"
+    )
+    workspace = Workspace(
+        workspace="Demo",
+        catalogue="Warehouse/Catalogue" if catalogued else None,
+        targets={SOURCE: TargetDeclaration(physical="Serving_Dev")},
+    )
+    with source_session(workspace=workspace) as session:
+        if catalogued:
+            answer_catalogue(session, source_catalogue(), read_bindings())
+        result = weaver.build(
+            root,
+            items=f"{ITEM}=SemanticModel/Reporting_Dev",
+            bundle_only=True,
+            bundle_path=tmp_path / "bundle",
+            session=session,
+        )
+        assert result.succeeded
+        assert session.warnings == (
+            [
+                f"{ITEM}: tables Notices, Missing read data that is not traced to a "
+                "managed Table or View. Add Weaver.Source to name each table's source"
+            ]
+            if catalogued
+            else []
         )
 
 
@@ -963,3 +997,8 @@ def test_health_tables_carry_the_model_source_bindings(tmp_path, monkeypatch):
     assert {
         str(edge.upstream) for edge in dag.edges if edge.downstream.item == ITEM
     } == {"Warehouse/Serving/Cake.Sales", "Warehouse/Serving/Cake.Summary"}
+    # Health assesses the model's refresh as a load.
+    from weaver.installed import SEMANTIC_REFRESH
+
+    (model,) = (node for node in dag.nodes if node.identity.item == ITEM)
+    assert model.artefact_kind == SEMANTIC_REFRESH

@@ -45,6 +45,7 @@ from .operations.mirror import (
     plan_mirror,
 )
 from .operations.test import test
+from .operations.unbind import UnbindPlan, UnbindResult, plan_unbind, unbind
 from .operations.wipe import (
     WipeItemResult,
     WipePlan,
@@ -90,6 +91,10 @@ __all__ = [
     "WipeItemResult",
     "WipeReport",
     "WipeResult",
+    "plan_unbind",
+    "unbind",
+    "UnbindPlan",
+    "UnbindResult",
     "load",
     "LoadRunReport",
     "LoadNodeReport",

@@ -80,12 +80,10 @@ def test_a_mount_makes_onelake_addressable_by_ordinary_python(
 
 
 #: The second contract, and the one that cost a defect. A mount is a view of
-#: remote storage, and a view can be stale: Weaver reaches one Files area two
-#: ways, ``abfss://`` over DFS for storage work, the mount for authored Python
-#:, so anything that changes OneLake outside the mount has to be visible
-#: through it. With caching on it is not, and the symptom is a listing that
-#: still holds entries the storage no longer has: ``shutil.rmtree`` deletes what
-#: it was told about and then fails to remove the directory, as ``ENOTEMPTY``.
+#: remote storage, and a view can be stale: its listing can still hold an entry
+#: deleted through OneLake. So Weaver lists, resets and publishes a Folder
+#: through ``notebookutils.fs`` and leaves the mount to authored code, which
+#: writes staged files through it.
 #:
 #: Only reproducible when one session outlives a change made behind it, which is
 #: the Fabric suite's shape.
@@ -105,7 +103,7 @@ emit(out)
 """
 
 MOUNT_AFTER_WIPE = r"""
-import notebookutils, shutil, time
+import notebookutils
 from pathlib import Path
 
 out = {}
@@ -113,32 +111,30 @@ out = {}
 # mount of one point, so this is the state a real load meets.
 local = Path(notebookutils.fs.getMountPath(POINT))
 staging = local / "Files" / PROBE / "CustomerCsv_Staging"
+onelake = ROOT + "/Files/" + PROBE + "/CustomerCsv_Staging"
 
-# What the mount says about a directory whose storage is gone. Recorded rather
-# than asserted: it is Fabric's answer, and the two halves of it are odd enough
-# to be worth reading in a failure. `exists()` stays true while the listing goes
-# empty, and the listing settles a moment after the delete rather than with it.
-out["exists_after_wipe"] = staging.exists()
-out["listed_after_wipe"] = sorted(p.name for p in staging.iterdir()) if staging.exists() else None
+# What each view says about a directory whose storage is gone. Recorded rather
+# than asserted where it is the mount's answer: the mount may lag.
+out["mount_exists_after_wipe"] = staging.exists()
+out["mount_listed_after_wipe"] = (
+    sorted(p.name for p in staging.iterdir()) if staging.exists() else None
+)
+out["store_exists_after_wipe"] = notebookutils.fs.exists(onelake)
 
-# The reset a folder load performs, verbatim from `reset_staging`, inlined
-# because the Environment carries the published wheel, which may predate the
-# change under test. This is the operation that failed with ENOTEMPTY.
-def with_retry(action, attempts=RESET_ATTEMPTS, pause=RESET_PAUSE):
-    for remaining in range(attempts - 1, -1, -1):
-        try:
-            return action()
-        except OSError:
-            if remaining == 0:
-                raise
-            time.sleep(pause)
-
+# The reset a folder load performs, inlined because the Environment carries the
+# published wheel, which may predate the change under test: remove and make the
+# directory through OneLake, make it through the mount for authored code, which
+# then writes through the mount.
 try:
-    with_retry(lambda: shutil.rmtree(staging) if staging.exists() else None)
-    staging.mkdir(parents=True, exist_ok=False)
+    if notebookutils.fs.exists(onelake):
+        notebookutils.fs.rm(onelake, True)
+    notebookutils.fs.mkdirs(onelake)
+    staging.mkdir(parents=True, exist_ok=True)
     (staging / "fresh.csv").write_text("c,d\n3,4\n", encoding="utf-8")
     out["reset"] = "ok"
-    out["after_reset"] = sorted(p.name for p in staging.iterdir())
+    out["store_after_reset"] = sorted(
+        info.name for info in notebookutils.fs.ls(onelake)
+    )
 except OSError as exc:
     out["reset"] = f"{type(exc).__name__}: {exc}"
 emit(out)
@@ -146,21 +142,20 @@ emit(out)
 
 
 @weaver_test(remote=True)
-def test_a_zero_cache_mount_sees_a_dfs_wipe_made_behind_it(
+def test_a_folder_reset_through_onelake_survives_a_dfs_wipe_behind_the_mount(
     livy_session, fabric_workspace, fabric_client, fabric_target_lakehouse
 ):
-    """The mount-coherence repair, proved where it is the only place it fails.
+    """The Folder reset, proved where a stale mount is possible.
 
-    One Livy session spans the whole thing: the defect needs a
-    mount that outlives a change made outside it, and a test that remounted
-    between the two halves would prove nothing. The wipe goes over DFS from
-    here, which is exactly how ``weaver wipe`` reaches a Lakehouse from a
-    desktop, and then the session, holding the same mount, must both see the
-    removal and be able to reset the directory over it.
+    One Livy session spans the whole thing: the defect needs a mount that
+    outlives a change made outside it, and a test that remounted between the
+    two halves would prove nothing. The wipe goes over DFS from here, which is
+    how ``weaver wipe`` reaches a Lakehouse from a desktop. The session, holding
+    the same mount, must see the removal through OneLake, reset the directory,
+    and have authored writes through the mount land in it.
     """
 
     from weaver.fabric import FabricResolver, OneLakeDfsClient
-    from weaver.runtime.folder_load import RESET_ATTEMPTS, RESET_PAUSE
     from weaver.targets import ItemRef
 
     item = fabric_target_lakehouse
@@ -168,39 +163,24 @@ def test_a_zero_cache_mount_sees_a_dfs_wipe_made_behind_it(
     root = resolver.spark_root(ItemRef(item.name))
     probe = "weaver_mount_coherence"
     point = "/weaver_coherence"
-    preamble = (
-        f"ROOT = {root!r}\nPOINT = {point!r}\nPROBE = {probe!r}\n"
-        f"RESET_ATTEMPTS = {RESET_ATTEMPTS!r}\nRESET_PAUSE = {RESET_PAUSE!r}\n"
-    )
+    preamble = f"ROOT = {root!r}\nPOINT = {point!r}\nPROBE = {probe!r}\n"
 
     before = livy_session.run(preamble + MOUNT_COHERENCE).payload
     assert before["before"] == ["customers.csv"]
 
     # Outside the mount, and outside the session: the desktop's own transport.
-    # The location is resolved rather than composed, a DFS client addresses
-    # OneLake by URL, and an item by id, not by the name a person types.
     dfs = OneLakeDfsClient()
     staged = resolver.files_root(ItemRef(item.name)) / probe / "CustomerCsv_Staging"
     dfs.delete(staged, recursive=True)
 
     after = livy_session.run(preamble + MOUNT_AFTER_WIPE).payload
 
-    # The claim, and it is about the outcome rather than about any listing on
-    # the way to it. Before the repair this was
-    # `OSError: [Errno 39] Directory not empty`.
+    # OneLake reports the delete at once, which is why Weaver lists through it.
+    assert after["store_exists_after_wipe"] is False
     assert after["reset"] == "ok", after["reset"]
-    # And what the next load publishes from holds only what this run staged, so
-    # no entry the storage had already lost survived into it.
-    assert after["after_reset"] == ["fresh.csv"]
-
-    # Two observations about the mount, asserted narrowly because they are
-    # Fabric's behaviour and not Weaver's, and because getting them wrong is
-    # what the retry exists for.
-    #
-    # A directory whose storage is gone still answers `exists()`, so a reset
-    # cannot decide there is nothing to remove and skip straight to `mkdir`.
-    assert after["exists_after_wipe"] is True
-    # And the listing is eventually consistent, not immediately: it may still
-    # name the deleted file for a moment. That is precisely why the removal is
-    # retried and the `mkdir` that follows is not.
-    assert after["listed_after_wipe"] in ([], ["customers.csv"])
+    # A write through the mount lands in the directory OneLake made, and nothing
+    # the storage had already lost survives into it.
+    assert after["store_after_reset"] == ["fresh.csv"]
+    # The mount's own view, asserted narrowly because it is Fabric's behaviour:
+    # it may still list the deleted file for a moment.
+    assert after["mount_listed_after_wipe"] in (None, [], ["customers.csv"])

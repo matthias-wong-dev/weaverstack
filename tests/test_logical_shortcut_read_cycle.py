@@ -254,6 +254,26 @@ def test_a_file_no_change_document_records_is_not_in_the_shortcuts_history(estat
 
 
 @weaver_test()
+def test_a_folder_shortcut_lists_what_onelake_holds_beneath_it(estate, tmp_path):
+    """A file deleted at the source can still be listed by the consumer's mount.
+
+    The listing comes from the consumer's store, through the shortcut, and
+    needs no logical source.
+    """
+
+    stale = mounted_lakehouse(
+        CURATED_TARGET,
+        tmp_path / "curated",
+        deleted=[f"Files/{LOCAL_SCHEMA}/{LOCAL_OBJECT}/event-001.json"],
+    )
+    consumer = CUR__Event(object(), lakehouse=stale).with_catalogue(_catalogue())
+    shortcut = FolderShortcut(schema=LOCAL_SCHEMA, object=LOCAL_OBJECT)(consumer)
+
+    assert estate.local("event-001.json").is_file()
+    assert shortcut.current_files("*.json") == [estate.local("event-002.json")]
+
+
+@weaver_test()
 def test_a_folder_shortcut_addresses_its_own_item_for_data(estate):
     shortcut = estate.shortcut()
 

@@ -189,6 +189,134 @@ def test_semantic_nodes_preserve_catalogue_dependency_edges_between_producers():
     assert ROOT not in (edge.upstream, edge.downstream)
     planned = load_dag(installed, items=(ITEM, warehouse))
     nodes = {node.logical_id: node.node_id for node in planned.nodes}
-    assert planned.edges == ((nodes[edge.upstream], nodes[edge.downstream]),)
+    # The model records no source, so it also waits for both loads.
+    assert set(planned.edges) == {
+        (nodes[edge.upstream], nodes[edge.downstream]),
+        (nodes[edge.upstream], nodes[ROOT]),
+        (nodes[edge.downstream], nodes[ROOT]),
+    }
     assert len(planned.nodes) == 3
-    assert ROOT in nodes
+
+
+def _traced_estate(mode="import"):
+    """A Warehouse with two loads, a model reading one of them, and one reading none."""
+
+    warehouse = WeaverItemId.parse("Warehouse/Sales")
+    owner = {"item_type": warehouse.item_type, "item_name": warehouse.item_name}
+    registry = []
+    for name in ("Orders", "Stock"):
+        registry.extend(
+            (
+                {
+                    **owner,
+                    "schema_name": "Sales",
+                    "object_name": name,
+                    "object_type": "table",
+                    "object_role": "data",
+                    "signature": "table",
+                },
+                {
+                    **owner,
+                    "schema_name": "_",
+                    "object_name": f"Load Sales.{name}",
+                    "object_type": "stored_procedure",
+                    "object_role": "load",
+                    "signature": "loader",
+                },
+            )
+        )
+    rows = installed_rows()
+    rows[warehouse] = {
+        "Installation": ({**owner, "target_name": "Sales_WH"},),
+        "Registry": tuple(registry),
+    }
+    traced = WeaverItemId.parse("SemanticModel/Orders")
+    rows[traced] = {
+        table: tuple({**row, "item_name": traced.item_name} for row in values)
+        for table, values in rows[ITEM].items()
+    }
+    rows[traced]["Installation"][0].update(
+        target_name="Orders", item_id="11111111-2222-3333-4444-000000000001"
+    )
+    scope = {"item_type": traced.item_type, "item_name": traced.item_name}
+    rows[traced]["SemanticModelTable"] = (
+        {
+            **scope,
+            "table_name": "Orders",
+            "source_mode": mode,
+            "source_access": "sql",
+        },
+    )
+    rows[traced]["Dependency"] = (
+        {
+            **scope,
+            "referencing_schema_name": "",
+            "referencing_object_name": "Orders",
+            "dependency_reference": "Warehouse/Sales/Sales.Orders",
+            "referenced_item_type": "Warehouse",
+            "referenced_item_name": "Sales",
+            "referenced_schema_name": "Sales",
+            "referenced_object_name": "Orders",
+        },
+    )
+    return Catalogue(rows).dag(), warehouse, traced
+
+
+@weaver_test()
+def test_an_untraced_model_waits_for_every_other_load_and_a_traced_one_for_its_sources():
+    installed, warehouse, traced = _traced_estate()
+    orders = WeaverDocumentId.parse("Warehouse/Sales/Sales.Orders")
+    stock = WeaverDocumentId.parse("Warehouse/Sales/Sales.Stock")
+    traced_root = WeaverDocumentId.model_root(traced)
+    assert not installed.unresolved
+    assert installed.is_untraced_model(installed.node(ROOT))
+    assert not installed.is_untraced_model(installed.node(traced_root))
+
+    planned = load_dag(installed, items=(warehouse, ITEM, traced))
+    ids = {node.logical_id: node.node_id for node in planned.nodes}
+    loads = {ids[orders], ids[stock]}
+    assert planned.upstream(ids[ROOT]) == loads
+    assert planned.upstream(ids[traced_root]) == {ids[orders]}
+    assert not planned.upstream(ids[orders]) and not planned.upstream(ids[stock])
+
+
+@weaver_test()
+def test_an_untraced_model_waits_only_for_what_the_selection_runs():
+    installed, warehouse, traced = _traced_estate()
+    stock = WeaverDocumentId.parse("Warehouse/Sales/Sales.Stock")
+
+    alone = load_dag(installed, items=(ITEM,))
+    (node,) = alone.nodes
+    assert not alone.edges
+
+    stale = load_dag(installed, items=(warehouse, ITEM), selection=(ROOT, stock))
+    ids = {node.logical_id: node.node_id for node in stale.nodes}
+    assert set(ids) == {ROOT, stock}
+    assert stale.upstream(ids[ROOT]) == {ids[stock]}
+
+    # An exact-name load adds no ordering.
+    named = load_dag(
+        installed, items=(warehouse, ITEM), names=("Sales.Stock", str(ITEM.item_name))
+    )
+    assert len(named.nodes) == 2
+    assert not named.edges
+
+
+@weaver_test()
+@pytest.mark.parametrize("mode", ["import", "directLake"])
+def test_a_model_read_only_in_direct_lake_needs_no_connection(mode):
+    """Direct Lake reads with single sign-on, so Load does not warn about connections."""
+
+    installed, warehouse, traced = _traced_estate(mode)
+
+    planned = load_dag(installed, items=(warehouse, ITEM, traced))
+    models = {
+        node.logical_id: node.direct_lake
+        for node in planned.nodes
+        if node.primitive_kind == "semantic_refresh"
+    }
+
+    assert models == {
+        WeaverDocumentId.model_root(traced): mode == "directLake",
+        ROOT: False,
+    }

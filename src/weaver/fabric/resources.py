@@ -202,6 +202,32 @@ def create_semantic_model(
     )
 
 
+def create_report(
+    workspace: WorkspaceItem, name: str, *, definition: dict, client=None
+) -> Item:
+    from ..report_definition import decode_report
+
+    decode_report(definition)
+    client = client or FabricClient()
+    try:
+        return find_item(workspace, name, item_type="Report", client=client)
+    except ItemNotFoundError:
+        pass
+    response = client.request(
+        "POST",
+        f"workspaces/{workspace.id}/reports",
+        payload={"displayName": name, "definition": definition},
+        expected=(201, 202),
+        retry_transient=False,
+    )
+    if response.status_code == 202:
+        client.wait_for_operation(response)
+        return _await_item(workspace, name, "Report", client=client)
+    return Item(
+        id=response.json()["id"], name=name, type="Report", workspace_id=workspace.id
+    )
+
+
 def delete_item(item: Item, *, client: FabricClient | None = None) -> None:
     client = client or FabricClient()
     client.request(

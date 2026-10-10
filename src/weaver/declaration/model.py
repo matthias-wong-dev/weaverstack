@@ -12,6 +12,7 @@ from ..signatures import implementation_signature
 from .metadata import ObjectId
 
 if TYPE_CHECKING:
+    from ..powerbi import PowerBIProject, ReportContribution
     from ..semantic_models.source import SemanticContribution
     from .programmable import Programmable
     from .schemas import SchemaSes
@@ -20,7 +21,8 @@ if TYPE_CHECKING:
 LAKEHOUSE = "Lakehouse"
 WAREHOUSE = "Warehouse"
 SEMANTIC_MODEL = "SemanticModel"
-ITEM_TYPES = frozenset({LAKEHOUSE, WAREHOUSE, SEMANTIC_MODEL})
+REPORT = "Report"
+ITEM_TYPES = frozenset({LAKEHOUSE, WAREHOUSE, SEMANTIC_MODEL, REPORT})
 
 #: The two areas a Lakehouse holds, and the first component of every Lakehouse
 #: data identity. Fabric keeps a Lakehouse's Delta tables under ``Tables`` and
@@ -46,7 +48,15 @@ VALIDATION_SHAPE = "validation"
 FILE_SHAPE = "file"
 PROCEDURE_SHAPE = "procedure"
 MODEL_SHAPE = "model"
-SHAPES = (OBJECT_SHAPE, VALIDATION_SHAPE, FILE_SHAPE, PROCEDURE_SHAPE, MODEL_SHAPE)
+ARTIFACT_SHAPE = "artifact"
+SHAPES = (
+    OBJECT_SHAPE,
+    VALIDATION_SHAPE,
+    FILE_SHAPE,
+    PROCEDURE_SHAPE,
+    MODEL_SHAPE,
+    ARTIFACT_SHAPE,
+)
 
 #: How a non-object shape marks itself in the one-line spelling. A file's schema
 #: is a path and its object carries an extension, so ``Schema.Object`` cannot
@@ -212,7 +222,10 @@ class WeaverDocumentId:
                     "a model root requires a SemanticModel item and no object parts"
                 )
             return
-        if self.shape == FILE_SHAPE:
+        if self.shape == ARTIFACT_SHAPE:
+            schema = _relative_path(self.object_id.schema, what="artifact namespace")
+            name = _file_name(self.object_id.object, what="artifact name")
+        elif self.shape == FILE_SHAPE:
             schema = _relative_path(self.object_id.schema, what="file path")
             name = _file_name(self.object_id.object, what="file name")
         elif self.shape == PROCEDURE_SHAPE:
@@ -246,6 +259,12 @@ class WeaverDocumentId:
         if len(parts) == 2 and parts[0] == SEMANTIC_MODEL:
             return cls.model_root(WeaverItemId(*parts))
         if len(parts) >= 4:
+            if parts[2].startswith("artifact:"):
+                return cls.artifact(
+                    WeaverItemId(parts[0], parts[1]),
+                    "/".join((parts[2][9:],) + parts[3:-1]),
+                    parts[-1],
+                )
             marker = _SHAPE_MARKERS[FILE_SHAPE]
             if parts[2].startswith(marker):
                 # ``file:<path>/<name>``, where the last component is the filename and
@@ -293,6 +312,16 @@ class WeaverDocumentId:
         return cls(item, ObjectId("", ""), shape=MODEL_SHAPE)
 
     @classmethod
+    def artifact(cls, item, namespace, name):
+        return cls(item, ObjectId(namespace, name), shape=ARTIFACT_SHAPE)
+
+    @classmethod
+    def report_root(cls, item):
+        if item.item_type != REPORT:
+            raise IdentityError("a report root requires a Report item")
+        return cls.artifact(item, "Definition", item.item_name + ".Report")
+
+    @classmethod
     def validation(cls, item: "WeaverItemId", object_id: ObjectId):
         shape = VALIDATION_SHAPE if item.item_type == LAKEHOUSE else OBJECT_SHAPE
         return cls(item, object_id, shape=shape)
@@ -319,6 +348,8 @@ class WeaverDocumentId:
 
     @property
     def relative(self) -> str:
+        if self.shape == ARTIFACT_SHAPE:
+            return f"artifact:{self.object_id.schema}/{self.object_id.object}"
         if self.shape == FILE_SHAPE:
             marker = _SHAPE_MARKERS[FILE_SHAPE]
             return f"{marker}{self.object_id.schema}/{self.object_id.object}"
@@ -737,6 +768,8 @@ class WeaverRepository:
 
     name: str
     items: tuple[WeaverItem, ...]
+    powerbi_projects: Mapping[str, "PowerBIProject"] = field(default_factory=dict)
+    reports: Mapping[WeaverItemId, "ReportContribution"] = field(default_factory=dict)
     root: Location | None = None
     source_documents: Mapping[WeaverDocumentId, "SourceDocument"] = field(
         default_factory=dict

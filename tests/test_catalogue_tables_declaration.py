@@ -49,6 +49,7 @@ def test_projected_catalogue_tables_have_the_declared_order():
         "KeyDictionary",
         "ForeignKeyDictionary",
         "TestDictionary",
+        "SemanticModelTest",
         "Dependency",
         "Shortcut",
         "SemanticModel",
@@ -155,7 +156,7 @@ def test_comparison_columns_are_every_non_key_column(each: CatalogueTable):
 @weaver_test()
 def test_every_column_declares_a_type_and_a_description(each: CatalogueTable):
     for column in each.columns:
-        assert column.type in ("string", "boolean", "timestamp"), column.name
+        assert column.type in ("string", "boolean", "timestamp", "bigint"), column.name
         assert column.description, f"{each.name}.{column.name}"
 
 

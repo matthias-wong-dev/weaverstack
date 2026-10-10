@@ -46,7 +46,11 @@ def test_semantic_build_deploys_and_reads_back_without_a_catalogue(tmp_path, pbi
     model.definition = encode_definition(engine_model(repository))
     first = weaver.build(root, items=SELECTOR, session=session)
     assert first.succeeded, first.errors
-    assert [call[0] for call in model.calls] == ["update_definition", "get_definition"]
+    assert [call[0] for call in model.calls] == [
+        "update_definition",
+        "invalid_measures",
+        "get_definition",
+    ]
     assert (
         decode_parts(model.calls[0][1]["definition"])
         == repository.semantic_models[ITEM].parts
@@ -56,7 +60,11 @@ def test_semantic_build_deploys_and_reads_back_without_a_catalogue(tmp_path, pbi
     model.calls.clear()
     second = weaver.build(root, items=SELECTOR, session=session)
     assert second.succeeded, second.errors
-    assert [call[0] for call in model.calls] == ["update_definition", "get_definition"]
+    assert [call[0] for call in model.calls] == [
+        "update_definition",
+        "invalid_measures",
+        "get_definition",
+    ]
 
 
 @weaver_test()
@@ -86,6 +94,30 @@ def test_other_items_still_need_a_catalogue(tmp_path):
             root, items=[SELECTOR, "Lakehouse/Sales=Lakehouse/Sales"], session=session
         )
     assert not session.semantic_model("Reporting_Dev").calls
+
+
+@weaver_test()
+def test_a_model_with_validations_builds_without_a_catalogue(tmp_path):
+    """Its validations run from the project folder, in file mode."""
+
+    root = project(tmp_path, False)
+    tests = root / str(ITEM) / "assumptions"
+    tests.mkdir()
+    (tests / "Sales.Nothing.dax").write_text(
+        "/*\nAssumption ID: Sales.Nothing\nDescription: Nothing is wrong.\n*/\n"
+        'EVALUATE FILTER(ROW("N", 1), FALSE())\n',
+        encoding="utf-8",
+    )
+    repository = parse_item_repository(Location(root.as_posix()))
+    session = session_without_catalogue()
+    model = session.semantic_model("Reporting_Dev")
+    model.definition = encode_definition(engine_model(repository))
+
+    result = weaver.build(root, items=SELECTOR, session=session)
+
+    assert result.succeeded, result.errors
+    assert [call[0] for call in model.calls][0] == "update_definition"
+    assert not session.tsql
 
 
 @weaver_test()
@@ -152,3 +184,52 @@ def test_load_without_a_catalogue_refreshes_only_named_models(items, options, me
     session = session_without_catalogue()
     with pytest.raises(CommandError, match=message):
         weaver.load(list(items), session=session, **options)
+
+
+def powerbi_project(tmp_path):
+    """``PowerBI/Commerce`` holding the Reporting model."""
+
+    root = project(tmp_path, False)
+    folder = root / "PowerBI/Commerce"
+    folder.mkdir(parents=True)
+    (root / str(ITEM) / f"{ITEM.item_name}.tmdl").rename(
+        folder / f"{ITEM.item_name}.tmdl"
+    )
+    (root / str(ITEM)).rmdir()
+    return root
+
+
+@pytest.mark.parametrize("selector", ["PowerBI", "PowerBI/Commerce"])
+@weaver_test()
+def test_load_without_a_catalogue_accepts_power_bi_selectors(tmp_path, selector):
+    root = powerbi_project(tmp_path)
+    session = session_without_catalogue(inventory=(("SemanticModel", "Reporting"),))
+
+    with session:
+        report = weaver.load(selector, source=root, dry_run=True, session=session)
+
+    assert [node.logical_id for node in report.nodes] == [str(ITEM)]
+
+
+@weaver_test()
+def test_an_unknown_power_bi_project_is_refused_by_name(tmp_path):
+    root = powerbi_project(tmp_path)
+
+    with pytest.raises(
+        CommandError, match="PowerBI/Missing: Power BI project not found"
+    ):
+        weaver.load("PowerBI/Missing", source=root, session=session_without_catalogue())
+
+
+@weaver_test()
+def test_a_named_model_loads_without_reading_a_project_folder(tmp_path):
+    """A source that is not a project is never read for an item named directly."""
+
+    session = session_without_catalogue(inventory=(("SemanticModel", "Reporting"),))
+
+    with session:
+        report = weaver.load(
+            str(ITEM), source=tmp_path / "absent", dry_run=True, session=session
+        )
+
+    assert [node.logical_id for node in report.nodes] == [str(ITEM)]

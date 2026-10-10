@@ -353,10 +353,14 @@ def test_catalogue_from_repository_has_all_artefacts(tmp_path):
     full_estate(tmp_path / "repo")
     semantic = tmp_path / "repo/SemanticModel/Reporting"
     semantic.mkdir(parents=True)
-    (semantic / "extension.tmdl").write_text(
+    (semantic / f"{semantic.name}.tmdl").write_text(
         'table Example\n\tpartition Example = calculated\n\t\tsource = ROW("Value", 1)\n',
         encoding="utf-8",
     )
+    repository = parse_item_repository(Location((tmp_path / "repo").as_posix()))
+    from test_powerbi_project_declaration import native
+
+    native(tmp_path / "repo")
     repository = parse_item_repository(Location((tmp_path / "repo").as_posix()))
     catalogue = Catalogue.from_repository(repository)
 

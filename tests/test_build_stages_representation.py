@@ -145,6 +145,24 @@ def test_one_layers_same_phase_stages_become_one_barrier_with_a_batch_each():
 
 
 @weaver_test()
+def test_different_work_in_one_layer_stays_separately_described():
+    from dataclasses import replace
+
+    merged = merge_layer_stages(
+        [
+            replace(_stage(BUILD, batch="model"), description="Verify deployed models"),
+            replace(_stage(BUILD, batch="report"), description="Deploy Reports"),
+            replace(_stage(BUILD, batch="other"), description="Verify deployed models"),
+        ]
+    )
+
+    assert [(s.description, [b.id for b in s.batches]) for s in merged] == [
+        ("Verify deployed models", ["model", "other"]),
+        ("Deploy Reports", ["report"]),
+    ]
+
+
+@weaver_test()
 def test_dependency_layers_within_a_phase_stay_separate_barriers():
     merged = merge_layer_stages(
         [

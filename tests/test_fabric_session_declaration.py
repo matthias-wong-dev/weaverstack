@@ -12,7 +12,7 @@ from support.weaver_test import weaver_test
 from weaver.errors import CommandError
 from weaver.fabric import FabricSessionResolver, FabricStore
 from weaver.locations import Location
-from weaver.store import Store
+from weaver.store import Store, StoreError
 from weaver.targets import ItemRef
 from weaver.workspaces import Workspace
 
@@ -278,6 +278,74 @@ def test_fabric_store_copies_between_onelake_and_the_driver_without_byte_decodin
         ),
         (f"file:{local_archive.as_posix()}", remote_archive.value, False),
     ]
+
+
+@weaver_test()
+def test_fabric_store_copies_and_moves_within_onelake():
+    """A move replaces its destination and makes its parent, so a temporary
+    sibling can be renamed over the file it replaces."""
+
+    root = "abfss://workspace-id@onelake.dfs.fabric.microsoft.com/lakehouse/Files"
+
+    class MovingFs:
+        def __init__(self):
+            self.calls = []
+
+        def cp(self, source, destination, recurse):
+            self.calls.append(("cp", source, destination, recurse))
+            return True
+
+        def mv(self, source, destination, create_path=False, overwrite=False):
+            self.calls.append(("mv", source, destination, create_path, overwrite))
+            return True
+
+    fs = MovingFs()
+    store = FabricStore(fs)
+
+    store.copy(Location(f"{root}/a_Staging/a.csv"), Location(f"{root}/a/.tmp"))
+    store.move(Location(f"{root}/a/.tmp"), Location(f"{root}/a/a.csv"))
+
+    assert fs.calls == [
+        ("cp", f"{root}/a_Staging/a.csv", f"{root}/a/.tmp", False),
+        ("mv", f"{root}/a/.tmp", f"{root}/a/a.csv", True, True),
+    ]
+
+
+@weaver_test()
+def test_fabric_store_copies_one_file_to_the_driver_without_its_sidecar(tmp_path):
+    remote = "abfss://workspace-id@onelake.dfs.fabric.microsoft.com/lakehouse/Files/a"
+
+    class FileFs:
+        def cp(self, source, destination, recurse):
+            assert (source, recurse) == (remote, False)
+            local = Path(destination.removeprefix("file:"))
+            local.write_bytes(b"content")
+            (local.parent / f".{local.name}.crc").write_bytes(b"generated")
+            return True
+
+    FabricStore(FileFs()).copy_file_to_local(Location(remote), tmp_path / "a")
+
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["a"]
+    assert (tmp_path / "a").read_bytes() == b"content"
+
+
+@weaver_test()
+def test_fabric_store_reports_a_refused_copy_or_move():
+    root = "abfss://workspace-id@onelake.dfs.fabric.microsoft.com/lakehouse/Files"
+
+    class RefusingFs:
+        def cp(self, source, destination, recurse):
+            return False
+
+        def mv(self, source, destination, create_path=False, overwrite=False):
+            raise RuntimeError("Py4JJavaError")
+
+    store = FabricStore(RefusingFs())
+
+    with pytest.raises(StoreError, match="could not copy"):
+        store.copy(Location(f"{root}/a"), Location(f"{root}/b"))
+    with pytest.raises(StoreError, match="cannot move .*Py4JJavaError"):
+        store.move(Location(f"{root}/a"), Location(f"{root}/b"))
 
 
 @weaver_test()

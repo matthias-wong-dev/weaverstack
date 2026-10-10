@@ -4,6 +4,7 @@ import shutil
 from pathlib import Path
 
 import pytest
+from support.semantic_models import policy_path
 from support.weaver_test import weaver_test
 
 from weaver.declaration.model import WeaverItemId
@@ -34,8 +35,8 @@ def source_project(
         )
     else:
         path = (
-            folder.parent if origin == "organisation" else folder
-        ) / "extension.tmdl"
+            policy_path(root) if origin == "organisation" else folder / "Reporting.tmdl"
+        )
         path.write_text(
             f"table Sales\n\tannotation {annotation} = {value}\n", encoding="utf-8"
         )
@@ -57,21 +58,58 @@ def test_source_annotation_declares_the_managed_relation_in_each_layer(
     tmp_path, origin
 ):
     root = source_project(tmp_path, origin=origin)
-    semantic = compile_source(root)
+    semantic = parse_item_repository(Location(root.as_posix())).semantic_models[ITEM]
     assert semantic.source_references == {"Sales": "Warehouse/Serving/Cake.Sales"}
     assert any(
-        b"annotation 'Weaver.Source' = Warehouse/Serving/Cake.Sales" in value
+        b"annotation Weaver.Source = Warehouse/Serving/Cake.Sales" in value
         for value in semantic.parts.values()
     )
     assert ("Sales", "Warehouse/Serving/Cake.Sales") in semantic.dependencies
 
 
+AUTHORED = {
+    "pbip": f"{ITEM}/Probe.SemanticModel/definition/tables/Sales.tmdl",
+    "organisation": "PowerBI/policy.tmdl",
+    "item": f"{ITEM}/{ITEM.item_name}.tmdl",
+}
+
+
 @pytest.mark.parametrize("origin", ["pbip", "organisation", "item"])
+@pytest.mark.parametrize(
+    "annotation, value, diagnostic",
+    [
+        ("Weaver.Soruce", "true", "unknown Weaver annotation"),
+        ("Weaver.Exclude", "maybe", "requires a boolean true or false"),
+    ],
+)
 @weaver_test()
-def test_unknown_weaver_annotation_is_a_source_located_error(tmp_path, origin):
-    root = source_project(tmp_path, origin=origin, annotation="Weaver.Soruce")
-    with pytest.raises(ConfigError, match=r".*tmdl.*Weaver.Soruce.*unknown"):
+def test_annotation_errors_cite_the_authored_file_and_line(
+    tmp_path, origin, annotation, value, diagnostic
+):
+    import re
+
+    root = source_project(tmp_path, origin=origin, annotation=annotation, value=value)
+    authored = AUTHORED[origin]
+    lines = (root / authored).read_text().splitlines()
+    line = next(i for i, text in enumerate(lines, 1) if annotation in text)
+    with pytest.raises(
+        ConfigError,
+        match="^" + re.escape(f"{authored}:{line}: {annotation}: {diagnostic}") + "$",
+    ):
         compile_source(root)
+
+
+@weaver_test()
+def test_an_unlocated_declaration_names_its_decoded_package_path():
+    from weaver.semantic_models.annotation import declared_at
+    from weaver.semantic_models.tmdl import Document
+
+    document = Document(
+        "definition/tables/Notice%20SQL.tmdl",
+        b"table 'Notice SQL'\n\tannotation Weaver.Exclude = maybe\n",
+    )
+    node = document.spans[1]
+    assert declared_at({}, {}, document, node) == "definition/tables/Notice SQL.tmdl:2"
 
 
 @pytest.mark.parametrize("origin", ["pbip", "organisation", "item"])
@@ -93,7 +131,7 @@ def test_source_annotation_rejects_the_wrong_scope(tmp_path, scope):
         "measure": "table Sales\n\tmeasure Value = 1\n\t\t",
         "relationship": "relationship Sales_Product\n\t",
     }
-    (root / str(ITEM) / "extension.tmdl").write_text(
+    (root / str(ITEM) / f"{ITEM.item_name}.tmdl").write_text(
         parents[scope] + "annotation Weaver.Source = Warehouse/Serving/Cake.Sales\n"
     )
     with pytest.raises(ConfigError, match=r".*tmdl.*Weaver.Source.*table"):
@@ -124,7 +162,7 @@ def test_source_annotation_requires_the_canonical_external_identity(
 @weaver_test()
 def test_source_annotation_keeps_the_lakehouse_tables_area(tmp_path):
     root = source_project(tmp_path, value="Lakehouse/Curated/Tables/CRM.Customer")
-    semantic = compile_source(root)
+    semantic = parse_item_repository(Location(root.as_posix())).semantic_models[ITEM]
     assert semantic.source_references == {
         "Sales": "Lakehouse/Curated/Tables/CRM.Customer"
     }

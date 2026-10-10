@@ -25,6 +25,7 @@ proved separately where a session exists.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -242,9 +243,15 @@ def test_read_staging_cleanup_and_destructor_leave_no_directory(export):
 
 @weaver_test()
 def test_load_issued_staging_wins_over_read_temporary_staging(export):
-    from weaver.runtime.folder_load import new_staging_folder, remove_staging
+    from weaver.runtime.folder_load import (
+        STAGING_SUFFIX,
+        new_staging_folder,
+        remove_staging,
+    )
 
-    issued = new_staging_folder(export.path(), export._staging_path())
+    destination = export._files()
+    staging = destination.sibling(STAGING_SUFFIX)
+    issued = new_staging_folder(destination, staging)
     export._issued_staging = issued
     try:
         assert export.staging_folder() is issued
@@ -253,7 +260,7 @@ def test_load_issued_staging_wins_over_read_temporary_staging(export):
         assert issued.path.exists()
     finally:
         export._issued_staging = None
-        remove_staging(issued.path)
+        remove_staging(staging)
 
 
 # --- what read() must return --------------------------------------------------
@@ -444,80 +451,41 @@ def test_a_second_load_is_never_handed_the_first_ones_directory(export):
     assert first.path == second.path
 
 
-# --- bounded retry ------------------------------------------------------------
+# --- a stale mount -----------------------------------------------------------
 #
-# Zero-cache mounting is the real repair for a mount that disagrees with the
-# storage behind it. This is the defensive half: even with nothing cached, the
-# mount fronts object storage rather than a local disk, so a removal can meet an
-# entry that is already gone, and the same call a moment later succeeds.
+# A mount's listing can still show a file deleted through OneLake. Weaver reads
+# the folder through the store, so what the mount still lists changes nothing.
 
 
-@pytest.fixture
-def flaky(monkeypatch):
-    """Make ``rmtree`` fail a given number of times before working."""
+def _stale(export, tmp_path, *gone):
+    """The same folder over a mount that still lists ``gone``."""
 
-    import weaver.runtime.folder_load as module
-
-    real = module.shutil.rmtree
-    state = {"remaining": 0, "calls": 0}
-
-    def rmtree(path, *args, **kwargs):
-        state["calls"] += 1
-        if state["remaining"] > 0:
-            state["remaining"] -= 1
-            raise OSError(39, "Directory not empty")
-        return real(path, *args, **kwargs)
-
-    monkeypatch.setattr(module.shutil, "rmtree", rmtree)
-    monkeypatch.setattr(module, "RESET_PAUSE", 0.0)
-    return state
+    lakehouse = mounted_lakehouse("Sales_LH", tmp_path, deleted=gone)
+    return Sales__Export(object(), lakehouse=lakehouse).with_catalogue(
+        never("Sales.Export", files=True)
+    )
 
 
 @weaver_test()
-def test_a_transient_reset_failure_is_retried_rather_than_raised(export, flaky):
-    _staging(export).mkdir(parents=True)
-    flaky["remaining"] = 2
-    export.files = {"a.csv": "x"}
-
-    result = export.load()
-
-    assert result.succeeded
-    assert flaky["calls"] >= 3
-
-
-@weaver_test()
-def test_a_reset_that_never_succeeds_is_reported_rather_than_retried_forever(
-    export, flaky
+def test_a_file_only_the_mount_still_lists_is_neither_updated_nor_deleted(
+    export, tmp_path
 ):
-    from weaver.runtime.folder_load import RESET_ATTEMPTS
+    folder = export.path()
+    folder.mkdir(parents=True)
+    (folder / "gone.csv").write_text("", encoding="utf-8")
+    stale = _stale(export, tmp_path, "Files/Sales/Export/gone.csv")
+    stale.files = {"gone.csv": "back", "a.csv": "x"}
 
-    _staging(export).mkdir(parents=True)
-    flaky["remaining"] = RESET_ATTEMPTS + 5
+    result = stale.load()
 
-    with pytest.raises(OSError, match="Directory not empty"):
-        export.load()
-
-    assert flaky["calls"] == RESET_ATTEMPTS
-
-
-@weaver_test()
-def test_a_transient_cleanup_failure_does_not_fail_a_published_load(export, flaky):
-    """The load already succeeded; what remains is tidying.
-
-    A retry gives the storage a moment to agree, and the same bounded policy
-    applies, an unbounded one would turn a published load into a hang.
-    """
-
-    export.files = {"a.csv": "x"}
-    flaky["remaining"] = 0
-    export.load()
-
-    export.files = {"b.csv": "y"}
-    flaky["remaining"] = 1  # the reset succeeds; the cleanup stumbles once
-    result = export.load()
-
-    assert result.succeeded
-    assert not _staging(export).exists()
+    (document,) = (folder / "_changes").glob("*.json")
+    assert json.loads(document.read_text(encoding="utf-8")) == {
+        "inserts": ["a.csv", "gone.csv"],
+        "updates": [],
+        "deletes": [],
+    }
+    assert (result.rows_inserted, result.rows_updated) == (2, 0)
+    assert (folder / "gone.csv").read_text(encoding="utf-8") == "back"
 
 
 # --- static ------------------------------------------------------------------

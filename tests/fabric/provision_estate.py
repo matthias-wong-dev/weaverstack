@@ -84,7 +84,12 @@ WAREHOUSE_ROLES = {
 }
 
 
-SEMANTIC_MODEL_ROLES = {"semantic_model": "PYTEST_SM"}
+SEMANTIC_MODEL_ROLES = {
+    # Bound by hand to a connection its owner configures; the suite restores it.
+    "semantic_model": "PYTEST_SM",
+    # Reshaped freely by the suite; needs no connection.
+    "scratch_semantic_model": "PYTEST_SM_SCRATCH",
+}
 
 
 def configured_name(role: str, default: str) -> str:

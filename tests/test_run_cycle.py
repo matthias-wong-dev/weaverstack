@@ -545,7 +545,7 @@ def test_a_request_hands_over_every_field_that_changes_behaviour():
 
     from dataclasses import fields
 
-    request = RunRequest.test([SALES], name="One", dry_run=True)
+    request = RunRequest.test([SALES], names=("One",), dry_run=True)
     handed = request.to_mapping()
 
     assert set(handed) == {field.name for field in fields(RunRequest)}
@@ -693,6 +693,26 @@ def test_a_failed_node_is_a_failed_frame_though_nothing_was_raised():
 
         failed = {frame.name: frame.failed for frame in session.timings}
         assert failed == {"a": True, "b": False}
+
+
+@weaver_test()
+def test_a_static_skip_is_a_skipped_frame_rather_than_a_success():
+    from weaver.runtime.load_result import LoadResult
+    from weaver.sessions import ConsoleSession
+
+    skip = LoadResult(succeeded=True, is_static_skip=True)
+    with ConsoleSession(progress=False) as session:
+        result = runner(nodes=[node("a"), node("b")]).run(
+            session=session, dispatch=controlled({"a": skip})
+        )
+
+        assert {n.node_id: n.status for n in result.nodes} == {
+            "a": SKIPPED,
+            "b": SUCCEEDED,
+        }
+        shown = {frame.name: frame for frame in session.timings}
+        assert shown["a"].skipped and shown["a"].note == "skipped"
+        assert not shown["b"].skipped and not shown["b"].failed
 
 
 @weaver_test()

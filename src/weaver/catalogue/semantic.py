@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import json
 
-from ..semantic_models.compiler import escape, leaf_properties
-from ..semantic_models.deployed import _RELATIONSHIP_DEFAULTS
+from ..semantic_models.deployed import _RELATIONSHIP_DEFAULTS, object_identity
 from .tables import (
     DEPENDENCY,
     REGISTRY,
     ROLE_DATA,
+    ROLE_SOURCE,
     SEMANTIC_MODEL,
     SEMANTIC_MODEL_COLUMN,
     SEMANTIC_MODEL_MEASURE,
@@ -33,64 +33,47 @@ def _text(value):
 
 
 def project_semantic_model(item, contribution, *, deployed=None):
-    from ..semantic_models.lineage import dependency_references, observed_bindings
+    from ..semantic_models.lineage import dependency_references
 
     model = {"model": {}} if deployed is None else deployed
     bindings = dict(contribution.source_bindings)
-    if deployed is not None and contribution.expression_sources:
+    if deployed is not None:
+        # Lineage comes from the definition Weaver deployed, kept for the
+        # tables Fabric reports; Fabric's copy of the M is not reparsed.
+        present = {
+            object_identity(table.get("name")): table.get("name")
+            for table in deployed["model"].get("tables", ())
+        }
         bindings = {
-            **observed_bindings(deployed, contribution.expression_sources),
-            **{
-                name: value
-                for name, value in contribution.source_bindings.items()
-                if name in contribution.source_references
-            },
+            present[object_identity(name)]: value
+            for name, value in bindings.items()
+            if object_identity(name) in present
         }
     common = {
         "item_type": item.item_type,
         "item_name": item.item_name,
-        "schema_name": "",
-        "object_name": "",
         "signature": contribution.signature,
     }
-    provenance = {
-        p: contribution.provenance.get(
-            p, {"source": "semantic engine", "reason": "readback"}
-        )
-        for p in leaf_properties(model)
-    }
-
-    def metadata(node, path):
-        return {
-            **common,
-            "properties": json_text(node),
-            "provenance": json_text(
-                {
-                    p[len(path) + 1 :]: origin
-                    for p, origin in provenance.items()
-                    if p.startswith(path + "/")
-                }
-            ),
-        }
-
+    ordinals = {name: index for index, name in enumerate(contribution.table_names, 1)}
     tables, columns, measures, relationships = [], [], [], []
     for table in model["model"].get("tables", ()):
         name = table["name"]
-        path = f"/model/tables/{escape(name)}"
+        # A table reading several sources has no single mode or access.
+        source = bindings.get(name) or {}
         tables.append(
             {
-                **metadata(table, path),
+                **common,
                 "table_name": name,
+                "table_ordinal": ordinals.get(name),
                 "description": _text(table.get("description")),
-                "source_binding": json_text(bindings[name])
-                if name in bindings
-                else None,
+                "source_mode": source.get("mode"),
+                "source_access": source.get("access"),
             }
         )
         for column in table.get("columns", ()):
             columns.append(
                 {
-                    **metadata(column, f"{path}/columns/{escape(column['name'])}"),
+                    **common,
                     "table_name": name,
                     "column_name": column["name"],
                     "description": _text(column.get("description")),
@@ -103,7 +86,7 @@ def project_semantic_model(item, contribution, *, deployed=None):
         for measure in table.get("measures", ()):
             measures.append(
                 {
-                    **metadata(measure, f"{path}/measures/{escape(measure['name'])}"),
+                    **common,
                     "table_name": name,
                     "measure_name": measure["name"],
                     "description": _text(measure.get("description")),
@@ -114,10 +97,7 @@ def project_semantic_model(item, contribution, *, deployed=None):
     for relationship in model["model"].get("relationships", ()):
         relationships.append(
             {
-                **metadata(
-                    relationship,
-                    f"/model/relationships/{escape(relationship['name'])}",
-                ),
+                **common,
                 "relationship_name": relationship["name"],
                 **{
                     stored: relationship.get(native, _RELATIONSHIP_DEFAULTS.get(native))
@@ -161,15 +141,32 @@ def project_semantic_model(item, contribution, *, deployed=None):
     projected = {
         DEPENDENCY.name: tuple(dependencies),
         REGISTRY.name: (
-            {**common, "object_type": "semantic_model", "object_role": ROLE_DATA},
+            {
+                **common,
+                "schema_name": "",
+                "object_name": "",
+                "object_type": "semantic_model",
+                "object_role": ROLE_DATA,
+            },
+            *(
+                {
+                    **common,
+                    "schema_name": schema,
+                    "object_name": name,
+                    "object_type": "source_artifact",
+                    "object_role": ROLE_SOURCE,
+                    "signature": signature,
+                }
+                for (
+                    schema,
+                    name,
+                ), signature in contribution.artifact_signatures.items()
+            ),
         ),
         SEMANTIC_MODEL.name: (
             {
                 **common,
                 "description": _text(model["model"].get("description")),
-                "definition": json_text(model),
-                "properties": json_text(contribution.properties),
-                "provenance": json_text(provenance),
             },
         ),
         **{

@@ -64,6 +64,7 @@ from .prune import TargetInventory, lakehouse_prune_stage, warehouse_prune_stage
 from .runtime import item_runtime_removals, item_runtime_stages
 from .runtime_tables import (
     VIEW_STATE_SLUG,
+    changed_semantic_validations,
     render_runtime_state_reconciliation,
     runtime_state_establishment,
     runtime_state_invalidation,
@@ -148,6 +149,9 @@ def generate_item_build_bundle(
                 f"inventory for {item} describes {inventory.target_id}, not {target.id}"
             )
 
+    from .reports import bind_reports
+
+    repository = bind_reports(repository, target_by_item, catalogue)
     registered = _registered_in(catalogue, by_item)
     selection = select_items(
         repository, catalogue, by_item=by_item, inventories=inventories
@@ -231,7 +235,8 @@ def generate_item_build_bundle(
     established_state = runtime_state_establishment(
         repository,
         items=tuple(target_by_item),
-        selected_for_build=selected_for_build,
+        selected_for_build=selected_for_build
+        | changed_semantic_validations(repository, catalogue, items=target_by_item),
         holds_table=_catalogue_holds(inventories),
     )
     reconciliation = render_runtime_state_reconciliation(
@@ -458,7 +463,7 @@ def _registered_in(catalogue, by_item: Mapping) -> dict:
     return {
         identity: document
         for identity, document in catalogue.registered.items()
-        if identity.item in by_item
+        if identity.item in by_item and document.object_role != "source"
     }
 
 
@@ -474,6 +479,11 @@ def _selectable(
         | {
             WeaverDocumentId.parse(str(item))
             for item in repository.semantic_models
+            if item in by_item
+        }
+        | {
+            WeaverDocumentId.report_root(item)
+            for item in repository.reports
             if item in by_item
         },
         {
@@ -587,11 +597,24 @@ def plan_item_build(
         mirrored=mirrored,
     )
     if item.item_type == SEMANTIC_MODEL:
-        from .semantic import semantic_stage
+        from .semantic import semantic_readback_stage, semantic_stage
+
+        stages = ()
+        if WeaverDocumentId.parse(str(item)) in selected_for_build:
+            stages = (semantic_stage(repository, item, target),)
+            if any(
+                contribution.model == item
+                and WeaverDocumentId.report_root(report) in selected_for_build
+                for report, contribution in repository.reports.items()
+            ):
+                stages += (semantic_readback_stage(repository, item, target),)
+        return PlannedItem(stages, (), frozenset())
+    if item.item_type == "Report":
+        from .reports import report_stages
 
         stages = (
-            (semantic_stage(repository, item, target),)
-            if WeaverDocumentId.parse(str(item)) in selected_for_build
+            report_stages(repository, item, target)
+            if WeaverDocumentId.report_root(item) in selected_for_build
             else ()
         )
         return PlannedItem(stages, (), frozenset())
@@ -850,14 +873,14 @@ def _semantic_bundle_without_catalogue(
 
     stages: list[PlannedStage] = []
     for item, target in target_by_item.items():
-        if WeaverDocumentId.parse(str(item)) not in selected_for_build:
-            continue
-        stages.append(semantic_stage(repository, item, target))
-        stages.append(
-            semantic_readback_stage(repository, item, target).declaring(
-                requires=(PHYSICAL_COMPLETE,)
-            )
-        )
+        if item.item_type == "Report":
+            from .reports import report_stages
+
+            if WeaverDocumentId.report_root(item) in selected_for_build:
+                stages.extend(report_stages(repository, item, target))
+        elif WeaverDocumentId.parse(str(item)) in selected_for_build:
+            stages.append(semantic_stage(repository, item, target))
+            stages.append(semantic_readback_stage(repository, item, target))
     targets = tuple(target_by_item.values())
     sequences, payloads, target_changes, required = enumerate_stages(
         stages, targets=targets, completion_target_id=targets[0].id

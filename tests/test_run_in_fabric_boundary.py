@@ -251,6 +251,16 @@ def test_each_node_is_shown_with_the_time_fabric_measured():
                     "note": "(read 5, +5 ~0 -0 !0)",
                     "elapsed": 7.5,
                 },
+                {"event": "started", "id": 3, "name": "Load Ref.Country"},
+                {
+                    "event": "completed",
+                    "id": 3,
+                    "name": "Load Ref.Country",
+                    "failed": False,
+                    "skipped": True,
+                    "note": "skipped",
+                    "elapsed": 0.5,
+                },
             ),
             {"kind": "step", "event": "completed", "id": 1, "name": "Execute"},
         ]
@@ -262,6 +272,8 @@ def test_each_node_is_shown_with_the_time_fabric_measured():
     assert shown["Load Sales.Customer"].elapsed == 7.5
     assert shown["Load Sales.Customer"].note == "(read 5, +5 ~0 -0 !0)"
     assert not shown["Load Sales.Customer"].failed
+    assert not shown["Load Sales.Customer"].skipped
+    assert shown["Load Ref.Country"].skipped
     assert "Execute" in shown
 
 
@@ -330,14 +342,20 @@ def test_fabric_writes_every_step_and_sub_step_it_presents():
             frame = session.open_concurrent_substep("Load Sales.Customer")
             frame.note = "(read 1, +1 ~0 -0 !0)"
             session.close_concurrent_substep(frame, elapsed=3.0)
+            skipped = session.open_concurrent_substep("Load Ref.Country")
+            skipped.skipped = True
+            session.close_concurrent_substep(skipped, elapsed=1.0)
 
     records = json.loads(store.read(location))
     assert [(one["kind"], one["event"], one["name"]) for one in records] == [
         ("step", "started", "Execute"),
         ("substep", "started", "Load Sales.Customer"),
         ("substep", "completed", "Load Sales.Customer"),
+        ("substep", "started", "Load Ref.Country"),
+        ("substep", "completed", "Load Ref.Country"),
         ("step", "completed", "Execute"),
     ]
+    assert (records[2]["skipped"], records[4]["skipped"]) == (False, True)
     assert records[2]["elapsed"] == 3.0
     assert records[2]["note"] == "(read 1, +1 ~0 -0 !0)"
     assert records[1]["id"] == records[2]["id"]

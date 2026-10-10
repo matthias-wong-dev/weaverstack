@@ -1,6 +1,7 @@
 """Validate a desktop build's Fabric items before starting a Livy session.
 
-Preflight lists each workspace once and never creates Fabric items.
+Preflight lists each workspace once and never creates Fabric items. A missing
+SemanticModel or Report target is left to Build, which creates it.
 """
 
 from __future__ import annotations
@@ -29,7 +30,11 @@ _ITEM_TYPE_FOR_BINDING = {
     LAKEHOUSE_TARGET: LAKEHOUSE,
     WAREHOUSE_TARGET: WAREHOUSE,
     SEMANTIC_MODEL_TARGET: "SemanticModel",
+    "report": "Report",
 }
+
+
+_CREATED_BY_BUILD = frozenset({"SemanticModel", "Report"})
 
 
 class PreflightError(BuildError):
@@ -50,6 +55,7 @@ class RequiredItem:
 class Preflight:
     workspace: WorkspaceItem
     resolved: dict[str, Item]
+    inventory: tuple[Item, ...] = ()
 
     def item(self, name: str, item_type: str) -> Item:
         return self.resolved[f"{item_type}/{name}"]
@@ -120,7 +126,8 @@ def preflight_fabric_targets(
     ):
         matches = by_name_and_type.get((required.item_type, required.name), [])
         if not matches:
-            problems.append(_missing(required, inventory))
+            if required.item_type not in _CREATED_BY_BUILD:
+                problems.append(_missing(required, inventory))
             continue
         if len(matches) > 1:
             problems.append(
@@ -149,7 +156,7 @@ def preflight_fabric_targets(
             f"Fabric build preflight failed in workspace {workspace!r}:\n"
             + "\n".join(problems)
         )
-    return Preflight(workspace=physical, resolved=resolved)
+    return Preflight(workspace=physical, resolved=resolved, inventory=inventory)
 
 
 def _missing(required: RequiredItem, inventory) -> str:
@@ -169,9 +176,4 @@ def _missing(required: RequiredItem, inventory) -> str:
             f"- {required} was not found; the workspace holds a "
             f"{', '.join(others)} of that name"
         )
-    suffix = (
-        "; create it with weaver initialise --semantic-model before Build"
-        if required.item_type == "SemanticModel"
-        else ""
-    )
-    return f"- {required} was not found{suffix}"
+    return f"- {required} was not found"

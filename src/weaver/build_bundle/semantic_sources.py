@@ -14,7 +14,9 @@ def read_semantic_sources(
 ):
     wanted = {}
     mappings = {}
-    for item, contribution in repository.semantic_models.items():
+    for item, contribution in sorted(
+        repository.semantic_models.items(), key=lambda pair: str(pair[0])
+    ):
         if item not in bindings.by_item or not contribution.source_references:
             continue
         tables = {
@@ -25,6 +27,15 @@ def read_semantic_sources(
             logical = str(source_identity(reference).item)
             if mapping := contribution.expression_sources.get(logical):
                 mappings[reference] = WeaverItemId.parse(mapping["target"])
+            _require_managed(
+                reference,
+                contribution,
+                table,
+                repository=repository,
+                bindings=bindings,
+                catalogue=catalogue,
+                workspace=workspace,
+            )
             wanted[reference] = wanted.get(reference, False) or needs_source_columns(
                 tables[table]
             )
@@ -33,39 +44,31 @@ def read_semantic_sources(
     for reference, needs_columns in sorted(wanted.items()):
         identity = source_identity(reference)
         bound = bindings.by_item.get(identity.item)
-        authored = repository.source_documents.get(identity) if bound else None
-        registered = catalogue.registered.get(identity)
+        schema, name = catalogue_columns(identity)
+        source_tables = catalogue.rows.get(identity.item, {})
         if not needs_columns:
-            schema, name = catalogue_columns(identity)
-            rows = catalogue.rows.get(identity.item, {})
             observed[reference] = {
                 "reference": reference,
                 "description": next(
                     (
-                        row.get("description")
-                        for row in rows.get("TableDictionary", ())
-                        if row.get("schema_name") == schema
-                        and row.get("object_name") == name
+                        r.get("description")
+                        for r in source_tables.get("TableDictionary", ())
+                        if r.get("schema_name") == schema
+                        and r.get("object_name") == name
                     ),
                     None,
                 ),
                 "column_notes": {
-                    row["column_name"]: row["description"]
-                    for row in rows.get("ColumnDictionary", ())
-                    if row.get("schema_name") == schema
-                    and row.get("object_name") == name
-                    and row.get("description")
+                    r["column_name"]: r["description"]
+                    for r in source_tables.get("ColumnDictionary", ())
+                    if r.get("schema_name") == schema
+                    and r.get("object_name") == name
+                    and r.get("description")
                 },
             }
             continue
-        if authored is not None and authored.kind in {TABLE, VIEW}:
-            kind = authored.kind.lower()
-        elif registered is not None and registered.object_type in {"table", "view"}:
-            kind = registered.object_type
-        else:
-            raise BuildError(
-                f"Semantic source {reference}: no managed Table or View. Build the source or correct the path."
-            )
+        authored = repository.source_documents.get(identity) if bound else None
+        kind = _managed_kind(identity, repository, bindings, catalogue)
         installed = catalogue.rows.get(identity.item, {}).get("Installation", ())
         if bound is not None:
             target_name = bound.target.item.name
@@ -163,3 +166,57 @@ def read_semantic_sources(
             "column_notes": notes,
         }
     return observed
+
+
+def _managed_kind(identity, repository, bindings, catalogue):
+    """``table`` or ``view`` for a selected or installed managed relation."""
+
+    if identity.item in bindings.by_item:
+        authored = repository.source_documents.get(identity)
+        if authored is not None and authored.kind in {TABLE, VIEW}:
+            return authored.kind.lower()
+    registered = catalogue.registered.get(identity)
+    if registered is not None and registered.object_type in {"table", "view"}:
+        return registered.object_type
+    return None
+
+
+def _require_managed(
+    reference, contribution, table, *, repository, bindings, catalogue, workspace
+):
+    """Refuse a Weaver.Source that names no managed Table or View.
+
+    Without a catalogue nothing is installed. A project item must declare the
+    relation; any other item must at least be a configured or mapped target.
+    """
+
+    identity = source_identity(reference)
+    if workspace.catalogue:
+        if _managed_kind(identity, repository, bindings, catalogue):
+            return
+        problem = "is not an installed or selected Table or View"
+        action = f"Correct the reference, or build {identity.item} first"
+    elif identity.item in {item.identity for item in repository.items}:
+        document = repository.source_documents.get(identity)
+        if document is not None and document.kind in {TABLE, VIEW}:
+            return
+        problem = f"is not a Table or View that {identity.item} declares"
+        action = "Correct the reference"
+    elif (
+        identity.item in workspace.configured_items
+        or str(identity.item) in contribution.expression_sources
+    ):
+        return
+    else:
+        problem = (
+            f"names {identity.item}, which is not a project item or configured target"
+        )
+        action = f"Correct the reference, or add a targets: entry for {identity.item}"
+    from ..semantic_models.annotation import declared_location
+
+    where = declared_location(
+        contribution, (("table", table), ("annotation", "Weaver.Source"))
+    )
+    raise BuildError(
+        f"{where or f'table {table!r}'}: Weaver.Source {reference} {problem}. {action}"
+    )

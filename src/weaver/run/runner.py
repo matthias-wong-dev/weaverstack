@@ -69,6 +69,10 @@ def _conclude(frame, node, outcome) -> None:
         return
     if outcome.status == FAILED:
         frame.failed = True
+    if outcome.status == SKIPPED:
+        frame.skipped = True
+        frame.note = "skipped"
+        return
     if getattr(node, "installed", None) is not None:
         frame.note = findings(outcome.result) if frame.failed else None
     elif not frame.failed and node.primitive_kind not in (
@@ -93,15 +97,11 @@ class RunRequest:
 
     kind: str
     items: tuple
-    #: One installed node by name, where the caller asked for exactly one.
-    name: str | None = None
-    #: Exact installed loadables by ``Schema.Object``. ``load`` only.
+    #: Regular expressions over installed names; only what they match runs.
     names: tuple[str, ...] = ()
     #: The installed loadables this run may execute, by logical identity.
     #: ``None`` runs every loadable the requested items own. ``load`` only.
     selected: tuple | None = None
-    #: A source file compiled and run without being installed. ``test`` only.
-    file: str | None = None
     #: Continue through settled dependency failures, and report each outcome.
     fault_tolerant: bool = False
     #: Plan, resolve and report without dispatching anything.
@@ -119,15 +119,6 @@ class RunRequest:
 
         if not self.items:
             raise CommandError(f"{self.kind} needs at least one item")
-        if self.name is not None and self.file is not None:
-            raise CommandError(
-                "Select either an installed validation with name= or a source "
-                "file with file=, not both"
-            )
-        if self.kind == LOAD and (self.name is not None or self.file is not None):
-            raise CommandError("Select installed load objects with names=")
-        if self.kind == TEST and self.names:
-            raise CommandError("Select one installed validation with name=")
         if self.selected is not None and self.kind != LOAD:
             raise CommandError("selected= applies only to loads")
         if self.reload and self.kind != LOAD:
@@ -144,15 +135,11 @@ class RunRequest:
 
     @classmethod
     def test(cls, items: Sequence, **policy) -> "RunRequest":
+        policy["names"] = tuple(policy.get("names") or ())
         return cls(kind=TEST, items=tuple(items), **policy)
 
     @property
-    def selection(self) -> str | tuple[str, ...] | None:
-
-        if self.file is not None:
-            return self.file
-        if self.name is not None:
-            return self.name
+    def selection(self) -> tuple[str, ...] | None:
         return self.names or None
 
     @classmethod
@@ -163,12 +150,10 @@ class RunRequest:
         return cls(
             kind=payload["kind"],
             items=tuple(WeaverItemId.parse(one) for one in payload["items"]),
-            name=payload.get("name"),
             names=tuple(payload.get("names") or ()),
             selected=None
             if selected is None
             else tuple(WeaverDocumentId.parse(one) for one in selected),
-            file=payload.get("file"),
             fault_tolerant=bool(payload.get("fault_tolerant")),
             dry_run=bool(payload.get("dry_run")),
             reload=bool(payload.get("reload")),
@@ -179,12 +164,10 @@ class RunRequest:
         return {
             "kind": self.kind,
             "items": [str(item) for item in self.items],
-            "name": self.name,
             "names": list(self.names),
             "selected": None
             if self.selected is None
             else [str(one) for one in self.selected],
-            "file": self.file,
             "fault_tolerant": self.fault_tolerant,
             "dry_run": self.dry_run,
             "reload": self.reload,

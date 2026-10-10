@@ -392,7 +392,7 @@ class _Browser:
         from azure.identity import AuthenticationRequiredError
 
         if self._cache_fails_late and self.authenticated:
-            raise UNENCRYPTABLE
+            UNENCRYPTABLE()
         if self.record is None or not self._renews:
             raise AuthenticationRequiredError(
                 scopes=list(scopes), claims=kwargs.get("claims")
@@ -604,14 +604,47 @@ def test_a_signed_in_user_never_reads_the_remembered_account(credentials, monkey
 # prerequisite there, so the sign-in works without a cache and says so once.
 
 
-#: What azure-identity raises on a Linux box with no usable libsecret, in the
-#: words it uses. The message is the signal: the ValueError carries the
-#: platform's own failure as its cause, and that could be anything.
-UNENCRYPTABLE = ValueError(
-    "Cache encryption is impossible because libsecret dependencies are not "
-    'installed or are unusable. Specify "allow_unencrypted_storage=True" to '
-    "store the cache unencrypted instead of raising this exception."
-)
+def _cache_on(platform, *, libsecret=True):
+    """Build azure-identity's real token-cache persistence as ``platform`` would."""
+
+    def build():
+        import sys
+        from unittest import mock
+
+        import msal_extensions
+        from azure.identity import _persistent_cache
+
+        def unusable(*args, **kwargs):
+            raise OSError("no display")
+
+        with mock.patch.object(sys, "platform", platform):
+            with mock.patch.object(
+                msal_extensions,
+                "LibsecretPersistence",
+                msal_extensions.LibsecretPersistence if libsecret else unusable,
+            ):
+                _persistent_cache._get_persistence(
+                    allow_unencrypted=False, account_name="a", cache_name="c"
+                )
+
+    return build
+
+
+def _encrypted_persistence_on(platform):
+    def build():
+        import sys
+        from unittest import mock
+
+        from msal_extensions.persistence import build_encrypted_persistence
+
+        with mock.patch.object(sys, "platform", platform):
+            build_encrypted_persistence("unused")
+
+    return build
+
+
+#: azure-identity on a Linux box with no usable libsecret.
+UNENCRYPTABLE = _cache_on("linux", libsecret=False)
 
 
 class _NoSecureStorage:
@@ -627,6 +660,8 @@ class _NoSecureStorage:
 
     def get_token(self, *scopes, **_):
         self.calls += 1
+        if callable(self._raising):
+            self._raising()
         raise self._raising
 
 
@@ -760,8 +795,8 @@ def test_an_unencrypted_cache_is_never_asked_for():
     "raised",
     [
         UNENCRYPTABLE,
-        NotImplementedError("A persistent cache is not available in this environment."),
-        RuntimeError("Unsupported platform: sunos"),
+        _cache_on("sunos"),
+        _encrypted_persistence_on("sunos"),
         ImportError("No module named 'msal_extensions'", name="msal_extensions"),
     ],
     ids=["no-libsecret", "no-store", "unsupported-platform", "no-msal-extensions"],
@@ -879,11 +914,15 @@ def test_an_unrelated_missing_import_is_not_a_missing_keyring(monkeypatch, capsy
 
 @weaver_test()
 def test_the_library_that_holds_the_token_is_recognised_by_name(monkeypatch, capsys):
-    """`ImportError.name` where Python set it, and the message where it did not."""
+    """`ImportError.name`, which Python sets for a missing module or name."""
 
+    try:
+        from msal_extensions import NoSuchCache  # noqa: F401
+    except ImportError as missing_name:
+        absent = missing_name
     for raised in (
         ImportError("No module named 'msal_extensions'", name="msal_extensions"),
-        ImportError("cannot import name 'PersistedTokenCache' from msal_extensions"),
+        absent,
     ):
         made: list[bool] = []
         working = _Working()

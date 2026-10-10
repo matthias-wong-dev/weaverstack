@@ -202,6 +202,41 @@ def test_example_only_generates_source(tmp_path, fabric, monkeypatch):
 
 
 @weaver_test()
+def test_the_example_refuses_a_power_bi_name_the_workspace_has(tmp_path, fabric):
+    """Build would deploy the example over a model or Report of the same name."""
+
+    fabric.held.append(resources.Item("id", "Sales", "SemanticModel", "ws"))
+    with pytest.raises(InitialiseError, match="--semantic-model"):
+        setup(tmp_path, fabric, example=True)
+    assert not fabric.created and not (tmp_path / "PowerBI").exists()
+
+    setup(tmp_path, fabric, example=True, semantic_model="Orders")
+    assert (tmp_path / "PowerBI/Orders/Orders.pbip").is_file()
+
+
+@weaver_test()
+def test_an_example_rerun_after_build_converges(tmp_path, fabric):
+    setup(tmp_path, fabric, example=True)
+    before = {
+        p.relative_to(tmp_path): p.read_bytes()
+        for p in tmp_path.rglob("*")
+        if p.is_file()
+    }
+    fabric.held.extend(
+        resources.Item(kind, "Sales", kind, "ws")
+        for kind in ("SemanticModel", "Report")
+    )
+
+    setup(tmp_path, fabric, example=True)
+
+    assert before == {
+        p.relative_to(tmp_path): p.read_bytes()
+        for p in tmp_path.rglob("*")
+        if p.is_file()
+    }
+
+
+@weaver_test()
 def test_invalid_lakehouse_name_stops_before_rest(tmp_path, monkeypatch):
     def refuse(*a, **k):
         raise AssertionError("reached REST")

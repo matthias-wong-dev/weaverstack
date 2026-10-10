@@ -169,45 +169,42 @@ def detach_shortcuts(
     )
 
 
-def released(store: Store, locations) -> bool:
-    """Whether OneLake has released every removed shortcut's path.
+def held(store: Store, locations) -> str | None:
+    """What still answers for a removed shortcut's path, or ``None`` once released.
 
-    A path OneLake is still releasing can answer 403 for a while, so a refusal
-    reads as not yet released.
+    OneLake can refuse a path it is still releasing. A storage error that
+    carries no HTTP status, as notebookutils raises, is waited on too, and its
+    message is kept for the report.
     """
 
     for location in locations:
         try:
             if store.exists(location):
-                return False
-        except Exception as exc:  # notebookutils raises a bare Py4J error
-            if not _forbidden(exc):
+                return f"{location.value} still exists"
+        except Exception as exc:
+            status = getattr(exc, "status_code", None)
+            if status is not None and status != 403:
                 raise
-            return False
-    return True
-
-
-def _forbidden(exc: BaseException) -> bool:
-    text = str(exc)
-    return "Forbidden" in text or "AccessDenied" in text or "returned 403" in text
+            return f"{location.value}: {exc}"
+    return None
 
 
 def _await_release(store: Store, detached: DetachedShortcuts) -> None:
     import time
 
     deadline = time.monotonic() + NAME_RELEASE_TIMEOUT
-    while not released(store, detached.locations):
+    while (reason := held(store, detached.locations)) is not None:
         if time.monotonic() >= deadline:
-            raise unreleased(detached)
+            raise unreleased(detached, reason)
         time.sleep(NAME_RELEASE_POLL_INTERVAL)
 
 
-def unreleased(detached: DetachedShortcuts) -> CommandError:
+def unreleased(detached: DetachedShortcuts, reason: str) -> CommandError:
     return CommandError(
         "OneLake still answers for removed shortcut(s) "
         + ", ".join(detached.removed)
-        + f" after {NAME_RELEASE_TIMEOUT:.0f}s, so their area was not swept. "
-        "Run the wipe again."
+        + f" after {NAME_RELEASE_TIMEOUT:.0f}s, so their area was not swept "
+        f"({reason}). Run the wipe again."
     )
 
 

@@ -82,7 +82,6 @@ def _two_item_catalogue() -> Catalogue:
             },
         },
         load_history=LoadHistory(
-            workflow_ids=("workflow-1",),
             statistics=(
                 _statistic("Sales", "Order"),
                 _statistic("Sales", "Order", item=REPORTING),
@@ -229,64 +228,45 @@ def test_an_absent_status_table_reads_as_no_activity():
     assert read_load_history(_Connection()) is None
 
 
-@weaver_test()
-def test_current_state_spanning_two_workflows_carries_both():
-    """A later partial load explains its own objects and not the rest."""
+def _state(name, result, workflow, *, started=None, completed=None):
+    from types import SimpleNamespace
 
-    connection = _history_connection(
-        statuses=[
-            _status(workflow="workflow-2"),
-            _status(workflow="workflow-1"),
-        ]
-    )
+    from weaver.health import RuntimeStatus
 
-    history = read_load_history(connection)
-
-    assert history.workflow_ids == ("workflow-1", "workflow-2")
+    identity = document_id(f"Warehouse/Reporting/{name}")
+    status = RuntimeStatus(identity, result, workflow, started, completed)
+    return SimpleNamespace(identity=identity), status
 
 
 @weaver_test()
-def test_the_summary_comes_from_current_state_and_not_from_the_statistics():
-    """A Blocked load settles a status row and appends no statistic."""
+def test_current_load_summarises_only_the_subjects_it_is_given():
+    """A View a build records is not a Load subject, so it is not counted."""
 
-    connection = _history_connection(
-        statuses=[
-            _status(
-                result="Succeeded",
-                rows=18,
-                started=NOW - timedelta(minutes=6),
-                completed=NOW - timedelta(minutes=1),
-            ),
-            _status(
-                result="Blocked",
-                rows=2,
-                started=NOW - timedelta(minutes=4),
-                completed=NOW,
-            ),
-        ],
-        statistics=[_statistic("Sales", "Order")],
+    order, order_status = _state(
+        "Sales.Order",
+        "succeeded",
+        "workflow-1",
+        started=NOW - timedelta(minutes=6),
+        completed=NOW - timedelta(minutes=1),
     )
+    blocked, blocked_status = _state(
+        "Sales.Line", "blocked", "workflow-2", completed=NOW
+    )
+    view, view_status = _state(
+        "Sales.Summary", "succeeded", "workflow-3", completed=NOW + timedelta(hours=1)
+    )
+    statuses = {
+        order.identity: order_status,
+        blocked.identity: blocked_status,
+        view.identity: view_status,
+    }
 
-    window = current_load(read_load_history(connection))
+    window = current_load(statuses, (order, blocked))
 
-    assert window.counts == {"succeeded": 18, "blocked": 2}
+    assert window.counts == {"succeeded": 1, "blocked": 1}
+    assert window.workflow_ids == ("workflow-1", "workflow-2")
     assert window.started_at == NOW - timedelta(minutes=6)
     assert window.completed_at == NOW
-
-
-@weaver_test()
-def test_one_result_across_two_workflows_counts_once_per_result():
-    connection = _history_connection(
-        statuses=[
-            _status(result="Succeeded", workflow="workflow-1", rows=18),
-            _status(result="Succeeded", workflow="workflow-2", rows=2),
-        ]
-    )
-
-    window = current_load(read_load_history(connection))
-
-    assert window.counts == {"succeeded": 20}
-    assert window.workflow_ids == ("workflow-1", "workflow-2")
 
 
 @weaver_test()
@@ -353,7 +333,7 @@ def test_a_null_duration_survives_the_conversion():
 
 @weaver_test()
 def test_a_catalogue_read_with_no_window_reports_no_activity():
-    assert current_load(None) is None
+    assert current_load({}, ()) is None
     assert load_activity(None) == ()
 
 
@@ -406,7 +386,9 @@ def test_health_materialises_the_tables_it_consults_and_no_others():
         "FolderDictionary",
         "TestDictionary",
         "Dependency",
+        "SemanticModel",
         "SemanticModelTable",
+        "SemanticModelTest",
         "Shortcut",
         "Mirror",
         "LoadStatus",

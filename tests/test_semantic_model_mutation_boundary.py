@@ -118,7 +118,7 @@ def test_shared_executor_blocks_certification_without_stopping_independent_model
     for name in ("Broken", "Other"):
         folder = root / "SemanticModel" / name
         folder.mkdir(parents=True)
-        (folder / "extension.tmdl").write_text(
+        (folder / f"{folder.name}.tmdl").write_text(
             "/// Published\nmodel Model\n", encoding="utf-8"
         )
     broken, other = SubmittedDefinition(), SubmittedDefinition()
@@ -238,6 +238,7 @@ def test_desktop_mutation_binds_semantic_session_without_spark(
         else:
             assert [method for method, _ in model.calls] == [
                 "update_definition",
+                "invalid_measures",
                 "get_definition",
             ]
 
@@ -301,14 +302,9 @@ def test_semantic_plan_uses_shared_codec_refusals_before_dispatch(tmp_path, faul
 
 @weaver_test()
 @pytest.mark.parametrize("kind", ["Table", "View"])
-def test_lakehouse_source_requires_object_success_and_endpoint_readiness(
-    tmp_path, kind
-):
+def test_lakehouse_source_certification_precedes_separate_model_build(tmp_path, kind):
     from test_semantic_source_build_cycle import SourceSession
     from test_semantic_source_session_boundary import EndpointInventory
-
-    from weaver.locations import Location
-    from weaver.mutation.bundle import load_bundle
 
     root = tmp_path / "project"
     folder = root / "Lakehouse/Serving/Tables"
@@ -322,7 +318,7 @@ def test_lakehouse_source_requires_object_success_and_endpoint_readiness(
     )
     model = root / str(ITEM)
     model.mkdir(parents=True)
-    (model / "extension.tmdl").write_text(
+    (model / f"{model.name}.tmdl").write_text(
         "expression 'Lakehouse/Serving' = Sql.Database(\"previous\", \"database\")\n\ntable Sales\n\tcolumn Id\n\t\tdataType: int64\n\t\tsourceColumn: Id\n\tpartition Sales = entity\n\t\tmode: directLake\n\t\tsource\n\t\t\tschemaName: Cake\n\t\t\tentityName: Sales\n\t\t\texpressionSource: 'Lakehouse/Serving'\n",
         encoding="utf-8",
     )
@@ -342,12 +338,22 @@ def test_lakehouse_source_requires_object_success_and_endpoint_readiness(
         ),
         store=FilesystemStore(),
     ) as session:
+        from weaver.locations import Location
+        from weaver.mutation.bundle import load_bundle
+
+        with pytest.raises(BuildError, match="separate step"):
+            weaver.build(
+                root,
+                items=[
+                    "Lakehouse/Serving=Lakehouse/Serving_Dev",
+                    f"{ITEM}=SemanticModel/Reporting_Dev",
+                ],
+                bundle_only=True,
+                session=session,
+            )
         result = weaver.build(
             root,
-            items=[
-                "Lakehouse/Serving=Lakehouse/Serving_Dev",
-                f"{ITEM}=SemanticModel/Reporting_Dev",
-            ],
+            items="Lakehouse/Serving=Lakehouse/Serving_Dev",
             bundle_only=True,
             bundle_path=tmp_path / "bundle",
             session=session,
@@ -360,9 +366,7 @@ def test_lakehouse_source_requires_object_success_and_endpoint_readiness(
         if a.resource_node_id == "Lakehouse/Serving/Tables/Cake.Sales"
         and a.kind == f"build_{kind.lower()}"
     )
-    deployment = next(a for a in actions if a.executor == "semantic_model")
-    refreshed = next(a for a in actions if a.kind == "await_sql_endpoint_refresh")
+    assert not any(a.executor == "semantic_model" for a in actions)
+    registry = next(a for a in actions if a.kind == "publish_registry")
     success = success_graph(plan)
-    assert source.id in success.ancestors(deployment.id)
-    assert refreshed.id in success.ancestors(deployment.id)
-    assert source.id not in success.ancestors(refreshed.id)
+    assert source.id in success.ancestors(registry.id)

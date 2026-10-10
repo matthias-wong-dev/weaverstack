@@ -298,6 +298,25 @@ def test_authored_source_partition_and_column_types_are_preserved(tmp_path):
         {ITEM},
     ).semantic_models[ITEM]
     table = TmdlDefinition(compiled.parts).model.tables["Sales"]
+    assert compiled.source_bindings["Sales"]["mode"] == "import"
+    assert compiled.source_bindings["Sales"]["access"] is None
+    assert compiled.source_bindings["Sales"]["server"] == "source.example"
+    metadata_only = bind_semantic_sources(parse(root), {}, {ITEM}).semantic_models[ITEM]
+    assert metadata_only.source_bindings["Sales"] == {
+        "reference": reference,
+        "mode": "import",
+        "access": None,
+    }
+    from weaver.catalogue.semantic import project_semantic_model
+    from weaver.semantic_models.fragments import source_table
+
+    projected = project_semantic_model(
+        ITEM,
+        compiled,
+        deployed={"model": {"tables": [source_table(compiled.parts, "Sales")]}},
+    )
+    (row,) = projected["SemanticModelTable"]
+    assert (row["source_mode"], row["source_access"]) == ("import", None)
     assert table.partitions["Sales"].source == '#table({"Original"}, {{"1"}})'
     assert table.columns["Id"].dataType == "string"
     assert table.columns["Id"].sourceColumn == "Original"
@@ -343,7 +362,6 @@ def test_authored_source_lineage_needs_no_physical_metadata_resolution(tmp_path)
     from test_semantic_annotation_declaration import ITEM
 
     from weaver.build_bundle.semantic_sources import read_semantic_sources
-    from weaver.catalogue import Catalogue
     from weaver.semantic_models.binding import begin_semantic_sources
 
     reference = "Warehouse/Serving/Cake.Sales"
@@ -353,13 +371,15 @@ def test_authored_source_lineage_needs_no_physical_metadata_resolution(tmp_path)
         + reference
         + '\n\tpartition Sales = calculated\n\t\tmode: import\n\t\tsource = ROW("Id", 1)\n',
     )
+    from test_semantic_source_build_cycle import source_catalogue
+
     repository = begin_semantic_sources(parse(root), {ITEM})
     observed = read_semantic_sources(
         repository,
         SimpleNamespace(by_item={ITEM: None}),
-        Catalogue({}),
+        source_catalogue(),
         session=SimpleNamespace(),
-        workspace=SimpleNamespace(),
+        workspace=SimpleNamespace(catalogue="Warehouse/Catalogue"),
         inventories={},
     )
     assert observed[reference]["reference"] == reference

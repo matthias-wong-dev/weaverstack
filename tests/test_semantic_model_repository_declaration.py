@@ -4,6 +4,7 @@ import shutil
 from pathlib import Path
 
 import pytest
+from support.semantic_models import policy_path
 from support.weaver_test import weaver_test
 
 from weaver.config import parse_workspace
@@ -28,12 +29,12 @@ def test_semantic_repository_retains_sources_effective_model_and_property_origin
     item_path.mkdir(parents=True)
     if pbip:
         shutil.copytree(FIXTURE, item_path, dirs_exist_ok=True)
-    org = root / "SemanticModel" / "extension.tmdl"
+    org = policy_path(root)
     org.write_text(
         "model Model\n\tculture: en-AU\n\tdiscourageImplicitMeasures\n",
         encoding="utf-8",
     )
-    addon = item_path / "extension.tmdl"
+    addon = item_path / f"{item_path.name}.tmdl"
     addon.write_text(
         'model Model\n\tculture: en-GB\n\ntable _Probe\n\tpartition _Probe = calculated\n\t\tsource = ROW("Value", 1)\n',
         encoding="utf-8",
@@ -54,11 +55,11 @@ def test_semantic_repository_retains_sources_effective_model_and_property_origin
     assert semantic.sources == before
     assert (
         semantic.provenance["/model/culture"]["source"]
-        == "SemanticModel/Reporting/extension.tmdl"
+        == "SemanticModel/Reporting/Reporting.tmdl"
     )
     assert (
         semantic.provenance["/model/discourageImplicitMeasures"]["source"]
-        == "SemanticModel/extension.tmdl"
+        == "PowerBI/policy.tmdl"
     )
     assert (
         semantic.provenance["/model/tables/_Probe/partitions/_Probe/source/expression"][
@@ -124,12 +125,12 @@ def test_semantic_targets_are_typed_through_configuration_and_build_bindings():
 @pytest.mark.parametrize(
     "path, content",
     [
-        ("extension.tmdl", "ref table Missing\n"),
-        ("extension.tmdl", "model Model\n    culture: en-US\n    culture: en-AU\n"),
-        ("extension.tmdl", "model Model\n   culture: en-US\n"),
+        ("Reporting.tmdl", "ref table Missing\n"),
+        ("Reporting.tmdl", "model Model\n    culture: en-US\n    culture: en-AU\n"),
+        ("Reporting.tmdl", "model Model\n   culture: en-US\n"),
         ("Tables/Dim__Date.py", "invalid authored table"),
         ("Dim__Date.sql", "select 1"),
-        ("tests/RowCount.dax", 'EVALUATE ROW("Count", 1)'),
+        ("RowCount.dax", 'EVALUATE ROW("Count", 1)'),
         ("addon.yml", "model: {}\n"),
     ],
 )
@@ -140,7 +141,7 @@ def test_unsupported_semantic_sources_fail_with_source_location(
 
     folder = tmp_path / "SemanticModel/Reporting"
     folder.mkdir(parents=True)
-    (folder / "extension.tmdl").write_text("model Model\n", encoding="utf-8")
+    (folder / f"{folder.name}.tmdl").write_text("model Model\n", encoding="utf-8")
     authored = folder / path
     authored.parent.mkdir(parents=True, exist_ok=True)
     authored.write_text(content, encoding="utf-8")

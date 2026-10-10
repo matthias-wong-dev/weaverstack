@@ -47,6 +47,7 @@ from .tables import (
     ROLE_DATA,
     ROLE_SHORTCUT,
     SCHEMA_DICTIONARY,
+    SEMANTIC_MODEL_TEST,
     SHORTCUT,
     TABLE_DICTIONARY,
     TEST_DICTIONARY,
@@ -78,6 +79,85 @@ class CatalogueProjection:
         return sum(len(rows) for rows in self.rows.values())
 
 
+def _test_dictionary_rows(repository, scope, validations) -> list[dict]:
+    all_documents = tuple(repository.source_documents.values())
+    rows = []
+    for identity in validations:
+        source = repository.source_documents[identity]
+        document = source.document
+        rows.append(
+            {
+                **_identity(scope, identity),
+                "test_type": TEST_TYPE_FOR_KIND[document.kind],
+                **_described(source, all_documents, repository),
+                # Assumptions have one side and therefore no correlation key.
+                "primary_key": column_set(document.primary_key) or None,
+                "signature": source.effective_signature,
+            }
+        )
+    return rows
+
+
+#: The installed definition's format, read by a semantic validation run.
+SEMANTIC_MODEL_TEST_VERSION = 1
+
+
+def _semantic_model_test_rows(repository, scope, validations) -> list[dict]:
+    from .semantic import json_text
+
+    rows = []
+    for identity in validations:
+        source = repository.source_documents[identity]
+        rows.append(
+            {
+                **_identity(scope, identity),
+                "definition": json_text(semantic_test_definition(source)),
+                "signature": source.effective_signature,
+            }
+        )
+    return rows
+
+
+def semantic_test_definition(source) -> dict:
+    """What a semantic validation run reads: its DAX and any Expected side."""
+
+    definition = {"version": SEMANTIC_MODEL_TEST_VERSION, "dax": source.dax_body}
+    if source.document.expected_source is not None:
+        definition["expectedSource"] = source.document.expected_source
+        definition["expectedSql"] = source.document.expected_sql
+    return definition
+
+
+def _dependency_rows(repository, scope, consumers) -> list[dict]:
+    rows = []
+    for edge in repository.dependency_edges:
+        if edge.consumer not in consumers:
+            continue
+        source = repository.source_documents[edge.consumer]
+        producer = edge.producer
+        rows.append(
+            {
+                **_identity_as(scope, edge.consumer, role="referencing"),
+                "dependency_reference": edge.reference,
+                # Unresolved physical and shortcut references have no producer ID.
+                "referenced_item_type": (
+                    producer.item.item_type if producer is not None else None
+                ),
+                "referenced_item_name": (
+                    producer.item.item_name if producer is not None else None
+                ),
+                "referenced_schema_name": (
+                    _catalogue_schema(producer) if producer is not None else None
+                ),
+                "referenced_object_name": (
+                    producer.object_id.object if producer is not None else None
+                ),
+                "signature": source.effective_signature,
+            }
+        )
+    return rows
+
+
 def project_item_catalogue(
     repository: WeaverRepository,
     *,
@@ -92,14 +172,42 @@ def project_item_catalogue(
 
     scope = InstallationScope(item.item_type, item.item_name)
     retained = tuple(sorted(set(retained), key=str))
+    if item in repository.reports:
+        from .powerbi import project_report
+
+        return CatalogueProjection(
+            scope=scope,
+            rows=project_report(item, repository.reports[item])
+            if WeaverDocumentId.report_root(item) in retained
+            else {},
+        )
     if item in repository.semantic_models:
         from .semantic import project_semantic_model
 
-        rows = (
-            project_semantic_model(item, repository.semantic_models[item])
-            if WeaverDocumentId.model_root(item) in retained
-            else {}
+        rows = {
+            table: list(values)
+            for table, values in (
+                project_semantic_model(item, repository.semantic_models[item])
+                if WeaverDocumentId.model_root(item) in retained
+                else {}
+            ).items()
+        }
+        validations = tuple(
+            identity
+            for identity in retained
+            if identity in repository.source_documents
+            and repository.source_documents[identity].is_validation
         )
+        if validations:
+            rows.setdefault(TEST_DICTIONARY.name, []).extend(
+                _test_dictionary_rows(repository, scope, validations)
+            )
+            rows.setdefault(SEMANTIC_MODEL_TEST.name, []).extend(
+                _semantic_model_test_rows(repository, scope, validations)
+            )
+            rows.setdefault(DEPENDENCY.name, []).extend(
+                _dependency_rows(repository, scope, set(validations))
+            )
         return CatalogueProjection(scope=scope, rows=rows)
     if any(identity.item != item for identity in retained):
         raise ValueError(
@@ -229,19 +337,9 @@ def project_item_catalogue(
         )
 
     # Registry certifies the validation's compiled artefact, not its logical ID.
-    for identity in retained_validations:
-        source = repository.source_documents[identity]
-        document = source.document
-        rows[TEST_DICTIONARY.name].append(
-            {
-                **_identity(scope, identity),
-                "test_type": TEST_TYPE_FOR_KIND[document.kind],
-                **_described(source, all_documents, repository),
-                # Assumptions have one side and therefore no correlation key.
-                "primary_key": column_set(document.primary_key) or None,
-                "signature": source.effective_signature,
-            }
-        )
+    rows[TEST_DICTIONARY.name].extend(
+        _test_dictionary_rows(repository, scope, retained_validations)
+    )
 
     # Runtime artefacts claim only Registry. Their role distinguishes otherwise
     # identical load and Test modules for downstream dispatch.
@@ -256,32 +354,9 @@ def project_item_catalogue(
         )
 
     # Validation dependencies use the logical identity, not the compiled artefact.
-    consumers = set(retained) | validation_set
-    for edge in repository.dependency_edges:
-        if edge.consumer not in consumers:
-            continue
-        source = repository.source_documents[edge.consumer]
-        producer = edge.producer
-        rows[DEPENDENCY.name].append(
-            {
-                **_identity_as(scope, edge.consumer, role="referencing"),
-                "dependency_reference": edge.reference,
-                # Unresolved physical and shortcut references have no producer ID.
-                "referenced_item_type": (
-                    producer.item.item_type if producer is not None else None
-                ),
-                "referenced_item_name": (
-                    producer.item.item_name if producer is not None else None
-                ),
-                "referenced_schema_name": (
-                    _catalogue_schema(producer) if producer is not None else None
-                ),
-                "referenced_object_name": (
-                    producer.object_id.object if producer is not None else None
-                ),
-                "signature": source.effective_signature,
-            }
-        )
+    rows[DEPENDENCY.name].extend(
+        _dependency_rows(repository, scope, set(retained) | validation_set)
+    )
 
     for declaration in repository.shortcuts:
         if declaration.owner != item:

@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 from support.bundles import build_metadata
+from support.semantic_models import policy_path
 from support.weaver_test import weaver_test
 from support.workspaces import InventoryClient
 
@@ -45,7 +46,7 @@ def project(tmp_path, pbip):
             folder,
             dirs_exist_ok=True,
         )
-    (folder / "extension.tmdl").write_text(
+    (folder / f"{folder.name}.tmdl").write_text(
         'table Calendar\n\tpartition Calendar = calculated\n\t\tsource = ROW("Year", 2026)\n',
         encoding="utf-8",
     )
@@ -58,6 +59,11 @@ class DefinitionClient:
         self.definition = encode_definition({"model": {"culture": "en-US"}})
         self.failure = None
         self.read_failure = None
+        self.invalid = []
+
+    def invalid_measures(self):
+        self.calls.append(("invalid_measures", None))
+        return self.invalid
 
     def get_definition(self):
         self.calls.append(("get_definition", None))
@@ -66,8 +72,10 @@ class DefinitionClient:
         return self.definition
 
     def bind_data_sources(self):
+        from weaver.fabric.semantic_model import DataSourceBinding
+
         self.calls.append(("bind_data_sources", None))
-        return ()
+        return DataSourceBinding()
 
     def update_definition(self, definition, **options):
         self.calls.append(("update_definition", {"definition": definition, **options}))
@@ -200,7 +208,11 @@ def test_build_deploys_and_certifies_readback_without_touching_source(tmp_path, 
         load_bundle(bundle.location, store=FilesystemStore()), session
     )
     assert report.succeeded, report.to_mapping()
-    assert [c[0] for c in semantic.calls] == ["update_definition", "get_definition"]
+    assert [c[0] for c in semantic.calls] == [
+        "update_definition",
+        "invalid_measures",
+        "get_definition",
+    ]
     submitted = semantic.calls[0][1]
     assert submitted["allow_purge_data"] is True
     assert (
@@ -215,7 +227,7 @@ def test_build_deploys_and_certifies_readback_without_touching_source(tmp_path, 
     )
     certify = next(i for i, s in enumerate(writes) if "MERGE" in s and "Registry" in s)
     assert definition_write < certify and child_write < certify
-    assert "calculatedTableColumn" in writes[definition_write]
+    assert "calculatedTableColumn" in writes[child_write]
     assert "Calendar" in writes[child_write] and "Year" in writes[child_write]
     assert not session.spark_sql
     assert before == {
@@ -229,8 +241,23 @@ def test_build_deploys_and_certifies_readback_without_touching_source(tmp_path, 
         repository, bindings, deployed, state2.target_inventories
     )
     second = bundle_for(tmp_path, repository, bindings, installed, "second")
-    assert not build_metadata(second.plan).selection.selected_for_build
-    assert list(second.plan.actions()) == []
+    assert build_metadata(second.plan).selection.selected_for_build == (ROOT,)
+    assert not build_metadata(second.plan).selection.impact.changed
+    semantic.calls.clear()
+    assert execute_bundle(second, session).succeeded
+    assert [c[0] for c in semantic.calls] == [
+        "update_definition",
+        "invalid_measures",
+        "get_definition",
+    ]
+    assert (
+        decode_parts(semantic.calls[0][1]["definition"])
+        == repository.semantic_models[ITEM].parts
+    )
+    assert (
+        repository.semantic_models[ITEM].signature
+        == installed.catalogue.registered[ROOT].signature
+    )
 
 
 @weaver_test()
@@ -249,7 +276,7 @@ def test_failed_deployment_or_readback_cannot_certify_changed_model(tmp_path, fa
     installed = installed_state(
         repository, bindings, deployed, observed.target_inventories
     )
-    path = root / str(ITEM) / "extension.tmdl"
+    path = root / str(ITEM) / f"{ITEM.item_name}.tmdl"
     path.write_text(path.read_text().replace("2026", "2027"), encoding="utf-8")
     changed = parse_item_repository(Location(root.as_posix()))
     bundle = bundle_for(tmp_path, changed, bindings, installed, "changed")
@@ -286,7 +313,9 @@ def test_failed_deployment_or_readback_cannot_certify_changed_model(tmp_path, fa
 
 @weaver_test()
 @pytest.mark.parametrize("policy", ["item", "organisation"])
-def test_policy_change_selects_only_effectively_changed_models(tmp_path, policy):
+def test_policy_change_classifies_signatures_and_deploys_all_selected_models(
+    tmp_path, policy
+):
     from uuid import NAMESPACE_URL, uuid5
 
     from weaver.build_bundle.semantic import bind_semantic_target
@@ -295,6 +324,7 @@ def test_policy_change_selects_only_effectively_changed_models(tmp_path, policy)
     other = WeaverItemId.parse("SemanticModel/Other")
     other_root = WeaverDocumentId.model_root(other)
     shutil.copytree(root / str(ITEM), root / str(other))
+    (root / str(other) / "Reporting.tmdl").rename(root / str(other) / "Other.tmdl")
     repository = parse_item_repository(Location(root.as_posix()))
     bindings = ItemBindings(
         (
@@ -327,17 +357,21 @@ def test_policy_change_selects_only_effectively_changed_models(tmp_path, policy)
         {item: {**dict(desired.rows[item]), **rows[item]} for item in rows}
     )
     if policy == "item":
-        addon = root / str(ITEM) / "extension.tmdl"
+        addon = root / str(ITEM) / f"{ITEM.item_name}.tmdl"
         addon.write_text(addon.read_text().replace("2026", "2027"), encoding="utf-8")
     else:
-        (root / "SemanticModel" / "extension.tmdl").write_text(
+        (policy_path(root)).write_text(
             "/// Shared description\nmodel Model\n", encoding="utf-8"
         )
     changed = parse_item_repository(Location(root.as_posix()))
     result = bundle_for(
         tmp_path, changed, bindings, BuildState(installed, inventories), "policy"
     )
-    assert set(build_metadata(result.plan).selection.selected_for_build) == (
+    assert set(build_metadata(result.plan).selection.selected_for_build) == {
+        ROOT,
+        other_root,
+    }
+    assert set(build_metadata(result.plan).selection.impact.changed) == (
         {ROOT} if policy == "item" else {ROOT, other_root}
     )
     assert not build_metadata(result.plan).selection.selected_for_drop
@@ -374,11 +408,11 @@ def test_build_freezes_typed_ids_without_reading_existing_definition(tmp_path):
 
 
 @weaver_test()
-def test_organisation_policy_only_selects_effectively_changed_models(tmp_path):
+def test_organisation_policy_classifies_changed_models_and_deploys_both(tmp_path):
     root, repository, bindings, session, _ = prepared(tmp_path)
     other = root / "SemanticModel/Other"
     other.mkdir()
-    (other / "extension.tmdl").write_text(
+    (other / f"{other.name}.tmdl").write_text(
         '/// Local policy\nmodel Model\n\ntable Constant\n\tpartition Constant = calculated\n\t\tsource = ROW("Value", 1)\n',
         encoding="utf-8",
     )
@@ -392,14 +426,15 @@ def test_organisation_policy_only_selects_effectively_changed_models(tmp_path):
         i: TargetInventory(str(i), "semanticmodel", i.item_name)
         for i, c in repository.semantic_models.items()
     }
-    (root / "SemanticModel/extension.tmdl").write_text(
+    (policy_path(root)).write_text(
         "/// Organisation policy\nmodel Model\n", encoding="utf-8"
     )
     changed = parse_item_repository(Location(root.as_posix()))
     selection = select_build(
         changed, catalogue.registered, selected=selected, inventories=inventories
     )
-    assert selection.selected_for_build == (ROOT,)
+    assert set(selection.selected_for_build) == selected
+    assert selection.impact.changed == (ROOT,)
 
 
 def answer_catalogue(session, catalogue, bindings):
@@ -451,7 +486,9 @@ def answer_catalogue(session, catalogue, bindings):
 
 @weaver_test()
 @pytest.mark.parametrize("pbip", [False, True])
-def test_public_build_bootstraps_catalogue_and_reaches_fixed_point(tmp_path, pbip):
+def test_public_build_bootstraps_catalogue_and_redeploys_with_stable_signature(
+    tmp_path, pbip
+):
     import weaver
 
     root = project(tmp_path, pbip)
@@ -504,18 +541,19 @@ def test_public_build_bootstraps_catalogue_and_reaches_fixed_point(tmp_path, pbi
         root, items=str(ITEM) + "=SemanticModel/Reporting_Dev", session=session
     )
     assert second.succeeded, second.errors
-    assert second.installation_report.action_counts()["total"] == 0, [
-        (a.executor, a.resource_node_id)
-        for a in second.installation_report.action_results()
+    assert second.selection.selected_for_build == (ROOT,)
+    assert not second.selection.impact.changed
+    assert [method for method, _ in semantic.calls] == [
+        "update_definition",
+        "invalid_measures",
+        "get_definition",
     ]
-    assert not second.selection.selected_for_build
-    assert semantic.calls == []
     assert all(
         identity.item != BUILTIN_ITEM
         for identity in second.selection.selected_for_build
     )
 
-    addon = root / str(ITEM) / "extension.tmdl"
+    addon = root / str(ITEM) / f"{ITEM.item_name}.tmdl"
     addon.write_text(addon.read_text().replace("2026", "2027"), encoding="utf-8")
     changed = parse_item_repository(Location(root.as_posix()))
     semantic.definition = encode_definition(engine_model(changed, year=2027))
@@ -527,5 +565,22 @@ def test_public_build_bootstraps_catalogue_and_reaches_fixed_point(tmp_path, pbi
     assert third.selection.selected_for_build == (ROOT,)
     assert [call[0] for call in semantic.calls] == [
         "update_definition",
+        "invalid_measures",
         "get_definition",
     ]
+
+
+@weaver_test()
+def test_an_invalid_measure_fails_the_build_and_certifies_nothing(tmp_path):
+    root, repository, bindings, session, state = prepared(tmp_path, False)
+    bundle = bundle_for(tmp_path, repository, bindings, state, "invalid")
+    semantic = session.semantic_model("Reporting_Dev")
+    semantic.definition = encode_definition(engine_model(repository))
+    semantic.invalid = [("Calendar", "Days", "Column 'Date' cannot be found.")]
+    session.calls.clear()
+    report = execute_bundle(
+        load_bundle(bundle.location, store=FilesystemStore()), session
+    )
+    assert not report.succeeded
+    assert "'Calendar'[Days]: Column 'Date' cannot be found" in str(report.to_mapping())
+    assert not any("MERGE" in s and "Registry" in s for s in session.tsql)

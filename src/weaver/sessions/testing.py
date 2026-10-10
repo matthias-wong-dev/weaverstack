@@ -63,6 +63,7 @@ class TestSession(Session):
         self._tsql_answers: dict[str, Any] = {}
         self._python_answers: list[Any] = []
         self._semantic_answers: dict[tuple[str, str], Any] = {}
+        self._report_answers: dict[tuple[str, str], Any] = {}
         self._default_rows: list[dict] = []
 
     # --- what a test configures ---------------------------------------------
@@ -95,6 +96,26 @@ class TestSession(Session):
                 "No semantic model client is configured. Call answer_semantic_model() first."
             )
         return self._semantic_answers[key]
+
+    def answer_report(self, workspace, item, client):
+        self._report_answers[(workspace, item)] = client
+
+    def report_item(self, item, *, workspace=None):
+        from ..fabric.report import validate_bound_report
+        from ..fabric.resources import Item
+
+        configured = self.workspace_or_default(workspace)
+        if isinstance(item, Item):
+            validate_bound_report(item)
+            key = (item.workspace_id, item.id)
+        else:
+            key = (str(configured.workspace), getattr(item, "name", item))
+        self._record("report_item", item, configured)
+        if key not in self._report_answers:
+            raise CommandError(
+                "No Report client is configured. Call answer_report() first."
+            )
+        return self._report_answers[key]
 
     # --- what a test reads ---------------------------------------------------
 

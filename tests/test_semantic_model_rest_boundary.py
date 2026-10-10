@@ -467,3 +467,56 @@ def test_dax_uses_the_power_bi_client_and_preserves_result_column_names():
             },
         )
     ]
+
+
+@weaver_test()
+def test_invalid_measures_reads_state_and_explains_each_one():
+    from weaver.fabric.semantic_model import SemanticModelClient
+
+    state = [{"[Table]": "Sales's", "[Measure]": "Margin]", "[State]": "SemanticError"}]
+    failure = {
+        "results": [
+            {
+                "tables": [{"rows": []}],
+                "error": {
+                    "code": "QueryUserError",
+                    "message": "MdxScript(Model) (1, 5) Column '<oii>Cost</oii>' in "
+                    "table '<oii>Sales</oii>' cannot be found or may not be used in "
+                    "this expression.",
+                },
+            }
+        ]
+    }
+    power_bi = Client(
+        response({"results": [{"tables": [{"rows": state}]}]}), response(failure)
+    )
+    model = SemanticModelClient(
+        "workspace-id", "model-id", fabric=Client(), power_bi=power_bi
+    )
+    assert model.invalid_measures() == [
+        (
+            "Sales's",
+            "Margin]",
+            "Column 'Cost' in table 'Sales' cannot be found or may not be used in "
+            "this expression.",
+        )
+    ]
+    queries = [call[2]["payload"]["queries"][0]["query"] for call in power_bi.calls]
+    assert 'FILTER(INFO.VIEW.MEASURES(), [State] <> "Valid")' in queries[0]
+    assert queries[1] == "EVALUATE ROW(\"Value\", 'Sales''s'[Margin]]])"
+
+
+@weaver_test()
+def test_a_measure_that_still_evaluates_is_not_invalid():
+    from weaver.fabric.semantic_model import SemanticModelClient
+
+    state = [{"[Table]": "Sales", "[Measure]": "Margin", "[State]": "Renamed"}]
+    power_bi = Client(
+        response({"results": [{"tables": [{"rows": state}]}]}),
+        response({"results": [{"tables": [{"rows": [{"[Value]": 1}]}]}]}),
+    )
+    model = SemanticModelClient(
+        "workspace-id", "model-id", fabric=Client(), power_bi=power_bi
+    )
+    assert model.invalid_measures() == []
+    assert len(power_bi.calls) == 2

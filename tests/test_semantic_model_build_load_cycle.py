@@ -51,7 +51,7 @@ def answer_built_inventory(session, bindings):
 
 @weaver_test()
 @pytest.mark.parametrize("pbip", [False, True])
-def test_public_build_load_fixed_point_and_changed_definition_cycle(tmp_path, pbip):
+def test_public_build_load_and_redeploy_invalidation_cycle(tmp_path, pbip):
     root = project(tmp_path, pbip)
     repository = parse_item_repository(Location(root.as_posix()))
     with session_for() as session:
@@ -99,14 +99,14 @@ def test_public_build_load_fixed_point_and_changed_definition_cycle(tmp_path, pb
         session.calls.clear()
         second = weaver.build(root, items=selector, session=session)
         assert second.succeeded, second.errors
-        assert not second.selection.selected_for_build
-        assert second.installation_report.action_counts()["total"] == 0
-        assert not any(
+        assert second.selection.selected_for_build == (ROOT,)
+        assert not second.selection.impact.changed
+        assert any(
             "[_].[LoadStatus]" in s and ("DELETE" in s or "MERGE" in s)
             for s in session.tsql
         )
 
-        addon = root / str(ITEM) / "extension.tmdl"
+        addon = root / str(ITEM) / f"{ITEM.item_name}.tmdl"
         addon.write_text(addon.read_text().replace("2026", "2027"), encoding="utf-8")
         changed = parse_item_repository(Location(root.as_posix()))
         definition.definition = encode_definition(engine_model(changed, year=2027))

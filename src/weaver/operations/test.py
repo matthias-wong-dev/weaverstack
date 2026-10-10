@@ -1,8 +1,9 @@
 """Public ``weaver.test(...)`` operation.
 
-Item and named runs select from installed catalogue state. A file run compiles a
-source validation without installing or publishing it. Reports distinguish failed
-validations from validations that could not be evaluated.
+Catalogue mode runs installed validations and records their results. File mode
+runs validations from the project folder against deployed objects and records
+nothing. Reports distinguish failed validations from validations that could not
+be evaluated.
 """
 
 from __future__ import annotations
@@ -13,6 +14,7 @@ from typing import Sequence
 
 from ..declaration.model import WeaverItemId
 from ..errors import CommandError
+from ..selection import matching, name_patterns
 from ..targets import lakehouse_names
 from ..test_report import (
     FAILED,
@@ -22,6 +24,7 @@ from ..test_report import (
     run_status,
 )
 from .items import requested_items, run_context_lines, run_scope
+from .project import Project
 from .workspace import operation_workspace
 
 #: Kept local to avoid importing ``weaver.run`` eagerly; must match ``TEST_TASK``.
@@ -31,8 +34,9 @@ TASK_TYPE = "test"
 def test(
     items: str | Sequence[str] | None = None,
     *,
-    name: str | None = None,
-    file: str | Path | None = None,
+    names: str | Sequence[str] | None = None,
+    files: str | Path | Sequence[str | Path] | None = None,
+    source=None,
     workspace: str | None = None,
     catalogue: str | None = None,
     environment: str | None = None,
@@ -40,27 +44,35 @@ def test(
     dry_run: bool = False,
     session=None,
 ) -> ValidationRunReport:
-    """Run the installed validations the named items own.
+    """Run the Tests and Assumptions of the named items.
 
-    Naming no item runs every item the Weaver catalogue records an installation
-    for.
+    With a Weaver catalogue this is catalogue mode: it runs the validations
+    installed for the items and records TestStatus and Log. ``files``, or a
+    workspace with no catalogue, selects file mode: validations are read from
+    the project folder at ``source`` and run against the deployed objects, and
+    nothing is recorded. An Expected source resolves through workspace
+    configuration ``targets:`` in file mode.
 
-    ``name`` runs one installed validation and includes its diagnostic rows.
-    ``file`` compiles and runs an uninstalled source file against exactly one
-    item. The two options are mutually exclusive.
+    Naming no item runs every installed item in catalogue mode and every item in
+    the project folder in file mode. ``PowerBI`` and ``PowerBI/<project>`` name
+    the semantic models of the project folder.
+
+    ``names`` are regular expressions, each matched against a whole validation
+    ``Schema.Object``, ignoring case. Each must match something, and only the
+    matches run, with their diagnostic rows.
+
+    ``files`` are validation files, directories or glob patterns. A file the
+    project folder declares runs against its own item; any other file runs
+    against the one item named.
+
+    ``source`` defaults to the current directory or Notebook Resources.
 
     A completed run returns its report whatever the validations found. The
     report distinguishes findings from validations that could not be evaluated.
     """
 
-    if name is not None and file is not None:
-        raise CommandError("test accepts either name= or file=, not both")
-
-    requested = requested_items(items, what="test")
-    if file is not None and not requested:
-        raise CommandError(
-            "test file= requires one installed item: Lakehouse/Name or Warehouse/Name"
-        )
+    selected_names = tuple(text for text, _ in name_patterns(names, error=CommandError))
+    selected_files = _files(files)
     resolved = operation_workspace(
         "test",
         workspace=workspace,
@@ -68,25 +80,47 @@ def test(
         environment=environment,
         workspace_config=workspace_config,
         session=session,
+        needs_catalogue=False,
     )
+    project = Project(source, resolved)
+    requested = requested_items(items, what="test", project=project)
+    from_files = bool(selected_files) or not resolved.catalogue
 
     from ..sessions.host import use_or_create_session
 
     with use_or_create_session(session, workspace=resolved) as opened:
         with opened.task(
             "Test (dry run)" if dry_run else "Test",
-            ", ".join(map(str, requested)) or "every installed item",
+            ", ".join(map(str, requested))
+            or ("every item" if from_files else "every installed item"),
         ) as frame:
-            report = run_test(
-                opened,
-                workspace=resolved,
-                items=requested,
-                name=name,
-                file=file,
-                dry_run=dry_run,
-            )
+            if from_files:
+                report = run_source_test(
+                    opened,
+                    workspace=resolved,
+                    project=project,
+                    items=requested,
+                    names=selected_names,
+                    files=selected_files,
+                    dry_run=dry_run,
+                )
+            else:
+                report = run_test(
+                    opened,
+                    workspace=resolved,
+                    items=requested,
+                    names=selected_names,
+                    dry_run=dry_run,
+                )
             frame.failed = not report.succeeded
             return report
+
+
+def _files(files) -> tuple[str, ...]:
+    if files is None:
+        return ()
+    values = (files,) if isinstance(files, (str, Path)) else tuple(files)
+    return tuple(str(value) for value in values)
 
 
 def run_test(
@@ -94,17 +128,16 @@ def run_test(
     *,
     workspace,
     items: Sequence[WeaverItemId],
-    name: str | None = None,
-    file: str | Path | None = None,
+    names: Sequence[str] = (),
     state=None,
     dry_run: bool = False,
 ) -> ValidationRunReport:
-    """Run validations through a prepared Session.
+    """Run installed validations through a prepared Session, and record them.
 
     ``state`` lets a caller provide an already-read catalogue snapshot.
 
     The catalogue is read before Spark starts because it holds the physical
-    target, including for a file run.
+    target.
     """
 
     from ..run import RunRequest, RunState
@@ -132,26 +165,9 @@ def run_test(
     session.offer_spark_home(lakehouse_names(targets), workspace=workspace)
     started = datetime.now(timezone.utc)
 
-    if file is not None:
-        from ..test_file import source_file_node
-
-        node = source_file_node(
-            session,
-            targets=targets,
-            path=Path(file),
-            started=started,
-            dry_run=dry_run,
-        )
-        # Source-file runs publish no estate evidence.
-        return _reported(
-            nodes=(node,),
-            started=started,
-            workflow_id=None,
-        )
-
     request = RunRequest.test(
         items,
-        name=name,
+        names=names,
         dry_run=dry_run,
         # Validations are independent; a finding does not block the rest.
         fault_tolerant=True,
@@ -174,6 +190,67 @@ def run_test(
         decode=_decoded,
     )
     return session.execute_run(run, workspace=workspace)
+
+
+def run_source_test(
+    session,
+    *,
+    workspace,
+    project,
+    items: Sequence[WeaverItemId],
+    names: Sequence[str] = (),
+    files: Sequence[str] = (),
+    dry_run: bool = False,
+) -> ValidationRunReport:
+    """Run validations from source through a prepared Session, recording nothing."""
+
+    from ..test_file import (
+        file_validations,
+        project_validations,
+        source_validation_nodes,
+    )
+    from .items import uncatalogued_target
+
+    with session.step("Read validations"):
+        validations = (
+            file_validations(files, project=project, items=items)
+            if files
+            else project_validations(project, items)
+        )
+        validations = _named(validations, names)
+    targets = tuple(
+        dict.fromkeys(uncatalogued_target(workspace, each.item) for each in validations)
+    )
+    _require_lakehouse_environment(
+        session, workspace=workspace, targets=targets, dry_run=dry_run
+    )
+    session.offer_spark_home(lakehouse_names(targets), workspace=workspace)
+    started = datetime.now(timezone.utc)
+    with session.step("Execute"):
+        nodes = source_validation_nodes(
+            session,
+            workspace=workspace,
+            validations=validations,
+            started=started,
+            dry_run=dry_run,
+            collect=bool(names or files),
+        )
+    return _reported(nodes=nodes, started=started, workflow_id=None)
+
+
+def _named(validations, names: Sequence[str]):
+    patterns = name_patterns(names, error=CommandError)
+    if not patterns:
+        return validations
+    known = ", ".join(sorted(each.qualified for each in validations)) or "none"
+    return matching(
+        patterns,
+        validations,
+        name=lambda validation: validation.qualified,
+        unmatched=lambda text: CommandError(
+            f"no validation to run matches '{text}'. Validations: {known}"
+        ),
+    )
 
 
 def validation_runner(workspace, state, request):
@@ -203,8 +280,8 @@ def execute_test(session, *, workspace, runner, started) -> ValidationRunReport:
     with session.step("Execute"):
         result = runner.run(
             session=session,
-            # Return diagnostics only when one validation was requested.
-            dispatch=_dispatch_collecting(collect=runner.request.name is not None),
+            # Return diagnostics only for validations selected by name.
+            dispatch=_dispatch_collecting(collect=bool(runner.request.names)),
             on_node=None if record is None else record.settled,
             # Validations are independent, so they run at once.
             lanes=Lanes.configured(workspace),
@@ -334,4 +411,4 @@ def _reported(
     )
 
 
-__all__ = ["TASK_TYPE", "run_test", "test"]
+__all__ = ["TASK_TYPE", "run_source_test", "run_test", "test"]

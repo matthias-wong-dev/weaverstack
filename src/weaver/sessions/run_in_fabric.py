@@ -194,6 +194,7 @@ class _Following:
         if frame is None:
             return
         frame.failed = bool(record.get("failed"))
+        frame.skipped = bool(record.get("skipped"))
         frame.note = record.get("note")
         session.close_concurrent_substep(frame, elapsed=record.get("elapsed"))
 
@@ -237,7 +238,12 @@ def progress_written(session, store, location):
             "detail": frame.detail,
         }
         if event != "started":
-            record.update(failed=frame.failed, note=frame.note, elapsed=frame.elapsed)
+            record.update(
+                failed=frame.failed,
+                skipped=frame.skipped,
+                note=frame.note,
+                elapsed=frame.elapsed,
+            )
         with lock:
             records.append(record)
 

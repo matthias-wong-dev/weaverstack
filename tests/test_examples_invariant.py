@@ -35,7 +35,6 @@ RETIRED_SPELLINGS = (
     "build_uploaded_item_repository",
     "weaverstack[cli]",
     "weaver push ",
-    "weaver unbind ",
     "weaver capacity ",
     "weaver notebook ",
     "weaver compose ",
@@ -44,7 +43,9 @@ RETIRED_SPELLINGS = (
 #: `weaver doctor` was retired here when it meant "is local Spark, Delta and a
 #: JDK available", which stopped being a question once the local emulator went.
 #: The name is back for a different one: can Weaver reach Fabric. Un-retired
-#: with that change, so an example may teach it again.
+#: with that change, so an example may teach it again. `weaver unbind` is
+#: back the same way: it now reads the catalogue and the workspace before it
+#: removes a claim.
 
 
 #: Every file an example presents. The Environment directory holds a built wheel and

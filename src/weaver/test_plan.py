@@ -3,8 +3,9 @@
 Selection from the installed managed graph, whose validation nodes come from
 ``_.TestDictionary`` and whose runnable artefacts come from ``_.Registry``.
 
-Validations are selected by name and item. They are not ordered against one
-another. Each dispatches an installed procedure or module that reports counts.
+Validations are selected by item and by regular expressions over their names.
+They are not ordered against one another. Each dispatches an installed
+procedure or module that reports counts.
 """
 
 from __future__ import annotations
@@ -16,8 +17,9 @@ from typing import Mapping, Sequence
 from .catalogue.state import Catalogue
 from .catalogue.tables import TEST_DICTIONARY
 from .declaration.metadata import TEST
-from .declaration.model import WeaverDocumentId, WeaverItemId
+from .declaration.model import SEMANTIC_MODEL, WeaverDocumentId, WeaverItemId
 from .errors import ValidationError
+from .fabric.resources import Item
 from .installed import KIND_FOR_TEST_TYPE, TEST_TYPE_FOR_KIND, InstalledNode
 from .targets import PhysicalTargetRef
 
@@ -42,12 +44,18 @@ class InstalledValidation:
     logical: WeaverDocumentId
     kind: str
     target: PhysicalTargetRef
-    artefact: WeaverDocumentId
+    #: ``None`` for a semantic validation, which runs from its definition.
+    artefact: WeaverDocumentId | None
     #: What Registry says the primitive is, or ``None`` when it has no row, which
     #: is a missing installation rather than an absence of interest.
     object_type: str | None = None
     primary_key: tuple[str, ...] = ()
     description: str | None = None
+    #: A semantic validation's ``_.SemanticModelTest`` JSON, and the model it
+    #: queries.
+    definition: str | None = None
+    bound_item: Item | None = None
+    expected_target: PhysicalTargetRef | None = None
 
     @classmethod
     def of(cls, node: InstalledNode) -> "InstalledValidation":
@@ -59,11 +67,18 @@ class InstalledValidation:
             object_type=node.artefact_type,
             primary_key=node.primary_key,
             description=node.description,
+            definition=node.definition,
+            bound_item=node.bound_item if node.definition is not None else None,
+            expected_target=node.expected_target,
         )
 
     @property
     def is_installed(self) -> bool:
-        return self.object_type is not None
+        return self.object_type is not None or self.definition is not None
+
+    @property
+    def is_semantic(self) -> bool:
+        return self.logical.item.item_type == SEMANTIC_MODEL
 
     @property
     def is_test(self) -> bool:
@@ -83,6 +98,12 @@ class InstalledValidation:
 
         if self.is_installed:
             return
+        if self.is_semantic:
+            raise ValidationError(
+                f"{self.logical} is declared in {TEST_DICTIONARY.name}, but its "
+                "definition is not installed. Build the model before running its "
+                "validation"
+            )
         raise ValidationError(
             f"{self.logical} is declared in {TEST_DICTIONARY.name}, but its "
             f"installed primitive {self.artefact} is not registered. Build the "
@@ -99,10 +120,22 @@ class InstalledValidation:
             "logical": str(self.logical),
             "kind": self.kind,
             "target": {"kind": self.target.kind, "name": self.target.name},
-            "artefact": str(self.artefact),
+            "artefact": None if self.artefact is None else str(self.artefact),
             "object_type": self.object_type,
             "primary_key": list(self.primary_key),
             "description": self.description,
+            "definition": self.definition,
+            "bound_item": None
+            if self.bound_item is None
+            else {
+                "id": self.bound_item.id,
+                "workspace_id": self.bound_item.workspace_id,
+                "name": self.bound_item.name,
+                "type": self.bound_item.type,
+            },
+            "expected_target": None
+            if self.expected_target is None
+            else {"kind": self.expected_target.kind, "name": self.expected_target.name},
         }
 
     @classmethod
@@ -113,10 +146,19 @@ class InstalledValidation:
             target=PhysicalTargetRef(
                 kind=mapping["target"]["kind"], name=mapping["target"]["name"]
             ),
-            artefact=WeaverDocumentId.parse(mapping["artefact"]),
+            artefact=None
+            if mapping.get("artefact") is None
+            else WeaverDocumentId.parse(mapping["artefact"]),
             object_type=mapping.get("object_type"),
             primary_key=tuple(mapping.get("primary_key", ())),
             description=_text(mapping.get("description")),
+            definition=mapping.get("definition"),
+            bound_item=None
+            if mapping.get("bound_item") is None
+            else Item(**mapping["bound_item"]),
+            expected_target=None
+            if mapping.get("expected_target") is None
+            else PhysicalTargetRef(**mapping["expected_target"]),
         )
 
 
@@ -162,29 +204,30 @@ class ValidationEstate:
             if validation.logical.item in wanted
         )
 
-    def named(self, name: str, items: Sequence[WeaverItemId]) -> InstalledValidation:
-        """Resolve only within the selected items; never widen the scope for a match."""
+    def matching(
+        self, names: Sequence[str], items: Sequence[WeaverItemId]
+    ) -> tuple[InstalledValidation, ...]:
+        """The validations of the selected items that ``names`` match.
 
-        candidates = [
-            validation
-            for validation in self.for_items(items)
-            if validation.qualified.casefold() == name.casefold()
-        ]
-        if not candidates:
-            known = ", ".join(
-                sorted(validation.qualified for validation in self.for_items(items))
-            )
-            raise ValidationError(
-                f"no validation named {name!r} is installed in the requested "
-                f"items. Installed: {known or 'none'}"
-            )
-        if len(candidates) > 1:
-            found = ", ".join(str(validation.logical) for validation in candidates)
-            raise ValidationError(
-                f"{name!r} names more than one installed validation ({found}). "
-                "qualify the request with a single item"
-            )
-        return candidates[0]
+        Matching stays within the selected items, and no names selects them all.
+        """
+
+        from .selection import matching, name_patterns
+
+        candidates = self.for_items(items)
+        patterns = name_patterns(names, error=ValidationError)
+        if not patterns:
+            return candidates
+        known = ", ".join(sorted(each.qualified for each in candidates)) or "none"
+        return matching(
+            patterns,
+            candidates,
+            name=lambda validation: validation.qualified,
+            unmatched=lambda text: ValidationError(
+                f"no installed validation in the requested items matches '{text}'. "
+                f"Installed: {known}"
+            ),
+        )
 
 
 def validation_order(

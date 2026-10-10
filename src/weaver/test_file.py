@@ -1,21 +1,25 @@
-"""Compile and run a SQL validation source file without installing it.
+"""Run validations from source against deployed objects, without a catalogue.
 
-The file path remains local while its content crosses to a Fabric session. File
-runs use the same compilers and comparison path as an installed validation.
+Each validation runs in its item's target from workspace configuration, or the
+target of the item's own name, and a semantic Test's Expected source resolves
+the same way. Runs use the same compilers and comparison as an installed
+validation and record nothing.
 """
 
 from __future__ import annotations
 
+import glob
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
 
 from .declaration.metadata import ASSUMPTION, PYTHON, SPARK_SQL
-from .declaration.model import LAKEHOUSE, WAREHOUSE
+from .declaration.model import SEMANTIC_MODEL, WeaverDocumentId, WeaverItemId
 from .errors import CommandError, ValidationError
 from .runtime.validation_result import AssumptionResult, TestResult
 from .targets import LAKEHOUSE_TARGET, PhysicalTargetRef
-from .test_execution import PYTHON_VALIDATION, WAREHOUSE_PROCEDURE
+from .test_execution import PYTHON_VALIDATION, SEMANTIC_VALIDATION, WAREHOUSE_PROCEDURE
 from .test_report import (
     FAILED,
     INVALID,
@@ -25,96 +29,225 @@ from .test_report import (
 )
 
 
-def source_file_node(
-    session: Any,
-    *,
-    targets: Sequence[PhysicalTargetRef],
-    path: Path,
-    started: datetime,
-    dry_run: bool = False,
-) -> ValidationNodeReport:
-    if len(targets) != 1:
-        raise CommandError(
-            "test file= runs one validation against one item, and "
-            f"{len(targets)} were named"
-        )
-    target = targets[0]
-    if not path.exists():
-        raise CommandError(f"no validation source at {path}")
+@dataclass(frozen=True)
+class SourceValidation:
+    """A Test or Assumption read from source, and the item it validates."""
 
-    # Validate compilation before reporting a dry run.
-    document = _read(path, target)
-    if dry_run:
-        return ValidationNodeReport(
-            logical_id=document.object_id.qualified,
-            kind=document.document.kind,
-            physical_target=str(target),
-            primitive_kind=PYTHON_VALIDATION
-            if target.kind == LAKEHOUSE_TARGET
-            else WAREHOUSE_PROCEDURE,
-            dispatch_location=str(path),
-            status=PLANNED,
-            started_at=started.isoformat(),
-            finished_at=datetime.now(timezone.utc).isoformat(),
+    item: WeaverItemId
+    source: Any
+    #: Where it was read, for the report.
+    path: str
+
+    @property
+    def logical(self) -> WeaverDocumentId:
+        return WeaverDocumentId.validation(self.item, self.source.object_id)
+
+    @property
+    def qualified(self) -> str:
+        return self.source.object_id.qualified
+
+
+def project_validations(project, items: Sequence[WeaverItemId]):
+    """The validations ``project`` declares for ``items``, or for every item."""
+
+    declared = {item.identity for item in project.repository.items}
+    missing = [item for item in items if item not in declared]
+    if missing:
+        raise CommandError(
+            ", ".join(map(str, missing))
+            + f" {'are' if len(missing) > 1 else 'is'} not in the project folder "
+            f"{project.location.value}"
         )
-    return _execute(
-        session, document=document, target=target, path=path, started=started
+    from .catalogue.builtin import BUILTIN_ITEM
+
+    wanted = set(items)
+    return tuple(
+        each
+        for each in _declared(project)
+        if each.item != BUILTIN_ITEM and (not wanted or each.item in wanted)
     )
 
 
-def _read(path: Path, target: PhysicalTargetRef):
-    """Parse a file with the structural checks for committed validations."""
+def _declared(project) -> tuple[SourceValidation, ...]:
+    return tuple(
+        SourceValidation(identity.item, source, source.relative_path)
+        for identity, source in sorted(
+            project.repository.source_documents.items(), key=lambda pair: str(pair[0])
+        )
+        if source.is_validation
+    )
+
+
+def file_validations(files: Sequence[str], *, project, items: Sequence[WeaverItemId]):
+    """The validations ``files`` select.
+
+    Each value is a file, a directory or a glob pattern. A file the project
+    folder declares runs against its own item, and a directory selects the
+    validations the project declares beneath it. Any other file is read on its
+    own and runs against the one item named.
+    """
+
+    found: dict[str, SourceValidation] = {}
+    for value in files:
+        if glob.has_magic(value):
+            paths = sorted(Path(each) for each in glob.glob(value, recursive=True))
+            if not paths:
+                raise CommandError(f"no file matches '{value}'")
+        else:
+            paths = [Path(value)]
+            if not paths[0].exists():
+                raise CommandError(f"no validation source at {value}")
+        for path in paths:
+            for each in _validations_at(path, project=project, items=items):
+                found.setdefault(each.path, each)
+    selected = tuple(found.values())
+    named = set(items)
+    for each in selected:
+        if named and each.item not in named:
+            raise CommandError(
+                f"{each.path} validates {each.item}, which is not among the items "
+                "named. Name it too, or name no items"
+            )
+    return selected
+
+
+def _validations_at(path: Path, *, project, items) -> tuple[SourceValidation, ...]:
+    relative = _within(path, project)
+    if relative is not None:
+        declared = tuple(
+            each
+            for each in _declared(project)
+            if each.path == relative
+            or path.is_dir()
+            and (not relative or each.path.startswith(relative + "/"))
+        )
+        if declared or path.is_dir():
+            if not declared:
+                raise CommandError(
+                    f"no Test or Assumption in the project folder is under {path}"
+                )
+            return declared
+    if path.is_dir():
+        raise CommandError(
+            f"{path} is not in the project folder {project.location.value}"
+        )
+    if len(items) != 1:
+        raise CommandError(
+            f"{path} is not a Test or Assumption in the project folder "
+            f"{project.location.value}. To run it on its own, name the one item "
+            "to run it against"
+        )
+    return (SourceValidation(items[0], _read(path, items[0]), str(path)),)
+
+
+def _within(path: Path, project) -> str | None:
+    """``path`` relative to a local project folder, or ``None`` outside it."""
+
+    if project.location.is_url:
+        return None
+    root = Path(project.location.value).resolve()
+    try:
+        relative = path.resolve().relative_to(root)
+    except ValueError:
+        return None
+    return "" if relative == Path(".") else relative.as_posix()
+
+
+def _read(path: Path, item: WeaverItemId):
+    """Parse one file with the structural checks for committed validations."""
 
     from .declaration import read_source_document
 
-    item_type = LAKEHOUSE if target.kind == LAKEHOUSE_TARGET else WAREHOUSE
-    directory = "tests"
-    text = path.read_bytes()
-    if b"Assumption ID:" in text:
-        directory = "assumptions"
+    directory = "assumptions" if b"Assumption ID:" in path.read_bytes() else "tests"
     document = read_source_document(
-        f"{item_type}/_file/{directory}/{path.name}", text, item_type
+        f"{item.item_type}/_file/{directory}/{path.name}",
+        path.read_bytes(),
+        item.item_type,
     )
     if not document.is_validation:
         raise CommandError(
-            f"{path} declares a {document.kind}, and test file= runs a Test or an "
-            "Assumption"
-        )
-    if document.language == PYTHON:
-        raise CommandError(
-            f"{path} is Python, which test file= does not run. Import the class "
-            "and call read() instead."
+            f"{path} declares a {document.kind}, and test runs a Test or an Assumption"
         )
     return document
 
 
-def _execute(session, *, document, target, path: Path, started: datetime):
-    common = {
-        "logical_id": document.object_id.qualified,
-        "kind": document.document.kind,
-        "physical_target": str(target),
-        "dispatch_location": str(path),
-        "started_at": started.isoformat(),
-    }
+def source_validation_nodes(
+    session: Any,
+    *,
+    workspace,
+    validations: Sequence[SourceValidation],
+    started: datetime,
+    dry_run: bool = False,
+    collect: bool = False,
+) -> tuple[ValidationNodeReport, ...]:
+    """Run each validation in turn and report it."""
+
+    from .operations.items import uncatalogued_target
+
+    nodes = []
+    for validation in validations:
+        target = uncatalogued_target(workspace, validation.item)
+        common = {
+            "logical_id": str(validation.logical),
+            "kind": validation.source.kind,
+            "physical_target": str(target),
+            "primitive_kind": _primitive(validation, target),
+            "dispatch_location": validation.path,
+            "started_at": started.isoformat(),
+        }
+        if dry_run:
+            nodes.append(
+                ValidationNodeReport(
+                    status=PLANNED,
+                    finished_at=datetime.now(timezone.utc).isoformat(),
+                    **common,
+                )
+            )
+            continue
+        nodes.append(
+            _execute(
+                session,
+                workspace=workspace,
+                validation=validation,
+                target=target,
+                collect=collect,
+                common=common,
+            )
+        )
+    return tuple(nodes)
+
+
+def _primitive(validation: SourceValidation, target: PhysicalTargetRef) -> str:
+    if validation.item.item_type == SEMANTIC_MODEL:
+        return SEMANTIC_VALIDATION
+    if target.kind == LAKEHOUSE_TARGET:
+        return PYTHON_VALIDATION
+    return WAREHOUSE_PROCEDURE
+
+
+def _execute(session, *, workspace, validation, target, collect, common):
+    document = validation.source
     try:
-        if target.kind == LAKEHOUSE_TARGET:
+        if document.language == PYTHON:
+            raise CommandError(
+                f"{validation.path} is Python, which runs only once installed. Build "
+                f"{validation.item} and test it, or import the class and call read()"
+            )
+        if validation.item.item_type == SEMANTIC_MODEL:
+            result, diagnostics = _run_semantic(session, workspace, validation, target)
+        elif target.kind == LAKEHOUSE_TARGET:
             result, diagnostics = _run_spark(session, document, target)
-            primitive = PYTHON_VALIDATION
         else:
             result, diagnostics = _run_warehouse(session, document, target)
-            primitive = WAREHOUSE_PROCEDURE
     except Exception as exc:  # noqa: BLE001 - any failure is the run's evidence
         message = f"{type(exc).__name__}: {exc}"
         failed = (
             AssumptionResult.failed_to_run(message)
-            if document.document.kind == ASSUMPTION
+            if document.kind == ASSUMPTION
             else TestResult.failed_to_run(message)
         )
         return ValidationNodeReport(
             status=INVALID,
-            primitive_kind=WAREHOUSE_PROCEDURE
-            if target.kind != LAKEHOUSE_TARGET
-            else PYTHON_VALIDATION,
             executed=True,
             messages=(message,),
             result=failed,
@@ -124,12 +257,41 @@ def _execute(session, *, document, target, path: Path, started: datetime):
 
     return ValidationNodeReport(
         status=PASSED if result.succeeded else FAILED,
-        primitive_kind=primitive,
         executed=True,
         result=result,
-        diagnostics=diagnostics,
+        diagnostics=tuple(diagnostics or ()) if collect else None,
         finished_at=datetime.now(timezone.utc).isoformat(),
         **common,
+    )
+
+
+def _run_semantic(session, workspace, validation: SourceValidation, target):
+    """Run a DAX validation as an installed one runs, from its source definition."""
+
+    from .catalogue.projection import semantic_test_definition
+    from .catalogue.semantic import json_text
+    from .operations.items import uncatalogued_target
+    from .semantic_validation import run_semantic_validation
+    from .test_plan import InstalledValidation
+
+    document = validation.source.document
+    expected = document.expected_source
+    installed = InstalledValidation(
+        logical=validation.logical,
+        kind=document.kind,
+        target=target,
+        artefact=None,
+        primary_key=tuple(document.primary_key or ()),
+        definition=json_text(semantic_test_definition(validation.source)),
+        bound_item=session.resolve_item(
+            target.name, item_type=SEMANTIC_MODEL, workspace=workspace
+        ),
+        expected_target=None
+        if expected is None
+        else uncatalogued_target(workspace, WeaverItemId.parse(expected)),
+    )
+    return run_semantic_validation(
+        installed, session=session, workspace=workspace, collect=True
     )
 
 
@@ -221,4 +383,9 @@ def _addressed(body: str) -> str:
     return addressed(body)
 
 
-__all__ = ["source_file_node"]
+__all__ = [
+    "SourceValidation",
+    "file_validations",
+    "project_validations",
+    "source_validation_nodes",
+]

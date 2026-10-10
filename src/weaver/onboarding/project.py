@@ -6,14 +6,14 @@ generated files use the same parsers as authored projects.
 
 The catalogue Warehouse holds Weaver's `_` schema and no authored objects, so it
 gets no folder here. Item folders are empty when no example was asked for, and a
-`.gitkeep` keeps them in version control.
+`.gitkeep` keeps them in version control. Power BI projects go under `PowerBI/`.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ..declaration.model import LAKEHOUSE, SEMANTIC_MODEL, WAREHOUSE
+from ..declaration.model import LAKEHOUSE, REPORT, SEMANTIC_MODEL, WAREHOUSE
 from ..errors import CommandError
 from ..targets import validate_name
 
@@ -25,6 +25,9 @@ WORKFLOW_NAME = "full"
 
 KEEP_FILE = ".gitkeep"
 
+#: The example's Power BI project when no SemanticModel name is given.
+EXAMPLE_MODEL = "Sales"
+
 
 @dataclass(frozen=True)
 class ProjectRequest:
@@ -35,6 +38,10 @@ class ProjectRequest:
     warehouse: str | None = None
     example: bool = False
     semantic_model: str | None = None
+    #: Power BI items found in the project folder.
+    source_items: tuple[str, ...] = ()
+    #: Lakehouse and Warehouse items the project folder already declares.
+    adopted_items: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         for field in ("workspace", "catalogue", "environment"):
@@ -58,6 +65,7 @@ class ProjectRequest:
             self.lakehouse is None
             and self.warehouse is None
             and self.semantic_model is None
+            and not self.source_items
         ):
             raise CommandError(
                 "Choose a Lakehouse, a Warehouse, or a SemanticModel for the project."
@@ -66,6 +74,14 @@ class ProjectRequest:
     @property
     def catalogue_reference(self) -> str:
         return f"{WAREHOUSE}/{self.catalogue}"
+
+    @property
+    def example_model(self) -> str | None:
+        """The example's Power BI project, which needs a source item to read."""
+
+        if not self.example or not (self.lakehouse or self.warehouse):
+            return None
+        return self.semantic_model or EXAMPLE_MODEL
 
     @property
     def items(self) -> tuple[str, ...]:
@@ -78,13 +94,31 @@ class ProjectRequest:
             chosen.append(f"{WAREHOUSE}/{self.warehouse}")
         if self.semantic_model:
             chosen.append(f"{SEMANTIC_MODEL}/{self.semantic_model}")
-        return tuple(chosen)
+        if self.example_model:
+            chosen.append(f"{SEMANTIC_MODEL}/{self.example_model}")
+            chosen.append(f"{REPORT}/{self.example_model}")
+        return tuple(dict.fromkeys(chosen + list(self.source_items)))
+
+
+def build_commands(request: ProjectRequest) -> tuple[str, ...]:
+    """The project's Build commands: sources first, then Power BI items."""
+
+    items = (*request.items, *request.adopted_items)
+    if not any(item.split("/", 1)[0] in {SEMANTIC_MODEL, REPORT} for item in items):
+        return ("build",)
+    sources = [
+        kind
+        for kind in (LAKEHOUSE, WAREHOUSE)
+        if any(item.startswith(f"{kind}/") for item in items)
+    ]
+    first = ("build " + " ".join(f"--item {kind}" for kind in sources),)
+    return (*(first if sources else ()), "build --item PowerBI")
 
 
 def project_files(request: ProjectRequest) -> dict[str, str]:
     files = {
         WORKSPACE_CONFIG_FILE: _workspace_config(request),
-        WORKFLOW_FILE: _workflow(),
+        WORKFLOW_FILE: _workflow(build_commands(request)),
         "README.md": _readme(request),
     }
     if request.lakehouse and not request.example:
@@ -92,10 +126,15 @@ def project_files(request: ProjectRequest) -> dict[str, str]:
         files[f"{LAKEHOUSE}/{request.lakehouse}/Tables/{KEEP_FILE}"] = ""
     if request.warehouse and not request.example:
         files[f"{WAREHOUSE}/{request.warehouse}/{KEEP_FILE}"] = ""
+    if request.example_model:
+        # The example writes its own Power BI project.
+        return files
     if request.semantic_model:
-        files[f"{SEMANTIC_MODEL}/{request.semantic_model}/extension.tmdl"] = (
+        files[f"PowerBI/{request.semantic_model}/{request.semantic_model}.tmdl"] = (
             semantic_extension()
         )
+    elif not request.source_items:
+        files[f"PowerBI/{KEEP_FILE}"] = ""
     return files
 
 
@@ -117,22 +156,16 @@ def _workspace_config(request: ProjectRequest) -> str:
         "",
         "targets:",
     ]
-    if request.lakehouse:
-        lines.append(f"  {LAKEHOUSE}/{request.lakehouse}: {_scalar(request.lakehouse)}")
-    if request.warehouse:
-        lines.append(f"  {WAREHOUSE}/{request.warehouse}: {_scalar(request.warehouse)}")
-    if request.semantic_model:
-        lines.append(
-            f"  {SEMANTIC_MODEL}/{request.semantic_model}: {_scalar(request.semantic_model)}"
-        )
+    for item in request.items:
+        lines.append(f"  {item}: {_scalar(item.partition('/')[2])}")
     return "\n".join(lines) + "\n"
 
 
-def _workflow() -> str:
-    return """workflows:
+def _workflow(builds) -> str:
+    steps = "".join(f"    - {build}\n" for build in builds)
+    return f"""workflows:
   full:
-    - build
-    - load
+{steps}    - load
     - test
     - health
   load-only:
@@ -140,13 +173,13 @@ def _workflow() -> str:
     - test
     - health
   build-only:
-    - build
-  wipe-all:
+{steps}  wipe-all:
     - wipe
 """
 
 
 def _readme(request: ProjectRequest) -> str:
+    builds = "\n".join(f"weaver {build}" for build in build_commands(request))
     return f"""# Weaver project
 
 This project describes data objects in the Microsoft Fabric workspace
@@ -161,6 +194,9 @@ and the physical target for each project item.
 packages to its `Libraries/PublicLibraries/environment.yml`. Fabric compute
 settings and custom libraries are kept in the same Environment definition.
 
+`PowerBI/<project>/` holds Power BI Desktop projects. Build creates their
+semantic models and Reports in Fabric.
+
 `workflow.yml` defines repeatable workflows: `full`, `load-only`, `build-only`
 and `wipe-all`. Wipe removes all user objects from the configured targets and
 asks for confirmation.
@@ -168,7 +204,7 @@ asks for confirmation.
 ## The basic workflow
 
 ```bash
-weaver build
+{builds}
 weaver load
 weaver test
 weaver health
@@ -189,14 +225,15 @@ first build creates those catalogue tables.
 
 ## The Environment
 
-Publish before running Python work, and after changing packages:
+Publish before building a Lakehouse or running Python work, and after changing
+packages:
 
 ```bash
 weaver fabric environment publish --path Environment/{request.environment}.Environment
 ```
 
-Publishing can take several minutes. Spark SQL needs a Lakehouse; Python work
-that imports Weaver also needs the published Environment.
+Publishing can take several minutes. Lakehouse builds and Python work run in
+Fabric Spark with this Environment.
 
 ## Working interactively
 
@@ -208,9 +245,10 @@ Commands inside the session reuse Fabric connections and the Spark session.
 
 ## Try the example
 
-Choose the Sales example during initialisation to include its source files. Run
-build, load and test together with `weaver workflow full`. To try the example
-later, initialise a new project folder with the example.
+Choose the Sales example during initialisation to include its source files and
+a Power BI project that reads them. Its Report describes how the example works.
+Run build, load and test together with `weaver workflow full`. To try the
+example later, initialise a new project folder with the example.
 
 ## Check connectivity
 

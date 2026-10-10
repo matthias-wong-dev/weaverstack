@@ -307,27 +307,46 @@ def test_failure_rolls_back_normalises_the_error_and_discards_the_connection():
 
 @weaver_test()
 @pytest.mark.parametrize(
-    ("driver_error", "unknown"),
+    ("sqlstate", "unknown"),
     [
-        ("Communication link failure", True),
-        ("Timeout expired", True),
-        ("Connection failure during transaction", True),
-        ("Serialization failure", False),
-        ("General error", False),
+        ("08S01", True),
+        ("HYT00", True),
+        ("08007", True),
+        ("40003", True),
+        ("40001", False),
+        ("42S02", False),
+        ("HY000", False),
     ],
 )
-def test_a_lost_response_leaves_the_statements_outcome_unknown(driver_error, unknown):
+def test_a_lost_response_leaves_the_statements_outcome_unknown(sqlstate, unknown):
     """A refusal is the server's answer; a lost link may follow a commit."""
+
+    from mssql_python.exceptions import sqlstate_to_exception
 
     from weaver.errors import OutcomeUnknown
 
-    error = RuntimeError(f"Driver Error: {driver_error}; DDBC Error: detail")
+    error = sqlstate_to_exception(sqlstate, "[SQL Server]detail")
     executor, _created = _executor([Connection(Cursor(error=error))])
 
-    with pytest.raises(SqlExecutionError) as raised:
+    with pytest.raises(SqlExecutionError, match="detail") as raised:
         executor.execute("create view [S].[V] as select 1 as x")
 
     assert isinstance(raised.value, OutcomeUnknown) is unknown
+
+
+@weaver_test()
+def test_a_lost_response_is_read_from_the_sqlstate_not_the_message():
+    from mssql_python.exceptions import OperationalError
+
+    from weaver.errors import OutcomeUnknown
+
+    error = OperationalError("General error", "Communication link failure")
+    executor, _created = _executor([Connection(Cursor(error=error))])
+
+    with pytest.raises(SqlExecutionError) as raised:
+        executor.execute("select 1")
+
+    assert not isinstance(raised.value, OutcomeUnknown)
 
 
 @weaver_test()

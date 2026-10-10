@@ -6,7 +6,13 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Mapping
 
-from .declaration.model import LAKEHOUSE, SEMANTIC_MODEL, WAREHOUSE, WeaverItemId
+from .declaration.model import (
+    LAKEHOUSE,
+    REPORT,
+    SEMANTIC_MODEL,
+    WAREHOUSE,
+    WeaverItemId,
+)
 from .errors import ConfigError
 from .targets import validate_name
 
@@ -208,13 +214,20 @@ class TargetDeclaration:
         )
 
     def target_for(self, item: WeaverItemId):
-        from .targets import DeltaTarget, ItemRef, SemanticModelTarget, WarehouseTarget
+        from .targets import (
+            DeltaTarget,
+            ItemRef,
+            ReportTarget,
+            SemanticModelTarget,
+            WarehouseTarget,
+        )
 
         ref = ItemRef(self.physical)
         return {
             LAKEHOUSE: DeltaTarget,
             WAREHOUSE: WarehouseTarget,
             SEMANTIC_MODEL: SemanticModelTarget,
+            REPORT: ReportTarget,
         }[item.item_type](ref)
 
 

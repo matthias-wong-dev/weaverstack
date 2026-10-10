@@ -344,9 +344,44 @@ def test_naming_one_selects_only_it(catalogue):
     rows, _lake, _house = catalogue
     estate = ValidationEstate.from_catalogue(rows)
 
-    found = estate.named("Sales.OrdersReconcile", [LAKEHOUSE])
+    (found,) = estate.matching(["Sales.OrdersReconcile"], [LAKEHOUSE])
 
     assert found.qualified == "Sales.OrdersReconcile"
+
+
+@weaver_test()
+def test_a_regular_expression_selects_every_validation_it_matches(catalogue):
+    rows, _lake, _house = catalogue
+    estate = ValidationEstate.from_catalogue(rows)
+
+    found = estate.matching([r"sales\.orders.*"], [LAKEHOUSE, WAREHOUSE])
+
+    assert [validation.qualified for validation in found] == [
+        "Sales.OrdersReconcile",
+        "Sales.OrdersHaveCustomers",
+    ]
+
+
+@weaver_test()
+def test_several_names_select_each_of_their_matches(catalogue):
+    rows, _lake, _house = catalogue
+    estate = ValidationEstate.from_catalogue(rows)
+
+    found = estate.matching(
+        ["Sales.OrdersHaveCustomers", "Sales.OrdersReconcile"],
+        [LAKEHOUSE, WAREHOUSE],
+    )
+
+    assert len(found) == 2
+
+
+@weaver_test()
+def test_a_name_matching_part_of_a_name_selects_nothing(catalogue):
+    rows, _lake, _house = catalogue
+    estate = ValidationEstate.from_catalogue(rows)
+
+    with pytest.raises(ValidationError, match="matches 'Sales.Orders'"):
+        estate.matching(["Sales.Orders"], [LAKEHOUSE])
 
 
 @weaver_test()
@@ -356,8 +391,8 @@ def test_naming_one_that_is_not_installed_is_an_error(catalogue):
     rows, _lake, _house = catalogue
     estate = ValidationEstate.from_catalogue(rows)
 
-    with pytest.raises(ValidationError, match="no validation named 'Sales.Absent'"):
-        estate.named("Sales.Absent", [LAKEHOUSE])
+    with pytest.raises(ValidationError, match="matches 'Sales.Absent'"):
+        estate.matching(["Sales.OrdersReconcile", "Sales.Absent"], [LAKEHOUSE])
 
 
 @weaver_test()
@@ -365,8 +400,8 @@ def test_the_error_lists_what_is_installed(catalogue):
     rows, _lake, _house = catalogue
     estate = ValidationEstate.from_catalogue(rows)
 
-    with pytest.raises(ValidationError, match="Sales.OrdersReconcile"):
-        estate.named("Sales.Absent", [LAKEHOUSE])
+    with pytest.raises(ValidationError, match="Installed: Sales.OrdersReconcile"):
+        estate.matching(["Sales.Absent"], [LAKEHOUSE])
 
 
 @weaver_test()
@@ -426,10 +461,18 @@ def test_two_items_sharing_one_target_do_not_select_each_others_validations():
         "Sales.OrdersHaveCustomers"
     ]
 
-    with pytest.raises(
-        ValidationError, match="no validation named 'Stock.LevelsAgree'"
-    ):
-        estate.named("Stock.LevelsAgree", [WAREHOUSE])
+    with pytest.raises(ValidationError, match="matches 'Stock.LevelsAgree'"):
+        estate.matching(["Stock.LevelsAgree"], [WAREHOUSE])
 
     # Both installed in one Warehouse, and each request answers for its own item.
     assert len(estate.for_items([WAREHOUSE, other])) == 2
+
+
+@weaver_test()
+def test_a_pattern_that_selects_nothing_is_quoted_as_written(catalogue):
+    rows, _lake, _house = catalogue
+    estate = ValidationEstate.from_catalogue(rows)
+
+    with pytest.raises(ValidationError) as raised:
+        estate.matching([r"Sales\.Absent.*"], [LAKEHOUSE])
+    assert r"matches 'Sales\.Absent.*'" in str(raised.value)

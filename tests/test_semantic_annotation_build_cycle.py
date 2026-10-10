@@ -47,14 +47,10 @@ def test_source_annotation_generates_columns_descriptions_and_managed_lineage(
         assert b"expression 'Warehouse/Serving'" in parts["definition/expressions.tmdl"]
         rows = published()[ITEM]
         assert rows["SemanticModelTable"][0]["description"] == "Sales description"
-        import json
-
-        provenance = json.loads(rows["SemanticModelTable"][0]["provenance"])
-        generated = [
-            origin for origin in provenance.values() if origin.get("reference")
-        ]
-        assert generated and all(o["reason"] == "Weaver.Source" for o in generated)
-        assert all(o["source"].endswith("extension.tmdl") for o in generated)
+        assert (
+            rows["SemanticModelTable"][0]["source_mode"],
+            rows["SemanticModelTable"][0]["source_access"],
+        ) == ("directLake", "sql")
         assert {
             (r["referencing_object_name"], r["dependency_reference"])
             for r in rows["Dependency"]
@@ -67,7 +63,7 @@ def test_source_annotation_reuses_one_expression_for_two_consuming_tables(
     tmp_path, monkeypatch
 ):
     root = source_project(tmp_path)
-    path = root / str(ITEM) / "extension.tmdl"
+    path = root / str(ITEM) / f"{ITEM.item_name}.tmdl"
     path.write_text(
         path.read_text()
         + "\ntable SalesAgain\n\tannotation Weaver.Source = Warehouse/Serving/Cake.Sales\n"
@@ -117,7 +113,7 @@ def test_source_annotation_reuses_one_expression_for_two_consuming_tables(
 @weaver_test()
 def test_source_generated_columns_receive_auto_hide_policy(tmp_path, scope):
     root = source_project(tmp_path)
-    path = root / str(ITEM) / "extension.tmdl"
+    path = root / str(ITEM) / f"{ITEM.item_name}.tmdl"
     source = path.read_text()
     policy = 'annotation Weaver.AutoHideColumns = "I?"\n'
     path.write_text(
@@ -152,7 +148,7 @@ def test_source_generated_columns_receive_auto_hide_policy(tmp_path, scope):
 @weaver_test()
 def test_authored_columns_refine_the_columns_a_source_generates(tmp_path):
     root = source_project(tmp_path)
-    path = root / str(ITEM) / "extension.tmdl"
+    path = root / str(ITEM) / f"{ITEM.item_name}.tmdl"
     path.write_text(
         path.read_text() + "\n\tcolumn Label\n\t\tisHidden\n\t\tsortByColumn: Id\n"
     )
@@ -183,6 +179,78 @@ def test_authored_columns_refine_the_columns_a_source_generates(tmp_path):
     ]
 
 
+@pytest.mark.parametrize(
+    "reference, housekeeping",
+    [
+        (
+            "Warehouse/Serving/Cake.Sales",
+            {
+                "Row insert datetime": "datetime2",
+                "Row update datetime": "datetime2",
+                "Row delete datetime": "datetime2",
+                "Row signature": "varbinary",
+            },
+        ),
+        (
+            "Lakehouse/Serving/Tables/Cake.Sales",
+            {
+                "row_insert_datetime": "datetime2",
+                "row_update_datetime": "datetime2",
+                "row_delete_datetime": "datetime2",
+                "row_signature": "varchar",
+            },
+        ),
+    ],
+)
+@weaver_test()
+def test_generation_leaves_out_weaver_housekeeping_columns(
+    tmp_path, reference, housekeeping
+):
+    from weaver.declaration.repository import parse_item_repository
+    from weaver.locations import Location
+    from weaver.semantic_models import TmdlDefinition
+    from weaver.semantic_models.binding import bind_semantic_sources
+
+    root = source_project(tmp_path, value=reference)
+    names = list(housekeeping)
+    path = root / str(ITEM) / f"{ITEM.item_name}.tmdl"
+    # An authored column brings one back; its dataType avoids the binary type.
+    path.write_text(
+        path.read_text()
+        + f"\tcolumn '{names[1]}'\n"
+        + f"\tcolumn Signature\n\t\tdataType: string\n\t\tsourceColumn: {names[3]}\n"
+    )
+    source = {
+        "reference": reference,
+        "server": "serving.example",
+        "database": "Serving_Dev",
+        "schema": "Cake",
+        "object": "Sales",
+        "object_type": "table",
+        "source_columns": [
+            {"column_name": "Id", "data_type": "bigint"},
+            {"column_name": "source_file", "data_type": "varchar"},
+            *(
+                {"column_name": name, "data_type": kind}
+                for name, kind in housekeeping.items()
+            ),
+        ],
+    }
+    repository = parse_item_repository(Location(root.as_posix()))
+    compiled = bind_semantic_sources(repository, {reference: source}, {ITEM})
+    columns = (
+        TmdlDefinition(compiled.semantic_models[ITEM].parts)
+        .model.tables["Sales"]
+        .columns
+    )
+    assert [(c.name, c.sourceColumn, c.dataType) for c in columns] == [
+        (names[1], names[1], "dateTime"),
+        ("Signature", names[3], "string"),
+        ("Id", "Id", "int64"),
+        ("source_file", "source_file", "string"),
+    ]
+
+
 class _Inventory:
     def __init__(self, installed=()):
         self.installed = set(installed)
@@ -210,7 +278,7 @@ def test_refined_columns_read_a_selected_source_view_unless_it_is_rebuilt(
     from weaver.locations import Location
 
     root = source_project(tmp_path)
-    path = root / str(ITEM) / "extension.tmdl"
+    path = root / str(ITEM) / f"{ITEM.item_name}.tmdl"
     path.write_text(path.read_text() + "\n\tcolumn Label\n\t\tisHidden\n")
     folder = root / str(SOURCE)
     folder.mkdir(parents=True)
@@ -264,7 +332,11 @@ def test_refined_columns_read_a_selected_source_view_unless_it_is_rebuilt(
 @pytest.mark.parametrize(
     "failure, diagnostic",
     [
-        ("missing_object", "no managed Table or View"),
+        (
+            "missing_object",
+            r"Reporting.tmdl:2: Weaver.Source Warehouse/Serving/Cake.Missing is not "
+            "an installed or selected Table or View",
+        ),
         ("missing_columns", "no source columns"),
         ("unsupported_type", "unsupported type"),
         ("missing_column", "Cake.Sales has no column Missing"),
@@ -277,10 +349,9 @@ def test_source_annotation_refuses_unresolved_generation_before_mutation(
     from weaver.errors import BuildError
 
     root = source_project(tmp_path)
-    path = root / str(ITEM) / "extension.tmdl"
+    path = root / str(ITEM) / f"{ITEM.item_name}.tmdl"
     if failure == "missing_object":
         path.write_text(path.read_text().replace("Cake.Sales", "Cake.Missing"))
-
     elif failure == "missing_column":
         path.write_text(path.read_text() + "\n\tcolumn Missing\n\t\tisHidden\n")
     with source_session() as session:
@@ -299,6 +370,125 @@ def test_source_annotation_refuses_unresolved_generation_before_mutation(
         )
         assert not any("MERGE" in statement for statement in session.tsql)
         assert not session.spark_sql and not session.python
+
+
+LINEAGE_ONLY = '\tpartition Native = calculated\n\t\tsource = ROW("Value", 1)\n'
+
+
+def refused_before_deployment(session):
+    assert not any(
+        kind == "update_definition"
+        for kind, _ in session.semantic_model("Reporting_Dev").calls
+    )
+    assert not any("MERGE" in statement for statement in session.tsql)
+
+
+@pytest.mark.parametrize(
+    "reference", ["Warehouse/Serving/Cake.Missing", "Warehouse/Absent/Cake.Sales"]
+)
+@weaver_test()
+def test_lineage_only_source_must_name_an_installed_relation(tmp_path, reference):
+    import re
+
+    from weaver.errors import BuildError
+
+    root = source_project(tmp_path, value=reference)
+    path = root / str(ITEM) / f"{ITEM.item_name}.tmdl"
+    path.write_text(path.read_text() + LINEAGE_ONLY)
+    item = reference.rsplit("/", 1)[0]
+    with source_session() as session:
+        answer_catalogue(session, source_catalogue(), read_bindings())
+        with pytest.raises(
+            BuildError,
+            match="^"
+            + re.escape(
+                f"SemanticModel/Reporting/Reporting.tmdl:2: Weaver.Source {reference} "
+                "is not an installed or selected Table or View. Correct the "
+                f"reference, or build {item} first"
+            )
+            + "$",
+        ):
+            weaver.build(
+                root, items=f"{ITEM}=SemanticModel/Reporting_Dev", session=session
+            )
+        refused_before_deployment(session)
+
+
+@pytest.mark.parametrize(
+    "reference, configured, declared, refusal",
+    [
+        ("Warehouse/Serving/Cake.Sales", True, False, None),
+        ("Warehouse/Serving/Cake.Sales", False, True, None),
+        (
+            "Warehouse/Serving/Cake.Sales",
+            False,
+            False,
+            "names Warehouse/Serving, which is not a project item or configured "
+            "target. Correct the reference, or add a targets: entry for "
+            "Warehouse/Serving",
+        ),
+        (
+            "Warehouse/Serving/Cake.Missing",
+            True,
+            True,
+            "is not a Table or View that Warehouse/Serving declares. Correct the "
+            "reference",
+        ),
+    ],
+)
+@weaver_test()
+def test_lineage_only_source_without_a_catalogue_names_a_known_item(
+    tmp_path, reference, configured, declared, refusal
+):
+    import re
+
+    from test_semantic_source_build_cycle import SOURCE
+
+    from weaver.errors import BuildError
+    from weaver.workspaces import TargetDeclaration, Workspace
+
+    root = source_project(tmp_path, value=reference)
+    path = root / str(ITEM) / f"{ITEM.item_name}.tmdl"
+    path.write_text(path.read_text() + LINEAGE_ONLY)
+    if declared:
+        folder = root / str(SOURCE)
+        folder.mkdir(parents=True)
+        (folder / "Cake.yml").write_text(
+            "Schema ID: Cake\nDescription: Cake records.\n", encoding="utf-8"
+        )
+        (folder / "Cake.Sales.sql").write_text(
+            "/*\nTable ID: Cake.Sales\nDescription: Sales facts.\n"
+            "Lineage: Constant\nPrimary key: Id\nSchema:\n  Id: bigint\n*/\n"
+            "SELECT CAST(1 AS BIGINT) AS Id\n",
+            encoding="utf-8",
+        )
+    workspace = Workspace(
+        workspace="Demo",
+        targets={SOURCE: TargetDeclaration("Serving_Dev")} if configured else {},
+    )
+    with source_session(workspace=workspace) as session:
+        if refusal is None:
+            result = weaver.build(
+                root,
+                items=f"{ITEM}=SemanticModel/Reporting_Dev",
+                bundle_only=True,
+                bundle_path=tmp_path / "bundle",
+                session=session,
+            )
+            assert result.succeeded
+            return
+        with pytest.raises(
+            BuildError,
+            match=re.escape(
+                f"SemanticModel/Reporting/Reporting.tmdl:2: Weaver.Source {reference} "
+                + refusal
+            )
+            + "$",
+        ):
+            weaver.build(
+                root, items=f"{ITEM}=SemanticModel/Reporting_Dev", session=session
+            )
+        refused_before_deployment(session)
 
 
 @weaver_test()
@@ -408,8 +598,9 @@ def test_source_annotation_uses_the_typed_lakehouse_sql_endpoint(tmp_path, monke
         assert any("TABLE_SCHEMA = N'Cake'" in sql for sql in session.tsql)
         table = published()[ITEM]["SemanticModelTable"][0]
         assert table["description"] == "Sales description"
-        binding = json.loads(table["source_binding"])
-        assert binding["item_id"] == _identifier("Lakehouse", "Serving_Dev")
+        assert table["source_access"] == "sql"
+        # Only Installation names the physical item.
+        assert "Serving_Dev" not in json.dumps(table)
         assert (
             published()[ITEM]["Dependency"][0]["dependency_reference"]
             == "Lakehouse/Curated/Tables/Cake.Sales"
@@ -422,7 +613,7 @@ def test_import_model_generates_navigation_partitions_with_lineage(
     tmp_path, monkeypatch
 ):
     root = source_project(tmp_path)
-    extension = root / str(ITEM) / "extension.tmdl"
+    extension = root / str(ITEM) / f"{ITEM.item_name}.tmdl"
     extension.write_text(
         "model Model\n\tdefaultMode: import\n\n" + extension.read_text()
     )

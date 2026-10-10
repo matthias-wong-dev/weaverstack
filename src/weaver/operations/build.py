@@ -12,8 +12,8 @@ from ..build_bundle.incremental import BuildSelection
 from ..errors import BuildError, CommandError
 from ..locations import Location
 from ..sessions.host import inside_fabric_session as _inside_fabric_session
-from ..store import FilesystemStore, Store
 from ..workspaces import Workspace
+from .project import repository_source
 from .workspace import operation_workspace
 
 
@@ -120,27 +120,7 @@ def build(
         needs_catalogue=False,
     )
 
-    selected = _item_bindings(items, resolved_workspace)
-    from ..build_bundle.targets import WarehouseBinding, effective_item_bindings
-    from ..build_bundle.workflow import require_catalogue_for
-
-    workspace_name = getattr(resolved_workspace, "workspace", None)
-    if resolved_workspace.catalogue:
-        bindings = effective_item_bindings(
-            selected,
-            control_item=resolved_workspace.catalogue_item,
-            workspace_name=workspace_name,
-        )
-        control = WarehouseBinding(
-            resolved_workspace.catalogue_item, workspace_name=workspace_name
-        )
-    else:
-        try:
-            require_catalogue_for(selected)
-        except BuildError as exc:
-            raise CommandError(str(exc)) from exc
-        bindings, control = selected, None
-    source_location, source_store = _repository_source(source, resolved_workspace)
+    source_location, source_store = repository_source(source, resolved_workspace)
 
     # Parse and validate the complete request before REST target resolution,
     # Spark startup or Livy work.
@@ -148,6 +128,28 @@ def build(
     from ..sessions.host import use_or_create_session
 
     with prepare_repository(source_location, source_store=source_store) as prepared:
+        selected = _item_bindings(
+            items, resolved_workspace, repository=prepared.repository
+        )
+        from ..build_bundle.targets import WarehouseBinding, effective_item_bindings
+        from ..build_bundle.workflow import require_catalogue_for
+
+        workspace_name = getattr(resolved_workspace, "workspace", None)
+        if resolved_workspace.catalogue:
+            bindings = effective_item_bindings(
+                selected,
+                control_item=resolved_workspace.catalogue_item,
+                workspace_name=workspace_name,
+            )
+            control = WarehouseBinding(
+                resolved_workspace.catalogue_item, workspace_name=workspace_name
+            )
+        else:
+            try:
+                require_catalogue_for(selected)
+            except BuildError as exc:
+                raise CommandError(str(exc)) from exc
+            bindings, control = selected, None
         from ..semantic_models.binding import begin_semantic_sources
         from ..semantic_models.expressions import configure_sources
 
@@ -168,7 +170,7 @@ def build(
                 },
             )
         validate_build_request(repository, bindings, catalogue_binding=control)
-        _preflight(resolved_workspace, bindings, session=session)
+        preflight = _preflight(resolved_workspace, bindings, session=session)
         with use_or_create_session(session, workspace=resolved_workspace) as opened:
             # Fabric requires a Lakehouse attachment before Spark starts, and
             # the bundle freezes the same one.
@@ -185,6 +187,17 @@ def build(
             )
             opened.report(_build_context_lines(resolved_workspace, selected))
             with opened.task("Build", resolved_workspace.workspace) as frame:
+                from ..fabric.powerbi_items import create_powerbi_items
+
+                create_powerbi_items(
+                    bindings,
+                    repository,
+                    session=opened,
+                    workspace=resolved_workspace,
+                    physical=preflight.workspace if preflight else None,
+                    inventory=preflight.inventory if preflight else None,
+                    bundle_only=bundle_only,
+                )
                 result = _run_build(resolved_workspace, session=opened, **arguments)
                 frame.failed = not result.succeeded
                 return result
@@ -220,14 +233,14 @@ def _build_context_lines(workspace: Workspace, bindings) -> tuple[str, ...]:
     return tuple(lines)
 
 
-def _preflight(workspace: Workspace, bindings, *, session) -> None:
+def _preflight(workspace: Workspace, bindings, *, session):
     """On desktop, verify all targets in one REST call before opening Spark."""
 
     if _inside_fabric_session(workspace):
-        return
+        return None
     from ..fabric.preflight import preflight_fabric_targets
 
-    preflight_fabric_targets(
+    return preflight_fabric_targets(
         bindings,
         workspace=workspace.workspace,
         control_item=workspace.catalogue_item if workspace.catalogue else None,
@@ -236,24 +249,7 @@ def _preflight(workspace: Workspace, bindings, *, session) -> None:
     )
 
 
-def _repository_source(source, workspace: Workspace) -> tuple[Location, Store]:
-    if source is None:
-        if not _inside_fabric_session(workspace):
-            source = "."
-        else:
-            # Notebook Resources are exposed as the process-local working tree.
-            source = Path.cwd()
-    location = source if isinstance(source, Location) else Location(str(source))
-    if location.value.startswith("abfss://"):
-        if not _inside_fabric_session(workspace):
-            raise CommandError("an abfss source requires a Fabric session")
-        from ..fabric.store import FabricStore
-
-        return location, FabricStore()
-    return location, FilesystemStore()
-
-
-def _item_bindings(items, workspace: Workspace):
+def _item_bindings(items, workspace: Workspace, *, repository=None):
     from ..build_bundle.targets import ItemBindings, parse_build_item
 
     if items is None:
@@ -267,9 +263,50 @@ def _item_bindings(items, workspace: Workspace):
             "build needs at least one item or a targets mapping in workspace "
             "configuration"
         )
+    if repository is not None:
+        from ..declaration.selectors import expand_item_selectors
+
+        values = expand_item_selectors(
+            values, repository=repository, configured_items=workspace.configured_items
+        )
     return ItemBindings(
         tuple(parse_build_item(value, workspace=workspace) for value in values)
     )
+
+
+def _present_semantic_outcomes(report, session) -> None:
+    """Say what deployment bound, which checks could not run and what Fabric rewrote."""
+
+    for action in report.action_results():
+        differences = (action.details or {}).get("readback_differences")
+        if differences:
+            item = "/".join(action.resource_node_id.split("/")[:2])
+            shown = ", ".join(differences[:3])
+            more = len(differences) - 3
+            session.warn(
+                f"{item}: Fabric's copy differs from what Build deployed at {shown}"
+                + (f" and {more} more" if more > 0 else "")
+                + ". Fabric accepted the deployment, so Build trusted it."
+            )
+        details = action.details if action.executor == "semantic_model" else None
+        if not details:
+            continue
+        model = action.resource_node_id
+        sources = details.get("data_sources") or {}
+        if sources.get("bound"):
+            session.report(
+                [f"{model} data sources bound: {', '.join(sources['bound'])}"]
+            )
+        for path in sources.get("unreached", ()):
+            session.warn(
+                f"{model} reads {path}, and no connection has that path. Create a "
+                "connection for it in Fabric before refreshing."
+            )
+        check = str(details.get("measure_check", ""))
+        if check.startswith("not run"):
+            session.warn(
+                f"{model} measures were not checked: {check[len('not run: ') :]}"
+            )
 
 
 def _result_from_item_build(source, bindings, result) -> BuildResult:
@@ -344,6 +381,7 @@ def _run_build(
                 catalogue_binding=catalogue_binding,
                 execution=execution,
                 output=output,
+                warn=session.warn,
             )
         if present_selection:
             session.report(
@@ -376,6 +414,7 @@ def _run_build(
                 catalogue_binding=catalogue_binding,
                 execution=execution,
                 output=Location((Path(temporary) / "bundle").as_posix()),
+                warn=session.warn,
             )
         if present_selection:
             session.report(
@@ -388,6 +427,7 @@ def _run_build(
             )
         with session.step("Install"):
             report = execute_bundle(bundle, session)
+        _present_semantic_outcomes(report, session)
         result = BuildResult(
             source=source,
             items=tuple(str(binding.item) for binding in requested_bindings.entries),
@@ -436,19 +476,24 @@ def _selection_lines(selection, bindings) -> tuple[str, ...]:
         ("selected for build", selection.selected_for_build),
         ("selected for removal", selection.selected_for_drop),
     )
-    lines = ["Install selection"]
-    for binding in bindings.entries:
-        display = (
+    displays = [
+        (
+            binding,
             f"Catalogue {binding.target.physical_kind}/{binding.target.item.name}"
             if binding.item == BUILTIN_ITEM
-            else str(binding.item)
+            else str(binding.item),
         )
+        for binding in bindings.entries
+    ]
+    width = max([26, *(len(display) + 2 for _, display in displays)])
+    lines = ["Install selection"]
+    for binding, display in displays:
         counted = [
             (label, sum(identity.item == binding.item for identity in identities))
             for label, identities in categories
         ]
         counted = [(label, count) for label, count in counted if count]
-        lines.append(f"  {display}" if counted else f"  {display:<26}up to date")
+        lines.append(f"  {display}" if counted else f"  {display:<{width}}up to date")
         lines.extend(f"    {label:<24}{count}" for label, count in counted)
     return tuple(lines)
 

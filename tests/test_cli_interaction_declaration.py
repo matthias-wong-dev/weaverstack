@@ -31,6 +31,7 @@ EXECUTABLE_COMMANDS = (
     ["test"],
     ["health"],
     ["wipe"],
+    ["unbind", "Lakehouse/Sales"],
     ["mirror"],
     ["initialise"],
     ["initialize"],

@@ -1,33 +1,11 @@
 """Observable shared-source relations and their existing Weaver identities."""
 
-import re
-
 from ..catalogue.claims import catalogue_columns
 from ..declaration.metadata import TABLE, VIEW
 from ..declaration.model import WeaverItemId
 from .fragments import source_table
+from .m_source import reads_data, relation
 from .tmdl import Document
-
-_M_ID = r'(?:#"(?:[^"]|"")*"|[A-Za-z_][A-Za-z0-9_]*)'
-_M_TEXT = r'"(?:[^"]|"")*"'
-_NAVIGATION = rf"\{{\s*\[\s*Schema\s*=\s*(?P<schema>{_M_TEXT})\s*,\s*Item\s*=\s*(?P<object>{_M_TEXT})\s*\]\s*\}}\s*\[Data\]"
-_DIRECT = re.compile(rf"\s*(?P<expression>{_M_ID})\s*{_NAVIGATION}\s*", re.DOTALL)
-_LET = re.compile(
-    rf"\s*let\s+(?P<root>{_M_ID})\s*=\s*(?P<expression>{_M_ID})\s*,\s*(?P<result>{_M_ID})\s*=\s*(?P=root)\s*{_NAVIGATION}\s+in\s+(?P=result)\s*",
-    re.DOTALL,
-)
-
-
-def _m_value(value):
-    if value.startswith('#"'):
-        value = value[1:]
-    if value.startswith('"'):
-        value = value[1:-1].replace('""', '"')
-    return re.sub(
-        r"#\((#|lf|cr|tab)\)",
-        lambda m: {"#": "#", "lf": "\n", "cr": "\r", "tab": "\t"}[m[1]],
-        value,
-    )
 
 
 def source_relation(source):
@@ -40,13 +18,10 @@ def source_relation(source):
     if source.get("type") != "m":
         return None
     text = source.get("expression", "")
-    text = "\n".join(text) if isinstance(text, list) else text
-    match = _DIRECT.fullmatch(text) or _LET.fullmatch(text)
-    return (
-        tuple(_m_value(match[key]) for key in ("expression", "schema", "object"))
-        if match
-        else None
-    )
+    found = relation("\n".join(text) if isinstance(text, list) else text)
+    if found is None or found.root is None:
+        return None
+    return found.root, found.schema, found.object
 
 
 def managed_relations(repository, catalogue, bindings, source):
@@ -147,10 +122,16 @@ def observed_bindings(model, expressions):
 
 
 def verify_lineage(contribution, model):
-    from ..errors import InstallError
+    """Tables whose deployed source Weaver cannot trace to the relation it planned.
+
+    Fabric may rewrite a partition's M, so a table listed here is a difference
+    to report, not a failure. The planned lineage stands.
+    """
+
+    from .compiler import escape
 
     if not contribution.expression_sources:
-        return
+        return ()
     actual = observed_bindings(model, contribution.expression_sources)
     planned = set(
         dependency_references(
@@ -163,10 +144,10 @@ def verify_lineage(contribution, model):
         )
     )
     missing = planned - set(dependency_references({}, actual))
-    if missing:
-        raise InstallError(
-            f"Semantic readback does not confirm mapped table lineage: {sorted(missing)}"
-        )
+    return tuple(
+        f"/model/tables/{escape(table)}/partitions"
+        for table in sorted({table for table, _ in missing})
+    )
 
 
 def dependency_references(references, bindings):
@@ -176,3 +157,68 @@ def dependency_references(references, bindings):
             if reference := source.get("reference"):
                 result.add((table, reference))
     return tuple(sorted(result))
+
+
+#: Partition sources that compute their rows rather than read them.
+_COMPUTED = frozenset({"calculated", "calculationgroup"})
+
+
+def _traced(source, expressions):
+    relation = source_relation(source)
+    if not relation or relation[0] not in expressions:
+        return False
+    _, schema, name = relation
+    matches = [
+        r
+        for r in expressions[relation[0]].get("relations", ())
+        if r["schema"] == schema and r["object"] == name
+    ]
+    return len(matches) == 1
+
+
+def untraced_tables(contribution):
+    """Tables without Weaver.Source that read data from an untraced partition."""
+
+    declared = {name.casefold() for name in contribution.source_references}
+    shared = _expression_names(contribution)
+    return tuple(
+        name
+        for name in contribution.table_names
+        if name.casefold() not in declared
+        and any(
+            _reads(partition["source"], shared)
+            and not _traced(partition["source"], contribution.expression_sources)
+            for partition in source_table(contribution.parts, name).get(
+                "partitions", ()
+            )
+        )
+    )
+
+
+def _reads(source, shared):
+    kind = str(source.get("type")).casefold()
+    if kind in _COMPUTED:
+        return False
+    if kind == "m":
+        return reads_data(source.get("expression", ""), shared)
+    return True
+
+
+def _expression_names(contribution):
+    from .objects import TmdlDefinition
+
+    return tuple(
+        expression.name
+        for expression in TmdlDefinition(contribution.parts).model.expressions
+    )
+
+
+def untraced_warning(item, contribution):
+    tables = untraced_tables(contribution)
+    if not tables:
+        return None
+    noun = "table" if len(tables) == 1 else "tables"
+    return (
+        f"{item}: {noun} {', '.join(tables)} read data that is not traced to a "
+        "managed Table or View. Add Weaver.Source to name each table's source"
+    )

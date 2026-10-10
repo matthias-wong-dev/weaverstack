@@ -12,6 +12,7 @@ from .project import (
     WORKFLOW_FILE,
     WORKSPACE_CONFIG_FILE,
     ProjectRequest,
+    build_commands,
     project_files,
 )
 
@@ -19,6 +20,7 @@ __all__ = [
     "WORKFLOW_FILE",
     "WORKSPACE_CONFIG_FILE",
     "ProjectRequest",
+    "build_commands",
     "environment_definition_files",
     "example_files",
     "project_files",

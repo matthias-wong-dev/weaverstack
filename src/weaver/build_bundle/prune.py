@@ -184,6 +184,8 @@ class TargetInventory:
 
         if object_type == "semantic_model":
             return self.kind == "semanticmodel"
+        if object_type == "report":
+            return self.kind == "report"
         _area, schema = stored_area(schema)
         if object_type == "file":
             # A file schema is its path beneath Files.
@@ -220,6 +222,11 @@ class TargetInventory:
         name = identity.object_id.object
         if identity.shape == MODEL_SHAPE:
             return "semantic_model" if self.kind == "semanticmodel" else None
+        if (
+            identity.item.item_type == "Report"
+            and identity == WeaverDocumentId.report_root(identity.item)
+        ):
+            return "report" if self.kind == "report" else None
         if identity.shape == FILE_SHAPE:
             return "file" if self.has_object(schema, name, "file") else None
         if identity.shape == PROCEDURE_SHAPE:

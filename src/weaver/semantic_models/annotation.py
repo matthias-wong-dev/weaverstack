@@ -3,7 +3,7 @@
 ``annotation DWG.HideIntegerColumns = true`` runs the `Annotation` subclass named
 ``DWG__HideIntegerColumns``: ``__`` in a class name is ``.`` in TMDL. Weaver's
 own annotations hold the ``Weaver`` namespace. A project adds its own in
-``SemanticModel/annotations/<ClassName>.py``, one class per file, and they apply
+``PowerBI/annotations/<ClassName>.py``, one class per file, and they apply
 to every semantic model in the project. Once a project defines a namespace, an
 undefined annotation in it is an error; other annotations stay native.
 
@@ -20,15 +20,16 @@ import types
 import uuid
 from dataclasses import dataclass, field, replace
 from typing import Mapping, NoReturn
+from urllib.parse import unquote
 
-from ..errors import ConfigError
+from ..errors import ConfigError, WeaverError
 from .compiler import _COMMON, _SCHEMAS, _merge, escape, leaf_properties
 from .extension_expectations import requested_object
 from .fragments import expression_text, scalar
 from .objects import TmdlObject
 from .tmdl import Document, PackageEditor, folded, quote_name
 
-DIRECTORY = "SemanticModel/annotations"
+DIRECTORY = "PowerBI/annotations"
 _SEGMENT = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9_]*[A-Za-z0-9])?\Z")
 _KINDS = {key.casefold(): key for key in _SCHEMAS}
 _COLLECTION_OF = {
@@ -93,7 +94,11 @@ class Annotation:
     def error(self, message: str) -> NoReturn:
         """Fail Build with this declaration's file and line."""
 
-        raise ConfigError(f"{self._location}: {message}")
+        raise _DeclarationError(f"{self._location}: {message}")
+
+
+class _DeclarationError(ConfigError):
+    """An error an annotation raised through `Annotation.error`, already located."""
 
 
 def _unquote(text):
@@ -112,24 +117,38 @@ class AnnotationRegistry:
     def namespaces(self):
         return {name.split(".", 1)[0].casefold() for name in self.classes}
 
-    def dispatch(self, document, node):
+    def claims(self, node):
+        """Whether `node` is in a namespace this registry defines."""
+
         namespace, dot, _ = node.name.partition(".")
-        if not dot or namespace.casefold() not in self.namespaces:
-            return None
+        return bool(dot) and namespace.casefold() in self.namespaces
+
+    def dispatch(self, node, location):
+        """The class a claimed annotation names.
+
+        `location` is the declaration's authored file and line.
+        """
+
+        namespace = node.name.partition(".")[0]
         cls = self.classes.get(node.name)
         if cls is None:
             raise ConfigError(
-                f"{document.path}:{node.header + 1}: {node.name}: "
-                f"unknown {namespace} annotation"
+                f"{location}: {node.name}: unknown {namespace} annotation"
             )
         if node.parent is None or node.parent.kind not in {
             scope.casefold() for scope in cls.scopes
         }:
             raise ConfigError(
-                f"{document.path}:{node.header + 1}: {node.name}: valid only at "
+                f"{location}: {node.name}: valid only at "
                 f"{' or '.join(sorted(cls.scopes))} scope"
             )
         return cls
+
+    def file(self, cls):
+        """The project file defining `cls`, or None for Weaver's own."""
+
+        path = f"{DIRECTORY}/{cls.__name__}.py"
+        return path if path in self.sources else None
 
 
 def builtin_registry() -> AnnotationRegistry:
@@ -183,6 +202,13 @@ def discover_annotations(root, store, paths) -> AnnotationRegistry:
             raise ConfigError(
                 f"{path}: set {stem}.scopes to the TMDL object kinds it annotates, "
                 'for example {"table"}'
+            )
+        unknown = sorted(s for s in scopes if s.casefold() not in _KINDS)
+        if unknown:
+            raise ConfigError(
+                f"{path}: {stem}.scopes names {', '.join(map(repr, unknown))}, "
+                "which is not a TMDL object kind. Use "
+                + ", ".join(sorted(_KINDS.values(), key=str.casefold))
             )
         if cls.apply is Annotation.apply:
             raise ConfigError(f"{path}: {stem} must implement apply(self, target)")
@@ -306,6 +332,40 @@ def _without(requested, path):
     return result
 
 
+def declared_at(sources, provenance, document, node):
+    """The authored file and line declaring `node` in the effective package.
+
+    Provenance names the layer that last wrote an object; a native PBIP part is
+    its own authored file. Otherwise the effective path is the best location.
+    """
+
+    pointer = _pointer(node.path)
+    candidates = [
+        value["source"]
+        for key, value in provenance.items()
+        if pointer is not None
+        and (key == pointer or key.startswith(pointer + "/"))
+        and value.get("source")
+    ]
+    candidates += [path for path in sources if path.endswith("/" + document.path)]
+    wanted = folded(node.path)
+    for path in dict.fromkeys(candidates):
+        if path.endswith(".tmdl") and path in sources:
+            spans = Document(path, sources[path]).index.get(wanted)
+            if spans:
+                return f"{path}:{spans[0].header + 1}"
+    return f"{unquote(document.path)}:{node.header + 1}"
+
+
+def declared_location(contribution, path):
+    """Where the object at `path` is declared, or None when it is not."""
+
+    found = PackageEditor(contribution.parts).locations(path)
+    if not found:
+        return None
+    return declared_at(contribution.sources, contribution.provenance, *found[0])
+
+
 class _Compilation:
     """One contribution's annotation run: the editor and what its edits imply."""
 
@@ -319,7 +379,17 @@ class _Compilation:
         self.absent = list(contribution.absent)
         self.source_references = dict(contribution.source_references)
         self.source_bindings = dict(contribution.source_bindings)
+
         self._seen = 0
+
+    def located(self, document, node):
+        return declared_at(self.contribution.sources, self.provenance, document, node)
+
+    def declared(self, path):
+        """Where the object at `path` is declared, or None when it is not."""
+
+        found = self.editor.locations(path)
+        return self.located(*found[0]) if found else None
 
     def removed(self, path):
         """Forget a removed object and expect its absence on readback."""
@@ -392,6 +462,18 @@ class _Compilation:
             if expected is not None:
                 self.requested = _merge(self.requested, expected)
 
+    def _failure(self, annotation, exc):
+        """Locate an unexpected failure inside an annotation's `apply`."""
+
+        cls = type(annotation)
+        file = self.registry.file(cls)
+        if file is None and isinstance(exc, WeaverError):
+            return ConfigError(f"{annotation._location}: {exc}")
+        where = f"{cls.__name__} ({file})" if file else cls.__name__
+        return ConfigError(
+            f"{annotation._location}: {where} raised {type(exc).__name__}: {exc}"
+        )
+
     def run(self, phase):
         declared = [
             (document, node)
@@ -403,17 +485,27 @@ class _Compilation:
         ]
         dispatched = set()
         for document, node in declared:
-            cls = self.registry.dispatch(document, node)
-            if cls is None or cls.phase != phase:
+            if not self.registry.claims(node):
+                continue
+            location = self.located(document, node)
+            cls = self.registry.dispatch(node, location)
+            if cls.phase != phase:
                 continue
             dispatched.add(node.name)
+            if node.name == "Weaver.BaseSemanticModels":
+                continue
             if not self.editor.locations(node.parent.path):
                 continue
             annotation = object.__new__(cls)
             annotation._text = expression_text(document, node)
-            annotation._location = f"{document.path}:{node.header + 1}: {node.name}"
+            annotation._location = f"{location}: {node.name}"
             annotation._compilation = self
-            annotation.apply(TmdlObject(self.editor, node.parent.path))
+            try:
+                annotation.apply(TmdlObject(self.editor, node.parent.path))
+            except _DeclarationError:
+                raise
+            except Exception as exc:
+                raise self._failure(annotation, exc) from exc
             self._settle(document, node)
             if phase == "post_schema":
                 references = prepare_annotations(
@@ -427,8 +519,9 @@ class _Compilation:
                         "post_schema introduces a source dependency; declare phase = 'schema'"
                     )
         _quote_names(self.editor, dispatched)
-        return replace(
+        compiled = replace(
             self.contribution,
+            table_order=None,
             parts=self.editor.parts,
             requested=self.requested,
             owned=tuple(sorted(self.owned)),
@@ -439,10 +532,15 @@ class _Compilation:
             annotations=self.registry,
             compilation=self if phase == "schema" else None,
         )
+        return (
+            replace(compiled, table_order=compiled.table_names)
+            if phase == "post_schema"
+            else compiled
+        )
 
 
 def _quote_names(editor, names):
-    """Quote dispatched annotation names, which Fabric keeps only when quoted."""
+    """Quote retained annotation names for native deployment."""
 
     for document in list(editor.documents()):
         lines = list(document.lines)
@@ -463,19 +561,21 @@ def prepare_annotations(contribution, registry=None):
     """Validate annotations and collect sources without executing handlers."""
 
     registry = registry or contribution.annotations or builtin_registry()
+
     references = {}
     editor = PackageEditor(contribution.parts)
     for document in editor.documents():
         for node in document.spans:
-            if node.kind != "annotation":
+            if node.kind != "annotation" or not registry.claims(node):
                 continue
-            cls = registry.dispatch(document, node)
-            if cls is None:
-                continue
+            location = declared_at(
+                contribution.sources, contribution.provenance, document, node
+            )
+            cls = registry.dispatch(node, location)
             if node.name == "Weaver.Source":
                 annotation = object.__new__(cls)
                 annotation._text = expression_text(document, node)
-                annotation._location = f"{document.path}:{node.header + 1}: {node.name}"
+                annotation._location = f"{location}: {node.name}"
                 references[node.parent.name] = annotation.reference
     return replace(
         contribution,

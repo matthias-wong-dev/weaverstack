@@ -265,3 +265,20 @@ def test_nothing_reconstructs_an_authored_path_from_a_deployed_one():
         "these look like they derive an authored path rather than carry one: "
         f"{offenders}"
     )
+
+
+@weaver_test()
+def test_a_cause_every_failed_action_shares_is_shown_once():
+    from weaver.operations.build import BuildFailure
+    from weaver_cli.main import failure_blocks
+
+    shared = [
+        BuildFailure(f"action-{n}", "BuildError", "Fabric cannot run this build.")
+        for n in range(3)
+    ]
+    assert failure_blocks(shared) == ["3 actions failed: Fabric cannot run this build."]
+    distinct = [*shared[:1], BuildFailure("other", "BuildError", "Another reason.")]
+    assert [block.splitlines()[-1] for block in failure_blocks(distinct)] == [
+        "Fabric cannot run this build.",
+        "Another reason.",
+    ]

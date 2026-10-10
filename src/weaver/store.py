@@ -7,6 +7,7 @@ incremental decisions.
 
 from __future__ import annotations
 
+import os
 import shutil
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -18,7 +19,15 @@ from .locations import Location
 
 
 class StoreError(WeaverError):
-    pass
+    def __init__(
+        self,
+        message: object,
+        *,
+        executor: str | None = None,
+        status_code: int | None = None,
+    ) -> None:
+        super().__init__(message, executor=executor)
+        self.status_code = status_code
 
 
 class StoreOutcomeUnknown(StoreError, OutcomeUnknown):
@@ -148,6 +157,33 @@ class FilesystemStore:
 
     def make_directory(self, location: Location) -> None:
         self._local(location).mkdir(parents=True, exist_ok=True)
+
+    def copy(self, source: Location, destination: Location) -> None:
+        target = self._local(destination)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            shutil.copyfile(self._local(source), target)
+        except OSError as exc:
+            raise StoreError(
+                f"Cannot copy {source.value} to {destination.value}: {exc}"
+            ) from exc
+
+    def move(self, source: Location, destination: Location) -> None:
+        target = self._local(destination)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            os.replace(self._local(source), target)
+        except OSError as exc:
+            raise StoreError(
+                f"Cannot move {source.value} to {destination.value}: {exc}"
+            ) from exc
+
+    def copy_file_to_local(self, source: Location, destination: Path) -> None:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            shutil.copyfile(self._local(source), destination)
+        except OSError as exc:
+            raise StoreError(f"Cannot read {source.value}: {exc}") from exc
 
     def copy_to_local(self, source: Location, destination: Path) -> None:
         source_path = self._local(source)

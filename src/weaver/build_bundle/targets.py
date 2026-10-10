@@ -9,7 +9,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Mapping
 
-from ..declaration.model import LAKEHOUSE, SEMANTIC_MODEL, WAREHOUSE, WeaverItemId
+from ..declaration.model import (
+    LAKEHOUSE,
+    REPORT,
+    SEMANTIC_MODEL,
+    WAREHOUSE,
+    WeaverItemId,
+)
 from ..errors import BuildError
 from ..mutation.targets import BoundTarget
 from ..targets import (
@@ -118,9 +124,36 @@ class SemanticModelBinding:
 
 
 @dataclass(frozen=True)
+class ReportBinding:
+    kind = "report"
+    report: ItemRef
+    workspace_id: str | None = None
+    workspace_name: str | None = None
+    item_id: str | None = None
+
+    @property
+    def item(self) -> ItemRef:
+        return self.report
+
+    @property
+    def physical_kind(self) -> str:
+        return REPORT
+
+    def to_bound_target(self):
+        return BoundTarget(
+            id=f"{self.kind}-{self.report.name}",
+            kind=self.kind,
+            item_id=self.item_id or self.report.name,
+            item_name=self.report.name,
+            workspace_id=self.workspace_id,
+            workspace_name=self.workspace_name,
+        )
+
+
+@dataclass(frozen=True)
 class ItemBinding:
     item: WeaverItemId
-    target: LakehouseBinding | WarehouseBinding | SemanticModelBinding
+    target: LakehouseBinding | WarehouseBinding | SemanticModelBinding | ReportBinding
 
     def __post_init__(self) -> None:
         if self.item.item_type != self.target.physical_kind:
@@ -256,6 +289,7 @@ def parse_build_item(text: str, *, workspace=None) -> ItemBinding:
         LAKEHOUSE: LakehouseBinding,
         WAREHOUSE: WarehouseBinding,
         SEMANTIC_MODEL: SemanticModelBinding,
+        REPORT: ReportBinding,
     }[physical_type](physical, workspace_name=workspace_name)
     return ItemBinding(item, binding)
 

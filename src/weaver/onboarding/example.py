@@ -3,7 +3,8 @@
 A Lakehouse receives an export folder, a Delta table and an Assumption. A
 Warehouse receives reference regions, a joined customer table and an
 Assumption. With both, the Warehouse reads the Lakehouse's customers through a
-logical shortcut and does not seed another copy.
+logical shortcut and does not seed another copy. A Power BI project reads the
+last of them; see ``powerbi_example``.
 
 `Sales` is the business schema and is implied by the objects themselves, so no
 schema document is written. The Fabric item names are the ones the user chose.
@@ -12,6 +13,7 @@ schema document is written. The Fabric item names are the ones the user chose.
 from __future__ import annotations
 
 from ..declaration.model import LAKEHOUSE, WAREHOUSE
+from .powerbi_example import powerbi_example_files
 from .project import ProjectRequest
 
 SCHEMA = "Sales"
@@ -250,4 +252,5 @@ def example_files(request: ProjectRequest) -> dict[str, str]:
             )
         else:
             files[f"{item}/Sales.Customer.sql"] = _WAREHOUSE_CUSTOMER
+    files.update(powerbi_example_files(request))
     return files

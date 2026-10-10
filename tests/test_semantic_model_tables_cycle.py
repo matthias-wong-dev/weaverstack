@@ -1,6 +1,5 @@
 """Typed semantic catalogue rows follow the model's Build lifecycle."""
 
-import json
 from dataclasses import replace
 
 from support.semantic_models import probe_model
@@ -25,7 +24,7 @@ def test_typed_semantic_rows_keep_descriptions_native_metadata_and_claim_ownersh
     tmp_path,
 ):
     root, _, bindings, _, _ = prepared(tmp_path, True)
-    (root / str(ITEM) / "extension.tmdl").write_text(
+    (root / str(ITEM) / f"{ITEM.item_name}.tmdl").write_text(
         "/// Sales model\nmodel Model\n\n/// Sales transactions\nref table Sales\n\t/// Product identity\n\tcolumn ProductId\n\n\t/// Total revenue\n\tmeasure Revenue\n",
         encoding="utf-8",
     )
@@ -62,11 +61,20 @@ def test_typed_semantic_rows_keep_descriptions_native_metadata_and_claim_ownersh
     }
     assert {
         t.name for t in CATALOGUE_TABLES if t.name.startswith("Semantic")
-    } == semantic_tables
+    } == semantic_tables | {"SemanticModelTest"}
     assert rows["SemanticModel"][0]["description"] == "Sales model"
-    assert json.loads(rows["SemanticModel"][0]["definition"]) == observed
+    assert set(rows["SemanticModel"][0]) == {
+        "item_type",
+        "item_name",
+        "description",
+        "signature",
+    }
     sales = next(r for r in rows["SemanticModelTable"] if r["table_name"] == "Sales")
     assert sales["description"] == "Sales transactions"
+    assert (
+        sales["table_ordinal"]
+        == repository.semantic_models[ITEM].table_names.index("Sales") + 1
+    )
     measure = next(
         r for r in rows["SemanticModelMeasure"] if r["measure_name"] == "Revenue"
     )
@@ -91,7 +99,7 @@ def test_typed_semantic_rows_keep_descriptions_native_metadata_and_claim_ownersh
     for name in semantic_tables:
         for row in rows[name]:
             assert row["signature"] == repository.semantic_models[ITEM].signature
-            assert json.loads(row["provenance"])
+            assert not {"definition", "properties", "provenance"} & set(row)
     pruned = without_claims(
         catalogue,
         [

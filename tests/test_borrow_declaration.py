@@ -6,6 +6,7 @@ The statements are settled here; whether Fabric reads through them is
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 import pytest
@@ -362,6 +363,10 @@ def test_a_source_holding_everything_certified_leaves_nothing_missing():
     [
         "CREATE PROCEDURE [Rpt].[Refresh] AS SELECT 1",
         "create or alter procedure [Rpt].[Refresh] as select 1",
+        "-- Refreshes reporting\n/* owner: /* nested */ Sales */\nCreate\tPROCEDURE "
+        "[Rpt].[Refresh] AS SELECT 1",
+        "\n  /* header */ CREATE  OR\n ALTER PROCEDURE [Rpt].[Refresh] AS SELECT 1",
+        "CREATE/* inline */PROCEDURE [Rpt].[Refresh] AS SELECT 1",
     ],
 )
 def test_a_copied_programmable_can_be_copied_again(written):
@@ -370,7 +375,14 @@ def test_a_copied_programmable_can_be_copied_again(written):
 
     ((statement,),) = (programmable_statements([written]),)
 
-    assert statement.casefold().startswith("create or alter")
+    words = re.sub(r"--[^\n]*|/\*.*\*/", " ", statement, flags=re.S).split()
+    assert [word.casefold() for word in words[:4]] == [
+        "create",
+        "or",
+        "alter",
+        "procedure",
+    ]
+    assert statement.casefold().endswith("[rpt].[refresh] as select 1")
 
 
 @weaver_test()

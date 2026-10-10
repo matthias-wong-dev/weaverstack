@@ -27,6 +27,8 @@ OBJECT_TYPES = (
     "stored_procedure",
     "schema",
     "semantic_model",
+    "report",
+    "source_artifact",
 )
 
 #: What an object is for, independent of its physical shape.
@@ -38,6 +40,7 @@ ROLE_ASSUMPTION = "assumption"
 ROLE_SHORTCUT = "shortcut"
 #: A managed stored procedure invoked outside Weaver's scheduler.
 ROLE_PROGRAMMABLE = "programmable"
+ROLE_SOURCE = "source"
 OBJECT_ROLES = (
     ROLE_DATA,
     ROLE_LOAD,
@@ -45,6 +48,7 @@ OBJECT_ROLES = (
     ROLE_ASSUMPTION,
     ROLE_SHORTCUT,
     ROLE_PROGRAMMABLE,
+    ROLE_SOURCE,
 )
 
 #: Roles installed to run rather than hold rows.
@@ -67,6 +71,8 @@ OBJECT_TYPE_VOCABULARY = {
     "stored_procedure": "Stored procedure",
     "schema": "Schema",
     "semantic_model": "Semantic model",
+    "report": "Report",
+    "source_artifact": "Source artifact",
 }
 
 OBJECT_ROLE_VOCABULARY = {
@@ -76,6 +82,7 @@ OBJECT_ROLE_VOCABULARY = {
     ROLE_ASSUMPTION: "Assumption",
     ROLE_SHORTCUT: "Shortcut",
     ROLE_PROGRAMMABLE: "Programmable",
+    ROLE_SOURCE: "Source",
 }
 
 KEY_TYPE_VOCABULARY = {KEY_PRIMARY: "Primary key", KEY_UNIQUE: "Unique"}
@@ -652,6 +659,29 @@ TEST_DICTIONARY = CatalogueTable(
     ),
 )
 
+SEMANTIC_MODEL_TEST = CatalogueTable(
+    name="SemanticModelTest",
+    description=(
+        "How each semantic model Test and Assumption runs. TestDictionary "
+        "describes the validation; this row is its installed definition."
+    ),
+    key=(SCOPE_ITEM_TYPE, SCOPE_ITEM_NAME, "schema_name", "object_name"),
+    columns=(
+        *_scope(),
+        *_object(),
+        CatalogueColumn(
+            "definition",
+            sql_type=WIDE_LIST_TYPE,
+            not_null=True,
+            description=(
+                "Versioned JSON: the DAX query and, for a Test, its logical "
+                "Expected source and Expected SQL."
+            ),
+        ),
+        _signature("the validation's source file"),
+    ),
+)
+
 DEPENDENCY = CatalogueTable(
     name="Dependency",
     description=(
@@ -776,20 +806,8 @@ SHORTCUT = CatalogueTable(
 )
 
 
-def _semantic_metadata():
-    return (
-        CatalogueColumn(
-            "properties",
-            sql_type=WIDE_LIST_TYPE,
-            description="Native properties as JSON.",
-        ),
-        CatalogueColumn(
-            "provenance",
-            sql_type=WIDE_LIST_TYPE,
-            description="Property origins and derivation reasons as JSON.",
-        ),
-        _signature("the effective semantic model"),
-    )
+def _semantic_signature():
+    return _signature("the effective semantic model")
 
 
 def _semantic_description():
@@ -802,40 +820,41 @@ def _semantic_description():
 
 SEMANTIC_MODEL = CatalogueTable(
     name="SemanticModel",
-    description="Deployed semantic models, their descriptions and native definitions.",
-    key=(*ITEM_SCOPE_COLUMNS, "schema_name", "object_name"),
+    description="Deployed semantic models and their descriptions.",
+    key=ITEM_SCOPE_COLUMNS,
     columns=(
         *_scope(),
-        *_object(),
         _semantic_description(),
-        CatalogueColumn(
-            "definition",
-            sql_type=WIDE_LIST_TYPE,
-            description="The deployed native TMSL database from definition readback.",
-        ),
-        *_semantic_metadata(),
+        _semantic_signature(),
     ),
 )
 
 SEMANTIC_MODEL_TABLE = CatalogueTable(
     name="SemanticModelTable",
-    description="Semantic tables and their resolved source bindings.",
-    key=(*ITEM_SCOPE_COLUMNS, "schema_name", "object_name", "table_name"),
+    description="Semantic tables and how each reads its managed source.",
+    key=(*ITEM_SCOPE_COLUMNS, "table_name"),
     columns=(
         *_scope(),
-        *_object(),
         CatalogueColumn(
             "table_name",
             not_null=True,
             description="The native table name, matching Dependency's referencing object name.",
         ),
+        CatalogueColumn(
+            "table_ordinal",
+            type=BIGINT,
+            description="One-based effective TMDL declaration order.",
+        ),
         _semantic_description(),
         CatalogueColumn(
-            "source_binding",
-            sql_type=WIDE_LIST_TYPE,
-            description="Resolved logical source, physical identity and shape as JSON.",
+            "source_mode",
+            description="The storage mode of the partition reading the managed source.",
         ),
-        *_semantic_metadata(),
+        CatalogueColumn(
+            "source_access",
+            description="How that partition reads the source: sql or lakehouse.",
+        ),
+        _semantic_signature(),
     ),
 )
 
@@ -844,14 +863,11 @@ SEMANTIC_MODEL_MEASURE = CatalogueTable(
     description="Semantic measures and their native expressions.",
     key=(
         *ITEM_SCOPE_COLUMNS,
-        "schema_name",
-        "object_name",
         "table_name",
         "measure_name",
     ),
     columns=(
         *_scope(),
-        *_object(),
         CatalogueColumn(
             "table_name", not_null=True, description="The measure's home table."
         ),
@@ -867,17 +883,16 @@ SEMANTIC_MODEL_MEASURE = CatalogueTable(
             sql_type=WIDE_LIST_TYPE,
             description="The authored format string.",
         ),
-        *_semantic_metadata(),
+        _semantic_signature(),
     ),
 )
 
 SEMANTIC_MODEL_RELATIONSHIP = CatalogueTable(
     name="SemanticModelRelationship",
     description="Semantic relationships and their table/column endpoints.",
-    key=(*ITEM_SCOPE_COLUMNS, "schema_name", "object_name", "relationship_name"),
+    key=(*ITEM_SCOPE_COLUMNS, "relationship_name"),
     columns=(
         *_scope(),
-        *_object(),
         CatalogueColumn(
             "relationship_name",
             not_null=True,
@@ -895,7 +910,7 @@ SEMANTIC_MODEL_RELATIONSHIP = CatalogueTable(
         CatalogueColumn(
             "is_active", type=BOOLEAN, description="Whether the relationship is active."
         ),
-        *_semantic_metadata(),
+        _semantic_signature(),
     ),
 )
 
@@ -904,14 +919,11 @@ SEMANTIC_MODEL_COLUMN = CatalogueTable(
     description="Semantic columns, including engine-inferred calculated columns.",
     key=(
         *ITEM_SCOPE_COLUMNS,
-        "schema_name",
-        "object_name",
         "table_name",
         "column_name",
     ),
     columns=(
         *_scope(),
-        *_object(),
         CatalogueColumn(
             "table_name", not_null=True, description="The owning semantic table."
         ),
@@ -927,7 +939,7 @@ SEMANTIC_MODEL_COLUMN = CatalogueTable(
             sql_type=WIDE_LIST_TYPE,
             description="The calculated column expression.",
         ),
-        *_semantic_metadata(),
+        _semantic_signature(),
     ),
 )
 
@@ -949,6 +961,7 @@ DICTIONARY_TABLES = (
     KEY_DICTIONARY,
     FOREIGN_KEY_DICTIONARY,
     TEST_DICTIONARY,
+    SEMANTIC_MODEL_TEST,
     DEPENDENCY,
     SHORTCUT,
     *SEMANTIC_TABLES,

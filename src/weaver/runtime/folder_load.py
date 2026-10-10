@@ -3,21 +3,28 @@
 Object code fills a Weaver-issued staging folder and returns files to delete.
 Validation confirms staged and deleted paths are within the declared file key
 before publishing changes.
+
+Weaver lists, compares, copies and deletes through the Lakehouse's store, never
+through the mount: a mount's listing can still show a file deleted through
+OneLake. Mounted paths are only handed to authored code.
 """
 
 from __future__ import annotations
 
+import contextlib
 import filecmp
 import fnmatch
 import json
-import os
-import shutil
+import tempfile
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 
 from ..errors import LoadError
+from ..locations import Location
+from ..store import StoreError, StoreNotFoundError
 from .load_contract import FolderLoadContract
 from .load_result import LoadResult
 
@@ -43,24 +50,47 @@ INTOLERANT_MESSAGE = (
 TOLERATED_MESSAGE = "staged files were rejected and excluded from the load"
 
 
+@dataclass(frozen=True)
+class FolderFiles:
+    """One Files folder, as its store reaches it and as authored code opens it.
+
+    ``store`` must also copy and move a file within itself and copy one to the
+    driver. ``path`` is the mounted address of ``location``.
+    """
+
+    store: Any
+    location: Location
+    path: Path
+
+    def sibling(self, suffix: str) -> "FolderFiles":
+        name = f"{self.location.name}{suffix}"
+        parent = Location(self.location.value.rsplit("/", 1)[0])
+        return FolderFiles(self.store, parent / name, self.path.with_name(name))
+
+    def at(self, relative: str) -> Location:
+        return self.location.join(*relative.split("/"))
+
+
 def load_folder(
     *,
     contract: FolderLoadContract,
-    destination: str | Path,
-    staging: str | Path,
+    destination: FolderFiles,
+    staging: FolderFiles,
     deletes=(),
     fault_tolerant: bool = False,
 ) -> LoadResult:
     """Validate all staged files before modifying the destination."""
 
-    destination_path, staging_path = _validate_paths(destination, staging)
-    staged, rejected = _classify(staging_path, contract)
-    deletes = _validate_deletes(deletes, staged, destination_path, contract=contract)
+    _validate_paths(destination, staging)
+    staged_entries, rejected = _classify(staging, contract)
+    staged = list(staged_entries)
+    current = _inventory(destination, excluded_roots={CHANGES_DIRECTORY})
+    deletes = _validate_deletes(deletes, staged, current, contract=contract)
     rows_read = len(staged) + len(rejected)
 
-    reject_path = destination_path.with_name(f"{destination_path.name}{REJECT_SUFFIX}")
-    _reset_reject_evidence(reject_path)
-    _keep_reject_evidence(rejected, staging_path, reject_path)
+    reject = destination.sibling(REJECT_SUFFIX)
+    _reset_reject_evidence(reject)
+    _keep_reject_evidence(rejected, staging, reject)
 
     if rejected and not fault_tolerant:
         raise LoadError(
@@ -70,10 +100,12 @@ def load_folder(
             ),
         )
 
-    inserted, updated = _publish(staged, staging_path, destination_path)
-    deleted = _reconcile_deletes(destination_path, deletes, staged, contract=contract)
+    inserted, updated = _publish(staged_entries, staging, destination, current)
+    deleted = _reconcile_deletes(
+        destination, current, deletes, staged, contract=contract
+    )
     _write_change_document(
-        destination_path,
+        destination,
         inserted=inserted,
         updated=updated,
         deleted=deleted,
@@ -105,89 +137,71 @@ class StagingFolder:
         return False
 
 
-def new_staging_folder(destination: str | Path, staging: str | Path) -> StagingFolder:
-    _destination_path, staging_path = _validate_paths(destination, staging)
-    reset_staging(staging_path)
-    return StagingFolder(path=staging_path)
+def new_staging_folder(destination: FolderFiles, staging: FolderFiles) -> StagingFolder:
+    _validate_paths(destination, staging)
+    reset_staging(staging)
+    return StagingFolder(path=staging.path)
 
 
-#: Retry a brief OneLake propagation delay during staging cleanup.
-RESET_ATTEMPTS = 5
-RESET_PAUSE = 0.5
+def reset_staging(staging: FolderFiles) -> None:
+    """Empty and recreate the fixed staging directory."""
+
+    remove_staging(staging)
+    staging.store.make_directory(staging.location)
+    # Authored code writes through the mount, which may not yet list the
+    # directory the store made.
+    staging.path.mkdir(parents=True, exist_ok=True)
 
 
-def reset_staging(path: Path) -> None:
-    """Empty and recreate the fixed staging directory.
-
-    OneLake mount state can lag DFS deletion, so removal is retried before the
-    path is reused.
-    """
-
-    _with_retry(lambda: shutil.rmtree(path) if path.exists() else None)
-    path.mkdir(parents=True, exist_ok=False)
-
-
-def remove_staging(path: Path) -> None:
-    _with_retry(lambda: shutil.rmtree(path) if path.exists() else None)
-
-
-def _with_retry(action) -> None:
-    import time
-
-    for remaining in range(RESET_ATTEMPTS - 1, -1, -1):
-        try:
-            action()
-            return
-        except OSError:
-            if remaining == 0:
-                raise
-            time.sleep(RESET_PAUSE)
+def remove_staging(staging: FolderFiles) -> None:
+    if staging.store.exists(staging.location):
+        staging.store.delete(staging.location, recursive=True)
 
 
 # --- validation ----------------------------------------------------------------
 
 
-def _validate_paths(destination: str | Path, staging: str | Path) -> tuple[Path, Path]:
-    destination_path = Path(destination)
-    staging_path = Path(staging)
-    if destination_path == staging_path:
-        raise LoadError(f"staging path is the destination folder: {destination_path}")
-    if staging_path.parent != destination_path.parent:
+def _validate_paths(destination: FolderFiles, staging: FolderFiles) -> None:
+    destination_location = destination.location.value
+    staging_location = staging.location.value
+    if destination_location == staging_location:
+        raise LoadError(f"staging path is the destination folder: {destination.path}")
+    if staging_location.rsplit("/", 1)[0] != destination_location.rsplit("/", 1)[0]:
         raise LoadError(
-            f"staging directory {staging_path} is not beside destination folder "
-            f"{destination_path}; return self.staging_folder()"
+            f"staging directory {staging.path} is not beside destination folder "
+            f"{destination.path}; return self.staging_folder()"
         )
-    expected = f"{destination_path.name}{STAGING_SUFFIX}"
-    if staging_path.name != expected:
+    expected = f"{destination.location.name}{STAGING_SUFFIX}"
+    if staging.location.name != expected:
         raise LoadError(
-            f"staging directory {staging_path} must be named {expected!r}; return "
+            f"staging directory {staging.path} must be named {expected!r}; return "
             "self.staging_folder()"
         )
-    return destination_path, staging_path
 
 
-def _classify(staging_path: Path, contract) -> tuple[list[str], list[str]]:
-    if not staging_path.is_dir():
+def _classify(staging: FolderFiles, contract) -> tuple[dict[str, Any], list[str]]:
+    if not staging.store.exists(staging.location):
         raise LoadError(
-            f"staging directory not found: {staging_path}; write files into "
+            f"staging directory not found: {staging.path}; write files into "
             "self.staging_folder() and return it"
         )
-    staged, rejected = [], []
-    for relative in _relative_files(staging_path):
+    staged: dict[str, Any] = {}
+    rejected: list[str] = []
+    for relative, entry in _inventory(staging).files.items():
         if _is_changes_path(relative):
             raise LoadError(
                 f"{contract.qualified}: {relative!r} is inside Weaver's "
                 f"{CHANGES_DIRECTORY}/ directory and cannot be staged"
             )
         if matches_file_key(relative, contract.file_keys):
-            staged.append(relative)
+            staged[relative] = entry
         else:
             rejected.append(relative)
     return staged, rejected
 
 
 def _validate_deletes(
-    deletes, staged, destination: Path, *, contract
+    deletes, staged, current: "_Inventory", *, contract
 ) -> tuple[str, ...]:
     if isinstance(deletes, (str, bytes)):
         raise LoadError(
@@ -245,7 +259,7 @@ def _validate_deletes(
             raise LoadError(
                 f"{contract.qualified}: {relative!r} is both staged and deleted"
             )
-        if (destination / path).is_dir():
+        if relative in current.directories:
             raise LoadError(
                 f"{contract.qualified}: a delete must name a file, and "
                 f"{relative!r} is a directory"
@@ -258,28 +272,30 @@ def _validate_deletes(
 
 
 def _publish(
-    staged, staging_path: Path, destination: Path
+    staged: dict[str, Any],
+    staging: FolderFiles,
+    destination: FolderFiles,
+    current: "_Inventory",
 ) -> tuple[tuple[str, ...], tuple[str, ...]]:
     """Do not rewrite byte-identical files or report them as updated."""
 
-    destination.mkdir(parents=True, exist_ok=True)
+    destination.store.make_directory(destination.location)
     inserted: list[str] = []
     updated: list[str] = []
-    for relative in staged:
-        source = staging_path / relative
-        target = destination / relative
-        if not target.exists():
+    for relative, entry in staged.items():
+        existing = current.files.get(relative)
+        if existing is None:
             inserted.append(relative)
-        elif not _identical(source, target):
+        elif not _identical(staging, destination, relative, entry, existing):
             updated.append(relative)
         else:
             continue
-        _safe_replace(source, target)
+        _safe_replace(destination.store, staging.at(relative), destination.at(relative))
     return tuple(inserted), tuple(updated)
 
 
 def _reconcile_deletes(
-    destination: Path, deletes, staged, *, contract
+    destination: FolderFiles, current: "_Inventory", deletes, staged, *, contract
 ) -> tuple[str, ...]:
     """Explicit deletes, plus what a replaced folder stopped staging.
 
@@ -289,35 +305,37 @@ def _reconcile_deletes(
 
     targets = set(deletes)
     if contract.replaces_wholesale:
-        managed = set(managed_relative_files(destination, contract.file_keys))
+        managed = {
+            relative
+            for relative in current.files
+            if matches_file_key(relative, contract.file_keys)
+        }
         targets.update(managed - set(staged))
 
     deleted: list[str] = []
     for relative in sorted(targets):
-        if _is_changes_path(relative):
+        if _is_changes_path(relative) or relative not in current.files:
             continue
-        target = destination / relative
-        if target.is_file():
-            target.unlink()
-            deleted.append(relative)
+        destination.store.delete(destination.at(relative))
+        deleted.append(relative)
     return tuple(deleted)
 
 
 # --- evidence and changes ------------------------------------------------------
 
 
-def _reset_reject_evidence(path: Path) -> None:
-    if path.exists():
-        shutil.rmtree(path)
+def _reset_reject_evidence(reject: FolderFiles) -> None:
+    if reject.store.exists(reject.location):
+        reject.store.delete(reject.location, recursive=True)
 
 
-def _keep_reject_evidence(rejected, staging: Path, destination: Path) -> None:
+def _keep_reject_evidence(rejected, staging: FolderFiles, reject: FolderFiles) -> None:
     for relative in rejected:
-        _safe_replace(staging / relative, destination / relative)
+        _safe_replace(reject.store, staging.at(relative), reject.at(relative))
 
 
 def _write_change_document(
-    destination: Path,
+    destination: FolderFiles,
     *,
     inserted: tuple[str, ...],
     updated: tuple[str, ...],
@@ -325,11 +343,11 @@ def _write_change_document(
 ) -> None:
     if not (inserted or updated or deleted):
         return
-    changes = destination / CHANGES_DIRECTORY
-    changes.mkdir(parents=True, exist_ok=True)
+    store = destination.store
+    changes = destination.location / CHANGES_DIRECTORY
     at = _utc_now()
     target = changes / f"{_format_change_datetime(at)}.json"
-    while target.exists():
+    while store.exists(target):
         at += timedelta(microseconds=1)
         target = changes / f"{_format_change_datetime(at)}.json"
     payload = {
@@ -337,47 +355,70 @@ def _write_change_document(
         "updates": sorted(updated),
         "deletes": sorted(deleted),
     }
-    _safe_write_text(target, json.dumps(payload, indent=2) + "\n")
+    _safe_write_text(store, target, json.dumps(payload, indent=2) + "\n")
 
 
-def _has_change_history(root: Path) -> bool:
+def _has_change_history(folder: FolderFiles) -> bool:
     """Treat any recorded file as history; validate documents only when reading."""
 
-    changes = root / CHANGES_DIRECTORY
-    if not changes.is_dir():
+    try:
+        entries = folder.store.list(folder.location / CHANGES_DIRECTORY)
+    except StoreNotFoundError:
         return False
-    return any(entry.is_file() for entry in changes.iterdir())
+    return any(not entry.is_directory for entry in entries)
 
 
-def adopt_existing_files(destination: str | Path) -> tuple[str, ...]:
+def adopt_existing_files(destination: FolderFiles) -> tuple[str, ...]:
     """Record every existing file once when the Folder has no change history."""
 
-    root = Path(destination)
-    if not root.is_dir():
+    if not destination.store.exists(destination.location):
         return ()
-    if _has_change_history(root):
+    if _has_change_history(destination):
         return ()
-    existing = tuple(_relative_files(root, excluded_roots={CHANGES_DIRECTORY}))
+    existing = tuple(_inventory(destination, excluded_roots={CHANGES_DIRECTORY}).files)
     if not existing:
         return ()
-    _write_change_document(root, inserted=existing, updated=(), deleted=())
+    _write_change_document(destination, inserted=existing, updated=(), deleted=())
     return existing
 
 
-def files_since(destination: str | Path, bookmark: datetime) -> dict[Path, datetime]:
+def current_files(folder: FolderFiles, patterns=()) -> list[Path]:
+    """The files the store lists now, as mounted paths.
+
+    ``patterns`` match as the File key does; none claims every file. Weaver's
+    change history is never listed.
+    """
+
+    root = folder.path.absolute()
+    return [
+        root / relative
+        for relative in _inventory(folder, excluded_roots={CHANGES_DIRECTORY}).files
+        if matches_file_key(relative, tuple(patterns))
+    ]
+
+
+def files_since(folder: FolderFiles, bookmark: datetime) -> dict[Path, datetime]:
     """Current files changed strictly after an aware ``bookmark``, and when."""
 
     boundary = _change_boundary(bookmark)
-    root = Path(destination).absolute()
-    latest = _collapse_change_events(_change_documents_since(destination, boundary))
+    root = folder.path.absolute()
+    latest = _collapse_change_events(folder, _change_documents_since(folder, boundary))
+    candidates = {
+        relative: changed_at
+        for relative, (operation, changed_at) in sorted(latest.items())
+        if operation in ("inserts", "updates")
+    }
+    if not candidates:
+        return {}
+    present = _inventory(folder, excluded_roots={CHANGES_DIRECTORY}).files
     return {
         root / relative: changed_at
-        for relative, (operation, changed_at) in sorted(latest.items())
-        if operation in ("inserts", "updates") and (root / relative).is_file()
+        for relative, changed_at in candidates.items()
+        if relative in present
     }
 
 
-def deleted_since(destination: str | Path, bookmark: datetime) -> dict[Path, datetime]:
+def deleted_since(folder: FolderFiles, bookmark: datetime) -> dict[Path, datetime]:
     """Files deleted strictly after an aware ``bookmark``, and when.
 
     A returned path is the file the deletion retired, so it normally does not
@@ -385,8 +426,8 @@ def deleted_since(destination: str | Path, bookmark: datetime) -> dict[Path, dat
     """
 
     boundary = _change_boundary(bookmark)
-    root = Path(destination).absolute()
-    latest = _collapse_change_events(_change_documents_since(destination, boundary))
+    root = folder.path.absolute()
+    latest = _collapse_change_events(folder, _change_documents_since(folder, boundary))
     return {
         root / relative: changed_at
         for relative, (operation, changed_at) in sorted(latest.items())
@@ -394,23 +435,26 @@ def deleted_since(destination: str | Path, bookmark: datetime) -> dict[Path, dat
     }
 
 
-def latest_files(destination: str | Path) -> dict[Path, datetime]:
+def latest_files(folder: FolderFiles) -> dict[Path, datetime]:
     """The current files from the newest change that left files in place.
 
     A file a newer change deleted is not reported.
     """
 
-    root = Path(destination).absolute()
-    documents = _available_change_documents(destination)
+    root = folder.path.absolute()
+    documents = _available_change_documents(folder)
+    if not documents:
+        return {}
+    present = _inventory(folder, excluded_roots={CHANGES_DIRECTORY}).files
     tombstones: set[str] = set()
-    for changed_at, path in reversed(documents):
-        document = _read_change_document(path)
+    for changed_at, location in reversed(documents):
+        document = _read_change_document(folder, location)
         candidates = {*document["inserts"], *document["updates"]}
         tombstones.update(document["deletes"])
         surviving = {
             root / relative: changed_at
             for relative in sorted(candidates - tombstones)
-            if (root / relative).is_file()
+            if relative in present
         }
         if surviving:
             return surviving
@@ -425,71 +469,64 @@ def _change_boundary(bookmark: datetime) -> datetime:
     return bookmark.astimezone(timezone.utc)
 
 
-def _change_documents(destination: str | Path) -> list[tuple[datetime, Path]]:
-    """Every change document beneath the Folder, oldest first.
+def _available_change_documents(
+    folder: FolderFiles,
+) -> list[tuple[datetime, Location]]:
+    """Every change document beneath the Folder, oldest first."""
 
-    Raises :class:`FileNotFoundError` when there is no ``_changes`` directory.
-    """
-
-    changes = Path(destination) / CHANGES_DIRECTORY
+    changes = folder.location / CHANGES_DIRECTORY
+    try:
+        entries = folder.store.list(changes)
+    except StoreNotFoundError:
+        return []
     documents = [
-        (_parse_change_filename(entry.name), entry)
-        for entry in changes.iterdir()
-        if entry.is_file() and entry.suffix == ".json"
+        (_parse_change_filename(entry.name), changes / entry.name)
+        for entry in entries
+        if not entry.is_directory and entry.name.endswith(".json")
     ]
     return sorted(documents, key=lambda item: (item[0], item[1].name))
 
 
-def _available_change_documents(
-    destination: str | Path,
-) -> list[tuple[datetime, Path]]:
-    """Return recorded change history, or empty when none exists."""
-
-    try:
-        return _change_documents(destination)
-    except FileNotFoundError:
-        return []
-
-
 def _change_documents_since(
-    destination: str | Path, boundary: datetime
-) -> list[tuple[datetime, Path]]:
+    folder: FolderFiles, boundary: datetime
+) -> list[tuple[datetime, Location]]:
     """The change documents strictly newer than ``boundary``, oldest first."""
 
     return [
-        entry
-        for entry in _available_change_documents(destination)
-        if entry[0] > boundary
+        entry for entry in _available_change_documents(folder) if entry[0] > boundary
     ]
 
 
-def _collapse_change_events(documents) -> dict[str, tuple[str, datetime]]:
+def _collapse_change_events(folder: FolderFiles, documents):
     latest: dict[str, tuple[str, datetime]] = {}
-    for changed_at, path in documents:
-        document = _read_change_document(path)
+    for changed_at, location in documents:
+        document = _read_change_document(folder, location)
         for operation in ("inserts", "updates", "deletes"):
             for relative in document[operation]:
                 latest[relative] = (operation, changed_at)
     return latest
 
 
-def _read_change_document(path: Path) -> dict[str, tuple[str, ...]]:
+def _read_change_document(
+    folder: FolderFiles, location: Location
+) -> dict[str, tuple[str, ...]]:
+    shown = folder.path / CHANGES_DIRECTORY / location.name
     try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise LoadError(f"cannot read Folder change document {path}: {exc}") from exc
+        raw = json.loads(folder.store.read(location).decode("utf-8"))
+    except (StoreError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise LoadError(f"cannot read Folder change document {shown}: {exc}") from exc
     if not isinstance(raw, dict) or set(raw) != {"inserts", "updates", "deletes"}:
-        raise LoadError(f"Folder change document {path} has an invalid shape")
+        raise LoadError(f"Folder change document {shown} has an invalid shape")
     document: dict[str, tuple[str, ...]] = {}
     for operation in ("inserts", "updates", "deletes"):
         values = raw[operation]
         if not isinstance(values, list):
-            raise LoadError(f"Folder change document {path} has invalid {operation}")
+            raise LoadError(f"Folder change document {shown} has invalid {operation}")
         normalised: list[str] = []
         for value in values:
             if not isinstance(value, str) or not value or not _safe_relative(value):
                 raise LoadError(
-                    f"Folder change document {path} has invalid path {value!r}"
+                    f"Folder change document {shown} has invalid path {value!r}"
                 )
             normalised.append(Path(value).as_posix())
         document[operation] = tuple(normalised)
@@ -565,75 +602,100 @@ def _match_parts(path_parts, pattern_parts) -> bool:
     )
 
 
-def managed_relative_files(root: Path, patterns) -> list[str]:
-    root = Path(root)
-    if not root.is_dir():
-        return []
-    return sorted(
+def managed_relative_files(folder: FolderFiles, patterns) -> list[str]:
+    return [
         relative
-        for relative in _relative_files(root, excluded_roots={CHANGES_DIRECTORY})
+        for relative in _inventory(folder, excluded_roots={CHANGES_DIRECTORY}).files
         if matches_file_key(relative, patterns)
-    )
+    ]
 
 
-def _relative_files(root: Path, *, excluded_roots=frozenset()) -> list[str]:
-    files: list[str] = []
-    for dirpath, dirnames, filenames in os.walk(root):
-        if Path(dirpath) == root:
-            dirnames[:] = [name for name in dirnames if name not in excluded_roots]
-        for name in filenames:
-            full = Path(dirpath) / name
-            files.append(full.relative_to(root).as_posix())
-    return sorted(files)
+# --- the store ---------------------------------------------------------------------
 
 
-def _identical(source: Path, target: Path) -> bool:
-    try:
-        if source.stat().st_size != target.stat().st_size:
+@dataclass(frozen=True)
+class _Inventory:
+    """A folder as its store lists it: files by relative path, and directories."""
+
+    files: dict[str, Any]
+    directories: frozenset[str]
+
+
+def _inventory(folder: FolderFiles, *, excluded_roots=frozenset()) -> _Inventory:
+    files: dict[str, Any] = {}
+    directories: set[str] = set()
+    pending = [(folder.location, "")]
+    while pending:
+        directory, prefix = pending.pop()
+        try:
+            entries = folder.store.list(directory)
+        except StoreNotFoundError:
+            continue
+        for entry in entries:
+            relative = f"{prefix}{entry.name}"
+            if entry.is_directory:
+                if not prefix and entry.name in excluded_roots:
+                    continue
+                directories.add(relative)
+                pending.append((directory / entry.name, f"{relative}/"))
+            else:
+                files[relative] = entry
+    return _Inventory(dict(sorted(files.items())), frozenset(directories))
+
+
+def _identical(
+    staging: FolderFiles, destination: FolderFiles, relative: str, staged, existing
+) -> bool:
+    if staged.size is not None and existing.size is not None:
+        if staged.size != existing.size:
             return False
-    except OSError:
-        return False
-    return filecmp.cmp(source, target, shallow=False)
+    with tempfile.TemporaryDirectory(prefix="weaver-compare-") as scratch:
+        source = Path(scratch) / "staged"
+        target = Path(scratch) / "current"
+        try:
+            staging.store.copy_file_to_local(staging.at(relative), source)
+            destination.store.copy_file_to_local(destination.at(relative), target)
+        except StoreError:
+            return False
+        return filecmp.cmp(source, target, shallow=False)
 
 
-def _safe_replace(source: Path, target: Path) -> None:
-    """Copy into place through a temporary sibling and one atomic rename.
+def _safe_replace(store, source: Location, target: Location) -> None:
+    """Copy into place through a temporary sibling and one move.
 
     Copying straight over the destination would leave a half-written file if
     anything failed mid-copy.
     """
 
-    target.parent.mkdir(parents=True, exist_ok=True)
-    tmp = target.parent / f"{_TMP_PREFIX}{uuid.uuid4().hex}"
-    try:
-        shutil.copyfile(source, tmp)
-        os.replace(tmp, target)
-    finally:
-        if tmp.exists():
-            tmp.unlink()
+    _through_sibling(store, target, lambda tmp: store.copy(source, tmp))
 
 
-def _safe_write_text(target: Path, content: str) -> None:
-    target.parent.mkdir(parents=True, exist_ok=True)
-    tmp = target.parent / f"{_TMP_PREFIX}{uuid.uuid4().hex}"
+def _safe_write_text(store, target: Location, content: str) -> None:
+    _through_sibling(store, target, lambda tmp: store.write(tmp, content.encode()))
+
+
+def _through_sibling(store, target: Location, fill) -> None:
+    tmp = Location(target.value.rsplit("/", 1)[0]) / f"{_TMP_PREFIX}{uuid.uuid4().hex}"
     try:
-        tmp.write_text(content, encoding="utf-8")
-        os.replace(tmp, target)
-    finally:
-        if tmp.exists():
-            tmp.unlink()
+        fill(tmp)
+        store.move(tmp, target)
+    except BaseException:
+        with contextlib.suppress(StoreError):
+            if store.exists(tmp):
+                store.delete(tmp)
+        raise
 
 
 __all__ = [
     "CHANGES_DIRECTORY",
     "adopt_existing_files",
     "CHANGE_DATETIME_FORMAT",
+    "FolderFiles",
     "INTOLERANT_MESSAGE",
     "REJECT_SUFFIX",
-    "RESET_ATTEMPTS",
-    "RESET_PAUSE",
     "TOLERATED_MESSAGE",
     "StagingFolder",
+    "current_files",
     "deleted_since",
     "files_since",
     "latest_files",

@@ -41,7 +41,9 @@ def is_validation_kind(kind: str) -> bool:
 PYTHON = "python"
 SQL = "sql"
 SPARK_SQL = "spark_sql"
-LANGUAGES = frozenset({PYTHON, SQL, SPARK_SQL})
+#: A SemanticModel validation: its query runs against the installed model.
+DAX = "dax"
+LANGUAGES = frozenset({PYTHON, SQL, SPARK_SQL, DAX})
 
 #: Languages whose objects materialise as Delta rather than in a Warehouse.
 #: They declare their shape up front and use the underscored audit spelling.
@@ -452,6 +454,10 @@ class WeaverDocument:
     raw: dict[str, Any] = field(default_factory=dict)
     declared_delta_min_reader_version: int | None = None
     declared_delta_min_writer_version: int | None = None
+    #: A DAX Test's expected side: a logical Warehouse or Lakehouse and the
+    #: query run there.
+    expected_source: str | None = None
+    expected_sql: str | None = None
 
     @property
     def delta_min_reader_version(self) -> int:
@@ -642,6 +648,10 @@ def parse_document(text: str, *, language: str) -> SesDocument:
             raise MetadataError(message)
 
     kind, object_id = _parse_id(loaded)
+    if language == DAX and not is_validation_kind(kind):
+        raise MetadataError(
+            "a DAX file declares a Test ID or an Assumption ID, not a " + kind
+        )
     if is_validation_kind(kind):
         return _parse_validation(
             loaded, kind=kind, language=language, object_id=object_id
@@ -782,7 +792,25 @@ def _parse_validation(
             "declare a Test"
         )
 
+    expected = {key: raw.pop(key) for key in EXPECTED_KEYS if key in raw}
+    if expected and (language != DAX or kind != TEST):
+        raise MetadataError(
+            f"{_listed(sorted(expected))} belong to a SemanticModel DAX Test. "
+            + (
+                "An Assumption has no expected side; remove them"
+                if kind == ASSUMPTION
+                else "Remove them"
+            )
+        )
     _reject_unknown_keys(raw, kind)
+    raw.update(expected)
+    expected_source = expected_sql = None
+    if language == DAX and kind == TEST:
+        expected_source = _parse_expected_source(raw)
+        expected_sql = raw.get("Expected SQL")
+        if not isinstance(expected_sql, str) or not expected_sql.strip():
+            raise MetadataError("a DAX Test must declare Expected SQL")
+        expected_sql = expected_sql.strip()
 
     # No language is required to declare dependencies here, though Spark SQL is
     # on an object. The header means the same either way: declared replaces
@@ -811,7 +839,34 @@ def _parse_validation(
         revision_date_format=revision_format,
         primary_key=primary_key,
         raw=dict(raw),
+        expected_source=expected_source,
+        expected_sql=expected_sql,
     )
+
+
+#: Keys only a SemanticModel DAX Test declares.
+EXPECTED_KEYS = ("Expected source", "Expected SQL")
+
+
+def _parse_expected_source(raw: dict[str, Any]) -> str:
+    from ..errors import IdentityError
+    from .model import WeaverItemId
+
+    value = raw.get("Expected source")
+    if not isinstance(value, str) or not value.strip():
+        raise MetadataError(
+            "a DAX Test must declare Expected source as Warehouse/<item> or "
+            "Lakehouse/<item>"
+        )
+    try:
+        item = WeaverItemId.parse(value.strip())
+    except IdentityError as exc:
+        raise MetadataError(f"Expected source: {exc}") from exc
+    if item.item_type not in {"Warehouse", "Lakehouse"}:
+        raise MetadataError(
+            f"Expected source must be a Warehouse or Lakehouse, got {value!r}"
+        )
+    return str(item)
 
 
 def _parse_id(raw: dict[str, Any]) -> tuple[str, ObjectId]:

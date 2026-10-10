@@ -25,7 +25,7 @@ from weaver import Folder
 
 class LAND__GeneratedEvents(Folder):
     def read(self):
-        existing = sorted(self.path().glob("generated-*.json"))
+        existing = self.current_files("generated-*.json")
         sequence = len(existing) + 1
         with self.staging_folder() as staging:
             (staging.path / f"generated-{sequence:03d}.json").write_text(

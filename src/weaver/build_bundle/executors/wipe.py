@@ -20,7 +20,7 @@ from ...physical_wipe import (
     DetachedShortcuts,
     clear_area,
     detach_shortcuts,
-    released,
+    held,
     unreleased,
 )
 from ...targets import FILES_AREA, TABLES_AREA
@@ -74,10 +74,11 @@ class LakehouseWipeExecutor:
                 "started": time.monotonic(),
             }
         locations = [Location(value) for value in state["locations"]]
-        if released(context.store, locations):
+        reason = held(context.store, locations)
+        if reason is None:
             return {"removed": state["removed"]}
         if time.monotonic() - state["started"] >= NAME_RELEASE_TIMEOUT:
             raise unreleased(
-                DetachedShortcuts(tuple(state["removed"]), tuple(locations))
+                DetachedShortcuts(tuple(state["removed"]), tuple(locations)), reason
             )
         return Waiting(state, NAME_RELEASE_POLL_INTERVAL)

@@ -85,6 +85,7 @@ def test_rebinding_unchanged_source_deploys_before_recertifying(tmp_path, change
         assert result.selection.selected_for_build == (ROOT,)
         assert [method for method, _ in model.calls] == [
             "update_definition",
+            "invalid_measures",
             "get_definition",
         ]
         assert not result.selection.selected_for_drop

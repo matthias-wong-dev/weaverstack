@@ -33,6 +33,7 @@ SESSION_COMMAND_ORDER = (
     "load",
     "test",
     "wipe",
+    "unbind",
     "workflow",
     "health",
 )

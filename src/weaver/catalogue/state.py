@@ -45,6 +45,7 @@ from .tables import (
     RUNTIME_ROLES,
     SCOPE_ITEM_NAME,
     SCOPE_ITEM_TYPE,
+    SEMANTIC_MODEL_TEST,
     SEMANTIC_TABLES,
     TEST_DICTIONARY,
     TEST_STATUS,
@@ -83,6 +84,7 @@ class Catalogue:
         session: Any = None,
         owns_session: bool = False,
         schema_additions=(),
+        schema_removals=(),
     ) -> None:
         self.rows = MappingProxyType(dict(rows))
         self.registered = (
@@ -97,6 +99,7 @@ class Catalogue:
             materialised if materialised is not None else carried
         )
         self.schema_additions = tuple(tuple(pair) for pair in schema_additions)
+        self.schema_removals = tuple(tuple(pair) for pair in schema_removals)
         self._load_history = load_history
         self._writer = writer
         self._session = session
@@ -345,6 +348,11 @@ class Catalogue:
             ],
             "materialised": sorted(self.materialised),
             **(
+                {"schema_removals": list(self.schema_removals)}
+                if self.schema_removals
+                else {}
+            ),
+            **(
                 {"schema_additions": list(self.schema_additions)}
                 if self.schema_additions
                 else {}
@@ -376,6 +384,7 @@ class Catalogue:
             rows=MappingProxyType(rows),
             materialised=frozenset(mapping.get("materialised", ())),
             schema_additions=mapping.get("schema_additions", ()),
+            schema_removals=mapping.get("schema_removals", ()),
             writer=writer,
             session=session,
         )
@@ -410,6 +419,8 @@ class Catalogue:
             }
             if item in repository.semantic_models:
                 declared.add(WeaverDocumentId.model_root(item))
+            if item in repository.reports:
+                declared.add(WeaverDocumentId.report_root(item))
             # Runtime artefacts are derived source declarations and target objects.
             declared.update(
                 artefact.identity
@@ -620,6 +631,7 @@ INTRODUCED_TABLES = frozenset(
         BOOKMARK.name,
         LOAD_STATUS.name,
         TEST_STATUS.name,
+        SEMANTIC_MODEL_TEST.name,
         *(table.name for table in SEMANTIC_TABLES),
     }
 )
@@ -777,7 +789,10 @@ def read_catalogue_state(catalogue: Any, items) -> Catalogue:
     present: set[str] = set()
     missing: set[str] = set()
     incompatible: list[str] = []
+    from .tables import SEMANTIC_MODEL_TABLE, SEMANTIC_TABLES
+
     additions = []
+    removals = []
     for table in CHECKED_TABLES:
         columns = catalogue.columns_of(table)
         if columns is None:
@@ -796,7 +811,19 @@ def read_catalogue_state(catalogue: Any, items) -> Catalogue:
             for folded_name, public in required.items()
             if folded_name not in folded
         )
-        introduced = {"Workspace ID", "Item ID"} if table == INSTALLATION else set()
+        introduced = (
+            {"Workspace ID", "Item ID"}
+            if table == INSTALLATION
+            else {"Table ordinal"}
+            if table == SEMANTIC_MODEL_TABLE
+            else set()
+        )
+        if table in SEMANTIC_TABLES:
+            removals.extend(
+                (table.name, column)
+                for column in ("Schema name", "Object name")
+                if column.casefold() in folded
+            )
         additions.extend(
             (table.name, column) for column in absent_columns if column in introduced
         )
@@ -863,6 +890,7 @@ def read_catalogue_state(catalogue: Any, items) -> Catalogue:
             table.name for table in READ_FOR_BUILD if table.name in present
         ),
         schema_additions=additions,
+        schema_removals=removals,
     )
 
 
@@ -957,11 +985,14 @@ def reconcile_catalogue_state(
         stale: dict[WeaverDocumentId, RegisteredDocument] = {}
         if inventory is not None:
             for identity, document in registered.items():
-                if identity.item != item:
+                if identity.item != item or document.object_role == "source":
                     continue
                 schema_name, object_name = catalogue_columns(identity)
                 expected = state.effective_physical_type(identity)
-                rebound = expected == "semantic_model" and not _same_semantic_binding(
+                rebound = expected in {
+                    "semantic_model",
+                    "report",
+                } and not _same_semantic_binding(
                     tables.get(INSTALLATION.name, ()), inventory
                 )
                 if rebound or not inventory.has_object(
@@ -1002,17 +1033,14 @@ def reconcile_catalogue_state(
                 )
         reconciled[item] = MappingProxyType(filtered)
         stale_labels.extend(str(identity) for identity in stale)
-    retained = {
-        identity: document
-        for identity, document in registered.items()
-        if identity not in {claim.identity for claim in stale_claims}
-    }
+    retained = _registered_documents(reconciled)
     return Reconciliation(
         catalogue=Catalogue(
             rows=MappingProxyType(reconciled),
             registered=retained,
             materialised=state.materialised,
             schema_additions=state.schema_additions,
+            schema_removals=state.schema_removals,
         ),
         stale_claims=tuple(dict.fromkeys(stale_claims)),
         stale_objects=tuple(sorted(stale_labels)),
@@ -1036,6 +1064,8 @@ def _row_identity(
 
     schema = str(row.get("schema_name") or "")
     name = str(row.get("object_name") or "")
+    if object_type in {"report", "source_artifact"}:
+        return WeaverDocumentId.artifact(item, schema, name)
     if object_type == "semantic_model":
         if schema or name:
             raise BuildError(

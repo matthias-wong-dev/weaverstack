@@ -88,3 +88,99 @@ def test_import_default_mode_allows_engine_omission():
     verify_requested({"defaultMode": "import"}, {"model": {"culture": "en-AU"}})
     with pytest.raises(InstallError, match="defaultMode"):
         verify_requested({"defaultMode": "directLake"}, {"model": {}})
+
+
+def sales(**column):
+    return {
+        "tables": [
+            {"name": "Sales", "columns": [{"name": "ProductId", **column}]},
+        ]
+    }
+
+
+@weaver_test()
+def test_fabric_quoting_and_recasing_of_names_is_not_a_difference():
+    requested = {
+        **sales(isHidden=True),
+        "annotations": [{"name": "Weaver.Source", "value": "Warehouse/Serving"}],
+    }
+    actual = {
+        "model": {
+            "tables": [
+                {
+                    "name": "sales",
+                    "columns": [{"name": "'PRODUCTID'", "isHidden": True}],
+                }
+            ],
+            "annotations": [
+                {"name": "'Weaver.Source'", "value": "Warehouse/Serving"},
+                {"name": "PBI_ProTooling", "value": '["WebModelingEdit"]'},
+            ],
+        }
+    }
+    assert verify_requested(requested, actual, owned=("/model",)) == ()
+
+
+@weaver_test()
+def test_an_annotation_fabric_dropped_or_changed_is_reported_not_raised():
+    requested = {
+        "annotations": [
+            {"name": "Note", "value": "Kept"},
+            {"name": "Origin", "value": "Project"},
+        ]
+    }
+    actual = {"model": {"annotations": [{"name": "Origin", "value": "Service"}]}}
+    assert verify_requested(requested, actual, owned=("/model",)) == (
+        "/model/annotations/Note",
+        "/model/annotations/Origin/value",
+    )
+
+
+@weaver_test()
+@pytest.mark.parametrize(
+    "found, outcome",
+    [
+        ("\r\n\t\tSUM(Sales[Amount])  \r\n\t\t+ 1\r\n", ()),
+        ("SUM(Sales[Amount]) + 1", ("/model/tables/Sales/measures/Total/expression",)),
+        ("SUM(Sales[Cost])\n+ 1", None),
+    ],
+    ids=["layout", "whitespace", "value"],
+)
+def test_expression_layout_is_ignored_and_a_changed_value_fails(found, outcome):
+    requested = {
+        "tables": [
+            {
+                "name": "Sales",
+                "measures": [
+                    {"name": "Total", "expression": "SUM(Sales[Amount])\n+ 1"}
+                ],
+            }
+        ]
+    }
+    actual = {"model": deepcopy({"tables": requested["tables"]})}
+    actual["model"]["tables"][0]["measures"][0]["expression"] = found
+    if outcome is None:
+        with pytest.raises(InstallError, match="Total/expression"):
+            verify_requested(requested, actual)
+    else:
+        assert verify_requested(requested, actual) == outcome
+
+
+@weaver_test()
+def test_a_requested_hide_fabric_did_not_keep_fails():
+    with pytest.raises(InstallError, match="ProductId/isHidden"):
+        verify_requested(sales(isHidden=True), {"model": sales()})
+
+
+@weaver_test()
+def test_an_excluded_object_fabric_kept_fails_under_any_quoting():
+    actual = {"model": {"tables": [{"name": "'Sales'", "columns": []}]}}
+    with pytest.raises(InstallError, match="excluded"):
+        verify_requested({}, actual, absent=((("table", "SALES"),),))
+
+
+@weaver_test()
+def test_an_unrequested_object_in_an_owned_model_fails():
+    actual = {"model": {"tables": [{"name": "Sales"}, {"name": "Removed"}]}}
+    with pytest.raises(InstallError, match="/model/tables"):
+        verify_requested({"tables": [{"name": "Sales"}]}, actual, owned=("/model",))

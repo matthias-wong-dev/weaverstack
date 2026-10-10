@@ -9,6 +9,7 @@ from typing import Sequence
 
 from ..catalogue.state import READABLE_TABLES
 from ..catalogue.tables import LOAD_STATUS
+from ..config import CATALOGUE_HINT
 from ..declaration.model import SEMANTIC_MODEL, WeaverItemId
 from ..errors import CommandError, LoadError
 from ..health import assess_load, resolve_as_of
@@ -31,8 +32,10 @@ from ..load_report import (
     LoadRunReport,
     warning,
 )
+from ..selection import name_patterns
 from ..targets import lakehouse_names
 from .items import requested_items, run_context_lines, run_scope
+from .project import Project
 
 #: Kept local to avoid importing ``weaver.run`` eagerly; must match ``LOAD_TASK``.
 TASK_TYPE = "load"
@@ -45,6 +48,7 @@ def load(
     items: str | Sequence[str] | None = None,
     *,
     names: str | Sequence[str] | None = None,
+    source=None,
     workspace: str | None = None,
     catalogue: str | None = None,
     environment: str | None = None,
@@ -62,14 +66,16 @@ def load(
     ``items`` are installed Weaver items, and they are a hard execution boundary:
     with no name filter every loadable object they own runs in dependency order,
     and a dependency never adds an unnamed item. Naming none loads every item the
-    Weaver catalogue records an installation for.
+    Weaver catalogue records an installation for. ``PowerBI`` and
+    ``PowerBI/<project>`` name the semantic models of the project folder at
+    ``source``, which defaults to the current directory or Notebook Resources.
 
-    ``names`` selects installed loadables inside those items. A Lakehouse
-    selector carries its area, ``Tables/Schema.Object`` or
-    ``Files/Schema.Object``; a Warehouse relation has none, and a bare
-    ``Schema.Object`` is accepted where it reaches one object. It is an operator
-    override: only those nodes run, without dependency expansion or dependency
-    ordering.
+    ``names`` are regular expressions, each matched against whole installed
+    names inside those items, ignoring case. A Lakehouse name carries its area,
+    ``Tables/Schema.Object`` or ``Files/Schema.Object``; a Warehouse relation has
+    none, and a bare ``Schema.Object`` is accepted where it reaches one object.
+    Each must match something. It is an operator override: only the matches run,
+    without dependency expansion or dependency ordering.
 
     ``reload`` reconstructs each selected table from zero: its ``_.Bookmark`` row
     is removed, its ``_.LoadStatus`` goes to Pending, its target is emptied, and
@@ -90,7 +96,6 @@ def load(
     """
 
     started = datetime.now(timezone.utc)
-    requested = requested_items(items, what="load")
     selected_names = _load_names(names)
     _refuse_conflicting_modes(stale=stale, reload=reload, as_of=as_of)
     # Before the workspace is resolved, so a malformed instant is refused
@@ -107,6 +112,9 @@ def load(
         workspace_config=workspace_config,
         session=session,
         needs_catalogue=False,
+    )
+    requested = requested_items(
+        items, what="load", project=Project(source, resolved_workspace)
     )
     if not resolved_workspace.catalogue:
         _refuse_without_catalogue(
@@ -153,9 +161,8 @@ def _refuse_without_catalogue(requested, *, names, stale, reload) -> None:
         raise CommandError(
             "Loading "
             + (", ".join(others) or "every installed item")
-            + " needs a Weaver catalogue: pass catalogue='Warehouse/Weaver', or "
-            "give one in workspace configuration. Without one, name the semantic "
-            "models to refresh"
+            + f" needs a Weaver catalogue. {CATALOGUE_HINT}. Without one, name the "
+            "semantic models to refresh"
         )
     if names or stale or reload:
         raise CommandError(
@@ -172,15 +179,11 @@ def uncatalogued_semantic_models(items, *, workspace, session):
     """
 
     from ..catalogue.state import Catalogue
-    from ..targets import physical_item
+    from .items import uncatalogued_target
 
     rows = {}
     for item in items:
-        name = (
-            physical_item(workspace.target_for(item)).name
-            if item in workspace.configured_items
-            else item.item_name
-        )
+        name = uncatalogued_target(workspace, item).name
         model = session.resolve_item(name, item_type=SEMANTIC_MODEL)
         identity = {
             "item_type": item.item_type,
@@ -590,12 +593,9 @@ def _completion_document(report: LoadRunReport, timings=()) -> dict:
 
 
 def _load_names(names: str | Sequence[str] | None) -> tuple[str, ...]:
-    if names is None:
-        return ()
-    values = (names,) if isinstance(names, str) else tuple(names)
-    if not values:
-        raise CommandError("load names= must contain at least one load selector")
-    return tuple(str(value) for value in values)
+    if names is not None and not isinstance(names, str) and not tuple(names):
+        raise CommandError("load names= must contain at least one name")
+    return tuple(text for text, _ in name_patterns(names, error=CommandError))
 
 
 __all__ = ["SUMMARY_STATUSES", "TASK_TYPE", "load", "run_load", "status_counts"]

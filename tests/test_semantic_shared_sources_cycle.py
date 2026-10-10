@@ -248,10 +248,7 @@ def test_shared_source_publishes_managed_table_lineage(tmp_path, monkeypatch):
     ] == [("Sales", "Serving", "Cake", "Sales")]
     model_tables = rows["SemanticModelTable"]
     sales_row = next(r for r in model_tables if r["table_name"] == "Sales")
-    assert (
-        json.loads(sales_row["source_binding"])["reference"]
-        == "Warehouse/Serving/Cake.Sales"
-    )
+    assert sales_row["source_access"] == "sql"
 
 
 @pytest.mark.parametrize(
@@ -273,7 +270,7 @@ def test_configured_data_source_names_a_logical_item(tmp_path, mapping, expected
     item = WeaverItemId.parse("SemanticModel/Reporting")
     folder = tmp_path / str(item)
     folder.mkdir(parents=True)
-    (folder / "extension.tmdl").write_text(
+    (folder / f"{folder.name}.tmdl").write_text(
         'expression DataSource = Sql.Database("server", "Curated")\n\tkind: m\n'
     )
     workspace = Workspace(

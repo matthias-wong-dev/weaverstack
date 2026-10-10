@@ -186,6 +186,33 @@ def test_the_mount_is_made_once_per_session(monkeypatch):
 
 
 @weaver_test()
+def test_files_are_listed_through_notebookutils_rather_than_the_mount(monkeypatch):
+    """A mount's listing can lag a delete made through OneLake; the session's
+    ``notebookutils.fs`` answers from OneLake itself."""
+
+    import weaver.lakehouse as module
+    from weaver.fabric.store import FabricStore
+
+    fs = object()
+    monkeypatch.setattr(module, "_notebook_utils", lambda: type("U", (), {"fs": fs})())
+
+    store = Lakehouse(name="Sales_LH", spark_root="abfss://ws@host/lh").files_store()
+
+    assert isinstance(store, FabricStore)
+    assert store.fs is fs
+
+
+@weaver_test()
+def test_lakehouse_files_outside_fabric_say_why_they_cannot_be_listed(monkeypatch):
+    import weaver.lakehouse as module
+
+    monkeypatch.setattr(module, "_notebook_utils", lambda: None)
+
+    with pytest.raises(LoadError, match="unavailable outside a Fabric session"):
+        Lakehouse(name="Sales_LH", spark_root="abfss://ws@host/lh").files_store()
+
+
+@weaver_test()
 def test_a_onelake_folder_outside_fabric_says_why_it_cannot_be_reached(monkeypatch):
     import weaver.lakehouse as module
 

@@ -21,6 +21,7 @@ from ..catalogue.state import (
     read_catalogue_state,
     reconcile_catalogue_state,
 )
+from ..config import CATALOGUE_HINT
 from ..declaration.model import SEMANTIC_MODEL, WeaverItemId, WeaverRepository
 from ..declaration.repository import parse_item_repository
 from ..errors import BuildError, DiscoveryError
@@ -151,6 +152,11 @@ def catalogue_items_for_build(
         if item in bound
         for reference in contribution.source_references.values()
     )
+    items.update(
+        c.model
+        for item, c in repository.reports.items()
+        if item in bound and c.model is not None
+    )
     return tuple(sorted(items, key=str))
 
 
@@ -158,14 +164,39 @@ def require_catalogue_for(bindings: ItemBindings) -> None:
     """Refuse items that need a catalogue; semantic models build without one."""
 
     others = sorted(
-        str(item) for item in bindings.by_item if item.item_type != SEMANTIC_MODEL
+        str(item)
+        for item in bindings.by_item
+        if item.item_type not in {SEMANTIC_MODEL, "Report"}
     )
     if others or not bindings.entries:
         raise BuildError(
             "Building "
             + (", ".join(others) or "this selection")
-            + " needs a Weaver catalogue: pass catalogue='Warehouse/Weaver', or "
-            "give one in workspace configuration. Semantic models build without one"
+            + f" needs a Weaver catalogue. {CATALOGUE_HINT}. Semantic models build "
+            "without one"
+        )
+
+
+def _require_separate_semantic_build(bindings: ItemBindings) -> None:
+    from ..catalogue.builtin import BUILTIN_ITEM
+
+    powerbi = [
+        str(item)
+        for item in sorted(
+            bindings.by_item,
+            key=lambda item: (item.item_type != SEMANTIC_MODEL, str(item)),
+        )
+        if item.item_type in {SEMANTIC_MODEL, "Report"}
+    ]
+    sources = sorted(
+        str(item)
+        for item in bindings.by_item
+        if item.item_type not in {SEMANTIC_MODEL, "Report"} and item != BUILTIN_ITEM
+    )
+    if powerbi and sources:
+        raise BuildError(
+            "Power BI items must be built as a separate step. Build "
+            f"{', '.join(sources)}, then {', '.join(powerbi)}"
         )
 
 
@@ -175,6 +206,8 @@ def validate_build_request(
     *,
     catalogue_binding: WarehouseBinding | None,
 ) -> tuple[WeaverItemId, ...]:
+    _require_separate_semantic_build(bindings)
+
     if catalogue_binding is None:
         require_catalogue_for(bindings)
     if not bindings.entries:
@@ -222,18 +255,23 @@ def read_build_state(
     catalogued = bool(workspace.catalogue)
     if not catalogued:
         require_catalogue_for(bindings)
+        from ..semantic_models.fragments import source_table
+
         references = sorted(
             str(item)
             for item, contribution in (
                 repository.semantic_models if repository else {}
             ).items()
-            if item in bindings.by_item and contribution.source_references
+            if item in bindings.by_item
+            and any(
+                not source_table(contribution.parts, name).get("partitions")
+                for name in contribution.source_references
+            )
         )
         if references:
             raise BuildError(
                 f"{references[0]} generates tables from managed sources, which needs "
-                "a Weaver catalogue: pass catalogue='Warehouse/Weaver', or give one "
-                "in workspace configuration"
+                f"a Weaver catalogue. {CATALOGUE_HINT}"
             )
 
     # Check occupancy before the slower per-target inventory and Spark reads.
@@ -276,6 +314,47 @@ def read_build_state(
                 workspace=workspace,
                 required=tuple(sorted(required, key=str)),
             )
+    if repository is not None:
+        from ..catalogue.tables import INSTALLATION
+
+        for model in sorted(
+            {
+                c.model
+                for i, c in repository.reports.items()
+                if i in bindings.by_item
+                and c.model is not None
+                and c.model not in bindings.by_item
+            },
+            key=str,
+        ):
+            rows = catalogue.rows.get(model, {}).get(INSTALLATION.name, ())
+            if len(rows) != 1:
+                linked = sorted(
+                    str(i)
+                    for i, c in repository.reports.items()
+                    if i in bindings.by_item and c.model == model
+                )
+                together = " ".join(f"--item {i}" for i in [str(model), *linked])
+                raise BuildError(
+                    f"{', '.join(linked)} uses {model}, which "
+                    + (
+                        "is not installed in the catalogue"
+                        if catalogued
+                        else "has no catalogue record to deploy against"
+                    )
+                    + f". Build them together: {together}"
+                )
+            row = rows[0]
+            resolved = session.resolve_item(
+                row["target_name"], item_type="SemanticModel", workspace=workspace
+            )
+            if (resolved.workspace_id, resolved.id) != (
+                row.get("workspace_id"),
+                row.get("item_id"),
+            ):
+                raise BuildError(
+                    f"{model} binding has changed; rebuild the model first"
+                )
     with session.step("Read target inventories"):
         inventories = read_target_inventories(
             bindings,
@@ -629,6 +708,7 @@ def build_repository_bundle(
     execution: ExecutionIdentity,
     source_store: Store,
     output: Location,
+    warn=None,
 ) -> BuildBundle:
     """Build a bundle without target access or mutation."""
 
@@ -639,6 +719,7 @@ def build_repository_bundle(
         catalogue_binding=catalogue_binding,
         execution=execution,
         source_store=source_store,
+        warn=warn,
     ).build(output=output)
 
 
@@ -759,10 +840,12 @@ def read_target_inventories(
                         WarehouseTarget.parse(target.item_id), workspace=workspace
                     )
                 inventories[binding.item] = read_warehouse_inventory(target, sql=sql)
-        elif target.kind == SEMANTIC_MODEL_TARGET:
+        elif target.kind in {SEMANTIC_MODEL_TARGET, "report"}:
             with session.substep(f"Resolve {target.display}"):
                 resolved = session.resolve_item(
-                    target.name, item_type="SemanticModel", workspace=workspace
+                    target.name,
+                    item_type="Report" if target.kind == "report" else "SemanticModel",
+                    workspace=workspace,
                 )
                 inventories[binding.item] = TargetInventory(
                     target.id,

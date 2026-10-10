@@ -1,0 +1,96 @@
+"""Delete a catalogue's claims for explicitly named physical targets."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+from ..declaration.model import LAKEHOUSE, SEMANTIC_MODEL, WAREHOUSE
+from ..targets import ItemRef
+from .reader import read_table
+from .reconcile import prune_installation
+from .render import InstallationScope, InstallationScopes, render_delete_scope
+from .tables import CURRENT_STATE_TABLES, INSTALLATION, REGISTRY
+
+
+@dataclass(frozen=True)
+class ClaimDeletion:
+    targets: tuple[str, ...]
+    logical_items: tuple[str, ...]
+    statements: tuple[str, ...]
+    before_reset: tuple[str, ...] = ()
+
+    def to_mapping(self) -> dict[str, object]:
+        return {
+            "targets": list(self.targets),
+            "logical_items": list(self.logical_items),
+            "statements": len(self.statements),
+        }
+
+
+def plan_claim_deletion(
+    catalogue,
+    *,
+    lakehouses=(),
+    warehouses=(),
+    semantic_models=(),
+) -> ClaimDeletion:
+    """Render complete catalogue deletion without inspecting physical targets."""
+
+    selected = (
+        {(LAKEHOUSE, ItemRef.parse(value).name) for value in lakehouses}
+        | {(WAREHOUSE, ItemRef.parse(value).name) for value in warehouses}
+        | {(SEMANTIC_MODEL, ItemRef.parse(value).name) for value in semantic_models}
+    )
+    rows = read_table(catalogue, INSTALLATION)
+    scopes = sorted(
+        {
+            InstallationScope(str(row["item_type"]), str(row["item_name"]))
+            for row in rows
+            if (str(row["item_type"]), str(row["target_name"])) in selected
+        },
+        key=str,
+    )
+    # One pass over the tables for every selected installation, rather than one
+    # pass per installation: a DELETE costs a transaction whether it removes one
+    # row or all of them, so the statement count is the cost.
+    statements = prune_installation(InstallationScopes(tuple(scopes))) if scopes else ()
+    semantic_scopes = tuple(
+        scope for scope in scopes if scope.item_type == SEMANTIC_MODEL
+    )
+    current = (
+        tuple(
+            render_delete_scope(table, scope=InstallationScopes(semantic_scopes))
+            for table in CURRENT_STATE_TABLES
+        )
+        if semantic_scopes
+        else ()
+    )
+    statements = (*statements[:1], *current, *statements[1:])
+    targets = tuple(f"{item_type}/{name}" for item_type, name in sorted(selected))
+    return ClaimDeletion(
+        targets=targets,
+        logical_items=tuple(map(str, scopes)),
+        statements=statements,
+        before_reset=(
+            render_delete_scope(REGISTRY, scope=InstallationScopes(semantic_scopes)),
+            *current,
+        )
+        if semantic_scopes
+        else (),
+    )
+
+
+def unbind_targets(
+    catalogue, *, lakehouses=(), warehouses=(), semantic_models=()
+) -> ClaimDeletion:
+    """Execute target-directed catalogue deletion and touch no physical target."""
+
+    result = plan_claim_deletion(
+        catalogue,
+        lakehouses=lakehouses,
+        warehouses=warehouses,
+        semantic_models=semantic_models,
+    )
+    for statement in result.statements:
+        catalogue.execute(statement)
+    return result
