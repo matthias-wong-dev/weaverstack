@@ -1,16 +1,16 @@
 {
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.0.0/schema.json",
-  "name": "details",
+  "name": "explore",
   "position": {
-    "x": 948,
-    "y": 84,
-    "z": 7,
-    "height": 624,
-    "width": 316,
-    "tabOrder": 7
+    "x": 0,
+    "y": 0,
+    "z": 0,
+    "height": 720,
+    "width": 1280,
+    "tabOrder": 0
   },
   "visual": {
-    "visualType": "htmlContent443BE3AD55E043BF878BED274D3A6865",
+    "visualType": "htmlContent443BE3AD55E043BF878BED274D3A6855",
     "query": {
       "queryState": {
         "content": {
@@ -20,14 +20,14 @@
                 "Measure": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Browser"
+                      "Entity": "Dashboard measures"
                     }
                   },
-                  "Property": "Focus details"
+                  "Property": "Explore page"
                 }
               },
-              "queryRef": "Browser.Focus details",
-              "nativeQueryRef": "Focus details"
+              "queryRef": "Dashboard measures.Explore page",
+              "nativeQueryRef": "Explore page"
             }
           ]
         }

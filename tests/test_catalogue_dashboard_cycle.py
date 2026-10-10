@@ -14,10 +14,12 @@ from weaver.catalogue_dashboard import (
     DASHBOARD_ITEMS,
     DASHBOARD_MODEL,
     DASHBOARD_REPORT,
+    renderer_literal,
 )
 from weaver.declaration.repository import parse_item_repository
 from weaver.errors import DiscoveryError
 from weaver.fabric.resolution import FabricResolver
+from weaver.fragments import fragment_files
 from weaver.locations import Location
 from weaver.semantic_models.definition import decode_parts, encode_definition
 from weaver.semantic_models.objects import TmdlDefinition
@@ -25,24 +27,25 @@ from weaver.sessions import TestSession
 from weaver.store import FilesystemStore
 from weaver.workspaces import Workspace
 
-HTML_CONTENT_SECURE = "htmlContent443BE3AD55E043BF878BED274D3A6865"
+HTML_CONTENT = "htmlContent443BE3AD55E043BF878BED274D3A6855"
+#: Every measure lives here. Analysis Services reserves the name Measures.
+MEASURE_TABLE = "Dashboard measures"
 
 #: Every catalogue table the model reads, by model table.
 SOURCES = {
-    "GraphNode": "GraphNode",
-    "GraphEdge": "GraphEdge",
-    "Focus": "GraphNode",
-    "LoadStatus": "LoadStatus",
+    "Graph node": "GraphNode",
+    "Graph edge": "GraphEdge",
+    "Load status": "LoadStatus",
     "Log": "Log",
-    "LoadStatistic": "LoadStatistic",
-    "TestStatus": "TestStatus",
-    "TestDictionary": "TestDictionary",
-    "TableDictionary": "TableDictionary",
-    "ColumnDictionary": "ColumnDictionary",
-    "SemanticModelTable": "SemanticModelTable",
-    "SemanticModelRelationship": "SemanticModelRelationship",
-    "KeyDictionary": "KeyDictionary",
-    "ForeignKeyDictionary": "ForeignKeyDictionary",
+    "Load statistic": "LoadStatistic",
+    "Test status": "TestStatus",
+    "Test dictionary": "TestDictionary",
+    "Table dictionary": "TableDictionary",
+    "Column dictionary": "ColumnDictionary",
+    "Semantic model table": "SemanticModelTable",
+    "Semantic model relationship": "SemanticModelRelationship",
+    "Key dictionary": "KeyDictionary",
+    "Foreign key dictionary": "ForeignKeyDictionary",
 }
 
 #: Every measure, by display folder.
@@ -55,15 +58,15 @@ MEASURES = {
         "Latest settled completion",
         "Observed at",
     },
-    "Overview": {"Health tiles", "Findings", "Observed at line"},
-    "Graph": {
-        "Focus node",
-        "Upstream hops",
-        "Downstream hops",
-        "Graph SVG",
-        "Focus details",
-    },
-    "Live run": {"Run timeline", "Readiness SVG"},
+    "Data": {"Graph data", "Run data", "Health data"},
+    "Pages": {"Renderer", "Overview page", "Explore page", "Live run page"},
+}
+
+#: The page measure each Report page shows.
+PAGES = {
+    "overview": "Overview page",
+    "explore": "Explore page",
+    "liveRun": "Live run page",
 }
 
 
@@ -141,15 +144,18 @@ def test_a_projects_own_dashboard_is_refused_rather_than_replaced(tmp_path, auth
 
 
 @weaver_test()
-def test_the_model_declares_its_measures_in_display_folders(tmp_path):
-    found = measures(dashboard_model(tmp_path).parts)
+def test_every_measure_lives_in_one_measure_table_by_display_folder(tmp_path):
+    model = dashboard_model(tmp_path)
+    found = measures(model.parts)
 
     assert {
         folder: {name for name, (_, f, _) in found.items() if f == folder}
         for folder in MEASURES
     } == MEASURES
     assert set(found) == set().union(*MEASURES.values())
-    assert {table for table, _, _ in found.values()} == {"Browser"}
+    assert {table for table, _, _ in found.values()} == {MEASURE_TABLE}
+    table = TmdlDefinition(model.parts).model.tables[MEASURE_TABLE]
+    assert "Weaver.MeasureTable" in [a.name for a in table.annotations]
 
 
 @weaver_test()
@@ -159,6 +165,8 @@ def test_the_measures_quote_every_table_and_avoid_reserved_names(tmp_path):
     model = dashboard_model(tmp_path)
     tables = {table.name for table in TmdlDefinition(model.parts).model.tables}
     for name, (_, _, expression) in measures(model.parts).items():
+        if name == "Renderer":
+            continue
         assert not re.search(r"\bVAR\s+rows\b", expression, re.IGNORECASE), name
         for table in tables:
             unquoted = re.search(rf"(?<!['\w]){re.escape(table)}\[", expression)
@@ -166,60 +174,50 @@ def test_the_measures_quote_every_table_and_avoid_reserved_names(tmp_path):
 
 
 @weaver_test()
-def test_the_graph_window_is_bounded_before_any_svg_is_built(tmp_path):
-    expression = measures(dashboard_model(tmp_path).parts)["Graph SVG"][2]
+def test_the_renderer_reaches_the_model_as_one_string_literal(tmp_path):
+    files = fragment_files("dashboard")
+    css, script = (files[name].decode() for name in ("dashboard.css", "dashboard.js"))
+    expression = measures(dashboard_model(tmp_path).parts)["Renderer"][2].strip()
 
-    # Twelve unrolled hops each way, and Max means twelve.
-    assert len(re.findall(r"VAR _u\d+ = ", expression)) == 12
-    assert len(re.findall(r"VAR _d\d+ = ", expression)) == 12
-    assert "IF(_upPick < 0, 12, _upPick)" in expression
-    # The budget applies to the reach before the first fragment of SVG.
-    nodes = expression.index("TOPN(150, _ranked")
-    edges = expression.index("TOPN(450, _edgeAll")
-    assert max(nodes, edges) < expression.index("<svg")
+    assert expression.startswith('"<style>') and expression.endswith('</script>"')
+    inner = expression[1:-1]
+    assert '"' not in inner.replace('""', "")
+    html = inner.replace('""', '"')
+    assert html.count("</script>") == 1 and html.count("</style>") == 1
+    assert "function windowAround(" in html and "--surface:" in html
+    with pytest.raises(AssertionError, match="</script"):
+        renderer_literal(css, script + "\n'</script>'")
 
 
 @weaver_test()
-def test_the_report_uses_html_content_secure_and_native_slicers(tmp_path):
+def test_each_page_shows_one_html_content_visual_over_its_page_measure(tmp_path):
     repository = parse(project(tmp_path))
     parts = repository.reports[DASHBOARD_REPORT].parts
-    names = set(measures(repository.semantic_models[DASHBOARD_MODEL].parts))
+    names = measures(repository.semantic_models[DASHBOARD_MODEL].parts)
 
     report = json.loads(parts["definition/report.json"])
-    assert report["publicCustomVisuals"] == [HTML_CONTENT_SECURE]
+    assert report["publicCustomVisuals"] == [HTML_CONTENT]
     pages = json.loads(parts["definition/pages/pages.json"])
-    assert pages["pageOrder"] == ["overview", "explore", "liveRun"]
-
-    visuals = {}
-    for path, content in parts.items():
-        match = re.fullmatch(r"definition/pages/(\w+)/visuals/(\w+)/visual\.json", path)
-        if match:
-            visuals[match.groups()] = json.loads(content)
-    assert {visual["visual"]["visualType"] for visual in visuals.values()} == {
-        HTML_CONTENT_SECURE,
-        "slicer",
-    }
-    for (page, name), visual in visuals.items():
-        state = visual["visual"]["query"]["queryState"]
-        if visual["visual"]["visualType"] == HTML_CONTENT_SECURE:
-            (projection,) = state["content"]["projections"]
-            assert projection["field"]["Measure"]["Property"] in names
-    focus = {
-        page: visual
-        for (page, name), visual in visuals.items()
-        if visual["visual"]["visualType"] == "slicer"
-        and visual["visual"]["query"]["queryState"]["Values"]["projections"][0][
-            "field"
-        ]["Column"]["Expression"]["SourceRef"]["Entity"]
-        == "Focus"
-    }
-    assert set(focus) == {"explore", "liveRun"}
-    assert {v["visual"]["syncGroup"]["groupName"] for v in focus.values()} == {"Focus"}
-    assert all("Is internal" in json.dumps(v["filterConfig"]) for v in focus.values())
-
-    for page, refreshes in (("overview", True), ("explore", False), ("liveRun", True)):
+    assert pages["pageOrder"] == list(PAGES)
+    for page, measure in PAGES.items():
+        visuals = [
+            json.loads(content)
+            for path, content in parts.items()
+            if re.fullmatch(rf"definition/pages/{page}/visuals/\w+/visual\.json", path)
+        ]
+        (visual,) = visuals
+        assert visual["visual"]["visualType"] == HTML_CONTENT
+        (projection,) = visual["visual"]["query"]["queryState"]["content"][
+            "projections"
+        ]
+        field = projection["field"]["Measure"]
+        assert field["Expression"]["SourceRef"]["Entity"] == MEASURE_TABLE
+        assert field["Property"] == measure and measure in names
+        # Data first, then the renderer that reads it.
+        expression = names[measure][2]
+        assert expression.index("window.__WD_DATA") < expression.index("[Renderer]")
         settings = json.loads(parts[f"definition/pages/{page}/page.json"])
-        assert ("pageRefresh" in settings.get("objects", {})) is refreshes
+        assert ("pageRefresh" in settings.get("objects", {})) is (page != "explore")
 
 
 @weaver_test()
@@ -273,10 +271,13 @@ def test_build_compiles_and_deploys_the_dashboard_through_the_power_bi_step(tmp_
     calls = [method for method, _ in model.calls]
     assert calls[:3] == ["update_definition", "refresh", "invalid_measures"]
     submitted = decode_parts(model.calls[0][1]["definition"])
-    node = submitted["definition/tables/GraphNode.tmdl"].decode()
+    node = submitted["definition/tables/Graph%20node.tmdl"].decode()
     assert "mode: directLake" in node
     assert "entityName: GraphNode" in node and "schemaName: _" in node
-    assert "column 'Node ID'" in node
+    definition = TmdlDefinition(submitted).model
+    columns = definition.tables["Graph node"].columns
+    assert columns["Signature"].isHidden and columns["Node ID"].isHidden
+    assert not columns["Label"].isHidden
     assert set(measures(submitted)) == set().union(*MEASURES.values())
     assert report.calls == ["update", "read"]
     assert not session.spark_sql and not session.python

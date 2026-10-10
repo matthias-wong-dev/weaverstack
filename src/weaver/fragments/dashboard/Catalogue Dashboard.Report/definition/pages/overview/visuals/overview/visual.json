@@ -1,16 +1,16 @@
 {
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.0.0/schema.json",
-  "name": "readiness",
+  "name": "overview",
   "position": {
-    "x": 628,
-    "y": 84,
-    "z": 5,
-    "height": 592,
-    "width": 636,
-    "tabOrder": 5
+    "x": 0,
+    "y": 0,
+    "z": 0,
+    "height": 720,
+    "width": 1280,
+    "tabOrder": 0
   },
   "visual": {
-    "visualType": "htmlContent443BE3AD55E043BF878BED274D3A6865",
+    "visualType": "htmlContent443BE3AD55E043BF878BED274D3A6855",
     "query": {
       "queryState": {
         "content": {
@@ -20,14 +20,14 @@
                 "Measure": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Browser"
+                      "Entity": "Dashboard measures"
                     }
                   },
-                  "Property": "Readiness SVG"
+                  "Property": "Overview page"
                 }
               },
-              "queryRef": "Browser.Readiness SVG",
-              "nativeQueryRef": "Readiness SVG"
+              "queryRef": "Dashboard measures.Overview page",
+              "nativeQueryRef": "Overview page"
             }
           ]
         }

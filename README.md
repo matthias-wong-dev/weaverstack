@@ -168,11 +168,12 @@ catalogue_dashboard: Catalogue Dashboard
 ```
 
 `weaver build --item PowerBI` builds them with the project's own Power BI
-items. The Report shows estate health, the lineage around a chosen object and
-the latest run. It renders with the certified HTML Content (Secure) visual and
-filters with native slicers. Its live pages refresh every 30 seconds, or at
-the capacity's minimum interval when that is longer. A project's own
-`Catalogue Dashboard` model or Report is refused while the key is set.
+items. The Report shows estate health, the lineage around a searched object
+and the latest run. It renders in the HTML Content visual, so the tenant must
+allow that custom visual and its scripts. Its Overview and Live run pages
+refresh every 30 seconds, or at the capacity's minimum interval when that is
+longer. A project's own `Catalogue Dashboard` model or Report is refused while
+the key is set.
 
 ### Shared data sources
 

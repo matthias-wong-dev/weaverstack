@@ -399,9 +399,12 @@ def _dashboard_part(authored: RepositoryPart) -> RepositoryPart:
     builds through the ordinary semantic and Report pipelines.
     """
 
-    from ..catalogue_dashboard import DASHBOARD, DASHBOARD_ITEMS, DASHBOARD_PROJECT
-    from ..fragments import DASHBOARD as FRAGMENT
-    from ..fragments import fragment_files
+    from ..catalogue_dashboard import (
+        DASHBOARD,
+        DASHBOARD_ITEMS,
+        DASHBOARD_PROJECT,
+        dashboard_files,
+    )
     from ..powerbi import discover_projects, read_reports
     from ..semantic_models.composition import read_project_models
 
@@ -422,9 +425,9 @@ def _dashboard_part(authored: RepositoryPart) -> RepositoryPart:
         )
     files = {
         f"{DASHBOARD_PROJECT}/{relative}": data
-        for relative, data in fragment_files(FRAGMENT).items()
+        for relative, data in dashboard_files().items()
     }
-    root = Location(f"weaver/fragments/{FRAGMENT}")
+    root = Location("weaver/fragments/dashboard")
     store = _PackageFiles(root, files)
     projects = discover_projects(files)
     (project,) = projects.values()

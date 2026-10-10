@@ -1,154 +1,89 @@
-/// Every installed node, as the graph draws it.
-table GraphNode
+model Model
+    annotation 'Weaver.AutoHideColumns' = ```
+            Signature
+            Search text
+            Is internal
+            * SK
+            Details
+            Node ID
+            Downstream node ID
+            Upstream node ID
+            Through node ID
+            Description reference
+            Lineage reference
+            ```
+
+/// Every installed node of the graph.
+table 'Graph node'
     annotation 'Weaver.Source' = Warehouse/_weaver/_.GraphNode
 
-/// Every installed edge between nodes.
-table GraphEdge
+/// Every installed edge of the graph.
+table 'Graph edge'
     annotation 'Weaver.Source' = Warehouse/_weaver/_.GraphEdge
 
-/// The installed nodes again, for picking the focus without filtering the graph.
-table Focus
-    annotation 'Weaver.Source' = Warehouse/_weaver/_.GraphNode
-
-table LoadStatus
+table 'Load status'
     annotation 'Weaver.Source' = Warehouse/_weaver/_.LoadStatus
 
-table Log
+table 'Log'
     annotation 'Weaver.Source' = Warehouse/_weaver/_.Log
 
-table LoadStatistic
+table 'Load statistic'
     annotation 'Weaver.Source' = Warehouse/_weaver/_.LoadStatistic
 
-table TestStatus
+table 'Test status'
     annotation 'Weaver.Source' = Warehouse/_weaver/_.TestStatus
 
-table TestDictionary
+table 'Test dictionary'
     annotation 'Weaver.Source' = Warehouse/_weaver/_.TestDictionary
 
-table TableDictionary
+table 'Table dictionary'
     annotation 'Weaver.Source' = Warehouse/_weaver/_.TableDictionary
 
-table ColumnDictionary
+table 'Column dictionary'
     annotation 'Weaver.Source' = Warehouse/_weaver/_.ColumnDictionary
 
-table SemanticModelTable
+table 'Semantic model table'
     annotation 'Weaver.Source' = Warehouse/_weaver/_.SemanticModelTable
 
-table SemanticModelRelationship
+table 'Semantic model relationship'
     annotation 'Weaver.Source' = Warehouse/_weaver/_.SemanticModelRelationship
 
-table KeyDictionary
+table 'Key dictionary'
     annotation 'Weaver.Source' = Warehouse/_weaver/_.KeyDictionary
 
-table ForeignKeyDictionary
+table 'Foreign key dictionary'
     annotation 'Weaver.Source' = Warehouse/_weaver/_.ForeignKeyDictionary
 
-table 'Upstream depth'
-    partition 'Upstream depth' = calculated
-        source = DATATABLE("Depth", STRING, "Hops", INTEGER, "Order", INTEGER, {{"0", 0, 0}, {"1", 1, 1}, {"2", 2, 2}, {"Max", -1, 3}})
-
-    column Depth
-        dataType: string
-        isNameInferred
-        sourceColumn: [Depth]
-        sortByColumn: Order
-
-    column Hops
-        dataType: int64
-        isNameInferred
-        isHidden
-        sourceColumn: [Hops]
-
-    column Order
-        dataType: int64
-        isNameInferred
-        isHidden
-        sourceColumn: [Order]
-
-table 'Downstream depth'
-    partition 'Downstream depth' = calculated
-        source = DATATABLE("Depth", STRING, "Hops", INTEGER, "Order", INTEGER, {{"0", 0, 0}, {"1", 1, 1}, {"2", 2, 2}, {"Max", -1, 3}})
-
-    column Depth
-        dataType: string
-        isNameInferred
-        sourceColumn: [Depth]
-        sortByColumn: Order
-
-    column Hops
-        dataType: int64
-        isNameInferred
-        isHidden
-        sourceColumn: [Hops]
-
-    column Order
-        dataType: int64
-        isNameInferred
-        isHidden
-        sourceColumn: [Order]
-
-table Status
-    partition Status = calculated
-        source = DATATABLE("Status", STRING, "Order", INTEGER, {{"Succeeded", 1}, {"Failed", 2}, {"Error", 3}, {"Blocked", 4}, {"Rejected", 5}, {"Skipped", 6}, {"Pending", 7}, {"No status", 8}})
-
-    column Status
-        dataType: string
-        isNameInferred
-        sourceColumn: [Status]
-        sortByColumn: Order
-
-    column Order
-        dataType: int64
-        isNameInferred
-        isHidden
-        sourceColumn: [Order]
-
-table 'Graph colouring'
-    isHidden
-    partition 'Graph colouring' = calculated
-        source = DATATABLE("Colouring", STRING, {{"Status"}, {"Readiness"}})
-
-    column Colouring
-        dataType: string
-        isNameInferred
-        sourceColumn: [Colouring]
-
-table Browser
-    partition Browser = calculated
-        source = ROW("Value", BLANK())
-
-    column Value
-        dataType: string
-        isNameInferred
-        isHidden
-        sourceColumn: [Value]
+/// Every measure of the Catalogue Dashboard.
+table 'Dashboard measures'
+    annotation 'Weaver.MeasureTable' = true
 
     /// Tests and Assumptions whose latest result is not Succeeded.
-    measure 'Red tests' = CALCULATE(COUNTROWS('TestStatus'), 'TestStatus'[Result] <> "Succeeded") + 0
+    measure 'Red tests' = CALCULATE(COUNTROWS('Test status'), 'Test status'[Result] <> "Succeeded") + 0
         formatString: #,##0
         displayFolder: Health
 
     /// Objects whose latest load Failed, raised an Error or was Blocked.
-    measure 'Failed loads' = CALCULATE(COUNTROWS('LoadStatus'), 'LoadStatus'[Result] IN {"Failed", "Error", "Blocked"}) + 0
+    measure 'Failed loads' = CALCULATE(COUNTROWS('Load status'), 'Load status'[Result] IN {"Failed", "Error", "Blocked"}) + 0
         formatString: #,##0
         displayFolder: Health
 
     /// Objects rebuilt and not loaded since.
-    measure 'Pending loads' = CALCULATE(COUNTROWS('LoadStatus'), 'LoadStatus'[Result] = "Pending") + 0
+    measure 'Pending loads' = CALCULATE(COUNTROWS('Load status'), 'Load status'[Result] = "Pending") + 0
         formatString: #,##0
         displayFolder: Health
 
     /// Loaded objects, Views aside, whose latest success is more than 24 hours old.
     measure 'Stale loads' = ```
         VAR _old = CALCULATETABLE(
-            SUMMARIZE('LoadStatus', 'LoadStatus'[Item type], 'LoadStatus'[Item name], 'LoadStatus'[Schema name], 'LoadStatus'[Object name]),
-            'LoadStatus'[Result] = "Succeeded",
-            'LoadStatus'[Completed datetime] < UTCNOW() - 1
+            SUMMARIZE('Load status', 'Load status'[Item type], 'Load status'[Item name], 'Load status'[Schema name], 'Load status'[Object name]),
+            'Load status'[Result] = "Succeeded",
+            'Load status'[Completed datetime] < UTCNOW() - 1
         )
         VAR _views = CALCULATETABLE(
-            SUMMARIZE('TableDictionary', 'TableDictionary'[Item type], 'TableDictionary'[Item name], 'TableDictionary'[Schema name], 'TableDictionary'[Object name]),
-            REMOVEFILTERS('TableDictionary'),
-            'TableDictionary'[Object type] = "view"
+            SUMMARIZE('Table dictionary', 'Table dictionary'[Item type], 'Table dictionary'[Item name], 'Table dictionary'[Schema name], 'Table dictionary'[Object name]),
+            REMOVEFILTERS('Table dictionary'),
+            'Table dictionary'[Object type] = "view"
         )
         RETURN COUNTROWS(EXCEPT(_old, _views)) + 0
         ```
@@ -158,734 +93,104 @@ table Browser
     /// When the latest load or test settled, in UTC.
     measure 'Latest settled completion' = ```
         MAX(
-            CALCULATE(MAX('LoadStatus'[Completed datetime]), 'LoadStatus'[Result] <> "Pending"),
-            CALCULATE(MAX('TestStatus'[Completed datetime]), 'TestStatus'[Result] <> "Pending")
+            CALCULATE(MAX('Load status'[Completed datetime]), 'Load status'[Result] <> "Pending"),
+            CALCULATE(MAX('Test status'[Completed datetime]), 'Test status'[Result] <> "Pending")
         )
         ```
         formatString: yyyy-mm-dd hh:nn:ss
         displayFolder: Health
 
-    /// When the model answered this query, in UTC.
+    /// When the model answered, in UTC.
     measure 'Observed at' = UTCNOW()
         formatString: yyyy-mm-dd hh:nn:ss
         displayFolder: Health
 
-    /// The health counts as HTML tiles.
-    measure 'Health tiles' = ```
-        VAR _red = [Red tests]
-        VAR _failed = [Failed loads]
-        VAR _pending = [Pending loads]
-        VAR _stale = [Stale loads]
-        VAR _latest = [Latest settled completion]
-        RETURN
-            "<div style='font-family:Segoe UI, Helvetica, Arial, sans-serif;display:flex;flex-wrap:wrap;gap:12px'>"
-            & "<div style='flex:1 1 160px;min-width:150px;background:#F8FAFC;border:1px solid #E2E8F0;border-top:4px solid " & SWITCH(IF(_red > 0, "bad", "ok"), "ok", "#2F9E6B", "bad", "#D14343", "warn", "#DD6B20", "wait", "#C08A12", "#8B95A7") & ";border-radius:10px;padding:12px 14px'>" & "<div style='font-size:12px;color:#64748B'>Red tests</div>" & "<div style='font-size:30px;font-weight:600;color:#1F2937;line-height:1.25'>" & FORMAT(_red, "#,##0") & "</div>" & "<div style='font-size:11px;color:#64748B'>latest result is not Succeeded</div></div>" & "<div style='flex:1 1 160px;min-width:150px;background:#F8FAFC;border:1px solid #E2E8F0;border-top:4px solid " & SWITCH(IF(_failed > 0, "bad", "ok"), "ok", "#2F9E6B", "bad", "#D14343", "warn", "#DD6B20", "wait", "#C08A12", "#8B95A7") & ";border-radius:10px;padding:12px 14px'>" & "<div style='font-size:12px;color:#64748B'>Failed loads</div>" & "<div style='font-size:30px;font-weight:600;color:#1F2937;line-height:1.25'>" & FORMAT(_failed, "#,##0") & "</div>" & "<div style='font-size:11px;color:#64748B'>Failed, Error or Blocked</div></div>" & "<div style='flex:1 1 160px;min-width:150px;background:#F8FAFC;border:1px solid #E2E8F0;border-top:4px solid " & SWITCH(IF(_pending > 0, "wait", "ok"), "ok", "#2F9E6B", "bad", "#D14343", "warn", "#DD6B20", "wait", "#C08A12", "#8B95A7") & ";border-radius:10px;padding:12px 14px'>" & "<div style='font-size:12px;color:#64748B'>Pending loads</div>" & "<div style='font-size:30px;font-weight:600;color:#1F2937;line-height:1.25'>" & FORMAT(_pending, "#,##0") & "</div>" & "<div style='font-size:11px;color:#64748B'>rebuilt and not loaded since</div></div>" & "<div style='flex:1 1 160px;min-width:150px;background:#F8FAFC;border:1px solid #E2E8F0;border-top:4px solid " & SWITCH(IF(_stale > 0, "warn", "ok"), "ok", "#2F9E6B", "bad", "#D14343", "warn", "#DD6B20", "wait", "#C08A12", "#8B95A7") & ";border-radius:10px;padding:12px 14px'>" & "<div style='font-size:12px;color:#64748B'>Stale loads</div>" & "<div style='font-size:30px;font-weight:600;color:#1F2937;line-height:1.25'>" & FORMAT(_stale, "#,##0") & "</div>" & "<div style='font-size:11px;color:#64748B'>no success in over 24 hours</div></div>" & "<div style='flex:1 1 160px;min-width:150px;background:#F8FAFC;border:1px solid #E2E8F0;border-top:4px solid " & SWITCH("none", "ok", "#2F9E6B", "bad", "#D14343", "warn", "#DD6B20", "wait", "#C08A12", "#8B95A7") & ";border-radius:10px;padding:12px 14px'>" & "<div style='font-size:12px;color:#64748B'>Latest settled</div>" & "<div style='font-size:30px;font-weight:600;color:#1F2937;line-height:1.25'>" & IF(ISBLANK(_latest), "none", FORMAT(_latest, "hh:nn:ss")) & "</div>" & "<div style='font-size:11px;color:#64748B'>" & IF(ISBLANK(_latest), "no load or test has settled", FORMAT(_latest, "yyyy-mm-dd") & " UTC") & "</div></div>"
-            & "</div>"
-        ```
-        displayFolder: Overview
-
-    /// Failed, stale and pending work, most severe first, as an HTML table.
-    measure 'Findings' = ```
-        VAR _now = UTCNOW()
-        VAR _views = CALCULATETABLE(
-            SUMMARIZE('TableDictionary', 'TableDictionary'[Item type], 'TableDictionary'[Item name], 'TableDictionary'[Schema name], 'TableDictionary'[Object name]),
-            REMOVEFILTERS('TableDictionary'),
-            'TableDictionary'[Object type] = "view"
+    /// Nodes, edges, statuses, load statistics and described columns, as JSON.
+    measure 'Graph data' = ```
+        VAR _internal = CALCULATETABLE(VALUES('Graph node'[Node ID]), REMOVEFILTERS('Graph node'), 'Graph node'[Is internal] = TRUE())
+        VAR _nodes = FILTER('Graph node', 'Graph node'[Is internal] = FALSE())
+        VAR _ids = SELECTCOLUMNS(_nodes, "@id", 'Graph node'[Node ID])
+        VAR _edges = FILTER(
+            ALL('Graph edge'[Downstream node ID], 'Graph edge'[Upstream node ID], 'Graph edge'[Edge kind]),
+            'Graph edge'[Downstream node ID] IN _ids && NOT ('Graph edge'[Upstream node ID] IN _internal)
         )
-        VAR _loads = ADDCOLUMNS(
-            SELECTCOLUMNS(ALL('LoadStatus'), "@it", 'LoadStatus'[Item type] & "", "@in", 'LoadStatus'[Item name] & "", "@sch", 'LoadStatus'[Schema name] & "", "@obj", 'LoadStatus'[Object name] & "", "@result", 'LoadStatus'[Result] & "", "@at", 'LoadStatus'[Completed datetime], "@what", "Load", "@failures", BLANK()),
-            "@stale", [@result] = "Succeeded" && [@at] < _now - 1 && NOT (([@it], [@in], [@sch], [@obj]) IN _views)
-        )
-        VAR _tests = ADDCOLUMNS(
-            SELECTCOLUMNS(ALL('TestStatus'), "@it", 'TestStatus'[Item type] & "", "@in", 'TestStatus'[Item name] & "", "@sch", 'TestStatus'[Schema name] & "", "@obj", 'TestStatus'[Object name] & "", "@result", 'TestStatus'[Result] & "", "@at", 'TestStatus'[Completed datetime], "@what", 'TestStatus'[Test type] & "", "@failures", 'TestStatus'[Failure count]),
-            "@stale", FALSE()
-        )
-        VAR _scored = FILTER(
-            ADDCOLUMNS(
-                UNION(_loads, _tests),
-                "@sev", SWITCH(
-                    TRUE(),
-                    [@result] IN {"Failed", "Error"}, 1,
-                    [@result] IN {"Blocked", "Rejected"} || [@stale], 2,
-                    [@result] IN {"Pending", "Skipped"} && [@what] <> "Load", 3,
-                    [@result] = "Pending", 3,
-                    0
-                )
-            ),
-            [@sev] > 0
-        )
-        VAR _count = COUNTROWS(_scored) + 0
-        VAR _shown = TOPN(50, _scored, [@sev], ASC, [@at], DESC, [@it], ASC, [@in], ASC, [@obj], ASC)
-        VAR _cell = "padding:6px 10px;border-bottom:1px solid #E2E8F0;vertical-align:top"
-        RETURN
-            IF(
-                _count = 0,
-                "<div style='font-family:Segoe UI, Helvetica, Arial, sans-serif;font-size:13px;color:#1E6B48;background:#E6F5EE;border-radius:10px;padding:12px 14px'>No findings. Every load and test settled successfully within the last 24 hours.</div>",
-                "<div style='font-family:Segoe UI, Helvetica, Arial, sans-serif;background:#FFFFFF;border:1px solid #E2E8F0;border-radius:10px;overflow:hidden'>"
-                & "<table style='border-collapse:collapse;width:100%;font-size:12px;color:#1F2937'>"
-                & "<tr style='background:#F1F5F9;color:#475569;text-align:left'><th style='" & _cell & "'>Severity</th><th style='" & _cell & "'>Object</th><th style='" & _cell & "'>What</th><th style='" & _cell & "'>Finding</th><th style='" & _cell & "'>Settled (UTC)</th></tr>"
-                & CONCATENATEX(
-                    _shown,
-                    VAR _sev = SWITCH([@sev], 1, "Error", 2, "Warning", "Info")
-                    VAR _name = [@it] & "/" & [@in] & IF([@obj] <> "", "/" & [@sch] & "." & [@obj])
-                    VAR _finding = SWITCH(
-                        TRUE(),
-                        [@stale], "No successful load for " & INT((_now - [@at]) * 24) & " hours",
-                        [@what] = "Test" && [@result] = "Failed", FORMAT([@failures], "#,##0") & " discrepancy rows",
-                        [@what] = "Assumption" && [@result] = "Failed", FORMAT([@failures], "#,##0") & " contradicting rows",
-                        [@result] = "Pending", IF([@what] = "Load", "Rebuilt; not loaded since", "Rebuilt; not run since"),
-                        [@result] = "Error", "Could not be evaluated",
-                        [@result] = "Blocked", "An upstream failure prevented it",
-                        [@result] = "Rejected", "Completed with rejected rows",
-                        [@result]
-                    )
-                    RETURN "<tr><td style='" & _cell & "'>" & "<span style='display:inline-block;padding:1px 8px;border-radius:9px;font-size:11px;font-weight:600;background:" & SWITCH(SWITCH([@sev], 1, "bad", 2, "warn", "none"), "ok", "#E6F5EE", "bad", "#FCE8E8", "warn", "#FDEEE3", "wait", "#FBF3DF", "next", "#E7EEFC", "#EEF1F5") & ";color:" & SWITCH(SWITCH([@sev], 1, "bad", 2, "warn", "none"), "ok", "#1E6B48", "bad", "#9B1C1C", "warn", "#9A3412", "wait", "#7A5A0C", "next", "#1E429F", "#475569") & "'>" & _sev & "</span>" & "</td>"
-                        & "<td style='" & _cell & "'>" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(_name, "&", "&amp;"), "<", "&lt;"), ">", "&gt;"), """", "&quot;"), "'", "&#39;") & "</td>"
-                        & "<td style='" & _cell & "'>" & [@what] & "</td>"
-                        & "<td style='" & _cell & "'>" & "<span style='display:inline-block;padding:1px 8px;border-radius:9px;font-size:11px;font-weight:600;background:" & SWITCH(SWITCH([@result], "Succeeded", "ok", "Skipped", "ok", "Failed", "bad", "Error", "bad", "Blocked", "warn", "Rejected", "warn", "Pending", "wait", "none"), "ok", "#E6F5EE", "bad", "#FCE8E8", "warn", "#FDEEE3", "wait", "#FBF3DF", "next", "#E7EEFC", "#EEF1F5") & ";color:" & SWITCH(SWITCH([@result], "Succeeded", "ok", "Skipped", "ok", "Failed", "bad", "Error", "bad", "Blocked", "warn", "Rejected", "warn", "Pending", "wait", "none"), "ok", "#1E6B48", "bad", "#9B1C1C", "warn", "#9A3412", "wait", "#7A5A0C", "next", "#1E429F", "#475569") & "'>" & [@result] & "</span>" & " " & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(_finding, "&", "&amp;"), "<", "&lt;"), ">", "&gt;"), """", "&quot;"), "'", "&#39;") & "</td>"
-                        & "<td style='" & _cell & ";white-space:nowrap'>" & IF(ISBLANK([@at]), "", FORMAT([@at], "yyyy-mm-dd hh:nn")) & "</td></tr>",
-                    "",
-                    [@sev], ASC, [@at], DESC, [@it], ASC, [@in], ASC, [@obj], ASC
-                )
-                & "</table>"
-                & IF(_count > 50, "<div style='padding:8px 10px;font-size:11.5px;color:#64748B'>Showing 50 of " & _count & " findings, most severe first.</div>")
-                & "</div>"
-            )
-        ```
-        displayFolder: Overview
-
-    /// When the page was observed, and how it refreshes, as HTML.
-    measure 'Observed at line' = "<div style='font-family:Segoe UI, Helvetica, Arial, sans-serif;font-size:11.5px;color:#7C8798'>Observed " & FORMAT(UTCNOW(), "yyyy-mm-dd hh:nn:ss") & " UTC. " & "This page refreshes itself every 30 seconds, or at the capacity's minimum interval when that is longer: 5 minutes unless a capacity admin lowers it.</div>"
-        displayFolder: Overview
-
-    /// The node picked in Focus, or else the node loaded most recently.
-    measure 'Focus node' = ```
-        VAR _latestLoad = CALCULATE(MAX('LoadStatus'[Completed datetime]), REMOVEFILTERS('LoadStatus'))
-        VAR _recent = CALCULATE(
-            MIN('GraphNode'[Node ID]),
-            REMOVEFILTERS('GraphNode'),
-            'GraphNode'[Is internal] = FALSE(),
+        VAR _statistics = CALCULATETABLE(
+            'Load statistic',
             TREATAS(
-                CALCULATETABLE(SUMMARIZE('LoadStatus', 'LoadStatus'[Item type], 'LoadStatus'[Item name], 'LoadStatus'[Schema name], 'LoadStatus'[Object name]), REMOVEFILTERS('LoadStatus'), 'LoadStatus'[Completed datetime] = _latestLoad),
-                'GraphNode'[Item type], 'GraphNode'[Item name], 'GraphNode'[Schema name], 'GraphNode'[Object name]
+                SUMMARIZE('Load status', 'Load status'[Item type], 'Load status'[Item name], 'Load status'[Schema name], 'Load status'[Object name], 'Load status'[Completed datetime]),
+                'Load statistic'[Item type], 'Load statistic'[Item name], 'Load statistic'[Schema name], 'Load statistic'[Object name], 'Load statistic'[Completed datetime]
             )
-        )
-        VAR _first = CALCULATE(MIN('GraphNode'[Node ID]), REMOVEFILTERS('GraphNode'), 'GraphNode'[Is internal] = FALSE())
-        RETURN COALESCE(SELECTEDVALUE('Focus'[Node ID]), _recent, _first)
-        ```
-        displayFolder: Graph
-
-    /// The upstream depth picked, with Max as 12.
-    measure 'Upstream hops' = VAR _pick = SELECTEDVALUE('Upstream depth'[Hops], 2) RETURN IF(_pick < 0, 12, _pick)
-        formatString: 0
-        displayFolder: Graph
-
-    /// The downstream depth picked, with Max as 12.
-    measure 'Downstream hops' = VAR _pick = SELECTEDVALUE('Downstream depth'[Hops], 2) RETURN IF(_pick < 0, 12, _pick)
-        formatString: 0
-        displayFolder: Graph
-
-    /// The window of the graph around the focus, coloured by status, as SVG.
-    measure 'Graph SVG' = ```
-        VAR _focusPick = SELECTEDVALUE('Focus'[Node ID])
-        VAR _latestLoad = CALCULATE(MAX('LoadStatus'[Completed datetime]), REMOVEFILTERS('LoadStatus'))
-        VAR _recent = CALCULATE(
-            MIN('GraphNode'[Node ID]),
-            REMOVEFILTERS('GraphNode'),
-            'GraphNode'[Is internal] = FALSE(),
-            TREATAS(
-                CALCULATETABLE(SUMMARIZE('LoadStatus', 'LoadStatus'[Item type], 'LoadStatus'[Item name], 'LoadStatus'[Schema name], 'LoadStatus'[Object name]), REMOVEFILTERS('LoadStatus'), 'LoadStatus'[Completed datetime] = _latestLoad),
-                'GraphNode'[Item type], 'GraphNode'[Item name], 'GraphNode'[Schema name], 'GraphNode'[Object name]
-            )
-        )
-        VAR _first = CALCULATE(MIN('GraphNode'[Node ID]), REMOVEFILTERS('GraphNode'), 'GraphNode'[Is internal] = FALSE())
-        VAR _focus = COALESCE(_focusPick, _recent, _first) & ""
-        VAR _upPick = SELECTEDVALUE('Upstream depth'[Hops], 2)
-        VAR _downPick = SELECTEDVALUE('Downstream depth'[Hops], 2)
-        VAR _up = IF(_upPick < 0, 12, _upPick)
-        VAR _down = IF(_downPick < 0, 12, _downPick)
-        VAR _mode = SELECTEDVALUE('Graph colouring'[Colouring], "Status")
-        VAR _nodes = CALCULATETABLE(
-            SELECTCOLUMNS(
-                'GraphNode',
-                "@n", 'GraphNode'[Node ID] & "",
-                "@label", 'GraphNode'[Label] & "",
-                "@item", 'GraphNode'[Item label] & "",
-                "@kind", 'GraphNode'[Node kind] & "",
-                "@it", 'GraphNode'[Item type] & "",
-                "@in", 'GraphNode'[Item name] & "",
-                "@sch", 'GraphNode'[Schema name] & "",
-                "@obj", 'GraphNode'[Object name] & ""
-            ),
-            REMOVEFILTERS('GraphNode')
-        )
-        VAR _filtered = CALCULATETABLE(VALUES('GraphNode'[Node ID]), KEEPFILTERS('GraphNode'[Is internal] = FALSE()))
-        VAR _statusFiltered = ISFILTERED('Status'[Status])
-        VAR _picked = VALUES('Status'[Status])
-        VAR _loaded = CALCULATETABLE(
-            VALUES('GraphNode'[Node ID]),
-            REMOVEFILTERS('GraphNode'),
-            TREATAS(CALCULATETABLE(SUMMARIZE('LoadStatus', 'LoadStatus'[Item type], 'LoadStatus'[Item name], 'LoadStatus'[Schema name], 'LoadStatus'[Object name]), REMOVEFILTERS('LoadStatus')), 'GraphNode'[Item type], 'GraphNode'[Item name], 'GraphNode'[Schema name], 'GraphNode'[Object name])
-        )
-        VAR _tested = CALCULATETABLE(
-            VALUES('GraphNode'[Node ID]),
-            REMOVEFILTERS('GraphNode'),
-            TREATAS(CALCULATETABLE(SUMMARIZE('TestStatus', 'TestStatus'[Item type], 'TestStatus'[Item name], 'TestStatus'[Schema name], 'TestStatus'[Object name]), REMOVEFILTERS('TestStatus')), 'GraphNode'[Item type], 'GraphNode'[Item name], 'GraphNode'[Schema name], 'GraphNode'[Object name])
-        )
-        VAR _loadPicked = CALCULATETABLE(
-            VALUES('GraphNode'[Node ID]),
-            REMOVEFILTERS('GraphNode'),
-            TREATAS(CALCULATETABLE(SUMMARIZE('LoadStatus', 'LoadStatus'[Item type], 'LoadStatus'[Item name], 'LoadStatus'[Schema name], 'LoadStatus'[Object name]), REMOVEFILTERS('LoadStatus'), 'LoadStatus'[Result] IN _picked), 'GraphNode'[Item type], 'GraphNode'[Item name], 'GraphNode'[Schema name], 'GraphNode'[Object name])
-        )
-        VAR _testPicked = CALCULATETABLE(
-            VALUES('GraphNode'[Node ID]),
-            REMOVEFILTERS('GraphNode'),
-            TREATAS(CALCULATETABLE(SUMMARIZE('TestStatus', 'TestStatus'[Item type], 'TestStatus'[Item name], 'TestStatus'[Schema name], 'TestStatus'[Object name]), REMOVEFILTERS('TestStatus'), 'TestStatus'[Result] IN _picked), 'GraphNode'[Item type], 'GraphNode'[Item name], 'GraphNode'[Schema name], 'GraphNode'[Object name])
-        )
-        VAR _noStatus = "No status" IN _picked
-        VAR _allowed = DISTINCT(
-            UNION(
-                SELECTCOLUMNS(
-                    FILTER(
-                        _filtered,
-                        NOT _statusFiltered
-                            || 'GraphNode'[Node ID] IN _loadPicked
-                            || 'GraphNode'[Node ID] IN _testPicked
-                            || (_noStatus && NOT ('GraphNode'[Node ID] IN _loaded) && NOT ('GraphNode'[Node ID] IN _tested))
-                    ),
-                    "@n", 'GraphNode'[Node ID] & ""
-                ),
-                ROW("@n", _focus)
-            )
-        )
-        VAR _edgesAll = SELECTCOLUMNS(
-            ALL('GraphEdge'[Downstream node ID], 'GraphEdge'[Upstream node ID], 'GraphEdge'[Edge kind]),
-            "@d", 'GraphEdge'[Downstream node ID] & "",
-            "@u", 'GraphEdge'[Upstream node ID] & "",
-            "@kind", 'GraphEdge'[Edge kind] & ""
-        )
-        VAR _graph = FILTER(_edgesAll, [@kind] <> "External")
-        VAR _base = UNION(
-            CALCULATETABLE(SELECTCOLUMNS(VALUES('GraphNode'[Node ID]), "@n", 'GraphNode'[Node ID] & ""), REMOVEFILTERS('GraphNode'), 'GraphNode'[Is internal] = FALSE()),
-            ROW("@n", _focus)
-        )
-        VAR _walk = FILTER(_graph, [@d] IN _base && [@u] IN _base)
-        VAR _live = FILTER(_graph, [@d] IN _allowed && [@u] IN _allowed)
-        VAR _f0 = ROW("@n", _focus)
-        VAR _uv0 = _f0
-        VAR _u1 = FILTER(EXCEPT(DISTINCT(SELECTCOLUMNS(FILTER(_walk, [@d] IN _f0), "@n", [@u])), _uv0), _up >= 1)
-        VAR _uv1 = UNION(_uv0, _u1)
-        VAR _u2 = FILTER(EXCEPT(DISTINCT(SELECTCOLUMNS(FILTER(_walk, [@d] IN _u1), "@n", [@u])), _uv1), _up >= 2)
-        VAR _uv2 = UNION(_uv1, _u2)
-        VAR _u3 = FILTER(EXCEPT(DISTINCT(SELECTCOLUMNS(FILTER(_walk, [@d] IN _u2), "@n", [@u])), _uv2), _up >= 3)
-        VAR _uv3 = UNION(_uv2, _u3)
-        VAR _u4 = FILTER(EXCEPT(DISTINCT(SELECTCOLUMNS(FILTER(_walk, [@d] IN _u3), "@n", [@u])), _uv3), _up >= 4)
-        VAR _uv4 = UNION(_uv3, _u4)
-        VAR _u5 = FILTER(EXCEPT(DISTINCT(SELECTCOLUMNS(FILTER(_walk, [@d] IN _u4), "@n", [@u])), _uv4), _up >= 5)
-        VAR _uv5 = UNION(_uv4, _u5)
-        VAR _u6 = FILTER(EXCEPT(DISTINCT(SELECTCOLUMNS(FILTER(_walk, [@d] IN _u5), "@n", [@u])), _uv5), _up >= 6)
-        VAR _uv6 = UNION(_uv5, _u6)
-        VAR _u7 = FILTER(EXCEPT(DISTINCT(SELECTCOLUMNS(FILTER(_walk, [@d] IN _u6), "@n", [@u])), _uv6), _up >= 7)
-        VAR _uv7 = UNION(_uv6, _u7)
-        VAR _u8 = FILTER(EXCEPT(DISTINCT(SELECTCOLUMNS(FILTER(_walk, [@d] IN _u7), "@n", [@u])), _uv7), _up >= 8)
-        VAR _uv8 = UNION(_uv7, _u8)
-        VAR _u9 = FILTER(EXCEPT(DISTINCT(SELECTCOLUMNS(FILTER(_walk, [@d] IN _u8), "@n", [@u])), _uv8), _up >= 9)
-        VAR _uv9 = UNION(_uv8, _u9)
-        VAR _u10 = FILTER(EXCEPT(DISTINCT(SELECTCOLUMNS(FILTER(_walk, [@d] IN _u9), "@n", [@u])), _uv9), _up >= 10)
-        VAR _uv10 = UNION(_uv9, _u10)
-        VAR _u11 = FILTER(EXCEPT(DISTINCT(SELECTCOLUMNS(FILTER(_walk, [@d] IN _u10), "@n", [@u])), _uv10), _up >= 11)
-        VAR _uv11 = UNION(_uv10, _u11)
-        VAR _u12 = FILTER(EXCEPT(DISTINCT(SELECTCOLUMNS(FILTER(_walk, [@d] IN _u11), "@n", [@u])), _uv11), _up >= 12)
-        VAR _dv0 = _f0
-        VAR _d1 = FILTER(EXCEPT(DISTINCT(SELECTCOLUMNS(FILTER(_walk, [@u] IN _f0), "@n", [@d])), _dv0), _down >= 1)
-        VAR _dv1 = UNION(_dv0, _d1)
-        VAR _d2 = FILTER(EXCEPT(DISTINCT(SELECTCOLUMNS(FILTER(_walk, [@u] IN _d1), "@n", [@d])), _dv1), _down >= 2)
-        VAR _dv2 = UNION(_dv1, _d2)
-        VAR _d3 = FILTER(EXCEPT(DISTINCT(SELECTCOLUMNS(FILTER(_walk, [@u] IN _d2), "@n", [@d])), _dv2), _down >= 3)
-        VAR _dv3 = UNION(_dv2, _d3)
-        VAR _d4 = FILTER(EXCEPT(DISTINCT(SELECTCOLUMNS(FILTER(_walk, [@u] IN _d3), "@n", [@d])), _dv3), _down >= 4)
-        VAR _dv4 = UNION(_dv3, _d4)
-        VAR _d5 = FILTER(EXCEPT(DISTINCT(SELECTCOLUMNS(FILTER(_walk, [@u] IN _d4), "@n", [@d])), _dv4), _down >= 5)
-        VAR _dv5 = UNION(_dv4, _d5)
-        VAR _d6 = FILTER(EXCEPT(DISTINCT(SELECTCOLUMNS(FILTER(_walk, [@u] IN _d5), "@n", [@d])), _dv5), _down >= 6)
-        VAR _dv6 = UNION(_dv5, _d6)
-        VAR _d7 = FILTER(EXCEPT(DISTINCT(SELECTCOLUMNS(FILTER(_walk, [@u] IN _d6), "@n", [@d])), _dv6), _down >= 7)
-        VAR _dv7 = UNION(_dv6, _d7)
-        VAR _d8 = FILTER(EXCEPT(DISTINCT(SELECTCOLUMNS(FILTER(_walk, [@u] IN _d7), "@n", [@d])), _dv7), _down >= 8)
-        VAR _dv8 = UNION(_dv7, _d8)
-        VAR _d9 = FILTER(EXCEPT(DISTINCT(SELECTCOLUMNS(FILTER(_walk, [@u] IN _d8), "@n", [@d])), _dv8), _down >= 9)
-        VAR _dv9 = UNION(_dv8, _d9)
-        VAR _d10 = FILTER(EXCEPT(DISTINCT(SELECTCOLUMNS(FILTER(_walk, [@u] IN _d9), "@n", [@d])), _dv9), _down >= 10)
-        VAR _dv10 = UNION(_dv9, _d10)
-        VAR _d11 = FILTER(EXCEPT(DISTINCT(SELECTCOLUMNS(FILTER(_walk, [@u] IN _d10), "@n", [@d])), _dv10), _down >= 11)
-        VAR _dv11 = UNION(_dv10, _d11)
-        VAR _d12 = FILTER(EXCEPT(DISTINCT(SELECTCOLUMNS(FILTER(_walk, [@u] IN _d11), "@n", [@d])), _dv11), _down >= 12)
-        VAR _reach = UNION(
-            ROW("@n", _focus, "@dist", 0),
-            SELECTCOLUMNS(_u1, "@n", [@n], "@dist", -1),
-            SELECTCOLUMNS(_d1, "@n", [@n], "@dist", 1),
-            SELECTCOLUMNS(_u2, "@n", [@n], "@dist", -2),
-            SELECTCOLUMNS(_d2, "@n", [@n], "@dist", 2),
-            SELECTCOLUMNS(_u3, "@n", [@n], "@dist", -3),
-            SELECTCOLUMNS(_d3, "@n", [@n], "@dist", 3),
-            SELECTCOLUMNS(_u4, "@n", [@n], "@dist", -4),
-            SELECTCOLUMNS(_d4, "@n", [@n], "@dist", 4),
-            SELECTCOLUMNS(_u5, "@n", [@n], "@dist", -5),
-            SELECTCOLUMNS(_d5, "@n", [@n], "@dist", 5),
-            SELECTCOLUMNS(_u6, "@n", [@n], "@dist", -6),
-            SELECTCOLUMNS(_d6, "@n", [@n], "@dist", 6),
-            SELECTCOLUMNS(_u7, "@n", [@n], "@dist", -7),
-            SELECTCOLUMNS(_d7, "@n", [@n], "@dist", 7),
-            SELECTCOLUMNS(_u8, "@n", [@n], "@dist", -8),
-            SELECTCOLUMNS(_d8, "@n", [@n], "@dist", 8),
-            SELECTCOLUMNS(_u9, "@n", [@n], "@dist", -9),
-            SELECTCOLUMNS(_d9, "@n", [@n], "@dist", 9),
-            SELECTCOLUMNS(_u10, "@n", [@n], "@dist", -10),
-            SELECTCOLUMNS(_d10, "@n", [@n], "@dist", 10),
-            SELECTCOLUMNS(_u11, "@n", [@n], "@dist", -11),
-            SELECTCOLUMNS(_d11, "@n", [@n], "@dist", 11),
-            SELECTCOLUMNS(_u12, "@n", [@n], "@dist", -12),
-            SELECTCOLUMNS(_d12, "@n", [@n], "@dist", 12)
-        )
-        VAR _ranked = ADDCOLUMNS(
-            NATURALINNERJOIN(FILTER(_reach, [@n] IN _allowed), _nodes),
-            "@abs", ABS([@dist]),
-            "@side", IF([@dist] < 0, 0, 1)
-        )
-        VAR _reachCount = COUNTROWS(_ranked)
-        VAR _kept = TOPN(150, _ranked, [@abs], ASC, [@side], ASC, [@label], ASC, [@n], ASC)
-        VAR _keptIds = SELECTCOLUMNS(_kept, "@n", [@n])
-        VAR _withStatus = ADDCOLUMNS(
-            _kept,
-            "@result",
-                VAR _a = [@it] VAR _b = [@in] VAR _c = [@sch] VAR _d = [@obj]
-                RETURN COALESCE(
-                    CALCULATE(MAX('LoadStatus'[Result]), REMOVEFILTERS('LoadStatus'), TREATAS({ ( _a, _b, _c, _d ) }, 'LoadStatus'[Item type], 'LoadStatus'[Item name], 'LoadStatus'[Schema name], 'LoadStatus'[Object name])),
-                    CALCULATE(MAX('TestStatus'[Result]), REMOVEFILTERS('TestStatus'), TREATAS({ ( _a, _b, _c, _d ) }, 'TestStatus'[Item type], 'TestStatus'[Item name], 'TestStatus'[Schema name], 'TestStatus'[Object name]))
-                ),
-            "@completed",
-                VAR _a = [@it] VAR _b = [@in] VAR _c = [@sch] VAR _d = [@obj]
-                RETURN COALESCE(
-                    CALCULATE(MAX('LoadStatus'[Completed datetime]), REMOVEFILTERS('LoadStatus'), TREATAS({ ( _a, _b, _c, _d ) }, 'LoadStatus'[Item type], 'LoadStatus'[Item name], 'LoadStatus'[Schema name], 'LoadStatus'[Object name])),
-                    CALCULATE(MAX('TestStatus'[Completed datetime]), REMOVEFILTERS('TestStatus'), TREATAS({ ( _a, _b, _c, _d ) }, 'TestStatus'[Item type], 'TestStatus'[Item name], 'TestStatus'[Schema name], 'TestStatus'[Object name]))
-                )
-        )
-        VAR _upEdges = FILTER(_graph, [@d] IN _keptIds)
-        VAR _upStatus = ADDCOLUMNS(
-            NATURALINNERJOIN(
-                SELECTCOLUMNS(_upEdges, "@of", [@d], "@n", [@u]),
-                SELECTCOLUMNS(_nodes, "@n", [@n], "@it", [@it], "@in", [@in], "@sch", [@sch], "@obj", [@obj])
-            ),
-            "@uresult",
-                VAR _a = [@it] VAR _b = [@in] VAR _c = [@sch] VAR _d = [@obj]
-                RETURN COALESCE(
-                    CALCULATE(MAX('LoadStatus'[Result]), REMOVEFILTERS('LoadStatus'), TREATAS({ ( _a, _b, _c, _d ) }, 'LoadStatus'[Item type], 'LoadStatus'[Item name], 'LoadStatus'[Schema name], 'LoadStatus'[Object name])),
-                    CALCULATE(MAX('TestStatus'[Result]), REMOVEFILTERS('TestStatus'), TREATAS({ ( _a, _b, _c, _d ) }, 'TestStatus'[Item type], 'TestStatus'[Item name], 'TestStatus'[Schema name], 'TestStatus'[Object name]))
-                ),
-            "@ucompleted",
-                VAR _a = [@it] VAR _b = [@in] VAR _c = [@sch] VAR _d = [@obj]
-                RETURN COALESCE(
-                    CALCULATE(MAX('LoadStatus'[Completed datetime]), REMOVEFILTERS('LoadStatus'), TREATAS({ ( _a, _b, _c, _d ) }, 'LoadStatus'[Item type], 'LoadStatus'[Item name], 'LoadStatus'[Schema name], 'LoadStatus'[Object name])),
-                    CALCULATE(MAX('TestStatus'[Completed datetime]), REMOVEFILTERS('TestStatus'), TREATAS({ ( _a, _b, _c, _d ) }, 'TestStatus'[Item type], 'TestStatus'[Item name], 'TestStatus'[Schema name], 'TestStatus'[Object name]))
-                )
-        )
-        VAR _ready = ADDCOLUMNS(
-            _withStatus,
-            "@ready",
-                VAR _n = [@n]
-                VAR _t = [@completed]
-                VAR _mine = [@result]
-                VAR _ups = FILTER(_upStatus, [@of] = _n)
-                VAR _total = COUNTROWS(_ups) + 0
-                VAR _open = COUNTROWS(FILTER(_ups, [@uresult] = "Pending")) + 0
-                VAR _fresh = COUNTROWS(FILTER(_ups, [@uresult] <> "Pending" && (ISBLANK(_t) || [@ucompleted] > _t))) + 0
-                RETURN SWITCH(
-                    TRUE(),
-                    ISBLANK(_mine), BLANK(),
-                    _mine <> "Pending" && _open = 0 && _fresh = 0, "Done",
-                    _open = 0 && _fresh = _total, "Candidate",
-                    "Waiting"
-                ),
-            "@moreUp", VAR _n = [@n] RETURN COUNTROWS(FILTER(_live, [@d] = _n && NOT ([@u] IN _keptIds))) + 0,
-            "@moreDown", VAR _n = [@n] RETURN COUNTROWS(FILTER(_live, [@u] = _n && NOT ([@d] IN _keptIds))) + 0,
-            "@key", [@item] & "|" & [@label] & "|" & [@n]
-        )
-        VAR _minD = MINX(_ready, [@dist])
-        VAR _maxD = MAXX(_ready, [@dist])
-        VAR _placed0 = ADDCOLUMNS(
-            _ready,
-            "@row", VAR _d = [@dist] VAR _k = [@key] RETURN COUNTROWS(FILTER(_ready, [@dist] = _d && [@key] < _k)) + 0,
-            "@group", VAR _d = [@dist] VAR _i = [@item] RETURN COUNTROWS(DISTINCT(SELECTCOLUMNS(FILTER(_ready, [@dist] = _d && [@item] < _i), "@g", [@item]))) + 0
-        )
-        VAR _edgeAll = NATURALINNERJOIN(
-            NATURALINNERJOIN(
-                FILTER(_graph, [@d] IN _keptIds && [@u] IN _keptIds),
-                SELECTCOLUMNS(_placed0, "@d", [@n], "@ddist", [@dist], "@drow", [@row], "@dgroup", [@group])
-            ),
-            SELECTCOLUMNS(_placed0, "@u", [@n], "@udist", [@dist], "@urow", [@row], "@ugroup", [@group])
-        )
-        VAR _edgeCount = COUNTROWS(_edgeAll) + 0
-        VAR _edges = TOPN(450, _edgeAll, ABS([@ddist]) + ABS([@udist]), ASC, [@d], ASC, [@u], ASC)
-        VAR _stubAll = NATURALINNERJOIN(
-            FILTER(_edgesAll, [@d] IN _keptIds && ([@kind] = "External" || NOT ([@u] IN SELECTCOLUMNS(_nodes, "@x", [@n])))),
-            SELECTCOLUMNS(_placed0, "@d", [@n], "@ddist", [@dist], "@drow", [@row], "@dgroup", [@group])
-        )
-        VAR _stubRoom = MAX(0, 450 - COUNTROWS(_edges))
-        VAR _stubs = TOPN(_stubRoom, _stubAll, ABS([@ddist]), ASC, [@d], ASC, [@u], ASC)
-        VAR _truncated = _reachCount > 150 || _edgeCount > 450 || COUNTROWS(_stubAll) > _stubRoom
-        VAR _top = IF(_truncated, 108, 80)
-        VAR _height = MAXX(_placed0, _top + ([@group] + 1) * 30 + ([@row] + 1) * 34) + 16
-        VAR _width = MAX(560, 72 + (_maxD - _minD) * 248 + 184 + 72)
-        VAR _focusRow = FILTER(_placed0, [@n] = _focus)
-        VAR _focusLabel = MAXX(_focusRow, [@label])
-        VAR _focusItem = MAXX(_focusRow, [@item])
-        VAR _shown = COUNTROWS(_placed0)
-        VAR _shownEdges = COUNTROWS(_edges) + 0
-        VAR _columns = DISTINCT(SELECTCOLUMNS(_placed0, "@c", [@dist]))
-        VAR _groups = GROUPBY(
-            _placed0,
-            [@dist], [@item],
-            "@first", MINX(CURRENTGROUP(), [@row]),
-            "@count", COUNTX(CURRENTGROUP(), [@row]),
-            "@g", MINX(CURRENTGROUP(), [@group])
-        )
-        VAR _stubsAt = ADDCOLUMNS(
-            _stubs,
-            "@k", VAR _d = [@d] VAR _u = [@u] RETURN COUNTROWS(FILTER(_stubs, [@d] = _d && [@u] < _u)) + 0
-        )
-        RETURN
-            IF(
-                ISBLANK(_focusLabel),
-                "<svg xmlns='http://www.w3.org/2000/svg' width='560' height='60' font-family='Segoe UI, Helvetica, Arial, sans-serif'><text x='16' y='34' font-size='13' fill='#64748B'>The catalogue records no installed objects yet. Build a project to see its graph.</text></svg>",
-                "<svg xmlns='http://www.w3.org/2000/svg' width='" & _width & "' height='" & _height & "' viewBox='0 0 " & _width & " " & _height & "' font-family='Segoe UI, Helvetica, Arial, sans-serif'>"
-                & "<defs><marker id='wbArrow' viewBox='0 0 8 8' refX='7.5' refY='4' markerWidth='6' markerHeight='6' orient='auto'><path d='M0,0.5 L8,4 L0,7.5 z' fill='#94A3B8'/></marker></defs>"
-                & "<text x='16' y='24' font-size='14' font-weight='600' fill='#64748B'>" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(IF(LEN(_focusLabel) > 60, LEFT(_focusLabel, 59) & "…", _focusLabel), "&", "&amp;"), "<", "&lt;"), ">", "&gt;"), """", "&quot;"), "'", "&#39;") & "</text>"
-                & "<text x='16' y='44' font-size='11.5' fill='#7C8798'>" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(_focusItem, "&", "&amp;"), "<", "&lt;"), ">", "&gt;"), """", "&quot;"), "'", "&#39;")
-                & " · " & IF(_upPick < 0, "all", _up & "") & " up, " & IF(_downPick < 0, "all", _down & "") & " down · "
-                & _shown & IF(_shown = 1, " node", " nodes") & ", " & _shownEdges & IF(_shownEdges = 1, " edge", " edges")
-                & IF(_mode = "Readiness", " · coloured by readiness", "") & "</text>"
-                & IF(
-                    _mode = "Readiness",
-                    "<g transform='translate(" & (_width - 212) & " 14)'><rect width='12' height='12' rx='3' fill='#E6F5EE' stroke='#2F9E6B'/><text x='17' y='10' font-size='10.5' fill='#7C8798'>Done</text></g>" & "<g transform='translate(" & (_width - 161) & " 14)'><rect width='12' height='12' rx='3' fill='#E7EEFC' stroke='#3B6FD8'/><text x='17' y='10' font-size='10.5' fill='#7C8798'>Candidate</text></g>" & "<g transform='translate(" & (_width - 83) & " 14)'><rect width='12' height='12' rx='3' fill='#FBF3DF' stroke='#C08A12'/><text x='17' y='10' font-size='10.5' fill='#7C8798'>Waiting</text></g>",
-                    "<g transform='translate(" & (_width - 433) & " 14)'><rect width='12' height='12' rx='3' fill='#E6F5EE' stroke='#2F9E6B'/><text x='17' y='10' font-size='10.5' fill='#7C8798'>Succeeded</text></g>" & "<g transform='translate(" & (_width - 355) & " 14)'><rect width='12' height='12' rx='3' fill='#FCE8E8' stroke='#D14343'/><text x='17' y='10' font-size='10.5' fill='#7C8798'>Failed</text></g>" & "<g transform='translate(" & (_width - 293) & " 14)'><rect width='12' height='12' rx='3' fill='#FDEEE3' stroke='#DD6B20'/><text x='17' y='10' font-size='10.5' fill='#7C8798'>Blocked or rejected</text></g>" & "<g transform='translate(" & (_width - 161) & " 14)'><rect width='12' height='12' rx='3' fill='#FBF3DF' stroke='#C08A12'/><text x='17' y='10' font-size='10.5' fill='#7C8798'>Pending</text></g>" & "<g transform='translate(" & (_width - 94) & " 14)'><rect width='12' height='12' rx='3' fill='#F1F3F6' stroke='#8B95A7'/><text x='17' y='10' font-size='10.5' fill='#7C8798'>No status</text></g>"
-                )
-                & IF(
-                    _truncated,
-                    "<rect x='16' y='56' width='" & (_width - 32) & "' height='26' rx='6' fill='#FEF3C7' stroke='#F59E0B'/>"
-                    & "<text x='28' y='73' font-size='11.5' fill='#78350F'>Showing the " & _shown & " of " & _reachCount
-                    & " nodes nearest the focus, within " & 150 & " nodes and " & 450
-                    & " edges. Lower the depth or filter by item, kind or status to see the rest.</text>"
-                )
-                & CONCATENATEX(
-                    _columns,
-                    VAR _x = 72 + ([@c] - _minD) * 248
-                    RETURN "<text x='" & (_x + 2) & "' y='" & (_top - 10) & "' font-size='10.5' letter-spacing='0.6' fill='#94A3B8'>"
-                        & SWITCH(TRUE(), [@c] = 0, "FOCUS", [@c] < 0, "UPSTREAM " & -[@c], "DOWNSTREAM " & [@c]) & "</text>",
-                    ""
-                )
-                & CONCATENATEX(
-                    _groups,
-                    VAR _x = 72 + ([@dist] - _minD) * 248
-                    VAR _y = _top + [@g] * 30 + [@first] * 34
-                    RETURN "<rect x='" & (_x - 8) & "' y='" & (_y - 2) & "' width='" & (184 + 16) & "' height='" & (18 + [@count] * 34 + 2)
-                        & "' rx='8' fill='#94A3B8' fill-opacity='0.08' stroke='#94A3B8' stroke-opacity='0.45'/>"
-                        & "<text x='" & _x & "' y='" & (_y + 11) & "' font-size='10' fill='#7C8798'>" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(IF(LEN([@item]) > 34, LEFT([@item], 33) & "…", [@item]), "&", "&amp;"), "<", "&lt;"), ">", "&gt;"), """", "&quot;"), "'", "&#39;") & "</text>",
-                    ""
-                )
-                & CONCATENATEX(
-                    _edges,
-                    VAR _x1 = 72 + ([@udist] - _minD) * 248 + 184
-                    VAR _y1 = _top + [@ugroup] * 30 + 18 + [@urow] * 34 + 13
-                    VAR _x2 = 72 + ([@ddist] - _minD) * 248 - 2
-                    VAR _y2 = _top + [@dgroup] * 30 + 18 + [@drow] * 34 + 13
-                    VAR _c = MAX(36, INT(ABS(_x2 - _x1) / 2))
-                    VAR _focal = [@d] = _focus || [@u] = _focus
-                    RETURN "<path d='M" & _x1 & " " & _y1 & " C" & (_x1 + _c) & " " & _y1 & " " & (_x2 - _c) & " " & _y2 & " " & _x2 & " " & _y2
-                        & "' fill='none' stroke='" & IF(_focal, "#64748B", "#94A3B8") & "' stroke-width='" & IF(_focal, "1.6", "1.1") & "'"
-                        & SWITCH([@kind], "Shortcut", " stroke-dasharray='1.5 3' stroke-linecap='round'", "Validation", " stroke-dasharray='5 3'", "")
-                        & " marker-end='url(#wbArrow)'/>",
-                    ""
-                )
-                & CONCATENATEX(
-                    _stubsAt,
-                    VAR _x2 = 72 + ([@ddist] - _minD) * 248 - 2
-                    VAR _y2 = _top + [@dgroup] * 30 + 18 + [@drow] * 34 + 13 + MIN([@k], 3) * 4 - 4
-                    RETURN "<g><title>" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE([@u], "&", "&amp;"), "<", "&lt;"), ">", "&gt;"), """", "&quot;"), "'", "&#39;") & "</title><path d='M" & (_x2 - 44) & " " & _y2 & " L" & _x2 & " " & _y2
-                        & "' stroke='#94A3B8' stroke-width='1.1' stroke-dasharray='3 3' marker-end='url(#wbArrow)'/>"
-                        & "<circle cx='" & (_x2 - 47) & "' cy='" & _y2 & "' r='2.5' fill='#94A3B8'/></g>",
-                    ""
-                )
-                & CONCATENATEX(
-                    _placed0,
-                    VAR _x = 72 + ([@dist] - _minD) * 248
-                    VAR _y = _top + [@group] * 30 + 18 + [@row] * 34
-                    VAR _tone = IF(
-                        _mode = "Readiness",
-                        SWITCH([@ready], "Done", "ok", "Candidate", "next", "Waiting", "wait", "none"),
-                        SWITCH([@result], "Succeeded", "ok", "Skipped", "ok", "Failed", "bad", "Error", "bad", "Blocked", "warn", "Rejected", "warn", "Pending", "wait", "none")
-                    )
-                    VAR _stroke = SWITCH(_tone, "ok", "#2F9E6B", "bad", "#D14343", "warn", "#DD6B20", "wait", "#C08A12", "next", "#3B6FD8", "#8B95A7")
-                    VAR _fill = SWITCH(_tone, "ok", "#E6F5EE", "bad", "#FCE8E8", "warn", "#FDEEE3", "wait", "#FBF3DF", "next", "#E7EEFC", "#F1F3F6")
-                    VAR _isFocus = [@n] = _focus
-                    VAR _state = IF(_mode = "Readiness", COALESCE([@ready], "no readiness"), COALESCE([@result], "no status"))
-                    VAR _glyph = SUBSTITUTE(SWITCH([@kind],
-                    "Table", "<rect x='0.5' y='1.5' width='13' height='11' rx='2' fill='none' stroke='C'/><path d='M0.5 5.5h13M5 5.5v7' stroke='C'/>",
-                    "View", "<path d='M0.5 7c2.5-4.5 10.5-4.5 13 0c-2.5 4.5-10.5 4.5-13 0z' fill='none' stroke='C'/><circle cx='7' cy='7' r='2' fill='C'/>",
-                    "Folder", "<path d='M0.5 3h4.5l1.5 1.5h7v8h-13z' fill='none' stroke='C'/>",
-                    "Shortcut", "<path d='M2.5 11.5l8.5-8.5M5 3h6v6' fill='none' stroke='C' stroke-width='1.6'/>",
-                    "Test", "<circle cx='7' cy='7' r='6' fill='none' stroke='C'/><path d='M4 7.2l2.1 2.1l4-4.4' fill='none' stroke='C' stroke-width='1.6'/>",
-                    "Assumption", "<path d='M7 1l6.3 11.5H0.7z' fill='none' stroke='C'/><path d='M7 5v3.6M7 10.2v1' stroke='C' stroke-width='1.6'/>",
-                    "Semantic model", "<path d='M7 0.8l6 3v6.4l-6 3l-6-3V3.8zM1 3.8l6 3l6-3M7 6.8v6.4' fill='none' stroke='C'/>",
-                    "Report", "<path d='M2.5 12V7.5M7 12V2.5M11.5 12V5' stroke='C' stroke-width='2.2'/>",
-                    "<circle cx='7' cy='7' r='5' fill='none' stroke='C'/>"), "'C'", "'" & _stroke & "'")
-                    RETURN "<g><title>" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE([@n], "&", "&amp;"), "<", "&lt;"), ">", "&gt;"), """", "&quot;"), "'", "&#39;") & " · " & [@kind] & " · " & _state
-                        & IF(NOT ISBLANK([@completed]), " · " & FORMAT([@completed], "yyyy-mm-dd hh:nn:ss") & " UTC") & "</title>"
-                        & IF(_isFocus, "<rect x='" & (_x - 4) & "' y='" & (_y - 4) & "' width='" & (184 + 8) & "' height='" & (26 + 8) & "' rx='9' fill='none' stroke='#475569' stroke-opacity='0.55' stroke-width='2'/>")
-                        & IF(
-                            [@completed] >= UTCNOW() - 2 / 1440,
-                            "<rect x='" & (_x - 2) & "' y='" & (_y - 2) & "' width='" & (184 + 4) & "' height='" & (26 + 4) & "' rx='8' fill='none' stroke='" & _stroke & "' stroke-width='2'><animate attributeName='opacity' values='0.9;0.1;0.9' dur='1.6s' repeatCount='indefinite'/></rect>"
-                        )
-                        & "<rect x='" & _x & "' y='" & _y & "' width='184' height='26' rx='" & IF([@kind] IN {"Test", "Assumption"}, "13", "6") & "' fill='" & _fill & "' stroke='" & _stroke & "' stroke-width='" & IF(_isFocus, "2", "1.2") & "'/>"
-                        & "<g transform='translate(" & (_x + 8) & " " & (_y + 6) & ")'>" & _glyph & "</g>"
-                        & "<text x='" & (_x + 28) & "' y='" & (_y + 17) & "' font-size='11.5' fill='#1F2937'" & IF(_isFocus, " font-weight='600'") & ">" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(IF(LEN([@label]) > 25, LEFT([@label], 24) & "…", [@label]), "&", "&amp;"), "<", "&lt;"), ">", "&gt;"), """", "&quot;"), "'", "&#39;") & "</text>"
-                        & IF(
-                            [@moreUp] > 0,
-                            "<g><title>" & [@moreUp] & " more upstream</title><rect x='" & (_x - 10) & "' y='" & (_y - 8) & "' width='24' height='14' rx='7' fill='#E2E8F0' stroke='#94A3B8' stroke-dasharray='2 1.5'/><text x='" & (_x + 2) & "' y='" & (_y + 2.5) & "' font-size='9' text-anchor='middle' fill='#475569'>+" & [@moreUp] & "</text></g>"
-                        )
-                        & IF(
-                            [@moreDown] > 0,
-                            "<g><title>" & [@moreDown] & " more downstream</title><rect x='" & (_x + 184 - 14) & "' y='" & (_y - 8) & "' width='24' height='14' rx='7' fill='#E2E8F0' stroke='#94A3B8' stroke-dasharray='2 1.5'/><text x='" & (_x + 184 - 2) & "' y='" & (_y + 2.5) & "' font-size='9' text-anchor='middle' fill='#475569'>+" & [@moreDown] & "</text></g>"
-                        )
-                        & "</g>",
-                    "",
-                    [@dist], ASC, [@row], ASC
-                )
-                & "</svg>"
-            )
-        ```
-        displayFolder: Graph
-
-    /// The focus node's description, last load, tests and columns, as HTML.
-    measure 'Focus details' = ```
-        VAR _focus = [Focus node]
-        VAR _node = CALCULATETABLE(
-            SELECTCOLUMNS(
-                'GraphNode',
-                "@it", 'GraphNode'[Item type] & "",
-                "@in", 'GraphNode'[Item name] & "",
-                "@sch", 'GraphNode'[Schema name] & "",
-                "@obj", 'GraphNode'[Object name] & "",
-                "@label", 'GraphNode'[Label] & "",
-                "@kind", 'GraphNode'[Node kind] & "",
-                "@item", 'GraphNode'[Item label] & "",
-                "@desc", 'GraphNode'[Description] & ""
-            ),
-            REMOVEFILTERS('GraphNode'),
-            'GraphNode'[Node ID] = _focus
-        )
-        VAR _it = MAXX(_node, [@it])
-        VAR _in = MAXX(_node, [@in])
-        VAR _sch = MAXX(_node, [@sch])
-        VAR _obj = MAXX(_node, [@obj])
-        VAR _label = MAXX(_node, [@label])
-        VAR _kind = MAXX(_node, [@kind])
-        VAR _desc = MAXX(_node, [@desc])
-        VAR _load = CALCULATE(MAX('LoadStatus'[Result]), REMOVEFILTERS('LoadStatus'), TREATAS({ ( _it, _in, _sch, _obj ) }, 'LoadStatus'[Item type], 'LoadStatus'[Item name], 'LoadStatus'[Schema name], 'LoadStatus'[Object name]))
-        VAR _loadAt = CALCULATE(MAX('LoadStatus'[Completed datetime]), REMOVEFILTERS('LoadStatus'), TREATAS({ ( _it, _in, _sch, _obj ) }, 'LoadStatus'[Item type], 'LoadStatus'[Item name], 'LoadStatus'[Schema name], 'LoadStatus'[Object name]))
-        VAR _loadMs = CALCULATE(MAX('LoadStatus'[Duration milliseconds]), REMOVEFILTERS('LoadStatus'), TREATAS({ ( _it, _in, _sch, _obj ) }, 'LoadStatus'[Item type], 'LoadStatus'[Item name], 'LoadStatus'[Schema name], 'LoadStatus'[Object name]))
-        VAR _statAt = CALCULATE(MAX('LoadStatistic'[Completed datetime]), REMOVEFILTERS('LoadStatistic'), TREATAS({ ( _it, _in, _sch, _obj ) }, 'LoadStatistic'[Item type], 'LoadStatistic'[Item name], 'LoadStatistic'[Schema name], 'LoadStatistic'[Object name]))
-        VAR _stat = CALCULATETABLE(
-            SELECTCOLUMNS(
-                'LoadStatistic',
-                "@read", 'LoadStatistic'[Rows read],
-                "@ins", 'LoadStatistic'[Rows inserted],
-                "@upd", 'LoadStatistic'[Rows updated],
-                "@del", 'LoadStatistic'[Rows deleted],
-                "@rej", 'LoadStatistic'[Rows rejected]
-            ),
-            REMOVEFILTERS('LoadStatistic'),
-            TREATAS({ ( _it, _in, _sch, _obj ) }, 'LoadStatistic'[Item type], 'LoadStatistic'[Item name], 'LoadStatistic'[Schema name], 'LoadStatistic'[Object name]),
-            'LoadStatistic'[Completed datetime] = _statAt
-        )
-        VAR _own = CALCULATE(MAX('TestStatus'[Result]), REMOVEFILTERS('TestStatus'), TREATAS({ ( _it, _in, _sch, _obj ) }, 'TestStatus'[Item type], 'TestStatus'[Item name], 'TestStatus'[Schema name], 'TestStatus'[Object name]))
-        VAR _ownFailures = CALCULATE(MAX('TestStatus'[Failure count]), REMOVEFILTERS('TestStatus'), TREATAS({ ( _it, _in, _sch, _obj ) }, 'TestStatus'[Item type], 'TestStatus'[Item name], 'TestStatus'[Schema name], 'TestStatus'[Object name]))
-        VAR _ownAt = CALCULATE(MAX('TestStatus'[Completed datetime]), REMOVEFILTERS('TestStatus'), TREATAS({ ( _it, _in, _sch, _obj ) }, 'TestStatus'[Item type], 'TestStatus'[Item name], 'TestStatus'[Schema name], 'TestStatus'[Object name]))
-        VAR _checks = NATURALINNERJOIN(
-            SELECTCOLUMNS(
-                FILTER(
-                    ALL('GraphEdge'[Downstream node ID], 'GraphEdge'[Upstream node ID], 'GraphEdge'[Edge kind]),
-                    'GraphEdge'[Upstream node ID] = _focus && 'GraphEdge'[Edge kind] = "Validation"
-                ),
-                "@n", 'GraphEdge'[Downstream node ID] & ""
-            ),
-            CALCULATETABLE(
-                SELECTCOLUMNS(
-                    'GraphNode',
-                    "@n", 'GraphNode'[Node ID] & "",
-                    "@vlabel", 'GraphNode'[Label] & "",
-                    "@vkind", 'GraphNode'[Node kind] & "",
-                    "@vit", 'GraphNode'[Item type] & "",
-                    "@vin", 'GraphNode'[Item name] & "",
-                    "@vsch", 'GraphNode'[Schema name] & "",
-                    "@vobj", 'GraphNode'[Object name] & ""
-                ),
-                REMOVEFILTERS('GraphNode')
-            )
-        )
-        VAR _checked = ADDCOLUMNS(
-            _checks,
-            "@vresult", VAR _a = [@vit] VAR _b = [@vin] VAR _c = [@vsch] VAR _d = [@vobj] RETURN CALCULATE(MAX('TestStatus'[Result]), REMOVEFILTERS('TestStatus'), TREATAS({ ( _a, _b, _c, _d ) }, 'TestStatus'[Item type], 'TestStatus'[Item name], 'TestStatus'[Schema name], 'TestStatus'[Object name])),
-            "@vfailures", VAR _a = [@vit] VAR _b = [@vin] VAR _c = [@vsch] VAR _d = [@vobj] RETURN CALCULATE(MAX('TestStatus'[Failure count]), REMOVEFILTERS('TestStatus'), TREATAS({ ( _a, _b, _c, _d ) }, 'TestStatus'[Item type], 'TestStatus'[Item name], 'TestStatus'[Schema name], 'TestStatus'[Object name]))
         )
         VAR _columns = CALCULATETABLE(
-            SELECTCOLUMNS('ColumnDictionary', "@col", 'ColumnDictionary'[Column name] & "", "@note", 'ColumnDictionary'[Description] & ""),
-            REMOVEFILTERS('ColumnDictionary'),
-            TREATAS({ ( _it, _in, _sch, _obj ) }, 'ColumnDictionary'[Item type], 'ColumnDictionary'[Item name], 'ColumnDictionary'[Schema name], 'ColumnDictionary'[Object name])
+            FILTER('Column dictionary', NOT ISBLANK('Column dictionary'[Description])),
+            TREATAS(SUMMARIZE(_nodes, 'Graph node'[Item type], 'Graph node'[Item name], 'Graph node'[Schema name], 'Graph node'[Object name]), 'Column dictionary'[Item type], 'Column dictionary'[Item name], 'Column dictionary'[Schema name], 'Column dictionary'[Object name])
         )
-        VAR _ups = COUNTROWS(FILTER(ALL('GraphEdge'[Downstream node ID], 'GraphEdge'[Upstream node ID]), 'GraphEdge'[Downstream node ID] = _focus)) + 0
-        VAR _downs = COUNTROWS(FILTER(ALL('GraphEdge'[Downstream node ID], 'GraphEdge'[Upstream node ID]), 'GraphEdge'[Upstream node ID] = _focus)) + 0
-        VAR _head = "font-size:11px;font-weight:600;letter-spacing:0.5px;color:#64748B;margin:14px 0 6px"
-        VAR _cell = "padding:4px 8px;border-bottom:1px solid #E2E8F0;vertical-align:top"
         RETURN
-            IF(
-                ISBLANK(_label),
-                "<div style='font-family:Segoe UI, Helvetica, Arial, sans-serif;font-size:13px;color:#7C8798'>Pick a node in Focus to see its details.</div>",
-                "<div style='font-family:Segoe UI, Helvetica, Arial, sans-serif;font-size:12px;color:#1F2937;background:#F8FAFC;border:1px solid #E2E8F0;border-radius:10px;padding:14px 16px'>"
-                & "<div style='font-size:15px;font-weight:600'>" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(_label, "&", "&amp;"), "<", "&lt;"), ">", "&gt;"), """", "&quot;"), "'", "&#39;") & "</div>"
-                & "<div style='color:#64748B;margin-top:2px'>" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(_kind, "&", "&amp;"), "<", "&lt;"), ">", "&gt;"), """", "&quot;"), "'", "&#39;") & " · " & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(MAXX(_node, [@item]), "&", "&amp;"), "<", "&lt;"), ">", "&gt;"), """", "&quot;"), "'", "&#39;") & " · " & _ups & " upstream, " & _downs & " downstream</div>"
-                & "<div style='margin-top:10px;line-height:1.45'>" & IF(_desc = "", "<span style='color:#7C8798'>No description is declared.</span>", SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(_desc, "&", "&amp;"), "<", "&lt;"), ">", "&gt;"), """", "&quot;"), "'", "&#39;")) & "</div>"
-                & IF(
-                    NOT ISBLANK(_load),
-                    "<div style='" & _head & "'>LAST LOAD</div><div>" & "<span style='display:inline-block;padding:1px 8px;border-radius:9px;font-size:11px;font-weight:600;background:" & SWITCH(SWITCH(_load, "Succeeded", "ok", "Skipped", "ok", "Failed", "bad", "Error", "bad", "Blocked", "warn", "Rejected", "warn", "Pending", "wait", "none"), "ok", "#E6F5EE", "bad", "#FCE8E8", "warn", "#FDEEE3", "wait", "#FBF3DF", "next", "#E7EEFC", "#EEF1F5") & ";color:" & SWITCH(SWITCH(_load, "Succeeded", "ok", "Skipped", "ok", "Failed", "bad", "Error", "bad", "Blocked", "warn", "Rejected", "warn", "Pending", "wait", "none"), "ok", "#1E6B48", "bad", "#9B1C1C", "warn", "#9A3412", "wait", "#7A5A0C", "next", "#1E429F", "#475569") & "'>" & _load & "</span>"
-                    & IF(NOT ISBLANK(_loadAt), " " & FORMAT(_loadAt, "yyyy-mm-dd hh:nn:ss") & " UTC")
-                    & IF(NOT ISBLANK(_loadMs), " · " & IF(_loadMs / 1000 < 60, FORMAT(_loadMs / 1000, "0.0") & " s", INT(_loadMs / 1000 / 60) & " min " & FORMAT(MOD(_loadMs / 1000, 60), "0") & " s"))
-                    & IF(
-                        NOT ISEMPTY(_stat),
-                        "<div style='color:#475569;margin-top:4px'>" & FORMAT(MAXX(_stat, [@read]), "#,##0") & " read, "
-                        & FORMAT(MAXX(_stat, [@ins]), "#,##0") & " inserted, " & FORMAT(MAXX(_stat, [@upd]), "#,##0") & " updated, "
-                        & FORMAT(MAXX(_stat, [@del]), "#,##0") & " deleted, " & FORMAT(MAXX(_stat, [@rej]), "#,##0") & " rejected</div>"
-                    )
-                    & "</div>"
-                )
-                & IF(
-                    NOT ISBLANK(_own),
-                    "<div style='" & _head & "'>LAST RUN</div><div>" & "<span style='display:inline-block;padding:1px 8px;border-radius:9px;font-size:11px;font-weight:600;background:" & SWITCH(SWITCH(_own, "Succeeded", "ok", "Skipped", "ok", "Failed", "bad", "Error", "bad", "Blocked", "warn", "Rejected", "warn", "Pending", "wait", "none"), "ok", "#E6F5EE", "bad", "#FCE8E8", "warn", "#FDEEE3", "wait", "#FBF3DF", "next", "#E7EEFC", "#EEF1F5") & ";color:" & SWITCH(SWITCH(_own, "Succeeded", "ok", "Skipped", "ok", "Failed", "bad", "Error", "bad", "Blocked", "warn", "Rejected", "warn", "Pending", "wait", "none"), "ok", "#1E6B48", "bad", "#9B1C1C", "warn", "#9A3412", "wait", "#7A5A0C", "next", "#1E429F", "#475569") & "'>" & _own & "</span>"
-                    & IF(NOT ISBLANK(_ownAt), " " & FORMAT(_ownAt, "yyyy-mm-dd hh:nn:ss") & " UTC")
-                    & IF(_own = "Failed", " · " & FORMAT(_ownFailures, "#,##0") & " failing rows") & "</div>"
-                )
-                & IF(
-                    NOT ISEMPTY(_checked),
-                    "<div style='" & _head & "'>TESTS</div><table style='border-collapse:collapse;width:100%;font-size:12px;color:#1F2937'>"
-                    & CONCATENATEX(
-                        _checked,
-                        "<tr><td style='" & _cell & "'>" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE([@vlabel], "&", "&amp;"), "<", "&lt;"), ">", "&gt;"), """", "&quot;"), "'", "&#39;") & " <span style='color:#7C8798'>" & [@vkind] & "</span></td><td style='" & _cell & ";text-align:right;white-space:nowrap'>"
-                        & "<span style='display:inline-block;padding:1px 8px;border-radius:9px;font-size:11px;font-weight:600;background:" & SWITCH(SWITCH([@vresult], "Succeeded", "ok", "Skipped", "ok", "Failed", "bad", "Error", "bad", "Blocked", "warn", "Rejected", "warn", "Pending", "wait", "none"), "ok", "#E6F5EE", "bad", "#FCE8E8", "warn", "#FDEEE3", "wait", "#FBF3DF", "next", "#E7EEFC", "#EEF1F5") & ";color:" & SWITCH(SWITCH([@vresult], "Succeeded", "ok", "Skipped", "ok", "Failed", "bad", "Error", "bad", "Blocked", "warn", "Rejected", "warn", "Pending", "wait", "none"), "ok", "#1E6B48", "bad", "#9B1C1C", "warn", "#9A3412", "wait", "#7A5A0C", "next", "#1E429F", "#475569") & "'>" & COALESCE([@vresult], "No status") & "</span>"
-                        & IF([@vresult] = "Failed", " " & FORMAT([@vfailures], "#,##0") & " rows") & "</td></tr>",
-                        "",
-                        [@vlabel], ASC
-                    )
-                    & "</table>"
-                )
-                & IF(
-                    NOT ISEMPTY(_columns),
-                    "<details open><summary style='" & _head & ";cursor:pointer'>COLUMNS (" & COUNTROWS(_columns) & ")</summary><table style='border-collapse:collapse;width:100%;font-size:12px;color:#1F2937'>"
-                    & CONCATENATEX(
-                        _columns,
-                        "<tr><td style='" & _cell & ";font-weight:600;white-space:nowrap'>" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE([@col], "&", "&amp;"), "<", "&lt;"), ">", "&gt;"), """", "&quot;"), "'", "&#39;") & "</td><td style='" & _cell & "'>" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE([@note], "&", "&amp;"), "<", "&lt;"), ">", "&gt;"), """", "&quot;"), "'", "&#39;") & "</td></tr>",
-                        "",
-                        [@col], ASC
-                    )
-                    & "</table></details>"
-                )
-                & "</div>"
-            )
+            "{""at"":" & IF(ISBLANK(UTCNOW()), "null", """" & FORMAT(UTCNOW(), "yyyy-mm-dd") & "T" & FORMAT(UTCNOW(), "hh:nn:ss") & "Z""")
+            & ",""nodes"":" & "[" & CONCATENATEX(_nodes, "[" & """" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE('Graph node'[Node ID] & "", "\", "\\"), """", "\"""), UNICHAR(13), "\r"), UNICHAR(10), "\n"), UNICHAR(9), "\t"), "<", "\u003c") & """" & "," & """" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE('Graph node'[Label] & "", "\", "\\"), """", "\"""), UNICHAR(13), "\r"), UNICHAR(10), "\n"), UNICHAR(9), "\t"), "<", "\u003c") & """" & "," & """" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE('Graph node'[Node kind] & "", "\", "\\"), """", "\"""), UNICHAR(13), "\r"), UNICHAR(10), "\n"), UNICHAR(9), "\t"), "<", "\u003c") & """" & "," & """" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE('Graph node'[Item label] & "", "\", "\\"), """", "\"""), UNICHAR(13), "\r"), UNICHAR(10), "\n"), UNICHAR(9), "\t"), "<", "\u003c") & """" & "," & """" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE('Graph node'[Item type] & "|" & 'Graph node'[Item name] & "|" & 'Graph node'[Schema name] & "|" & 'Graph node'[Object name] & "", "\", "\\"), """", "\"""), UNICHAR(13), "\r"), UNICHAR(10), "\n"), UNICHAR(9), "\t"), "<", "\u003c") & """" & "," & """" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(LEFT('Graph node'[Description], 300) & "", "\", "\\"), """", "\"""), UNICHAR(13), "\r"), UNICHAR(10), "\n"), UNICHAR(9), "\t"), "<", "\u003c") & """" & "]", ",") & "]"
+            & ",""edges"":" & "[" & CONCATENATEX(_edges, "[" & """" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE('Graph edge'[Downstream node ID] & "", "\", "\\"), """", "\"""), UNICHAR(13), "\r"), UNICHAR(10), "\n"), UNICHAR(9), "\t"), "<", "\u003c") & """" & "," & """" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE('Graph edge'[Upstream node ID] & "", "\", "\\"), """", "\"""), UNICHAR(13), "\r"), UNICHAR(10), "\n"), UNICHAR(9), "\t"), "<", "\u003c") & """" & "," & """" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE('Graph edge'[Edge kind] & "", "\", "\\"), """", "\"""), UNICHAR(13), "\r"), UNICHAR(10), "\n"), UNICHAR(9), "\t"), "<", "\u003c") & """" & "]", ",") & "]"
+            & ",""loads"":" & "[" & CONCATENATEX('Load status', "[" & """" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE('Load status'[Item type] & "|" & 'Load status'[Item name] & "|" & 'Load status'[Schema name] & "|" & 'Load status'[Object name] & "", "\", "\\"), """", "\"""), UNICHAR(13), "\r"), UNICHAR(10), "\n"), UNICHAR(9), "\t"), "<", "\u003c") & """" & "," & """" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE('Load status'[Result] & "", "\", "\\"), """", "\"""), UNICHAR(13), "\r"), UNICHAR(10), "\n"), UNICHAR(9), "\t"), "<", "\u003c") & """" & "," & IF(ISBLANK('Load status'[Started datetime]), "null", """" & FORMAT('Load status'[Started datetime], "yyyy-mm-dd") & "T" & FORMAT('Load status'[Started datetime], "hh:nn:ss") & "Z""") & "," & IF(ISBLANK('Load status'[Completed datetime]), "null", """" & FORMAT('Load status'[Completed datetime], "yyyy-mm-dd") & "T" & FORMAT('Load status'[Completed datetime], "hh:nn:ss") & "Z""") & "," & IF(ISBLANK('Load status'[Duration milliseconds]), "null", FORMAT('Load status'[Duration milliseconds], "0")) & "]", ",") & "]"
+            & ",""tests"":" & "[" & CONCATENATEX('Test status', "[" & """" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE('Test status'[Item type] & "|" & 'Test status'[Item name] & "|" & 'Test status'[Schema name] & "|" & 'Test status'[Object name] & "", "\", "\\"), """", "\"""), UNICHAR(13), "\r"), UNICHAR(10), "\n"), UNICHAR(9), "\t"), "<", "\u003c") & """" & "," & """" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE('Test status'[Result] & "", "\", "\\"), """", "\"""), UNICHAR(13), "\r"), UNICHAR(10), "\n"), UNICHAR(9), "\t"), "<", "\u003c") & """" & "," & IF(ISBLANK('Test status'[Completed datetime]), "null", """" & FORMAT('Test status'[Completed datetime], "yyyy-mm-dd") & "T" & FORMAT('Test status'[Completed datetime], "hh:nn:ss") & "Z""") & "," & IF(ISBLANK('Test status'[Failure count]), "null", FORMAT('Test status'[Failure count], "0")) & "]", ",") & "]"
+            & ",""stats"":" & "[" & CONCATENATEX(_statistics, "[" & """" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE('Load statistic'[Item type] & "|" & 'Load statistic'[Item name] & "|" & 'Load statistic'[Schema name] & "|" & 'Load statistic'[Object name] & "", "\", "\\"), """", "\"""), UNICHAR(13), "\r"), UNICHAR(10), "\n"), UNICHAR(9), "\t"), "<", "\u003c") & """" & "," & IF(ISBLANK('Load statistic'[Rows read]), "null", FORMAT('Load statistic'[Rows read], "0")) & "," & IF(ISBLANK('Load statistic'[Rows inserted]), "null", FORMAT('Load statistic'[Rows inserted], "0")) & "," & IF(ISBLANK('Load statistic'[Rows updated]), "null", FORMAT('Load statistic'[Rows updated], "0")) & "," & IF(ISBLANK('Load statistic'[Rows deleted]), "null", FORMAT('Load statistic'[Rows deleted], "0")) & "," & IF(ISBLANK('Load statistic'[Rows rejected]), "null", FORMAT('Load statistic'[Rows rejected], "0")) & "]", ",") & "]"
+            & ",""columns"":" & "[" & CONCATENATEX(_columns, "[" & """" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE('Column dictionary'[Item type] & "|" & 'Column dictionary'[Item name] & "|" & 'Column dictionary'[Schema name] & "|" & 'Column dictionary'[Object name] & "", "\", "\\"), """", "\"""), UNICHAR(13), "\r"), UNICHAR(10), "\n"), UNICHAR(9), "\t"), "<", "\u003c") & """" & "," & """" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE('Column dictionary'[Column name] & "", "\", "\\"), """", "\"""), UNICHAR(13), "\r"), UNICHAR(10), "\n"), UNICHAR(9), "\t"), "<", "\u003c") & """" & "," & """" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(LEFT('Column dictionary'[Description], 300) & "", "\", "\\"), """", "\"""), UNICHAR(13), "\r"), UNICHAR(10), "\n"), UNICHAR(9), "\t"), "<", "\u003c") & """" & "]", ",") & "]"
+            & "}"
         ```
-        displayFolder: Graph
+        displayFolder: Data
 
-    /// One bar per Log row of the picked workflow, or the latest one, as SVG.
-    measure 'Run timeline' = ```
-        VAR _latestAt = CALCULATE(MAX('Log'[Completed datetime]), REMOVEFILTERS('Log'))
-        VAR _latest = CALCULATE(MAX('Log'[Workflow ID]), REMOVEFILTERS('Log'), 'Log'[Completed datetime] = _latestAt)
-        VAR _workflow = COALESCE(IF(ISFILTERED('Log'[Workflow ID]), SELECTEDVALUE('Log'[Workflow ID])), _latest)
-        VAR _all = CALCULATETABLE(
-            SELECTCOLUMNS(
-                'Log',
-                "@sk", 'Log'[Log SK] & "",
-                "@task", 'Log'[Task type] & "",
-                "@tt", 'Log'[Target type] & "",
-                "@tn", 'Log'[Target name] & "",
-                "@sch", 'Log'[Schema name] & "",
-                "@obj", 'Log'[Object name] & "",
-                "@result", 'Log'[Result] & "",
-                "@s", 'Log'[Started datetime],
-                "@c", 'Log'[Completed datetime],
-                "@details", 'Log'[Details] & ""
-            ),
-            REMOVEFILTERS('Log'),
-            'Log'[Workflow ID] = _workflow
+    /// Log rows of the ten latest workflows, as JSON.
+    measure 'Run data' = ```
+        VAR _flows = TOPN(
+            10,
+            ADDCOLUMNS(VALUES('Log'[Workflow ID]), "@at", CALCULATE(MAX('Log'[Completed datetime]))),
+            [@at], DESC
         )
-        VAR _count = COUNTROWS(_all) + 0
-        VAR _bars = TOPN(120, _all, [@s], ASC, [@sk], ASC)
-        VAR _t0 = MINX(_all, [@s])
-        VAR _t1 = MAXX(_all, [@c])
-        VAR _span = MAX((_t1 - _t0) * 86400, 1)
-        VAR _placed = ADDCOLUMNS(
-            _bars,
-            "@i", VAR _s = [@s] VAR _k = [@sk] RETURN COUNTROWS(FILTER(_bars, [@s] < _s || ([@s] = _s && [@sk] < _k))) + 0,
-            "@label",
-                IF(
-                    [@obj] = "",
-                    VAR _p = SEARCH("""node_id"": """, [@details], 1, 0)
-                    VAR _rest = IF(_p > 0, MID([@details], _p + 12, 200), "")
-                    VAR _q = SEARCH("""", _rest, 1, 0)
-                    VAR _id = IF(_q > 1, LEFT(_rest, _q - 1), [@tt] & "/" & [@tn])
-                    VAR _colon = SEARCH(":", _id, 1, 0)
-                    VAR _verb = IF(_colon > 0, LEFT(_id, _colon - 1), "")
-                    VAR _name = MID(_id, _colon + 1, 400)
-                    RETURN IF(_verb = "" || _verb = "load", _name, _name & " (" & _verb & ")"),
-                    [@tt] & "/" & [@tn] & "/" & [@sch] & "." & [@obj]
-                )
+        VAR _rows = TOPN(
+            2000,
+            FILTER('Log', 'Log'[Workflow ID] IN SELECTCOLUMNS(_flows, "@w", 'Log'[Workflow ID])),
+            'Log'[Completed datetime], DESC
         )
-        VAR _height = 70 + COUNTROWS(_bars) * 20 + 34
-        VAR _width = 960
-        VAR _ok = COUNTROWS(FILTER(_all, [@result] IN {"Succeeded", "Skipped"})) + 0
-        VAR _bad = COUNTROWS(FILTER(_all, [@result] IN {"Failed", "Error", "Blocked", "Rejected"})) + 0
+        VAR _log = ADDCOLUMNS(
+            _rows,
+            "@ref",
+                VAR _p = SEARCH("""node_id"": """, 'Log'[Details], 1, 0)
+                VAR _rest = IF(_p > 0, MID('Log'[Details], _p + 12, 400), "")
+                VAR _q = SEARCH("""", _rest, 1, 0)
+                RETURN IF(_q > 1, LEFT(_rest, _q - 1), "")
+        )
         RETURN
-            IF(
-                _count = 0,
-                "<svg xmlns='http://www.w3.org/2000/svg' width='560' height='60' font-family='Segoe UI, Helvetica, Arial, sans-serif'><text x='16' y='34' font-size='13' fill='#7C8798'>No workflow has run yet. Run weaver load to see its timeline.</text></svg>",
-                "<svg xmlns='http://www.w3.org/2000/svg' width='" & _width & "' height='" & _height & "' viewBox='0 0 " & _width & " " & _height & "' font-family='Segoe UI, Helvetica, Arial, sans-serif'>"
-                & "<text x='16' y='22' font-size='14' font-weight='600' fill='#64748B'>Workflow " & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(_workflow, "&", "&amp;"), "<", "&lt;"), ">", "&gt;"), """", "&quot;"), "'", "&#39;") & "</text>"
-                & "<text x='16' y='41' font-size='11.5' fill='#7C8798'>Started " & FORMAT(_t0, "yyyy-mm-dd hh:nn:ss") & " UTC · " & IF(_span < 60, FORMAT(_span, "0.0") & " s", INT(_span / 60) & " min " & FORMAT(MOD(_span, 60), "0") & " s")
-                & " · " & _count & IF(_count = 1, " step", " steps") & " · " & _ok & " succeeded, " & _bad & " not"
-                & IF(_count > 120, " · showing the first 120", "") & "</text>"
-                & CONCATENATEX(
-                    GENERATESERIES(0, 4),
-                    VAR _x = 300 + INT([Value] / 4 * 620)
-                    RETURN "<line x1='" & _x & "' y1='62' x2='" & _x & "' y2='" & (_height - 26) & "' stroke='#94A3B8' stroke-opacity='0.35'/>"
-                        & "<text x='" & _x & "' y='" & (_height - 10) & "' font-size='10' text-anchor='middle' fill='#7C8798'>+" & IF(([Value] / 4 * _span) < 60, FORMAT(([Value] / 4 * _span), "0.0") & " s", INT(([Value] / 4 * _span) / 60) & " min " & FORMAT(MOD(([Value] / 4 * _span), 60), "0") & " s") & "</text>",
-                    ""
-                )
-                & CONCATENATEX(
-                    _placed,
-                    VAR _y = 70 + [@i] * 20
-                    VAR _x1 = 300 + INT(([@s] - _t0) * 86400 / _span * 620)
-                    VAR _x2 = 300 + INT((COALESCE([@c], _t1) - _t0) * 86400 / _span * 620)
-                    VAR _tone = SWITCH([@result], "Succeeded", "ok", "Skipped", "ok", "Failed", "bad", "Error", "bad", "Blocked", "warn", "Rejected", "warn", "Pending", "wait", "none")
-                    VAR _colour = SWITCH(_tone, "ok", "#2F9E6B", "bad", "#D14343", "warn", "#DD6B20", "wait", "#C08A12", "#8B95A7")
-                    RETURN "<g><title>" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE([@label], "&", "&amp;"), "<", "&lt;"), ">", "&gt;"), """", "&quot;"), "'", "&#39;") & " · " & [@task] & " · " & [@result] & " · "
-                        & IF((COALESCE([@c], _t1) - [@s]) * 86400 < 60, FORMAT((COALESCE([@c], _t1) - [@s]) * 86400, "0.0") & " s", INT((COALESCE([@c], _t1) - [@s]) * 86400 / 60) & " min " & FORMAT(MOD((COALESCE([@c], _t1) - [@s]) * 86400, 60), "0") & " s") & "</title>"
-                        & "<text x='290' y='" & (_y + 13) & "' font-size='11' text-anchor='end' fill='#7C8798'>"
-                        & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(IF(LEN([@label]) > 44, "…" & RIGHT([@label], 43), [@label]), "&", "&amp;"), "<", "&lt;"), ">", "&gt;"), """", "&quot;"), "'", "&#39;") & "</text>"
-                        & "<rect x='" & _x1 & "' y='" & (_y + 3) & "' width='" & MAX(3, _x2 - _x1) & "' height='14' rx='3' fill='" & _colour & "' fill-opacity='0.85'/></g>",
-                    "",
-                    [@i], ASC
-                )
-                & "</svg>"
-            )
+            "{""log"":" & "[" & CONCATENATEX(_log, "[" & """" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE('Log'[Workflow ID] & "", "\", "\\"), """", "\"""), UNICHAR(13), "\r"), UNICHAR(10), "\n"), UNICHAR(9), "\t"), "<", "\u003c") & """" & "," & """" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE('Log'[Task type] & "", "\", "\\"), """", "\"""), UNICHAR(13), "\r"), UNICHAR(10), "\n"), UNICHAR(9), "\t"), "<", "\u003c") & """" & "," & """" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE('Log'[Target type] & "", "\", "\\"), """", "\"""), UNICHAR(13), "\r"), UNICHAR(10), "\n"), UNICHAR(9), "\t"), "<", "\u003c") & """" & "," & """" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE('Log'[Target name] & "", "\", "\\"), """", "\"""), UNICHAR(13), "\r"), UNICHAR(10), "\n"), UNICHAR(9), "\t"), "<", "\u003c") & """" & "," & """" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE('Log'[Schema name] & "", "\", "\\"), """", "\"""), UNICHAR(13), "\r"), UNICHAR(10), "\n"), UNICHAR(9), "\t"), "<", "\u003c") & """" & "," & """" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE('Log'[Object name] & "", "\", "\\"), """", "\"""), UNICHAR(13), "\r"), UNICHAR(10), "\n"), UNICHAR(9), "\t"), "<", "\u003c") & """" & "," & """" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE('Log'[Result] & "", "\", "\\"), """", "\"""), UNICHAR(13), "\r"), UNICHAR(10), "\n"), UNICHAR(9), "\t"), "<", "\u003c") & """" & "," & IF(ISBLANK('Log'[Started datetime]), "null", """" & FORMAT('Log'[Started datetime], "yyyy-mm-dd") & "T" & FORMAT('Log'[Started datetime], "hh:nn:ss") & "Z""") & "," & IF(ISBLANK('Log'[Completed datetime]), "null", """" & FORMAT('Log'[Completed datetime], "yyyy-mm-dd") & "T" & FORMAT('Log'[Completed datetime], "hh:nn:ss") & "Z""") & "," & """" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE([@ref] & "", "\", "\\"), """", "\"""), UNICHAR(13), "\r"), UNICHAR(10), "\n"), UNICHAR(9), "\t"), "<", "\u003c") & """" & "]", ",") & "]" & "}"
         ```
-        displayFolder: Live run
+        displayFolder: Data
 
-    /// The same window, coloured by readiness: Done, Candidate or Waiting.
-    measure 'Readiness SVG' = CALCULATE([Graph SVG], TREATAS({"Readiness"}, 'Graph colouring'[Colouring]))
-        displayFolder: Live run
+    /// Health counts, statuses and Views, as JSON.
+    measure 'Health data' = ```
+        VAR _views = CALCULATETABLE('Table dictionary', 'Table dictionary'[Object type] = "view")
+        RETURN
+            "{""at"":" & IF(ISBLANK(UTCNOW()), "null", """" & FORMAT(UTCNOW(), "yyyy-mm-dd") & "T" & FORMAT(UTCNOW(), "hh:nn:ss") & "Z""")
+            & ",""health"":{""red"":" & [Red tests] & ",""failed"":" & [Failed loads] & ",""pending"":" & [Pending loads]
+            & ",""stale"":" & [Stale loads] & ",""latest"":" & IF(ISBLANK([Latest settled completion]), "null", """" & FORMAT([Latest settled completion], "yyyy-mm-dd") & "T" & FORMAT([Latest settled completion], "hh:nn:ss") & "Z""") & "}"
+            & ",""loads"":" & "[" & CONCATENATEX('Load status', "[" & """" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE('Load status'[Item type] & "|" & 'Load status'[Item name] & "|" & 'Load status'[Schema name] & "|" & 'Load status'[Object name] & "", "\", "\\"), """", "\"""), UNICHAR(13), "\r"), UNICHAR(10), "\n"), UNICHAR(9), "\t"), "<", "\u003c") & """" & "," & """" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE('Load status'[Result] & "", "\", "\\"), """", "\"""), UNICHAR(13), "\r"), UNICHAR(10), "\n"), UNICHAR(9), "\t"), "<", "\u003c") & """" & "," & IF(ISBLANK('Load status'[Started datetime]), "null", """" & FORMAT('Load status'[Started datetime], "yyyy-mm-dd") & "T" & FORMAT('Load status'[Started datetime], "hh:nn:ss") & "Z""") & "," & IF(ISBLANK('Load status'[Completed datetime]), "null", """" & FORMAT('Load status'[Completed datetime], "yyyy-mm-dd") & "T" & FORMAT('Load status'[Completed datetime], "hh:nn:ss") & "Z""") & "," & IF(ISBLANK('Load status'[Duration milliseconds]), "null", FORMAT('Load status'[Duration milliseconds], "0")) & "]", ",") & "]"
+            & ",""tests"":" & "[" & CONCATENATEX('Test status', "[" & """" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE('Test status'[Item type] & "|" & 'Test status'[Item name] & "|" & 'Test status'[Schema name] & "|" & 'Test status'[Object name] & "", "\", "\\"), """", "\"""), UNICHAR(13), "\r"), UNICHAR(10), "\n"), UNICHAR(9), "\t"), "<", "\u003c") & """" & "," & """" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE('Test status'[Result] & "", "\", "\\"), """", "\"""), UNICHAR(13), "\r"), UNICHAR(10), "\n"), UNICHAR(9), "\t"), "<", "\u003c") & """" & "," & IF(ISBLANK('Test status'[Completed datetime]), "null", """" & FORMAT('Test status'[Completed datetime], "yyyy-mm-dd") & "T" & FORMAT('Test status'[Completed datetime], "hh:nn:ss") & "Z""") & "," & IF(ISBLANK('Test status'[Failure count]), "null", FORMAT('Test status'[Failure count], "0")) & "]", ",") & "]"
+            & ",""views"":[" & CONCATENATEX(_views, """" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE('Table dictionary'[Item type] & "|" & 'Table dictionary'[Item name] & "|" & 'Table dictionary'[Schema name] & "|" & 'Table dictionary'[Object name] & "", "\", "\\"), """", "\"""), UNICHAR(13), "\r"), UNICHAR(10), "\n"), UNICHAR(9), "\t"), "<", "\u003c") & """", ",") & "]"
+            & "}"
+        ```
+        displayFolder: Data
+
+    /// The dashboard's stylesheet and script.
+    measure 'Renderer' = ```
+        "{renderer}"
+        ```
+        displayFolder: Pages
+        isHidden
+
+    /// The Overview page for HTML Content.
+    measure 'Overview page' = "<div id=""wd-app"" class=""wd""></div><script>window.__WD_DATA = Object.assign({page: ""overview""}, " & [Health data] & ");</script>" & [Renderer]
+        displayFolder: Pages
+
+    /// The Explore page for HTML Content.
+    measure 'Explore page' = "<div id=""wd-app"" class=""wd""></div><script>window.__WD_DATA = Object.assign({page: ""explore""}, " & [Graph data] & ");</script>" & [Renderer]
+        displayFolder: Pages
+
+    /// The Live run page for HTML Content.
+    measure 'Live run page' = "<div id=""wd-app"" class=""wd""></div><script>window.__WD_DATA = Object.assign({page: ""live""}, " & [Graph data] & ", " & [Run data] & ");</script>" & [Renderer]
+        displayFolder: Pages

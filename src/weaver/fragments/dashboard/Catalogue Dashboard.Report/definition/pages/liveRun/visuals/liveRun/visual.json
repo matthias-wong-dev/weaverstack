@@ -1,16 +1,16 @@
 {
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.0.0/schema.json",
-  "name": "observedAt",
+  "name": "liveRun",
   "position": {
-    "x": 16,
-    "y": 680,
-    "z": 2,
-    "height": 32,
-    "width": 1248,
-    "tabOrder": 2
+    "x": 0,
+    "y": 0,
+    "z": 0,
+    "height": 720,
+    "width": 1280,
+    "tabOrder": 0
   },
   "visual": {
-    "visualType": "htmlContent443BE3AD55E043BF878BED274D3A6865",
+    "visualType": "htmlContent443BE3AD55E043BF878BED274D3A6855",
     "query": {
       "queryState": {
         "content": {
@@ -20,14 +20,14 @@
                 "Measure": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Browser"
+                      "Entity": "Dashboard measures"
                     }
                   },
-                  "Property": "Observed at line"
+                  "Property": "Live run page"
                 }
               },
-              "queryRef": "Browser.Observed at line",
-              "nativeQueryRef": "Observed at line"
+              "queryRef": "Dashboard measures.Live run page",
+              "nativeQueryRef": "Live run page"
             }
           ]
         }
