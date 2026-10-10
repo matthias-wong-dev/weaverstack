@@ -35,10 +35,12 @@ from .catalogue.tables import (
 from .declaration.metadata import ASSUMPTION, TEST, ObjectId
 from .declaration.model import (
     AREAS,
+    ARTIFACT_SHAPE,
     FILE_SHAPE,
     FILES,
     LAKEHOUSE,
     LOGICAL_TARGET,
+    MODEL_SHAPE,
     OBJECT_SHAPE,
     PHYSICAL_TARGET,
     SCHEMA_SHORTCUT,
@@ -300,6 +302,10 @@ class InstalledDag:
     )
     #: Unresolved reads by consumer. Deferred so unrelated targets remain usable.
     unresolved: Mapping[WeaverDocumentId, tuple[str, ...]] = field(default_factory=dict)
+    #: The authored references behind :attr:`unresolved`, by consumer.
+    unresolved_references: Mapping[WeaverDocumentId, tuple[str, ...]] = field(
+        default_factory=dict
+    )
 
     # --- lookup ---------------------------------------------------------------
 
@@ -464,6 +470,70 @@ def installed_dag(catalogue: Catalogue) -> InstalledDag:
     return _build(catalogue)
 
 
+def item_dag(catalogue: Catalogue, item: WeaverItemId) -> InstalledDag:
+    """The installed graph one item's rows describe, read on their own.
+
+    What the item reads in other items is assumed installed, so the result
+    depends on this item's rows alone. Those upstreams are nodes of their own
+    items here, and carry no metadata beyond their identity.
+    """
+
+    tables = catalogue.rows.get(item, {})
+    own = Catalogue({item: tables})
+    return _build(own, assumed=_foreign_upstreams(own, item))
+
+
+def _foreign_upstreams(
+    catalogue: Catalogue, item: WeaverItemId
+) -> dict[WeaverDocumentId, InstalledNode]:
+    """Placeholders for the objects in other items that ``item`` reads."""
+
+    found: dict[WeaverDocumentId, InstalledNode] = {}
+
+    def assume(identity) -> None:
+        if identity is None or identity.item == item or identity in found:
+            return
+        found[identity] = InstalledNode(
+            identity=identity,
+            target=PhysicalTargetRef(
+                kind=_TARGET_KIND_FOR_ITEM.get(identity.item.item_type, ""),
+                name=identity.item.item_name,
+            ),
+            role=ROLE_DATA,
+            object_type=_assumed_type(identity),
+        )
+
+    for row in catalogue.rows.get(item, {}).get(DEPENDENCY.name, ()):
+        item_type = str(row.get("referenced_item_type") or "")
+        item_name = str(row.get("referenced_item_name") or "")
+        if not item_type or not item_name:
+            continue
+        assume(
+            stored_identity(
+                WeaverItemId(item_type, item_name),
+                str(row.get("referenced_schema_name") or ""),
+                str(row.get("referenced_object_name") or ""),
+            )
+        )
+    for shortcut in installed_shortcuts(catalogue):
+        if shortcut.is_logical:
+            assume(shortcut.source)
+    return found
+
+
+def _assumed_type(identity: WeaverDocumentId) -> str:
+    """What an assumed upstream is taken to be.
+
+    Only a semantic source's check reads it, and that accepts a table or a View.
+    """
+
+    if identity.shape == MODEL_SHAPE:
+        return "semantic_model"
+    if identity.shape == ARTIFACT_SHAPE:
+        return "report"
+    return "folder" if identity.is_files else "table"
+
+
 #: What an operation does to a model, for the refusal that names it.
 _DOING = {"Load": "loading", "Test": "testing"}
 
@@ -525,7 +595,11 @@ def _deployed_file(item: WeaverItemId, relative: str) -> WeaverDocumentId:
 # --- reading the catalogue ----------------------------------------------------
 
 
-def _build(catalogue: Catalogue) -> InstalledDag:
+def _build(
+    catalogue: Catalogue,
+    *,
+    assumed: Mapping[WeaverDocumentId, InstalledNode] = MappingProxyType({}),
+) -> InstalledDag:
     installations = installed_targets(catalogue)
     data, artefacts, ambiguous = _registered(catalogue, installations)
     validations = _validations(catalogue, installations)
@@ -540,8 +614,10 @@ def _build(catalogue: Catalogue) -> InstalledDag:
         nodes[node.node_id] = node
 
     shortcuts = installed_shortcuts(catalogue)
-    resolver = _References(objects=data, shortcuts=shortcuts)
+    resolver = _References(objects={**assumed, **data}, shortcuts=shortcuts)
     edges = resolver.resolve(_dependency_rows(catalogue, nodes))
+    for identity, node in assumed.items():
+        nodes.setdefault(str(identity), node)
     edges += _shortcut_edges(shortcuts, nodes)
     graph = Graph(
         nodes,
@@ -565,6 +641,12 @@ def _build(catalogue: Catalogue) -> InstalledDag:
             {
                 consumer: tuple(messages)
                 for consumer, messages in resolver.unresolved.items()
+            }
+        ),
+        unresolved_references=MappingProxyType(
+            {
+                consumer: tuple(references)
+                for consumer, references in resolver.unresolved_references.items()
             }
         ),
     )
@@ -1008,6 +1090,7 @@ class _References:
         }
         self.external: dict[WeaverDocumentId, list[str]] = {}
         self.unresolved: dict[WeaverDocumentId, list[str]] = {}
+        self.unresolved_references: dict[WeaverDocumentId, list[str]] = {}
 
     def resolve(self, rows) -> tuple[InstalledEdge, ...]:
         edges: dict[tuple[str, str, str, str | None], InstalledEdge] = {}
@@ -1021,15 +1104,16 @@ class _References:
             except CatalogueStateError as exc:
                 # Defer failure until an operation reaches this consumer so an
                 # unrelated target remains usable.
-                self.unresolved.setdefault(row.consumer, []).append(str(exc))
+                self._unresolved(row, str(exc))
                 continue
             if found is None:
                 continue
             producer, through = found
             if producer == row.consumer:
-                self.unresolved.setdefault(row.consumer, []).append(
+                self._unresolved(
+                    row,
                     f"{row.consumer} depends on {row.reference!r}, which resolves "
-                    "to itself. Remove the dependency and build the item again."
+                    "to itself. Remove the dependency and build the item again.",
                 )
                 continue
             edge = InstalledEdge(
@@ -1046,6 +1130,10 @@ class _References:
                 edge,
             )
         return tuple(edges.values())
+
+    def _unresolved(self, row, message: str) -> None:
+        self.unresolved.setdefault(row.consumer, []).append(message)
+        self.unresolved_references.setdefault(row.consumer, []).append(row.reference)
 
     def _semantic(self, row):
         from .errors import WeaverError
@@ -1260,6 +1348,7 @@ __all__ = [
     "installed_dag",
     "installed_shortcuts",
     "installed_targets",
+    "item_dag",
     "primitive_candidates",
     "refuse_uncertified_models",
     "stored_identity",
