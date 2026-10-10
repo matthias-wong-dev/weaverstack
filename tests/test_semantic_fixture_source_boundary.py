@@ -314,11 +314,8 @@ def test_reshaping_cycles_use_the_scratch_model_not_the_configured_one(monkeypat
 
     monkeypatch.syspath_prepend(str(Path(__file__).parent / "fabric"))
     reshaping = {
-        "test_semantic_wipe_public_cycle": (
-            "test_public_wipe_preserves_item_sources_and_catalogue_then_rebuilds"
-        ),
-        "test_semantic_annotation_public_cycle": (
-            "test_public_annotation_build_readback_load_and_fixed_point"
+        "test_semantic_direct_lake_cycle": (
+            "test_generated_direct_lake_build_load_and_both_wipes"
         ),
         "test_semantic_model_public_cycle": (
             "test_existing_warehouse_source_build_persists_lineage_and_loads_without_source"
