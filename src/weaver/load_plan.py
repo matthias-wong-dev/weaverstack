@@ -11,6 +11,7 @@ from functools import cached_property
 from typing import TYPE_CHECKING, Mapping, Sequence
 
 from .catalogue.state import Catalogue
+from .catalogue.tables import ROLE_SHORTCUT
 from .declaration.model import (
     OBJECT_SHAPE,
     WeaverDocumentId,
@@ -128,8 +129,17 @@ class LoadDag:
         items: Sequence[WeaverItemId],
         selection: Sequence[WeaverDocumentId] | None = None,
         names: Sequence[str] = (),
+        ancestors: bool = False,
+        descendants: bool = False,
     ) -> "LoadDag":
-        return load_dag(catalogue.dag(), items=items, selection=selection, names=names)
+        return load_dag(
+            catalogue.dag(),
+            items=items,
+            selection=selection,
+            names=names,
+            ancestors=ancestors,
+            descendants=descendants,
+        )
 
     @property
     def by_id(self) -> Mapping[str, LoadNode]:
@@ -173,28 +183,34 @@ def load_dag(
     items: Sequence[WeaverItemId],
     selection: Sequence[WeaverDocumentId] | None = None,
     names: Sequence[str] = (),
+    ancestors: bool = False,
+    descendants: bool = False,
 ) -> LoadDag:
     """The physical load graph for one set of items.
 
-    Dependencies order the selection but never enlarge it: an edge is kept only
-    where both ends were named. ``names`` narrows it to the loadables its
+    Dependencies order the selection. ``names`` narrows it to the loadables its
     regular expressions match, an operator override that adds neither nodes nor
-    ordering edges. A Lakehouse name carries its area, ``Tables/Schema.Object``
+    ordering edges unless expansion is requested. A Lakehouse name carries its
+    area, ``Tables/Schema.Object``
     or ``Files/Schema.Object``, and a bare ``Schema.Object`` is accepted where
     it reaches one object.
 
-    ``selection`` is an execution filter over logical loadable identities,
-    decided by the caller. Only the loadables it names run. The traversal
+    ``selection`` names logical loadable seeds, decided by the caller. The traversal
     continues through the ones it leaves out, so two selected loadables keep the
     order the graph gives them. ``None`` selects every loadable the requested
     items own.
+
+    ``ancestors`` and ``descendants`` recursively expand the original seeds,
+    separately, within the requested items. Their union runs in dependency order.
 
     A semantic model that records no managed source waits for every other node
     in the plan. One that records sources waits for those alone.
     """
 
     requested = tuple(dict.fromkeys(items))
-    return _Planner(dag, selection=selection).plan(requested, names=tuple(names))
+    return _Planner(dag, selection=selection).plan(
+        requested, names=tuple(names), ancestors=ancestors, descendants=descendants
+    )
 
 
 class _Planner:
@@ -218,10 +234,17 @@ class _Planner:
         requested: tuple[WeaverItemId, ...],
         *,
         names: tuple[str, ...] = (),
+        ancestors: bool = False,
+        descendants: bool = False,
     ) -> LoadDag:
         self._refuse_ambiguity(requested)
         seeds = self._seeds(requested, names=names)
-        if names:
+        if ancestors or descendants:
+            seeds = self._expand(
+                seeds, requested, ancestors=ancestors, descendants=descendants
+            )
+            self.selection = frozenset(node.identity for node in seeds)
+        if names and not (ancestors or descendants):
             # An exact-name request is not a partial DAG request.
             # The caller chose the nodes and asked Weaver not to infer more work
             # or readiness constraints from their dependencies.
@@ -243,6 +266,29 @@ class _Planner:
         # to whoever consumes the graph.
         dag.order()
         return dag
+
+    def _expand(
+        self,
+        seeds: tuple[InstalledNode, ...],
+        requested: tuple[WeaverItemId, ...],
+        *,
+        ancestors: bool,
+        descendants: bool,
+    ) -> tuple[InstalledNode, ...]:
+        allowed_items = frozenset(requested)
+        scoped = self.dag.graph.subgraph(
+            node.node_id for node in self.dag.nodes if node.item in allowed_items
+        )
+        expanded = scoped.subgraph(
+            (node.node_id for node in seeds),
+            with_ancestors=ancestors,
+            with_descendants=descendants,
+        )
+        return tuple(
+            self.dag.by_id[node_id]
+            for node_id in expanded.order()
+            if self.dag.by_id[node_id].can_load
+        )
 
     def _order_untraced_models_last(self) -> None:
         """Make each untraced semantic model wait for every other load node.
@@ -534,15 +580,18 @@ class _Planner:
     ) -> tuple[tuple[InstalledNode, object], ...]:
         """What one object reads directly, and the barrier each read crosses.
 
-        The installed graph's own shortcut edges are left alone here. A shortcut
-        destination is materialised from its source, and the read that crosses is
-        the one the consumer declared, which
+        A shortcut conduit follows its installed source. The read that crosses
+        is the one the consumer declared, which
         :attr:`weaver.installed.InstalledEdge.through` already names.
         """
 
         unresolved = self.dag.unresolved_for(consumer)
         if unresolved:
             raise LoadError(unresolved[0])
+        if consumer.role == ROLE_SHORTCUT:
+            return tuple(
+                (producer, None) for producer in self.dag.parents(consumer.node_id)
+            )
         producers = []
         for edge in self.dag.reads(consumer.identity):
             producer = self.dag.node(edge.upstream)
