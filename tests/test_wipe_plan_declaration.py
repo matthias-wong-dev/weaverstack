@@ -630,11 +630,11 @@ def _emptied(monkeypatch, removed=("Sales",), area="delta"):
 
 
 def _unbinding(monkeypatch, asked):
-    from weaver.unbind import UnbindResult
+    from weaver.catalogue.unbind import ClaimDeletion
 
     def plan_unbind(plan, _workspace, **_options):
         asked.append(plan.unbound)
-        return UnbindResult(
+        return ClaimDeletion(
             targets=plan.unbound, logical_items=(), statements=("delete claims",)
         )
 
@@ -765,6 +765,17 @@ def test_one_coherent_line_per_physical_item(monkeypatch):
     assert result.items[0].counts == {"entries": 2, "shortcuts": 1}
     assert "2 entries" in result.items[0].describe()
     assert "1 shortcuts" in result.items[0].describe()
+
+
+@weaver_test()
+def test_a_long_target_keeps_its_outcome_apart():
+    from weaver.operations.wipe import EMPTIED, WipeItemResult
+
+    item = WipeItemResult(
+        target="SemanticModel/A semantic model name", outcome=EMPTIED, counts={}
+    )
+    assert item.describe() == "SemanticModel/A semantic model name  emptied"
+    assert item.describe(40).endswith(" " * 7 + "emptied")
 
 
 @weaver_test()

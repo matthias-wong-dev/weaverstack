@@ -1,7 +1,8 @@
 """Create a Weaver project and its declared Fabric items.
 
 Environment publication is optional. Examples are source files for a later
-build, load and test. The first build creates the catalogue tables.
+build, load and test. The first build creates the catalogue tables. Power BI
+items are scaffolded here and created by Build.
 """
 
 from __future__ import annotations
@@ -11,11 +12,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .declaration.model import LAKEHOUSE, WAREHOUSE
+from .declaration.model import LAKEHOUSE, REPORT, SEMANTIC_MODEL, WAREHOUSE
 from .errors import WeaverError
 from .onboarding import (
     WORKSPACE_CONFIG_FILE,
     ProjectRequest,
+    build_commands,
     environment_definition_files,
     example_files,
     project_files,
@@ -72,6 +74,7 @@ class InitialiseReport:
     dry_run: bool = False
     environment_publication: str = "deferred"
     environment_definition: str = "written"
+    builds: tuple[str, ...] = ("build",)
 
     @property
     def created(self) -> tuple[str, ...]:
@@ -89,7 +92,7 @@ class InitialiseReport:
     def next_commands(self) -> tuple[str, ...]:
         return (
             "weaver workflow full",
-            "weaver build",
+            *(f"weaver {build}" for build in self.builds),
             "weaver load",
             "weaver test",
             "weaver health",
@@ -114,10 +117,11 @@ def initialise(
     project_folder,
     *,
     workspace: str | None = None,
-    catalogue: str = DEFAULT_CATALOGUE,
-    environment: str = DEFAULT_ENVIRONMENT,
+    catalogue: str | None = None,
+    environment: str | None = None,
     lakehouse: str | None = None,
     warehouse: str | None = None,
+    semantic_model: str | None = None,
     example: bool = False,
     publish_environment: bool = False,
     install_weaver: bool | None = None,
@@ -127,6 +131,7 @@ def initialise(
 ) -> InitialiseReport:
     """Validate and create a project and its requested Fabric items.
 
+    ``semantic_model`` adds ``PowerBI/<name>/<name>.tmdl`` for Build to create.
     ``example`` adds source files. ``publish_environment`` publishes the
     Environment after writing the project.
     """
@@ -143,14 +148,45 @@ def initialise(
         )
         publish_environment = publish_environment or install_weaver
     destination = Path(project_folder).resolve()
+    source_items = ()
+    configured = None
+    adopted = set()
+    repository = None if semantic_model else powerbi_repository(destination)
+    if repository is not None:
+        source_items = tuple(
+            str(item)
+            for item in sorted(
+                set(repository.semantic_models) | set(repository.reports)
+            )
+        )
+        adopted.update(item.identity for item in repository.items)
+        if (destination / WORKSPACE_CONFIG_FILE).is_file():
+            from .config import load_workspace
+
+            configured = load_workspace(destination / WORKSPACE_CONFIG_FILE)
+            adopted.update(configured.configured_items)
     request = ProjectRequest(
         workspace=_workspace_name(workspace, session=session),
-        catalogue=catalogue,
-        environment=environment,
+        catalogue=catalogue
+        or (
+            configured.catalogue_item.name
+            if configured is not None and configured.catalogue
+            else DEFAULT_CATALOGUE
+        ),
+        environment=environment
+        or (
+            configured.environment.name
+            if configured is not None and configured.environment
+            else DEFAULT_ENVIRONMENT
+        ),
         lakehouse=lakehouse,
         warehouse=warehouse,
+        semantic_model=semantic_model,
         example=example,
+        source_items=source_items,
+        adopted_items=_sources(adopted),
     )
+    wanted_items = _requested(request)
 
     from .sessions.host import use_or_create_session
 
@@ -163,7 +199,13 @@ def initialise(
                     client if client is not None else opened.resolver(addressed).client
                 )
                 state, found, physical, environment_item = _read_the_workspace(
-                    request, client=rest
+                    request,
+                    client=rest,
+                    wanted_items=wanted_items,
+                    example_written=(
+                        request.example_model is not None
+                        and (destination / "PowerBI" / request.example_model).exists()
+                    ),
                 )
 
             with opened.step("Reading the Environment", request.environment):
@@ -193,24 +235,40 @@ def initialise(
                                 path.read_bytes()
                             )
             with opened.step("Checking the project files", str(destination)):
+                if source_items:
+                    # Adopt existing authored project files, not fresh scaffolding.
+                    files = {
+                        path: (destination / path).read_bytes()
+                        if (destination / path).is_file()
+                        else content
+                        for path, content in files.items()
+                    }
                 _refuse_overwrites(destination, files)
+                if source_items:
+                    files = _with_source_targets(files, source_items)
                 _check_destination_paths(destination, files)
-                _parse_generated(files, request, destination=destination)
+                configured = _parse_generated(files, request, destination=destination)
 
             if dry_run:
                 return InitialiseReport(
                     project_folder=str(destination),
                     workspace=request.workspace,
-                    resources=_planned(request, found),
+                    resources=_planned(request, found, wanted_items=wanted_items),
                     files=tuple(sorted(files)),
                     example=ExampleOutcome(generated=request.example),
                     dry_run=True,
                     environment_definition=definition_status,
+                    builds=build_commands(request),
                 )
 
             resources.extend(
                 _create_missing(
-                    request, found, physical=physical, session=opened, client=rest
+                    request,
+                    found,
+                    physical=physical,
+                    session=opened,
+                    client=rest,
+                    wanted_items=wanted_items,
                 )
             )
             with opened.step("Writing the project files", str(destination)):
@@ -219,7 +277,10 @@ def initialise(
                 from .fabric.environment import create_with_definition
                 from .fabric.environment_definition import read_environment_definition
 
-                with opened.step("Creating the Environment", request.environment):
+                with opened.step(
+                    f"Creating the Environment {request.environment}",
+                    request.environment,
+                ):
                     try:
                         create_with_definition(
                             physical,
@@ -263,7 +324,60 @@ def initialise(
         environment_publication=publication,
         environment_definition=definition_status,
         dry_run=False,
+        builds=build_commands(request),
     )
+
+
+def _has_powerbi_sources(destination: Path) -> bool:
+    """Whether ``PowerBI/`` holds more than its scaffolded ``.gitkeep``."""
+
+    folder = destination / "PowerBI"
+    return folder.is_dir() and any(
+        path.is_file() and path.relative_to(folder).as_posix() != ".gitkeep"
+        for path in folder.rglob("*")
+    )
+
+
+def _sources(items) -> tuple[str, ...]:
+    from .catalogue.builtin import BUILTIN_ITEM
+
+    return tuple(
+        sorted(
+            str(item)
+            for item in items
+            if item.item_type in {LAKEHOUSE, WAREHOUSE} and item != BUILTIN_ITEM
+        )
+    )
+
+
+def _with_source_targets(files, source_items):
+    """Add default bindings for new source items without replacing existing targets."""
+
+    import yaml
+
+    declaration = yaml.safe_load(files[WORKSPACE_CONFIG_FILE])
+    targets = declaration.setdefault("targets", {})
+    missing = [item for item in source_items if item not in targets]
+    if not missing:
+        return files
+    for item in missing:
+        targets[item] = item.partition("/")[2]
+    return {
+        **files,
+        WORKSPACE_CONFIG_FILE: yaml.safe_dump(declaration, sort_keys=False),
+    }
+
+
+def powerbi_repository(destination):
+    """Read local declared items for ordinary project adoption and CLI validation."""
+
+    from .declaration.repository import parse_item_repository
+    from .locations import Location
+
+    root = Path(destination).resolve()
+    if not _has_powerbi_sources(root):
+        return None
+    return parse_item_repository(Location(root.as_posix()))
 
 
 def _bare(request: ProjectRequest):
@@ -400,8 +514,14 @@ def _requested(request: ProjectRequest) -> tuple[_Requested, ...]:
     return tuple(wanted)
 
 
-def _read_the_workspace(request: ProjectRequest, *, client):
-    """Read all requested item identities from one workspace listing."""
+def _read_the_workspace(
+    request: ProjectRequest, *, client, wanted_items=None, example_written=False
+):
+    """Read all requested item identities from one workspace listing.
+
+    Build deploys the example's Power BI items over any of the same name, so a
+    new example must not share a name with one the workspace already has.
+    """
 
     from .fabric.resources import (
         FACET_TYPES,
@@ -420,7 +540,7 @@ def _read_the_workspace(request: ProjectRequest, *, client):
         by_name.setdefault(item.name, set()).add(item.type)
 
     found: dict[str, bool] = {}
-    for wanted in _requested(request):
+    for wanted in wanted_items if wanted_items is not None else _requested(request):
         types = by_name.get(wanted.name, set())
         if types and wanted.item_type not in types:
             other = ", ".join(sorted(types))
@@ -430,6 +550,14 @@ def _read_the_workspace(request: ProjectRequest, *, client):
                 f"{wanted.role}, or use an existing {wanted.item_type}."
             )
         found[wanted.role] = bool(types)
+    name = request.example_model
+    if name is not None and not example_written:
+        if taken := sorted(by_name.get(name, set()) & {SEMANTIC_MODEL, REPORT}):
+            raise InitialiseError(
+                f"'{request.workspace}' already has a {' and a '.join(taken)} "
+                f"named '{name}'. Name the example's Power BI project with "
+                "--semantic-model."
+            )
 
     environment = next(
         (
@@ -443,7 +571,7 @@ def _read_the_workspace(request: ProjectRequest, *, client):
 
 
 def _planned(
-    request: ProjectRequest, found: dict[str, bool]
+    request: ProjectRequest, found: dict[str, bool], *, wanted_items=None
 ) -> tuple[FabricItemOutcome, ...]:
     """Report dry-run items in the same order as a real run."""
 
@@ -453,18 +581,26 @@ def _planned(
             name=wanted.name,
             status=EXISTING if found[wanted.role] else PLANNED,
         )
-        for wanted in _requested(request)
+        for wanted in (
+            wanted_items if wanted_items is not None else _requested(request)
+        )
     )
 
 
 def _create_missing(
-    request: ProjectRequest, found: dict[str, bool], *, physical, session, client
+    request: ProjectRequest,
+    found: dict[str, bool],
+    *,
+    physical,
+    session,
+    client,
+    wanted_items=None,
 ) -> tuple[FabricItemOutcome, ...]:
     from .fabric.resources import LAKEHOUSE as LAKEHOUSE_ITEM
     from .fabric.resources import create_lakehouse, create_warehouse
 
     made = []
-    for wanted in _requested(request):
+    for wanted in wanted_items if wanted_items is not None else _requested(request):
         if wanted.role == ENVIRONMENT_ROLE:
             continue
         if found[wanted.role]:
@@ -474,7 +610,7 @@ def _create_missing(
             create_lakehouse if wanted.item_type == LAKEHOUSE_ITEM else create_warehouse
         )
         try:
-            with session.step(f"Creating the {wanted.role}", wanted.name):
+            with session.step(f"Creating the {wanted.role} {wanted.name}", wanted.name):
                 create(physical, wanted.name, client=client)
         except WeaverError as exc:
             raise _creation_error(wanted.role, wanted.name, exc) from exc
@@ -482,7 +618,12 @@ def _create_missing(
     return tuple(made)
 
 
-_ROLE_ORDER = (CATALOGUE_ROLE, ENVIRONMENT_ROLE, LAKEHOUSE, WAREHOUSE)
+_ROLE_ORDER = (
+    CATALOGUE_ROLE,
+    ENVIRONMENT_ROLE,
+    LAKEHOUSE,
+    WAREHOUSE,
+)
 
 
 def _in_role_order(resources) -> tuple[FabricItemOutcome, ...]:

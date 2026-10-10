@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from functools import cached_property
 from types import MappingProxyType
-from typing import Iterable, Mapping, Sequence
+from typing import TYPE_CHECKING, Iterable, Mapping, Sequence
 
 from .catalogue.claims import catalogue_columns, stored_area
 from .catalogue.state import Catalogue, InstalledMirror
@@ -20,11 +20,17 @@ from .catalogue.tables import (
     INSTALLATION,
     ROLE_ASSUMPTION,
     ROLE_DATA,
+    ROLE_SOURCE,
     ROLE_TEST,
+    SEMANTIC_MODEL_TABLE,
+    SEMANTIC_MODEL_TEST,
     SHORTCUT,
     TABLE_DICTIONARY,
     TEST_DICTIONARY,
     VALIDATION_ROLES,
+)
+from .catalogue.tables import (
+    SEMANTIC_MODEL as SEMANTIC_MODEL_DEFINITION,
 )
 from .declaration.metadata import ASSUMPTION, TEST, ObjectId
 from .declaration.model import (
@@ -36,6 +42,7 @@ from .declaration.model import (
     OBJECT_SHAPE,
     PHYSICAL_TARGET,
     SCHEMA_SHORTCUT,
+    SEMANTIC_MODEL,
     TABLE_SHORTCUT,
     TABLES,
     WAREHOUSE,
@@ -58,9 +65,18 @@ from .targets import (
 WAREHOUSE_PROCEDURE = "warehouse_procedure"
 PYTHON_TABLE = "python_table"
 PYTHON_FOLDER = "python_folder"
+SEMANTIC_REFRESH = "semantic_refresh"
+
+if TYPE_CHECKING:
+    from .fabric.resources import Item
 
 #: Item type determines the kind of its named physical target.
-_TARGET_KIND_FOR_ITEM = {LAKEHOUSE: LAKEHOUSE_TARGET, WAREHOUSE: WAREHOUSE_TARGET}
+_TARGET_KIND_FOR_ITEM = {
+    LAKEHOUSE: LAKEHOUSE_TARGET,
+    WAREHOUSE: WAREHOUSE_TARGET,
+    SEMANTIC_MODEL: "semanticmodel",
+    "Report": "report",
+}
 
 #: The catalogue uses lower case; declarations use title case.
 KIND_FOR_TEST_TYPE = {"test": TEST, "assumption": ASSUMPTION}
@@ -104,6 +120,13 @@ class InstalledNode:
     is_static: bool = False
     #: Source ownership when another target supplies this object's data.
     mirror: InstalledMirror | None = None
+    #: The typed semantic item frozen by Build, independent of display-name reuse.
+    bound_item: Item | None = None
+    #: A semantic validation's installed definition: the JSON its
+    #: ``_.SemanticModelTest`` row holds. It compiles to no artefact.
+    definition: str | None = None
+    #: Where a semantic Test's Expected SQL runs, from ``_.Installation``.
+    expected_target: PhysicalTargetRef | None = None
 
     @property
     def node_id(self) -> str:
@@ -123,7 +146,11 @@ class InstalledNode:
 
     @property
     def is_installed(self) -> bool:
-        return self.artefact_type is not None
+        return (
+            self.artefact_type is not None
+            or self.artefact_kind == SEMANTIC_REFRESH
+            or self.definition is not None
+        )
 
     @property
     def is_mirrored(self) -> bool:
@@ -141,12 +168,19 @@ class InstalledNode:
         target owns its data. Load-state participation is a separate concern.
         """
 
-        return self.role == ROLE_DATA and self.is_installed and not self.is_mirrored
+        return (
+            self.role == ROLE_DATA
+            and self.object_type != "report"
+            and self.is_installed
+            and not self.is_mirrored
+        )
 
     @property
     def load_name(self) -> str | None:
         """The request spelling, which may identify both a Folder and a table."""
 
+        if self.item.item_type == SEMANTIC_MODEL:
+            return self.item.item_name
         object_id = getattr(self.identity, "object_id", None)
         return None if object_id is None else object_id.qualified
 
@@ -154,6 +188,8 @@ class InstalledNode:
     def load_key(self) -> str:
         """The target-local identity, including a Lakehouse object's area."""
 
+        if self.item.item_type == SEMANTIC_MODEL:
+            return str(self.identity)
         schema, name = catalogue_columns(self.identity)
         return f"{schema}.{name}"
 
@@ -199,6 +235,9 @@ class InstalledEdge:
     #: Shortcut destinations are materialised after their sources even though
     #: nothing declares that read.
     is_shortcut: bool = False
+    semantic_table: str | None = None
+    source_mode: str | None = None
+    source_access: str | None = None
 
 
 @dataclass(frozen=True)
@@ -286,6 +325,15 @@ class InstalledDag:
 
     def reads(self, node) -> tuple[InstalledEdge, ...]:
         return self._reads.get(str(node), ())
+
+    def is_untraced_model(self, node: InstalledNode) -> bool:
+        """Whether a semantic model records no read of a managed object.
+
+        Such a model may read anything, so Load orders it after the rest of
+        the plan.
+        """
+
+        return node.artefact_kind == SEMANTIC_REFRESH and not self.reads(node.identity)
 
     def node(self, identity) -> InstalledNode:
         node = self.by_id.get(str(identity))
@@ -416,6 +464,27 @@ def installed_dag(catalogue: Catalogue) -> InstalledDag:
     return _build(catalogue)
 
 
+#: What an operation does to a model, for the refusal that names it.
+_DOING = {"Load": "loading", "Test": "testing"}
+
+
+def refuse_uncertified_models(
+    dag: InstalledDag,
+    items: Sequence[WeaverItemId],
+    *,
+    operation: str,
+    error: type[Exception],
+) -> None:
+    """Refuse a requested semantic model whose deployment is not certified."""
+
+    for item in items:
+        if item.item_type == SEMANTIC_MODEL and not dag.loadables(items=(item,)):
+            raise error(
+                f"{item} is not certified for {operation}. Build {item} before "
+                f"{_DOING[operation]} it."
+            )
+
+
 # --- artefact identities ------------------------------------------------------
 
 
@@ -534,6 +603,8 @@ def _registered(catalogue: Catalogue, installations):
         catalogue.registered.items(), key=lambda pair: str(pair[0])
     ):
         target = installations.get(identity.item)
+        if document.object_role == ROLE_SOURCE:
+            continue
         if target is None:
             # Missing ownership cannot be skipped because the graph must be complete.
             raise CatalogueStateError(
@@ -576,6 +647,30 @@ def _registered(catalogue: Catalogue, installations):
             continue
         node = replace(node, is_static=identity in static)
         data[identity] = node
+        if node.object_type == "semantic_model":
+            from .fabric.resources import Item
+
+            definitions = catalogue.rows[identity.item].get(
+                SEMANTIC_MODEL_DEFINITION.name, ()
+            )
+            if not any(
+                row.get("signature") == catalogue.registered[identity].signature
+                for row in definitions
+            ):
+                continue
+            rows = catalogue.rows[identity.item].get(INSTALLATION.name, ())
+            binding = rows[0]
+            data[identity] = replace(
+                node,
+                artefact_kind=SEMANTIC_REFRESH,
+                bound_item=Item(
+                    id=binding.get("item_id"),
+                    workspace_id=binding.get("workspace_id"),
+                    name=node.target.name,
+                    type=SEMANTIC_MODEL,
+                ),
+            )
+            continue
         for kind, candidate in primitive_candidates(identity, node.object_type):
             data[identity] = replace(
                 node,
@@ -633,6 +728,16 @@ def _validations(catalogue: Catalogue, installations):
                     f"The catalogue contains {logical}, but does not identify a "
                     f"target for {item}. Build {item} again."
                 )
+            if item.item_type == SEMANTIC_MODEL:
+                found[logical] = _semantic_validation(
+                    tables,
+                    row,
+                    logical,
+                    kind=kind,
+                    target=target,
+                    installations=installations,
+                )
+                continue
             artefact = validation_artefact_id(item, kind, logical.object_id)
             registered = catalogue.registered.get(artefact)
             found[logical] = InstalledNode(
@@ -646,6 +751,47 @@ def _validations(catalogue: Catalogue, installations):
                 description=_text(row.get("description")),
             )
     return found
+
+
+def _semantic_validation(
+    tables, row, logical, *, kind, target, installations
+) -> InstalledNode:
+    """A validation installed when its definition matches its declaration."""
+
+    import json
+
+    from .fabric.resources import Item
+
+    definition = next(
+        (
+            each.get("definition")
+            for each in tables.get(SEMANTIC_MODEL_TEST.name, ())
+            if (each.get("schema_name"), each.get("object_name"))
+            == (row.get("schema_name"), row.get("object_name"))
+            and each.get("signature") == row.get("signature")
+        ),
+        None,
+    )
+    installation = tables.get(INSTALLATION.name, ({},))[0]
+    source = json.loads(definition).get("expectedSource") if definition else None
+    return InstalledNode(
+        identity=logical,
+        target=target,
+        role=_ROLE_FOR_VALIDATION_KIND[kind],
+        artefact_kind=kind,
+        primary_key=_column_set(row.get("primary_key")),
+        description=_text(row.get("description")),
+        definition=definition,
+        expected_target=installations.get(WeaverItemId.parse(source))
+        if source
+        else None,
+        bound_item=Item(
+            id=installation.get("item_id"),
+            workspace_id=installation.get("workspace_id"),
+            name=target.name,
+            type=SEMANTIC_MODEL,
+        ),
+    )
 
 
 def _validation_kind(row: Mapping[str, object], logical: WeaverDocumentId) -> str:
@@ -717,6 +863,10 @@ def stored_identity(item: WeaverItemId, schema: str, name: str) -> WeaverDocumen
     Validation identities use a separate projection.
     """
 
+    if item.item_type == SEMANTIC_MODEL and schema == "" and name == "":
+        return WeaverDocumentId.model_root(item)
+    if item.item_type == "Report":
+        return WeaverDocumentId.artifact(item, schema, name)
     area, relational = stored_area(schema)
     return WeaverDocumentId(item, ObjectId(relational, name), is_files=area == FILES)
 
@@ -741,6 +891,10 @@ def _shortcut_edges(shortcuts, nodes) -> tuple[InstalledEdge, ...]:
 class _DependencyRow:
     consumer: WeaverDocumentId
     reference: str
+    semantic_table: str | None = None
+    referenced: tuple[str, ...] = ()
+    source_mode: str | None = None
+    source_access: str | None = None
 
 
 def _dependency_rows(catalogue: Catalogue, nodes) -> tuple[_DependencyRow, ...]:
@@ -755,6 +909,48 @@ def _dependency_rows(catalogue: Catalogue, nodes) -> tuple[_DependencyRow, ...]:
         for row in tables.get(DEPENDENCY.name, ()):
             schema = str(row.get("referencing_schema_name") or "")
             name = str(row.get("referencing_object_name") or "")
+            if item.item_type == SEMANTIC_MODEL and schema:
+                # A validation's read of its expected source, by full identity.
+                consumer = WeaverDocumentId.validation(item, ObjectId(schema, name))
+                if str(consumer) in nodes:
+                    found.append(
+                        _DependencyRow(
+                            consumer=consumer,
+                            reference=str(row.get("dependency_reference") or ""),
+                        )
+                    )
+                continue
+            if item.item_type == SEMANTIC_MODEL:
+                consumer = WeaverDocumentId.model_root(item)
+                if str(consumer) not in nodes:
+                    continue
+                table = next(
+                    (
+                        r
+                        for r in tables.get(SEMANTIC_MODEL_TABLE.name, ())
+                        if r.get("table_name") == name
+                    ),
+                    {},
+                )
+                found.append(
+                    _DependencyRow(
+                        consumer=consumer,
+                        reference=str(row.get("dependency_reference") or ""),
+                        semantic_table=name,
+                        referenced=tuple(
+                            str(row.get(k) or "")
+                            for k in (
+                                "referenced_item_type",
+                                "referenced_item_name",
+                                "referenced_schema_name",
+                                "referenced_object_name",
+                            )
+                        ),
+                        source_mode=table.get("source_mode"),
+                        source_access=table.get("source_access"),
+                    )
+                )
+                continue
             consumer = stored_identity(item, schema, name)
             if str(consumer) not in nodes:
                 area, relational = stored_area(schema)
@@ -769,8 +965,31 @@ def _dependency_rows(catalogue: Catalogue, nodes) -> tuple[_DependencyRow, ...]:
                     reference=str(row.get("dependency_reference") or ""),
                 )
             )
+    # A semantic validation reads its model, so a refresh makes it stale.
+    for item, tables in catalogue.rows.items():
+        if item.item_type != SEMANTIC_MODEL:
+            continue
+        for row in tables.get(TEST_DICTIONARY.name, ()):
+            consumer = WeaverDocumentId.validation(
+                item,
+                ObjectId(str(row.get("schema_name")), str(row.get("object_name"))),
+            )
+            if str(consumer) in nodes:
+                found.append(
+                    _DependencyRow(
+                        consumer=consumer,
+                        reference=str(WeaverDocumentId.model_root(item)),
+                    )
+                )
     return tuple(
-        sorted(dict.fromkeys(found), key=lambda row: (str(row.consumer), row.reference))
+        sorted(
+            dict.fromkeys(found),
+            key=lambda row: (
+                str(row.consumer),
+                row.semantic_table or "",
+                row.reference,
+            ),
+        )
     )
 
 
@@ -791,10 +1010,14 @@ class _References:
         self.unresolved: dict[WeaverDocumentId, list[str]] = {}
 
     def resolve(self, rows) -> tuple[InstalledEdge, ...]:
-        edges: dict[tuple[str, str, str], InstalledEdge] = {}
+        edges: dict[tuple[str, str, str, str | None], InstalledEdge] = {}
         for row in rows:
+            source = {}
             try:
-                found = self._one(row.consumer, row.reference)
+                if row.semantic_table is not None:
+                    found, source = self._semantic(row)
+                else:
+                    found = self._one(row.consumer, row.reference)
             except CatalogueStateError as exc:
                 # Defer failure until an operation reaches this consumer so an
                 # unrelated target remains usable.
@@ -814,16 +1037,75 @@ class _References:
                 downstream=row.consumer,
                 reference=row.reference,
                 through=None if through is None else through.destination,
+                semantic_table=row.semantic_table,
+                source_mode=source.get("mode"),
+                source_access=source.get("access"),
             )
-            edges.setdefault((str(producer), str(row.consumer), row.reference), edge)
+            edges.setdefault(
+                (str(producer), str(row.consumer), row.reference, row.semantic_table),
+                edge,
+            )
         return tuple(edges.values())
+
+    def _semantic(self, row):
+        from .errors import WeaverError
+        from .semantic_models.references import source_identity
+
+        try:
+            producer = source_identity(row.reference)
+            schema, name = catalogue_columns(producer)
+            expected = (producer.item.item_type, producer.item.item_name, schema, name)
+            node = self._objects.get(producer)
+            # A metadata-only Weaver.Source annotation establishes provenance
+            # without verifying the authored partition's access method.
+            if (
+                str(producer) != row.reference
+                or row.referenced != expected
+                or node is None
+                or node.object_type not in {"table", "view"}
+                or row.source_mode
+                not in {"directLake", "import", "directQuery", "dual"}
+                or row.source_access not in {"sql", None}
+            ):
+                raise ValueError("source identity or mode is missing or differs")
+        except (WeaverError, ValueError, TypeError) as exc:
+            raise CatalogueStateError(
+                f"{row.consumer} table {row.semantic_table!r}: invalid installed .source {row.reference!r}: {exc}. Build the model again."
+            ) from exc
+        return (producer, None), {
+            "mode": row.source_mode,
+            "access": row.source_access,
+        }
 
     def _one(self, consumer: WeaverDocumentId, reference: str):
         """Resolve shortcuts before native objects to preserve the crossing."""
 
+        if consumer.item.item_type == "Report":
+            producer = WeaverDocumentId.parse(reference)
+            if (
+                producer.item.item_type != SEMANTIC_MODEL
+                or producer not in self._objects
+            ):
+                raise CatalogueStateError(
+                    f"{consumer}: model {reference!r} is not installed; build the model again"
+                )
+            return producer, None
+        if "/" in reference:
+            return self._identity(consumer, reference)
         if _is_python_module_reference(reference):
             return self._python(consumer, reference)
         return self._relation(consumer, reference)
+
+    def _identity(self, consumer: WeaverDocumentId, reference: str):
+        """A semantic validation's read, named by full logical identity."""
+
+        producer = WeaverDocumentId.parse(reference)
+        if producer not in self._objects:
+            raise CatalogueStateError(
+                f"{consumer} reads {reference}, which is not installed. Build "
+                f"{producer.item}, then build {consumer.item} again."
+            )
+        return producer, None
 
     def _python(self, consumer: WeaverDocumentId, reference: str):
         symbol = _shortcut_symbol(reference)
@@ -979,5 +1261,6 @@ __all__ = [
     "installed_shortcuts",
     "installed_targets",
     "primitive_candidates",
+    "refuse_uncertified_models",
     "stored_identity",
 ]

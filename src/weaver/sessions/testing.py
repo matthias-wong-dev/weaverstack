@@ -62,6 +62,8 @@ class TestSession(Session):
         self._spark_answers: dict[str, Any] = {}
         self._tsql_answers: dict[str, Any] = {}
         self._python_answers: list[Any] = []
+        self._semantic_answers: dict[tuple[str, str], Any] = {}
+        self._report_answers: dict[tuple[str, str], Any] = {}
         self._default_rows: list[dict] = []
 
     # --- what a test configures ---------------------------------------------
@@ -74,6 +76,46 @@ class TestSession(Session):
 
     def answer_python(self, value) -> None:
         self._python_answers.append(value)
+
+    def answer_semantic_model(self, workspace: str, item: str, client) -> None:
+        self._semantic_answers[(workspace, item)] = client
+
+    def semantic_model(self, item, *, workspace=None):
+        from ..fabric.resources import Item
+
+        name = getattr(item, "name", item)
+        configured = self.workspace_or_default(workspace)
+        self._record("semantic_model", item, configured)
+        key = (
+            (item.workspace_id, item.id)
+            if isinstance(item, Item)
+            else (str(configured.workspace), name)
+        )
+        if key not in self._semantic_answers:
+            raise CommandError(
+                "No semantic model client is configured. Call answer_semantic_model() first."
+            )
+        return self._semantic_answers[key]
+
+    def answer_report(self, workspace, item, client):
+        self._report_answers[(workspace, item)] = client
+
+    def report_item(self, item, *, workspace=None):
+        from ..fabric.report import validate_bound_report
+        from ..fabric.resources import Item
+
+        configured = self.workspace_or_default(workspace)
+        if isinstance(item, Item):
+            validate_bound_report(item)
+            key = (item.workspace_id, item.id)
+        else:
+            key = (str(configured.workspace), getattr(item, "name", item))
+        self._record("report_item", item, configured)
+        if key not in self._report_answers:
+            raise CommandError(
+                "No Report client is configured. Call answer_report() first."
+            )
+        return self._report_answers[key]
 
     # --- what a test reads ---------------------------------------------------
 

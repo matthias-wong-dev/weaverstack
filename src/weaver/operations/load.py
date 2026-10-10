@@ -9,10 +9,16 @@ from typing import Sequence
 
 from ..catalogue.state import READABLE_TABLES
 from ..catalogue.tables import LOAD_STATUS
-from ..declaration.model import WeaverItemId
+from ..config import CATALOGUE_HINT
+from ..declaration.model import SEMANTIC_MODEL, WeaverItemId
 from ..errors import CommandError, LoadError
 from ..health import assess_load, resolve_as_of
-from ..installed import PYTHON_FOLDER, PYTHON_TABLE, WAREHOUSE_PROCEDURE
+from ..installed import (
+    PYTHON_FOLDER,
+    PYTHON_TABLE,
+    SEMANTIC_REFRESH,
+    WAREHOUSE_PROCEDURE,
+)
 from ..load_plan import ENDPOINT_REFRESH, ONELAKE_PUBLICATION
 from ..load_report import (
     BLOCKED,
@@ -26,8 +32,10 @@ from ..load_report import (
     LoadRunReport,
     warning,
 )
+from ..selection import name_patterns
 from ..targets import lakehouse_names
 from .items import requested_items, run_context_lines, run_scope
+from .project import Project
 
 #: Kept local to avoid importing ``weaver.run`` eagerly; must match ``LOAD_TASK``.
 TASK_TYPE = "load"
@@ -40,6 +48,7 @@ def load(
     items: str | Sequence[str] | None = None,
     *,
     names: str | Sequence[str] | None = None,
+    source=None,
     workspace: str | None = None,
     catalogue: str | None = None,
     environment: str | None = None,
@@ -57,14 +66,16 @@ def load(
     ``items`` are installed Weaver items, and they are a hard execution boundary:
     with no name filter every loadable object they own runs in dependency order,
     and a dependency never adds an unnamed item. Naming none loads every item the
-    Weaver catalogue records an installation for.
+    Weaver catalogue records an installation for. ``PowerBI`` and
+    ``PowerBI/<project>`` name the semantic models of the project folder at
+    ``source``, which defaults to the current directory or Notebook Resources.
 
-    ``names`` selects installed loadables inside those items. A Lakehouse
-    selector carries its area, ``Tables/Schema.Object`` or
-    ``Files/Schema.Object``; a Warehouse relation has none, and a bare
-    ``Schema.Object`` is accepted where it reaches one object. It is an operator
-    override: only those nodes run, without dependency expansion or dependency
-    ordering.
+    ``names`` are regular expressions, each matched against whole installed
+    names inside those items, ignoring case. A Lakehouse name carries its area,
+    ``Tables/Schema.Object`` or ``Files/Schema.Object``; a Warehouse relation has
+    none, and a bare ``Schema.Object`` is accepted where it reaches one object.
+    Each must match something. It is an operator override: only the matches run,
+    without dependency expansion or dependency ordering.
 
     ``reload`` reconstructs each selected table from zero: its ``_.Bookmark`` row
     is removed, its ``_.LoadStatus`` goes to Pending, its target is emptied, and
@@ -85,7 +96,6 @@ def load(
     """
 
     started = datetime.now(timezone.utc)
-    requested = requested_items(items, what="load")
     selected_names = _load_names(names)
     _refuse_conflicting_modes(stale=stale, reload=reload, as_of=as_of)
     # Before the workspace is resolved, so a malformed instant is refused
@@ -101,7 +111,15 @@ def load(
         environment=environment,
         workspace_config=workspace_config,
         session=session,
+        needs_catalogue=False,
     )
+    requested = requested_items(
+        items, what="load", project=Project(source, resolved_workspace)
+    )
+    if not resolved_workspace.catalogue:
+        _refuse_without_catalogue(
+            requested, names=selected_names, stale=stale, reload=reload
+        )
 
     from ..sessions.host import use_or_create_session
 
@@ -110,10 +128,21 @@ def load(
             "Load (dry run)" if dry_run else "Load",
             ", ".join(map(str, requested)) or "every installed item",
         ) as frame:
+            state = None
+            if not resolved_workspace.catalogue:
+                from ..run import RunState
+
+                with opened.step("Resolve semantic models"):
+                    state = RunState(
+                        catalogue=uncatalogued_semantic_models(
+                            requested, workspace=resolved_workspace, session=opened
+                        )
+                    )
             report = run_load(
                 opened,
                 workspace=resolved_workspace,
                 items=requested,
+                state=state,
                 names=selected_names,
                 fault_tolerant=fault_tolerant,
                 dry_run=dry_run,
@@ -124,6 +153,67 @@ def load(
             )
             frame.failed = not report.succeeded
             return report
+
+
+def _refuse_without_catalogue(requested, *, names, stale, reload) -> None:
+    others = sorted(str(i) for i in requested if i.item_type != SEMANTIC_MODEL)
+    if not requested or others:
+        raise CommandError(
+            "Loading "
+            + (", ".join(others) or "every installed item")
+            + f" needs a Weaver catalogue. {CATALOGUE_HINT}. Without one, name the "
+            "semantic models to refresh"
+        )
+    if names or stale or reload:
+        raise CommandError(
+            "--name, --stale and --reload need a Weaver catalogue; without one, "
+            "load refreshes the named semantic models"
+        )
+
+
+def uncatalogued_semantic_models(items, *, workspace, session):
+    """Installed rows for semantic models in a workspace with no catalogue.
+
+    Without a catalogue nothing records an installation, so each named model is
+    resolved in the workspace and refreshed as it stands.
+    """
+
+    from ..catalogue.state import Catalogue
+    from .items import uncatalogued_target
+
+    rows = {}
+    for item in items:
+        name = uncatalogued_target(workspace, item).name
+        model = session.resolve_item(name, item_type=SEMANTIC_MODEL)
+        identity = {
+            "item_type": item.item_type,
+            "item_name": item.item_name,
+            "schema_name": "",
+            "object_name": "",
+        }
+        rows[item] = {
+            "Installation": (
+                {
+                    "item_type": item.item_type,
+                    "item_name": item.item_name,
+                    "target_name": name,
+                    "workspace_id": model.workspace_id,
+                    "item_id": model.id,
+                },
+            ),
+            "Registry": (
+                {
+                    **identity,
+                    "object_type": "semantic_model",
+                    "object_role": "data",
+                    "signature": "uncatalogued",
+                },
+            ),
+            "SemanticModel": (
+                {**identity, "signature": "uncatalogued", "definition": "{}"},
+            ),
+        }
+    return Catalogue(rows)
 
 
 def _refuse_conflicting_modes(*, stale: bool, reload: bool, as_of) -> None:
@@ -281,10 +371,11 @@ def execute_load(session, *, workspace, runner, started) -> LoadRunReport:
     from ..run import dispatch_primitive, open_run_record
     from ..run.runner import Lanes
 
-    # A dry run must not create run evidence or move bookmarks.
+    # A dry run must not create run evidence or move bookmarks, and a workspace
+    # with no catalogue has nowhere to record it.
     record = (
         None
-        if runner.request.dry_run
+        if runner.request.dry_run or not workspace.catalogue
         else open_run_record(
             runner.state.catalogue,
             workspace=workspace,
@@ -466,6 +557,10 @@ def _completion_document(report: LoadRunReport, timings=()) -> dict:
         "rows_deleted": 0,
         "rows_rejected": 0,
     }
+    if report.nodes and all(
+        node.primitive_kind == SEMANTIC_REFRESH for node in report.nodes
+    ):
+        rows = {}
     for node in report.nodes:
         counted["executed"] += 1 if node.executed else 0
         counted["succeeded"] += (
@@ -498,12 +593,9 @@ def _completion_document(report: LoadRunReport, timings=()) -> dict:
 
 
 def _load_names(names: str | Sequence[str] | None) -> tuple[str, ...]:
-    if names is None:
-        return ()
-    values = (names,) if isinstance(names, str) else tuple(names)
-    if not values:
-        raise CommandError("load names= must contain at least one load selector")
-    return tuple(str(value) for value in values)
+    if names is not None and not isinstance(names, str) and not tuple(names):
+        raise CommandError("load names= must contain at least one name")
+    return tuple(text for text, _ in name_patterns(names, error=CommandError))
 
 
 __all__ = ["SUMMARY_STATUSES", "TASK_TYPE", "load", "run_load", "status_counts"]

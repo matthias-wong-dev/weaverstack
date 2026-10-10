@@ -174,7 +174,14 @@ class _ShortcutResolver:
             self.source_kinds.append(request["source_kind"])
         if self.waiting:
             self.waiting -= 1
-            return BulkSubmission(created={}, waiting=tuple(range(len(requests))))
+            return BulkSubmission(
+                created={},
+                waiting=tuple(range(len(requests))),
+                reported={
+                    i: "RequestBodyValidationFailed: Target path doesn't exist"
+                    for i in range(len(requests))
+                },
+            )
         return BulkSubmission(
             created={
                 i: {"path": f"{request['path']}/{request['name']}"}
@@ -251,8 +258,10 @@ def test_a_source_that_never_reaches_onelake_fails_naming_the_shortcut(
     monkeypatch.setattr(shortcuts, "SOURCE_TIMEOUT", 0.0)
     context = _local_context(tmp_path, resolver=_ShortcutResolver(waiting=99))
 
-    with pytest.raises(Exception, match="Lakehouse/Curated/Tables/Sales.Landed"):
+    with pytest.raises(Exception, match="Lakehouse/Curated/Tables/Sales.Landed") as e:
         run(ShortcutExecutor(), _action(), _payload(), context)
+
+    assert "Target path doesn't exist" in str(e.value)
 
 
 @weaver_test()

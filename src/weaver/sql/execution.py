@@ -236,24 +236,28 @@ class PooledSqlExecutor:
         return False
 
 
-#: ``mssql-python`` driver errors raised after a statement may have been sent
-#: (SQLSTATE 08S01, 08003, 08007, HYT00, HYT01 and 01002). A server's own
+#: SQLSTATEs reported after a statement may have been sent. A server's own
 #: refusal, a serialization failure included, is a known failure.
-_LOST_RESPONSE = (
-    "Communication link failure",
-    "Connection not open",
-    "Connection failure during transaction",
-    "Timeout expired",
-    "Connection timeout expired",
-    "Disconnect error",
-)
+_LOST_RESPONSE = ("08S01", "08003", "08007", "01002", "40003", "HYT00", "HYT01")
 
 
 def _response_lost(exc: BaseException) -> bool:
     if isinstance(exc, (ConnectionError, TimeoutError)):
         return True
-    message = str(exc.args[0]) if exc.args else str(exc)
-    return any(f"Driver Error: {lost};" in message for lost in _LOST_RESPONSE)
+    # The driver keeps no SQLSTATE on its exceptions. Each is built from one
+    # entry of its SQLSTATE table, so its class and ``driver_error`` name it.
+    driver_error = getattr(exc, "driver_error", None)
+    if not isinstance(driver_error, str):
+        return False
+    try:
+        from mssql_python.exceptions import sqlstate_to_exception
+    except ImportError:
+        return False
+    for sqlstate in _LOST_RESPONSE:
+        known = sqlstate_to_exception(sqlstate, "")
+        if type(known) is type(exc) and known.driver_error == driver_error:
+            return True
+    return False
 
 
 def _output_parameter_batch(

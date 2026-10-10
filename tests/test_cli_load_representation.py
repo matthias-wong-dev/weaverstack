@@ -290,6 +290,14 @@ def test_repeated_names_reach_the_api_as_one_exact_selection(recorded):
 
 
 @weaver_test()
+def test_a_power_bi_selector_and_its_project_folder_reach_the_api(recorded):
+    main(["load", "PowerBI/Commerce", "--source", "reporting", "--workspace", "Demo"])
+
+    assert recorded[0]["items"] == ("PowerBI/Commerce",)
+    assert recorded[0]["source"] == "reporting"
+
+
+@weaver_test()
 def test_the_cautious_answers_are_the_defaults(recorded):
     main(_command())
 
@@ -535,6 +543,82 @@ def test_terminal_failure_summary_uses_load_and_helper_categories():
     assert "Load summary: 1 succeeded, 1 failed, 1 blocked, 1 pending" in message
     assert "Refresh summary: 1 blocked" in message
     assert "2 loads blocked" not in message
+
+
+@weaver_test()
+def test_a_plan_shows_what_each_node_waits_for(capsys):
+    from dataclasses import replace
+
+    from weaver.load_report import VALIDATED
+
+    base = replace(_report().nodes[0], status=VALIDATED, executed=False, result=None)
+    loads = [
+        replace(base, node_id=f"load:Warehouse/Sales/Sales.T{i}") for i in range(5)
+    ]
+    model = replace(
+        base, node_id="load:SemanticModel/Sales", primitive_kind="semantic_refresh"
+    )
+    traced = replace(
+        base, node_id="load:SemanticModel/Orders", primitive_kind="semantic_refresh"
+    )
+    edges = (
+        *((load.node_id, model.node_id) for load in reversed(loads)),
+        (loads[1].node_id, traced.node_id),
+    )
+    report = replace(
+        _report(),
+        dry_run=True,
+        nodes=(*loads, model, traced),
+        edges=edges,
+    )
+
+    _cli_module()._print_load(report)
+
+    lines = capsys.readouterr().out.splitlines()
+    after = {
+        lines[index - 1].split()[-1]: line.strip()
+        for index, line in enumerate(lines)
+        if line.strip().startswith("after ")
+    }
+    assert after == {
+        model.node_id: "after load:Warehouse/Sales/Sales.T0, "
+        "load:Warehouse/Sales/Sales.T1, load:Warehouse/Sales/Sales.T2 and 2 more",
+        traced.node_id: "after load:Warehouse/Sales/Sales.T1",
+    }
+
+
+@weaver_test()
+def test_skipped_loads_are_marked_and_counted_alike_in_both_summaries(capsys):
+    from dataclasses import replace
+
+    from weaver.load_report import SKIPPED
+    from weaver.operations.load import _raise_for_failure
+    from weaver.sessions.console import SKIPPED_MARK
+
+    base = _report().nodes[0]
+    skip = LoadResult(succeeded=True, is_static_skip=True)
+    nodes = (
+        *(replace(base, node_id=f"ok{i}") for i in range(5)),
+        replace(base, node_id="failed", status=FAILED, result=None),
+        *(
+            replace(base, node_id=f"static{i}", status=SKIPPED, result=skip)
+            for i in range(3)
+        ),
+    )
+    report = replace(_report(), status=TASK_FAILED, nodes=nodes)
+
+    _cli_module()._print_load(report)
+    with pytest.raises(LoadError) as raised:
+        _raise_for_failure(report)
+
+    printed = capsys.readouterr().out
+    marked = [line for line in printed.splitlines() if "static" in line]
+    assert len(marked) == 3
+    assert all(line.lstrip().startswith(SKIPPED_MARK) for line in marked)
+    summary = printed.split("Load summary", 1)[1].split("Rows", 1)[0].split()
+    printed_counts = dict(zip(summary[1::2], map(int, summary[::2]), strict=True))
+    assert printed_counts == {"succeeded": 5, "failed": 1, "blocked": 0, "skipped": 3}
+    assert "Load summary: 5 succeeded, 1 failed, 3 skipped" in str(raised.value)
 
 
 @weaver_test()

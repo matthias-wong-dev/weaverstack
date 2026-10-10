@@ -107,13 +107,20 @@ class FabricStore:
             raise StoreError(f"cannot read a location that does not exist: {path}")
         with tempfile.TemporaryDirectory() as scratch:
             local = Path(scratch) / "read"
-            try:
-                copied = self.fs.cp(path, f"file:{local.as_posix()}", False)
-            except Exception as exc:  # notebookutils raises a bare Py4J error
-                raise StoreError(f"cannot read {location.value}: {exc}") from exc
-            if copied is False:
-                raise StoreError(f"could not read {location.value}")
+            self.copy_file_to_local(location, local)
             return local.read_bytes()
+
+    def copy_file_to_local(self, source: Location, destination: Path) -> None:
+        """Copy one OneLake file to the driver, without its checksum sidecar."""
+
+        target = f"file:{destination.as_posix()}"
+        try:
+            copied = self.fs.cp(self._path(source), target, False)
+        except Exception as exc:  # notebookutils raises a bare Py4J error
+            raise StoreError(f"cannot read {source.value}: {exc}") from exc
+        if copied is False:
+            raise StoreError(f"could not read {source.value}")
+        (destination.parent / f".{destination.name}.crc").unlink(missing_ok=True)
 
     def write(self, location: Location, data: bytes) -> None:
         """Write bytes that contain UTF-8 text."""
@@ -131,6 +138,35 @@ class FabricStore:
     def make_directory(self, location: Location) -> None:
         if not self.fs.mkdirs(self._path(location)):
             raise StoreError(f"could not create directory {location.value}")
+
+    def copy(self, source: Location, destination: Location) -> None:
+        """Copy one file within OneLake."""
+
+        try:
+            copied = self.fs.cp(self._path(source), self._path(destination), False)
+        except Exception as exc:
+            raise StoreError(
+                f"cannot copy {source.value} to {destination.value}: {exc}"
+            ) from exc
+        if copied is False:
+            raise StoreError(f"could not copy {source.value} to {destination.value}")
+
+    def move(self, source: Location, destination: Location) -> None:
+        """Move one file within OneLake, replacing the destination."""
+
+        try:
+            moved = self.fs.mv(
+                self._path(source),
+                self._path(destination),
+                create_path=True,
+                overwrite=True,
+            )
+        except Exception as exc:
+            raise StoreError(
+                f"cannot move {source.value} to {destination.value}: {exc}"
+            ) from exc
+        if moved is False:
+            raise StoreError(f"could not move {source.value} to {destination.value}")
 
     def copy_to_local(self, source: Location, destination: Path) -> None:
         """Copy OneLake content to the driver and remove Hadoop checksum debris.

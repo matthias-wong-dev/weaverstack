@@ -40,7 +40,7 @@ ALL = PROJECTED_TABLES
 
 
 @weaver_test()
-def test_there_are_exactly_eleven_catalogue_tables():
+def test_projected_catalogue_tables_have_the_declared_order():
     assert [each.name for each in ALL] == [
         "SchemaDictionary",
         "FolderDictionary",
@@ -49,8 +49,14 @@ def test_there_are_exactly_eleven_catalogue_tables():
         "KeyDictionary",
         "ForeignKeyDictionary",
         "TestDictionary",
+        "SemanticModelTest",
         "Dependency",
         "Shortcut",
+        "SemanticModel",
+        "SemanticModelTable",
+        "SemanticModelMeasure",
+        "SemanticModelRelationship",
+        "SemanticModelColumn",
         "Installation",
         "Registry",
     ]
@@ -150,7 +156,7 @@ def test_comparison_columns_are_every_non_key_column(each: CatalogueTable):
 @weaver_test()
 def test_every_column_declares_a_type_and_a_description(each: CatalogueTable):
     for column in each.columns:
-        assert column.type in ("string", "boolean", "timestamp"), column.name
+        assert column.type in ("string", "boolean", "timestamp", "bigint"), column.name
         assert column.description, f"{each.name}.{column.name}"
 
 
@@ -172,6 +178,8 @@ def test_installation_is_keyed_on_the_scope_alone():
         "item_name",
         "target_name",
         "weaver_version",
+        "workspace_id",
+        "item_id",
         "signature",
     )
     assert "target_name" in INSTALLATION.comparison_columns

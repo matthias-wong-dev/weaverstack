@@ -62,7 +62,9 @@ class Fabric:
             return _Response(201, {"id": self.sessions[-1]})
         session = url[len(BASE) + 1 :].split("/")[0]
         if method == "GET" and url == f"{BASE}/{session}":
-            return _Response(200, {"state": "idle"})
+            return _Response(
+                200, {"state": "dead" if session in self.ended else "idle"}
+            )
         if method == "POST" and url.endswith("/statements"):
             if self.refusals:
                 return self.refusals.pop(0)
@@ -158,7 +160,9 @@ def test_a_replacement_is_reported(fabric):
 @weaver_test()
 def test_a_replacement_fabric_also_ends_is_not_replaced_again(fabric):
     session = _started()
-    fabric.ended.update({"1", "2"})
+    fabric.ended.add("1")
+    fabric.refusals.append(_Response(400, {"message": "Session is gone"}))
+    session.restarted = lambda: fabric.ended.add("2")
 
     with pytest.raises(LivySessionEnded):
         session.run("load()")
@@ -228,6 +232,20 @@ def test_a_refused_statement_leaves_the_session_for_the_next(desktop, fabric):
 
 
 @weaver_test()
+def test_an_ended_session_is_read_from_its_state_not_the_refusals_wording(
+    desktop, fabric
+):
+    session, scope = desktop
+    fabric.ended.add("1")
+    fabric.refusals.append(_Response(400, {"message": "Session is gone"}))
+
+    session.execute_spark_sql("SELECT 1")
+
+    assert fabric.sessions == ["1", "2"]
+    assert len(fabric.run_on("2")) == 1
+
+
+@weaver_test()
 def test_a_session_fabric_ended_is_replaced_inside_the_session(desktop, fabric):
     session, scope = desktop
     fabric.ended.add("1")
@@ -277,7 +295,9 @@ class Sessions:
             return _Response(201, {"id": session})
         session = url[len(BASE) + 1 :].split("/")[0]
         if method == "GET" and url == f"{BASE}/{session}":
-            return _Response(200, {"state": "idle"})
+            return _Response(
+                200, {"state": "dead" if session in self.ended else "idle"}
+            )
         if method == "POST" and url.endswith("/statements"):
             code = json.loads(data)["code"]
             with self.lock:

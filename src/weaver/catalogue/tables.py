@@ -19,7 +19,17 @@ CATALOGUE_SCHEMA = "_"
 
 #: Installed-object vocabulary used for runtime addressing. Files, stored
 #: procedures and shortcut schemas are managed objects subject to the lifecycle.
-OBJECT_TYPES = ("folder", "table", "view", "file", "stored_procedure", "schema")
+OBJECT_TYPES = (
+    "folder",
+    "table",
+    "view",
+    "file",
+    "stored_procedure",
+    "schema",
+    "semantic_model",
+    "report",
+    "source_artifact",
+)
 
 #: What an object is for, independent of its physical shape.
 ROLE_DATA = "data"
@@ -30,6 +40,7 @@ ROLE_ASSUMPTION = "assumption"
 ROLE_SHORTCUT = "shortcut"
 #: A managed stored procedure invoked outside Weaver's scheduler.
 ROLE_PROGRAMMABLE = "programmable"
+ROLE_SOURCE = "source"
 OBJECT_ROLES = (
     ROLE_DATA,
     ROLE_LOAD,
@@ -37,6 +48,7 @@ OBJECT_ROLES = (
     ROLE_ASSUMPTION,
     ROLE_SHORTCUT,
     ROLE_PROGRAMMABLE,
+    ROLE_SOURCE,
 )
 
 #: Roles installed to run rather than hold rows.
@@ -58,6 +70,9 @@ OBJECT_TYPE_VOCABULARY = {
     "file": "File",
     "stored_procedure": "Stored procedure",
     "schema": "Schema",
+    "semantic_model": "Semantic model",
+    "report": "Report",
+    "source_artifact": "Source artifact",
 }
 
 OBJECT_ROLE_VOCABULARY = {
@@ -67,6 +82,7 @@ OBJECT_ROLE_VOCABULARY = {
     ROLE_ASSUMPTION: "Assumption",
     ROLE_SHORTCUT: "Shortcut",
     ROLE_PROGRAMMABLE: "Programmable",
+    ROLE_SOURCE: "Source",
 }
 
 KEY_TYPE_VOCABULARY = {KEY_PRIMARY: "Primary key", KEY_UNIQUE: "Unique"}
@@ -376,6 +392,10 @@ INSTALLATION = CatalogueTable(
             not_null=True,
             description="The Weaver version that last reconciled this installation.",
         ),
+        CatalogueColumn(
+            "workspace_id", description="The resolved Fabric workspace ID."
+        ),
+        CatalogueColumn("item_id", description="The resolved Fabric item ID."),
         _signature("the Item declaration"),
     ),
 )
@@ -639,11 +659,34 @@ TEST_DICTIONARY = CatalogueTable(
     ),
 )
 
+SEMANTIC_MODEL_TEST = CatalogueTable(
+    name="SemanticModelTest",
+    description=(
+        "How each semantic model Test and Assumption runs. TestDictionary "
+        "describes the validation; this row is its installed definition."
+    ),
+    key=(SCOPE_ITEM_TYPE, SCOPE_ITEM_NAME, "schema_name", "object_name"),
+    columns=(
+        *_scope(),
+        *_object(),
+        CatalogueColumn(
+            "definition",
+            sql_type=WIDE_LIST_TYPE,
+            not_null=True,
+            description=(
+                "Versioned JSON: the DAX query and, for a Test, its logical "
+                "Expected source and Expected SQL."
+            ),
+        ),
+        _signature("the validation's source file"),
+    ),
+)
+
 DEPENDENCY = CatalogueTable(
     name="Dependency",
     description=(
         "Resolved dependency edges and their authored references, scoped to the "
-        "referencing item. Cross-item and cross-engine edges are Shortcuts."
+        "referencing item. Semantic source edges retain the consuming table."
     ),
     key=(
         SCOPE_ITEM_TYPE,
@@ -763,6 +806,152 @@ SHORTCUT = CatalogueTable(
 )
 
 
+def _semantic_signature():
+    return _signature("the effective semantic model")
+
+
+def _semantic_description():
+    return CatalogueColumn(
+        "description",
+        sql_type=WIDE_LIST_TYPE,
+        description="The native semantic description.",
+    )
+
+
+SEMANTIC_MODEL = CatalogueTable(
+    name="SemanticModel",
+    description="Deployed semantic models and their descriptions.",
+    key=ITEM_SCOPE_COLUMNS,
+    columns=(
+        *_scope(),
+        _semantic_description(),
+        _semantic_signature(),
+    ),
+)
+
+SEMANTIC_MODEL_TABLE = CatalogueTable(
+    name="SemanticModelTable",
+    description="Semantic tables and how each reads its managed source.",
+    key=(*ITEM_SCOPE_COLUMNS, "table_name"),
+    columns=(
+        *_scope(),
+        CatalogueColumn(
+            "table_name",
+            not_null=True,
+            description="The native table name, matching Dependency's referencing object name.",
+        ),
+        CatalogueColumn(
+            "table_ordinal",
+            type=BIGINT,
+            description="One-based effective TMDL declaration order.",
+        ),
+        _semantic_description(),
+        CatalogueColumn(
+            "source_mode",
+            description="The storage mode of the partition reading the managed source.",
+        ),
+        CatalogueColumn(
+            "source_access",
+            description="How that partition reads the source: sql or lakehouse.",
+        ),
+        _semantic_signature(),
+    ),
+)
+
+SEMANTIC_MODEL_MEASURE = CatalogueTable(
+    name="SemanticModelMeasure",
+    description="Semantic measures and their native expressions.",
+    key=(
+        *ITEM_SCOPE_COLUMNS,
+        "table_name",
+        "measure_name",
+    ),
+    columns=(
+        *_scope(),
+        CatalogueColumn(
+            "table_name", not_null=True, description="The measure's home table."
+        ),
+        CatalogueColumn(
+            "measure_name", not_null=True, description="The native measure name."
+        ),
+        _semantic_description(),
+        CatalogueColumn(
+            "expression", sql_type=WIDE_LIST_TYPE, description="The DAX expression."
+        ),
+        CatalogueColumn(
+            "format_string",
+            sql_type=WIDE_LIST_TYPE,
+            description="The authored format string.",
+        ),
+        _semantic_signature(),
+    ),
+)
+
+SEMANTIC_MODEL_RELATIONSHIP = CatalogueTable(
+    name="SemanticModelRelationship",
+    description="Semantic relationships and their table/column endpoints.",
+    key=(*ITEM_SCOPE_COLUMNS, "relationship_name"),
+    columns=(
+        *_scope(),
+        CatalogueColumn(
+            "relationship_name",
+            not_null=True,
+            description="The native relationship name.",
+        ),
+        CatalogueColumn("from_table", description="The source table."),
+        CatalogueColumn("from_column", description="The source column."),
+        CatalogueColumn("to_table", description="The destination table."),
+        CatalogueColumn("to_column", description="The destination column."),
+        CatalogueColumn("from_cardinality", description="The source cardinality."),
+        CatalogueColumn("to_cardinality", description="The destination cardinality."),
+        CatalogueColumn(
+            "cross_filtering_behavior", description="The native cross-filter direction."
+        ),
+        CatalogueColumn(
+            "is_active", type=BOOLEAN, description="Whether the relationship is active."
+        ),
+        _semantic_signature(),
+    ),
+)
+
+SEMANTIC_MODEL_COLUMN = CatalogueTable(
+    name="SemanticModelColumn",
+    description="Semantic columns, including engine-inferred calculated columns.",
+    key=(
+        *ITEM_SCOPE_COLUMNS,
+        "table_name",
+        "column_name",
+    ),
+    columns=(
+        *_scope(),
+        CatalogueColumn(
+            "table_name", not_null=True, description="The owning semantic table."
+        ),
+        CatalogueColumn(
+            "column_name", not_null=True, description="The native column name."
+        ),
+        _semantic_description(),
+        CatalogueColumn("data_type", description="The native semantic data type."),
+        CatalogueColumn("column_type", description="The native column kind."),
+        CatalogueColumn("source_column", description="The source column name."),
+        CatalogueColumn(
+            "expression",
+            sql_type=WIDE_LIST_TYPE,
+            description="The calculated column expression.",
+        ),
+        _semantic_signature(),
+    ),
+)
+
+SEMANTIC_TABLES = (
+    SEMANTIC_MODEL,
+    SEMANTIC_MODEL_TABLE,
+    SEMANTIC_MODEL_MEASURE,
+    SEMANTIC_MODEL_RELATIONSHIP,
+    SEMANTIC_MODEL_COLUMN,
+)
+
+
 #: Dictionary reconciliation order, kept stable for payloads and reports.
 DICTIONARY_TABLES = (
     SCHEMA_DICTIONARY,
@@ -772,8 +961,10 @@ DICTIONARY_TABLES = (
     KEY_DICTIONARY,
     FOREIGN_KEY_DICTIONARY,
     TEST_DICTIONARY,
+    SEMANTIC_MODEL_TEST,
     DEPENDENCY,
     SHORTCUT,
+    *SEMANTIC_TABLES,
 )
 
 #: Reconciliation order: descriptions, binding, then certification.

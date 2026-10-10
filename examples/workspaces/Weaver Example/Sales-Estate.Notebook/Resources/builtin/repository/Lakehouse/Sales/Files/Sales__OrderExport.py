@@ -43,13 +43,13 @@ class Sales__OrderExport(Folder):
         return staging, []
 
     def most_recent(self):
-        """The newest export on disk, read with ordinary Python.
+        """The newest export, read with ordinary Python.
 
-        ``path()`` is a ``pathlib.Path``, so a folder's own files are reachable
-        the way any other files are — globbed, opened, read. Compare
-        ``spark_path()``, which is what ``Sales.Customer`` and ``Sales.Order``
-        hand to Spark.
+        ``current_files()`` lists through OneLake and returns mounted
+        ``pathlib.Path`` values, so a folder's own files are opened and read the
+        way any other files are. Compare ``spark_path()``, which is what
+        ``Sales.Customer`` and ``Sales.Order`` hand to Spark.
         """
 
-        exports = sorted(self.path().glob("*.csv"))
+        exports = self.current_files("*.csv")
         return exports[-1].read_text(encoding="utf-8") if exports else ""

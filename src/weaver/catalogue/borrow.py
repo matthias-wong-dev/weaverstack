@@ -242,11 +242,46 @@ def programmable_statements(definitions: Iterable[str]) -> tuple[str, ...]:
 def _as_create_or_alter(definition: str) -> str:
     # Fabric returns the original declaration, which may use non-repeatable CREATE.
     body = definition.strip()
-    lowered = body.casefold()
-    for prefix in ("create or alter", "create"):
-        if lowered.startswith(prefix):
-            return "create or alter" + body[len(prefix) :]
-    return body
+    start = _skip_trivia(body, 0)
+    if not _keyword(body, start, "create"):
+        return body
+    after = start + len("create")
+    following = _skip_trivia(body, after)
+    if _keyword(body, following, "or"):
+        alter = _skip_trivia(body, following + len("or"))
+        if _keyword(body, alter, "alter"):
+            return body
+    return body[:start] + "create or alter" + body[after:]
+
+
+def _keyword(text: str, position: int, word: str) -> bool:
+    end = position + len(word)
+    return text[position:end].casefold() == word and not (
+        end < len(text) and (text[end].isalnum() or text[end] in "_@#$")
+    )
+
+
+def _skip_trivia(text: str, position: int) -> int:
+    """The position after whitespace and T-SQL comments, which may nest."""
+
+    while position < len(text):
+        if text[position].isspace():
+            position += 1
+        elif text.startswith("--", position):
+            newline = text.find("\n", position)
+            position = len(text) if newline < 0 else newline + 1
+        elif text.startswith("/*", position):
+            depth, position = 1, position + 2
+            while depth and position < len(text):
+                if text.startswith("/*", position):
+                    depth, position = depth + 1, position + 2
+                elif text.startswith("*/", position):
+                    depth, position = depth - 1, position + 2
+                else:
+                    position += 1
+        else:
+            break
+    return position
 
 
 def record_statements(

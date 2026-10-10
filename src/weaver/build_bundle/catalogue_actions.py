@@ -86,11 +86,14 @@ def _claim_statements(claims: Iterable[CatalogueClaim]) -> tuple[str, ...]:
                 values = rule.values(identity)
                 predicates.append(
                     "("
-                    + " AND ".join(
-                        f"{identifier(table.public_name_of(column))} = {literal(value)}"
-                        for column, value in zip(
-                            rule.predicate_columns, values, strict=True
+                    + (
+                        " AND ".join(
+                            f"{identifier(table.public_name_of(column))} = {literal(value)}"
+                            for column, value in zip(
+                                rule.predicate_columns, values, strict=True
+                            )
                         )
+                        or "1 = 1"
                     )
                     + ")"
                 )
@@ -141,6 +144,76 @@ def _stage(
     )
 
 
+def render_catalogue_upgrade(catalogue, *, catalogue_target):
+    from ..catalogue.tables import SEMANTIC_MODEL_TABLE, SEMANTIC_TABLES
+    from ..errors import BuildError
+
+    statements = []
+    for table, column in catalogue.schema_additions:
+        if table == INSTALLATION.name and column in {"Workspace ID", "Item ID"}:
+            data_type = "varchar(128)"
+        elif table == SEMANTIC_MODEL_TABLE.name and column == "Table ordinal":
+            data_type = "bigint"
+        else:
+            raise BuildError(f"Unsupported catalogue column upgrade {table}.{column}")
+        target = f"[_].{identifier(table)}"
+        statements.append(
+            f"IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID({literal(target)}) "
+            f"AND name = {literal(column)})\n"
+            f"ALTER TABLE {target} ADD {identifier(column)} {data_type} NULL;"
+        )
+    removals = {}
+    semantic = {table.name: table for table in SEMANTIC_TABLES}
+    for table, column in catalogue.schema_removals:
+        if table not in semantic or column not in {"Schema name", "Object name"}:
+            raise BuildError(f"Unsupported catalogue column removal {table}.{column}")
+        removals.setdefault(table, []).append(column)
+    for name, columns in sorted(removals.items()):
+        table = semantic[name]
+        target = f"[_].{identifier(name)}"
+        key = ", ".join(
+            identifier(table.public_name_of(column)) for column in table.key
+        )
+        constraints = f"SELECT 1 FROM sys.key_constraints WHERE parent_object_id = OBJECT_ID({literal(target)}) AND name = {literal('PK_' + name)}"
+        steps = [
+            f"IF EXISTS (SELECT 1 FROM {target} GROUP BY {key} HAVING COUNT_BIG(*) > 1)\n"
+            f"THROW 50000, {literal(name + ': semantic keys are not unique; repair the catalogue before upgrade')}, 1;",
+            f"IF EXISTS ({constraints})\nALTER TABLE {target} DROP CONSTRAINT {identifier('PK_' + name)};",
+        ]
+        for column in columns:
+            # Older semantic metadata used empty relational identity columns.
+            # Refuse to discard meaningful values anywhere in the estate.
+            steps.append(
+                f"IF EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID({literal(target)}) AND name = {literal(column)})\nBEGIN\n"
+                f"IF EXISTS (SELECT 1 FROM {target} WHERE {identifier(column)} IS NOT NULL AND {identifier(column)} <> '')\n"
+                f"THROW 50000, {literal(name + ': nonempty legacy semantic identity; repair the catalogue before upgrade')}, 1;\n"
+                f"ALTER TABLE {target} DROP COLUMN {identifier(column)};\nEND;"
+            )
+        steps.append(
+            f"ALTER TABLE {target} ADD CONSTRAINT {identifier('PK_' + name)} PRIMARY KEY NONCLUSTERED ({key}) NOT ENFORCED;"
+        )
+        # The schema change preserves every installation's rows and audit values.
+        # The executor sends each statement intact on one TDS connection.
+        body = (
+            "BEGIN TRY\nBEGIN TRANSACTION;\n"
+            + "\n".join(steps)
+            + "\nCOMMIT;\nEND TRY\nBEGIN CATCH\nIF @@TRANCOUNT > 0 ROLLBACK;\nTHROW;\nEND CATCH;"
+        )
+        obsolete = ", ".join(literal(column) for column in columns)
+        statements.append(
+            f"IF EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID({literal(target)}) AND name IN ({obsolete}))\n"
+            f"EXEC({literal(body)});"
+        )
+    return _stage(
+        index=0,
+        slug="upgrade-catalogue",
+        description="Upgrade catalogue identity and semantic keys",
+        kind=PUBLISH_CATALOGUE,
+        statements=statements,
+        catalogue_target=catalogue_target,
+    )
+
+
 def render_catalogue_before_build(
     catalogue: Catalogue,
     identities: Iterable[WeaverDocumentId],
@@ -160,6 +233,8 @@ def render_catalogue_before_build(
 
 
 def _item_signature(repository, item) -> str:
+    if item in repository.reports:
+        return repository.reports[item].signature
     return next(model.signature for model in repository.items if model.identity == item)
 
 
@@ -206,6 +281,8 @@ def desired_catalogue(
                 "item_type": item.item_type,
                 "item_name": item.item_name,
                 "target_name": target_by_item[item].name,
+                "workspace_id": target_by_item[item].workspace_id,
+                "item_id": target_by_item[item].item_id,
                 "weaver_version": __version__,
                 "signature": _item_signature(repository, item),
             },
@@ -259,6 +336,7 @@ def render_catalogue_after_build(
     *,
     catalogue_target,
     current: Catalogue | None = None,
+    selected_models=(),
 ) -> tuple[PlannedStage, ...]:
     """Publish dictionaries and Installation in one batch, Registry last.
 
@@ -269,7 +347,12 @@ def render_catalogue_after_build(
     desired = desired_catalogue(repository, selected_ids, target_by_item)
 
     # Diff against persisted rows so an unchanged table produces no statement.
-    publication = publish(current or Catalogue(rows={}), desired)
+    from .semantic import publication_catalogues, semantic_stage
+
+    current, desired = publication_catalogues(
+        current or Catalogue(rows={}), desired, selected_models
+    )
+    publication = publish(current, desired)
 
     # Registry is its own final action; table plans carry the ordering.
     catalogue_statements: list[str] = [
@@ -297,4 +380,13 @@ def render_catalogue_after_build(
             catalogue_target=catalogue_target,
         ),
     )
-    return tuple(stage for stage in rendered if stage is not None)
+    observed = tuple(
+        semantic_stage(
+            repository,
+            identity.item,
+            target_by_item[identity.item],
+            catalogue_target=catalogue_target,
+        )
+        for identity in sorted(selected_models, key=str)
+    )
+    return observed + tuple(stage for stage in rendered if stage is not None)

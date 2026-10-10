@@ -56,7 +56,8 @@ Session         ConsoleSession   desktop → Fabric
 initialise      resolve request → read the workspace's items → create the
                 missing ones → write the project → optionally publish the Environment
 
-build           resolve request → read BuildState → Builder → MutationExecutor
+build           resolve request → create missing Power BI items → read BuildState
+                → Builder → MutationExecutor
 load / test     resolve request → read RunState   → Runner
 health          resolve request → read Catalogue  → HealthReport
 doctor          authenticate → list workspaces → discover items → probe OneLake, TDS and Spark
@@ -69,8 +70,13 @@ conversion into the physical target vocabulary, one implementation of graph
 mechanics, and one installed graph. Anything more complicated needs a concrete
 reason.
 
-`initialise` is the only operation that creates a Fabric item. A build's
-preflight reads and never creates, so the two do not overlap. A command naming
+Two operations create Fabric items, and their kinds do not overlap.
+`initialise` creates the catalogue Warehouse, the Environment, Lakehouses and
+Warehouses. Build creates each selected SemanticModel and Report target that is
+missing, in `weaver.fabric.powerbi_items`, before it reads build state, and
+creates nothing else; a missing Lakehouse or Warehouse target fails its
+preflight. A bundle-only Build creates nothing and refuses a missing target,
+because a bundle freezes each target's item ID. A command naming
 no workspace and inheriting none reads `workspace-config.yml` in the directory
 it was run from, which is the last resort in `weaver.config.resolve_workspace`.
 
@@ -136,6 +142,12 @@ constructed explicitly by the caller that crosses. Inside Fabric, `store_for`
 returns the session-native `FabricStore`. From a desktop that construction fails
 and does not substitute DFS.
 
+A Lakehouse's Files mount is for authored code: `Folder.path()` and the staging
+directory `read()` writes into. Weaver lists, compares, copies and deletes
+Folder files through `Lakehouse.files_store()`, because a mount's listing can
+still show a file deleted through OneLake. Authored code lists with
+`current_files`, `files_since` and `latest_files` for the same reason.
+
 `FilesystemStore` is named for its transport. A build reads its repository
 through one wherever it runs, because every incoming source tree is copied to a
 temporary filesystem snapshot before parsing. See `_temp_copy` in
@@ -161,6 +173,166 @@ cache and the `AuthenticationRecord` naming the cached account, so `BrowserSignI
 keeps the second in `~/.weaver/authentication-record.json`. An unencrypted cache
 is never asked for. The Fabric suite installs the same `desktop_credential()`
 chain, so a sign-in performed by `weaver doctor` runs it.
+
+`Session.semantic_model()` resolves a typed SemanticModel and owns its Fabric
+and Power BI clients. The desktop clients share one credential with separate
+API audiences; a notebook obtains its native Power BI token through Session.
+Definition updates and refresh submissions disable HTTP-response retries.
+Refresh waits for its request ID to reach terminal completion through the
+canonical Power BI endpoint.
+
+Semantic models share the ordinary repository, graph, format-5 MutationPlan,
+MutationExecutor and catalogue owners. The shared codec validates their targets
+and payloads. `Session.execute_mutation` binds `Session.semantic_model` through
+MutationBindings and the physical drivers. A semantic-only Build starts no Spark.
+`SemanticModel/Name` is the model-root document identity. Desired state is a
+TMDL definition-part package; observed state is Fabric-returned TMSL. Store source
+bytes, requested edits and provenance beside the package. `powerbi` discovers
+every named native or standalone definition in a project's local scope, pairing
+only exact same-name native and TMDL inputs. `semantic_models.source` reads raw
+PBIP or empty bases. `composition` recursively orders `Weaver.BaseSemanticModels`
+and rejects missing, cyclic or repeated ancestors. It uses `extensions`, the
+generic recursive merger, on raw definitions; never on already-policy-applied
+or annotation-transformed bases. Organisation policy applies once per final
+model before its own TMDL overlay. The source-span editor changes addressed
+native fragments and preserves unrelated bytes. Merging is recursive over syntax
+for every kind: object identity is kind and name within the parent, property identity is the
+name. Missing refs and ambiguous targets fail with source locations.
+`semantic_models.objects` exposes live objects over the same editor, with
+property access dynamic over native names. `_SCHEMAS` bounds typed readback and
+generation only; it never decides what can be preserved, read, merged or
+edited. `extension_expectations` projects known requested values for
+readback. Known generated objects use `render` and `patching`. Ordinary PBIP
+deployment requires no complete TMDL parser.
+Package paths/bytes and resolved source metadata determine the desired signature.
+Every selected model compiles and deploys regardless of its previous signature;
+selected consuming Reports redeploy through the ordinary dependency graph.
+Report-only selection retains independent signature checks.
+Every contributing native directory, overlay, policy and annotation implementation
+has its own source artefact signature; final signatures also carry effective
+source metadata and table order. Base composition is local source reuse, not a
+physical deployment edge. Variant-only Build does not deploy unselected bases.
+The effective definition quotes the retained `Weaver.BaseSemanticModels`
+annotation name for native readback. Composition does not execute its handler.
+
+Report association is optional: same-name model first, then sole project model,
+otherwise as-authored. PBIR connection metadata never discovers that relation.
+The ordinary dependency graph, planner, catalogue and executor carry the optional
+relation. Associated Reports receive payload-only environment rebinding and
+depend on model verification; as-authored Reports retain all native connection
+bytes and certify independently. `initialise` adopts all discovered models and
+Reports from an existing PowerBI tree using configured typed targets, with no
+authored source rewrites. Its explicit single-model option remains scoped.
+
+`initialise` alone creates semantic items. Build binds the existing typed item
+and freezes its workspace/item IDs in the bundle. Definition updates permit
+required clearing of processed semantic data; source data is outside that action. Declared success edges require deployment before effective-definition
+readback and all five semantic catalogue projections before Registry publication. The readback
+checks requested properties and inferred calculated columns. Requested values are
+strict; names compare by `deployed.object_identity`, expressions by layout, and
+annotations, unrequested scalars and whitespace-only text changes return as
+`readback_differences`, which Build presents as one warning per item. Report
+readback is strict only for the model binding. Lineage is published from the
+deployed plan; Fabric's copy of the M is never reparsed into dependencies. Publication also
+requires the shared physical completion gate. Failed or uncertain deployment
+and failed readback cannot certify a model; independent physical branches continue.
+Catalogue identity upgrades precede preparation and publication through the same
+dependency planner. Planning resolves the
+item without fetching its existing definition. There is no live partition
+comparison or retention step. Semantic DAX Tests and full semantic Health remain
+later feature work.
+
+Shared M expressions identify optional logical Warehouse or Lakehouse sources.
+Session resolves the typed physical item and its connector metadata before pure
+Build planning. Observable table navigation joins managed source declarations
+or installed catalogue identities. Semantic deployment requires successful
+selected source Table/View actions and, for Lakehouse SQL sources, the existing
+SQL endpoint refresh completion. Authored partitions, storage modes, columns and
+descriptions remain unchanged by shared-expression substitution. `annotation.py`
+is the public registry for executable Weaver annotations in PBIP and both extension
+layers. Parsing validates declarations and collects logical sources without
+executing handlers. Final compilation runs schema annotations over the merged,
+target-bound model, materialises source metadata and generated columns, then runs
+post-schema annotations. Each annotation occurrence executes once in its phase.
+Source annotations join the existing Session metadata and source-binding owners;
+authored data definitions remain intact and only missing descriptions are enriched.
+Tables without partitions generate source definitions and columns. Declared
+`Weaver.Source` links on authored partitions publish logical lineage and
+native storage mode, but no physical access claim unless Weaver actually
+established the connector. Generated partitions publish SQL access.
+Same-managed-target environment overrides run
+before generation. Post-schema handlers see generated columns and apply hiding
+through the ordinary object API.
+Measure-table and switch handlers write known native fragments, including dynamic
+format-string definitions. Generated MeasureTable columns omit native type
+declarations and require `calculatedTableColumn`/`string` in typed readback.
+Exclusion uses span removal and explicit observed-absence
+expectations. Payloads carry those expectations through the shared executor before
+catalogue certification. Keep ordinary annotations and surviving Weaver annotations;
+unknown Weaver names fail. The former YAML .source and .dax directives are removed.
+Microsoft's [Direct Lake limits](https://learn.microsoft.com/en-us/fabric/fundamentals/direct-lake-overview#considerations-and-limitations)
+apply, including single-source and composite-model constraints for Direct Lake
+on SQL. Views use the native DirectQuery fallback; Weaver retains `directLake`.
+
+`_.SemanticModel` records each model's description and signature.
+`_.SemanticModelTable`, `_.SemanticModelMeasure`, `_.SemanticModelRelationship`
+and `_.SemanticModelColumn` expose typed child metadata read back after
+deployment. Models, tables, measures and columns include native descriptions.
+These rows are logical and identical across environments: only `_.Installation`
+names a physical item.
+
+A semantic model's Tests and Assumptions are DAX validation documents. They
+belong to `PowerBI/<project>/tests/<Model>/` or `assumptions/<Model>/`, where
+Model is an exact named local definition. Composed models own their validations.
+They compile to nothing: `_.SemanticModelTest` holds each installed definition, with
+its logical Expected source, and no Registry row claims it. A validation is
+installed when that row matches its `_.TestDictionary` signature; a changed
+definition resets its TestStatus and leaves the effective model signature intact.
+Every selected model still deploys and resets LoadStatus. The installed graph
+adds its dependency on the model, so a refresh makes a pass stale. A run resolves
+the Expected source through `_.Installation` and compares the two sides in
+`runtime/relation_compare.py`, which keeps `runtime/test_compare.py`'s contract. `SemanticModelTable` records each managed source's mode
+and access. Join its item identity and Table name to Dependency item identity
+and Referencing object name. Each semantic
+table publishes its exact producer in `_.Dependency`; two consuming tables keep
+separate rows even when they share a producer. The installed DAG reads those rows
+and derives the single model-refresh node's upstream edges. Lakehouse SQL endpoint
+refresh and Warehouse OneLake publication use the existing Load barriers. Sources
+with simple shared-M navigation can also publish observable managed edges;
+`m_source` recognises one navigation behind step aliases and `Table` shaping.
+Unknown navigation contributes no guessed relation. Normal Load item/name
+selection still controls which producers run.
+
+Shared M environment mappings run after native extensions. Explicit `data_sources` values
+from the API/CLI override workspace config; logical `Warehouse/Name` and
+`Lakehouse/Name` expressions can resolve from workspace targets. Only selected
+expressions are rewritten. SQL expressions resolve SQL endpoints; native
+`Lakehouse.Contents` expressions resolve item/workspace IDs. Session owns both
+lookups. Source substitution does not bind runtime connections.
+
+Load reads the certified model root and its typed workspace/item IDs from the
+catalogue. The installed graph, load planner and Runner dispatch a built-in
+semantic refresh through `Session.semantic_model().refresh()`. Request ID,
+service timing and outcome belong to the normal Log and LoadStatus record.
+Semantic refresh has no row counts or bookmarks. Model deployment invalidates
+LoadStatus because definition updates permit clearing processed data. Report-only
+Build leaves model LoadStatus intact. Semantic-only Load uses REST/TDS
+and needs neither source files nor a deployed runtime module.
+
+Connection binding is a separate planned operation. `semantic-model bind`
+will resolve installed model IDs and bind explicit source references to existing
+approved connection IDs through Session. Its plan must expose ambiguous matches
+and required permissions before any write. The operation may use an existing
+cloud, gateway or SSO connection; credential creation/rotation and gateway
+administration stay outside Weaver. An optional Build binding phase will share
+that operation and report its result separately from definition deployment.
+Non-interactive execution must never prompt or bind implicitly. Semantic wipe
+owns no shared connection or gateway. Binding, automatic bind offers and
+binding preservation are not implemented in this branch.
+
+`doctor --semantic-model NAME` checks Power BI authentication, the model's
+TMSL definition and DAX access through REST. This mode starts no Spark session.
+The semantic check reads only; refresh belongs to the runtime load operation.
 
 ### Fabric is the reference
 
@@ -193,10 +365,14 @@ are in.
 There is one `build`, one `load` and one `test`. Every build action runs in the
 mutation executor wherever that is, and the state a build plans against is read the same
 way: the catalogue over TDS, a Lakehouse's views over Spark SQL, a Lakehouse's
-objects from storage, a Warehouse over TDS. A desktop `weaver build` therefore
-needs no published wheel, because its Spark SQL and TableBuilder submissions
-import no Weaver, and no Fabric Environment either, because they run on the
-workspace default. `load` and `test` ask for `--environment`. `install` asks
+objects from storage, a Warehouse over TDS. A desktop `weaver build` needs no
+published wheel, because a plan that attaches Spark carries Weaver's runtime in
+its carrier. That plan does need Weaver's dependencies in the Spark session, so
+a Lakehouse build needs the published Environment; a build with no Spark work
+needs none. A session without them declines the carrier before any action runs,
+and Build reports that once, naming what is missing. Loads and tests of
+deployed Python modules use an Environment.
+`install` asks
 for nothing: a bundle carries the workspace, the catalogue, the Environment and
 the Lakehouse a Spark session attaches to, frozen when it was generated, and the
 Session that installs it supplies credentials and transport and no decision.
@@ -207,7 +383,8 @@ reads and writes must never be the reason a Spark session starts.
 
 What crosses as a program is a load or test with Spark work, sent whole to
 Fabric, where its deployed modules are imported beside Spark. `weaver load` and
-`weaver test` therefore require the published wheel.
+`weaver test` therefore require the published wheel. Warehouse and semantic-only
+Loads use TDS and REST without Spark.
 
 A Fabric test that runs Weaver on the laptop tests the desktop position, not the
 in-Fabric one. That is what the `remote` and `hosted` markers are for, and why a
@@ -478,7 +655,10 @@ Enforced by `tests/test_core_boundary.py`:
 
 Enforceable as the corresponding code lands:
 
-- **Static discovery.** Discovery never imports object modules.
+- **Static discovery.** Discovery never imports object modules. The one
+  exception is `PowerBI/annotations/*.py`: trusted compiler extensions
+  executed when the repository is parsed, each loaded for that repository only
+  and never registered in a process-wide table.
 - **Objects never mutate the target.** `read()` proposes. Weaver owns mutation,
   CRUD accounting, staging and logging.
 - **A runtime artefact is known by its role.** Planning reads `object_role` from
@@ -521,6 +701,10 @@ Enforceable as the corresponding code lands:
   Spark creation use reader 3/writer 7 by default; schema features are per Table.
   Explicit minima may be raised by features required by that Table. The direct
   profile verifies the committed protocol, schema and properties before publishing.
+- **Semantic models compile without a catalogue.** With no catalogue, Build
+  accepts only SemanticModel items, deploys every selected model and verifies
+  readback on the model; Load refreshes the named models and records nothing.
+  Nothing target-local stands in for the catalogue, so there is no fixed point.
 - **The central catalogue is authoritative.** No target-local catalogue, no
   target-local runtime, no target-local logging authority.
 - **Certification is per object.** Before a rebuild, the selected objects and
@@ -568,6 +752,8 @@ DurableJournal / MutationJournal   checkpoint recovery and receipts
 ArchiveStaging / select_staging    a separate carrier Lakehouse
 procedural Wipe and Mirror runs    create_onelake_shortcuts / await_addressable
 per-batch settlement chains        the native-session lane
+initialise(reports=...)            Power BI item creation in initialise
+SemanticModel/annotations
 ```
 
 The `provision` scope went when the suite moved to fixed items. Standing the
@@ -590,6 +776,25 @@ unscoped wipe empties is what `_.Installation` records. Where the workspace
 configuration has `targets:`, every recorded installation must be bound there to
 the same physical item, or the wipe refuses and asks for named targets. Named
 targets are emptied exactly as named.
+
+A SemanticModel wipe retains the Fabric item and replaces its native definition.
+A semantic-only selection keeps the catalogue and unbinds the selected model's
+claims. Registry certification and current runtime state are removed before the
+REST reset; dictionary claims are removed after verified readback. It uses no Spark.
+`--preserve-data-source` is frozen in WipePlan. It retains one Automatic SQL /
+Direct Lake source or one explicitly bound ShareableCloud SQL / Import source
+through a hidden `__WeaverSource` table with one native partition and no columns
+or measures. Direct Lake retains its deployed shared expressions. Import requires
+a literal SQL database and one relation navigation, without shared expressions. Every Import partition must match the bound connection's physical
+source. Unsupported source or connection forms are refused before any selected
+target is changed. Semantic wipe never owns source data, shared connections or
+gateways.
+
+An unbind removes a catalogue's claims and changes nothing in Fabric.
+`plan_unbind` reads `_.Installation` and the workspace's items, so the plan names
+the logical items that stop being managed and whether each physical item still
+exists; the CLI confirms only an item that still exists. `unbind` executes the
+claim deletion as a wipe of no targets. The catalogue itself is never unbound.
 
 A mirror plans before it acts too. `check_mirror` proves the source and refuses
 unsafe destinations, then `mirror_mutation_plan` reads what the mirror needs,

@@ -127,15 +127,46 @@ class WarehouseTarget:
         return self.warehouse.name
 
 
+@dataclass(frozen=True)
+class SemanticModelTarget:
+    model: ItemRef
+
+    @classmethod
+    def parse(cls, text: str) -> "SemanticModelTarget":
+        return cls(ItemRef.parse(text))
+
+    def __str__(self) -> str:
+        return self.model.name
+
+
+@dataclass(frozen=True)
+class ReportTarget:
+    report: ItemRef
+
+    @classmethod
+    def parse(cls, text: str) -> "ReportTarget":
+        return cls(ItemRef.parse(text))
+
+    def __str__(self) -> str:
+        return self.report.name
+
+
 # --- the physical target grammar shared by public operations ------------------
 
 LAKEHOUSE_KIND = "Lakehouse"
 WAREHOUSE_KIND = "Warehouse"
 
 #: Physical target kinds, in the order used in errors.
-PHYSICAL_KINDS = (LAKEHOUSE_KIND, WAREHOUSE_KIND)
+SEMANTIC_MODEL_KIND = "SemanticModel"
+REPORT_KIND = "Report"
+PHYSICAL_KINDS = (LAKEHOUSE_KIND, WAREHOUSE_KIND, SEMANTIC_MODEL_KIND, REPORT_KIND)
 
-_PHYSICAL_TYPES = {LAKEHOUSE_KIND: DeltaTarget, WAREHOUSE_KIND: WarehouseTarget}
+_PHYSICAL_TYPES = {
+    LAKEHOUSE_KIND: DeltaTarget,
+    WAREHOUSE_KIND: WarehouseTarget,
+    SEMANTIC_MODEL_KIND: SemanticModelTarget,
+    REPORT_KIND: ReportTarget,
+}
 
 
 def parse_physical_target(
@@ -169,6 +200,10 @@ def parse_physical_target(
 def physical_kind(target) -> str:
     """``Lakehouse`` or ``Warehouse`` for one typed physical target."""
 
+    if isinstance(target, ReportTarget):
+        return REPORT_KIND
+    if isinstance(target, SemanticModelTarget):
+        return SEMANTIC_MODEL_KIND
     if isinstance(target, DeltaTarget):
         return LAKEHOUSE_KIND
     if isinstance(target, WarehouseTarget):
@@ -179,6 +214,10 @@ def physical_kind(target) -> str:
 def physical_item(target) -> ItemRef:
     """The item one typed physical target names."""
 
+    if isinstance(target, ReportTarget):
+        return target.report
+    if isinstance(target, SemanticModelTarget):
+        return target.model
     if isinstance(target, DeltaTarget):
         return target.lakehouse
     if isinstance(target, WarehouseTarget):
@@ -197,7 +236,13 @@ def physical_target_text(target) -> str:
 LAKEHOUSE_TARGET = "lakehouse"
 WAREHOUSE_TARGET = "warehouse"
 
-_GRAMMAR_KIND = {LAKEHOUSE_TARGET: LAKEHOUSE_KIND, WAREHOUSE_TARGET: WAREHOUSE_KIND}
+SEMANTIC_MODEL_TARGET = "semanticmodel"
+_GRAMMAR_KIND = {
+    LAKEHOUSE_TARGET: LAKEHOUSE_KIND,
+    WAREHOUSE_TARGET: WAREHOUSE_KIND,
+    SEMANTIC_MODEL_TARGET: SEMANTIC_MODEL_KIND,
+    "report": REPORT_KIND,
+}
 
 
 @dataclass(frozen=True)
@@ -212,9 +257,7 @@ class PhysicalTargetRef:
         """Convert a typed target to catalogue and plan vocabulary."""
 
         return cls(
-            kind=LAKEHOUSE_TARGET
-            if isinstance(target, DeltaTarget)
-            else WAREHOUSE_TARGET,
+            kind=physical_kind(target).lower(),
             name=physical_item(target).name,
         )
 

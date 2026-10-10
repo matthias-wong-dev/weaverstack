@@ -52,6 +52,77 @@ def session(client, *, exists=True):
 
 
 @weaver_test()
+def test_named_semantic_model_checks_definition_and_dax_without_other_transports():
+    from weaver.semantic_models.definition import encode_definition
+
+    calls = []
+    semantic = SimpleNamespace(
+        power_bi=SimpleNamespace(authenticate=lambda: {"path": "Azure CLI"}),
+        get_definition=lambda: (
+            calls.append("definition") or encode_definition({"model": {}})
+        ),
+        query_dax=lambda query: calls.append(query) or [{"[Value]": 1}],
+    )
+    client = Client(
+        [
+            item("Reporting", "SemanticModel"),
+            item("Landing", "Lakehouse"),
+            item("Curated", "Warehouse"),
+        ]
+    )
+    opened, files = session(client)
+    opened.answer_semantic_model("Analytics", "Reporting", semantic)
+    report = doctor(workspace="Analytics", semantic_model="Reporting", session=opened)
+    assert report.succeeded and all(check.passed for check in report.checks)
+    assert [check.name for check in report.checks[-3:]] == [
+        "Power BI authentication",
+        "Semantic model definition",
+        "Semantic model DAX",
+    ]
+    assert [check.via for check in report.checks[-3:]] == [
+        "SemanticModel/Reporting"
+    ] * 3
+    assert report.checks[-3].detail == "Azure CLI"
+    assert calls == ["definition", 'EVALUATE ROW("Value", 1)']
+    assert not files and not opened.spark_sql and not opened.tsql
+    assert [call.kind for call in opened.calls] == ["semantic_model"]
+
+
+@weaver_test()
+def test_power_bi_auth_failure_is_redacted_and_dax_does_not_retry_sign_in():
+    from weaver.semantic_models.definition import encode_definition
+
+    calls = []
+
+    def fail():
+        calls.append("authenticate")
+        raise RuntimeError("secret token must not appear")
+
+    semantic = SimpleNamespace(
+        power_bi=SimpleNamespace(authenticate=fail),
+        get_definition=lambda: encode_definition({"model": {}}),
+        query_dax=lambda query: calls.append("query"),
+    )
+    opened, _ = session(Client([item("Reporting", "SemanticModel")]))
+    opened.answer_semantic_model("Analytics", "Reporting", semantic)
+    report = doctor(workspace="Analytics", semantic_model="Reporting", session=opened)
+    assert not report.succeeded
+    assert [check.status for check in report.checks[-3:]] == [ERROR, OK, NOT_TESTED]
+    assert "secret token" not in str(report.to_mapping())
+    assert calls == ["authenticate"]
+
+
+@weaver_test()
+def test_missing_semantic_model_does_not_probe_a_same_named_warehouse():
+    opened, files = session(Client([item("Reporting", "Warehouse")]))
+    report = doctor(workspace="Analytics", semantic_model="Reporting", session=opened)
+    assert not report.succeeded
+    assert report.checks[-1].status == MISSING
+    assert report.checks[-1].via == "SemanticModel/Reporting"
+    assert not files and not opened.calls
+
+
+@weaver_test()
 def test_discovery_probes_each_transport_once_without_project_or_environment(
     tmp_path, monkeypatch
 ):

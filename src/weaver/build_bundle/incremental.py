@@ -9,6 +9,7 @@ from typing import Iterable, Mapping
 from ..catalogue.state import RegisteredDocument
 from ..catalogue.tables import ROLE_SHORTCUT
 from ..declaration.model import (
+    MODEL_SHAPE,
     WeaverDocumentId,
     WeaverItemId,
     WeaverRepository,
@@ -203,7 +204,11 @@ def declared_signatures(
     for identity in selected:
         declaration = shortcuts.get(identity)
         artefact = installed.get(identity)
-        if declaration is not None:
+        if isinstance(identity, WeaverDocumentId) and identity.shape == MODEL_SHAPE:
+            signatures[identity] = repository.semantic_models[identity.item].signature
+        elif identity.item in repository.reports:
+            signatures[identity] = repository.reports[identity.item].signature
+        elif declaration is not None:
             signatures[identity] = declaration.signature
         elif artefact is not None:
             signatures[identity] = artefact.signature
@@ -253,7 +258,16 @@ def determine_impact(
     }
 
     existing = set(physical_types)
-    roots = changed | stale
+    # Selected models deploy even when their effective signatures are equal.
+    roots = (
+        changed
+        | stale
+        | {
+            identity
+            for identity in selected_set
+            if isinstance(identity, WeaverDocumentId) and identity.shape == MODEL_SHAPE
+        }
+    )
     impacted = set(roots)
     graph = repository.dependency_graph
     if graph is not None:
@@ -323,13 +337,24 @@ def select_build(
     # changed is replaced like any other changed node.
     pointers = shortcut_destinations(repository)
     untouched = set(impact.impacted_descendants) & pointers
-    selected_for_drop = set(impact.impacted) - prohibited - untouched
+    models = {
+        identity
+        for identity in selected
+        if (isinstance(identity, WeaverDocumentId) and identity.shape == MODEL_SHAPE)
+        or identity.item in repository.reports
+    }
+    selected_for_drop = set(impact.impacted) - prohibited - untouched - models
     refreshed = (set(impact.impacted) & pointers) - prohibited
     return BuildSelection(
         impact=impact,
         prohibited=_ordered(prohibited),
         selected_for_drop=_ordered(selected_for_drop),
-        selected_for_build=_ordered(set(impact.new) | selected_for_drop | refreshed),
+        selected_for_build=_ordered(
+            set(impact.new)
+            | selected_for_drop
+            | refreshed
+            | (set(impact.impacted) & models)
+        ),
     )
 
 

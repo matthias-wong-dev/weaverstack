@@ -102,15 +102,22 @@ class PlannedStage:
 
 
 def merge_layer_stages(stages: Iterable[PlannedStage]) -> tuple[PlannedStage, ...]:
-    """Merge same-phase, same-index work without crossing dependency layers."""
+    """Merge one kind of same-phase, same-index work within a dependency layer.
 
-    grouped: dict[tuple[int, int], list[PlannedStage]] = {}
+    A merged stage keeps one description, so only stages that describe the same
+    work merge.
+    """
+
+    grouped: dict[tuple[int, int], dict[str, list[PlannedStage]]] = {}
     for stage in stages:
-        grouped.setdefault(stage.rank, []).append(stage)
+        grouped.setdefault(stage.rank, {}).setdefault(stage.description, []).append(
+            stage
+        )
 
     merged: list[PlannedStage] = []
-    for rank in sorted(grouped):
-        group = grouped[rank]
+    for group in (
+        group for rank in sorted(grouped) for group in grouped[rank].values()
+    ):
         first = group[0]
         payloads: dict[str, bytes] = {}
         for stage in group:
@@ -214,7 +221,15 @@ def _numbered(
 
 
 _SPARK = frozenset({"spark_sql", "spark_sql_batch", "spark_table"})
-_TDS = frozenset({"tsql", "tsql_batch", "runtime_state", "await_endpoint_objects"})
+_TDS = frozenset(
+    {
+        "tsql",
+        "tsql_batch",
+        "runtime_state",
+        "semantic_catalogue",
+        "await_endpoint_objects",
+    }
+)
 _ONELAKE = frozenset({"folder", "load_file"})
 #: Session-scoped temporary views authored as table setup can collide.
 TEMPORARY_VIEWS = "spark:temporary-views"

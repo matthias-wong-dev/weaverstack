@@ -70,8 +70,14 @@ class DoctorReport:
         }
 
 
-def doctor(*, workspace: str, session=None, client=None) -> DoctorReport:
-    """Prove authentication, REST, OneLake, TDS and Spark in a named workspace."""
+def doctor(
+    *,
+    workspace: str,
+    semantic_model: str | None = None,
+    session=None,
+    client=None,
+) -> DoctorReport:
+    """Check workspace transports or one named semantic model."""
 
     from ..sessions.host import use_or_create_session
     from ..targets import ItemRef, WarehouseTarget
@@ -139,6 +145,23 @@ def doctor(*, workspace: str, session=None, client=None) -> DoctorReport:
         except Exception as exc:
             checks.append(Check("Workspace discovery", ERROR, str(exc)))
             return report()
+        if semantic_model is not None:
+            if not any(
+                item.name == semantic_model and item.type == "SemanticModel"
+                for item in items
+            ):
+                checks.append(
+                    Check(
+                        "Semantic model",
+                        MISSING,
+                        f"SemanticModel/{semantic_model} is not visible in {workspace}.",
+                        via=f"SemanticModel/{semantic_model}",
+                    )
+                )
+                return report()
+            model = opened.semantic_model(semantic_model, workspace=configured)
+            checks.extend(_semantic_checks(model, semantic_model))
+            return report()
         lakehouse = next((item for item in items if item.type == "Lakehouse"), None)
         warehouse = next((item for item in items if item.type == "Warehouse"), None)
         if lakehouse:
@@ -197,6 +220,42 @@ def doctor(*, workspace: str, session=None, client=None) -> DoctorReport:
                 )
             )
     return report()
+
+
+def _semantic_checks(model, name):
+    from ..semantic_models.definition import decode_model
+
+    via = f"SemanticModel/{name}"
+    try:
+        identity = model.power_bi.authenticate()
+        authentication = Check(
+            "Power BI authentication", OK, identity.get("path"), via=via
+        )
+    except Exception as exc:
+        authentication = Check(
+            "Power BI authentication",
+            ERROR,
+            type(exc).__name__,
+            "Sign in with access to this model and the Power BI API.",
+            via,
+        )
+    definition = _attempt(
+        "Semantic model definition",
+        lambda: decode_model(model.get_definition()),
+        via=via,
+    )
+    query = (
+        _attempt(
+            "Semantic model DAX",
+            lambda: model.query_dax('EVALUATE ROW("Value", 1)') == [{"[Value]": 1}],
+            via=via,
+        )
+        if authentication.passed
+        else Check(
+            "Semantic model DAX", NOT_TESTED, "Power BI authentication failed.", via=via
+        )
+    )
+    return [authentication, definition, query]
 
 
 def _attempt(name, work, *, via=None, remedy=None):

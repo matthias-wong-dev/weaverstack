@@ -8,6 +8,8 @@ already satisfied by the target, so it adds no edge.
 
 from __future__ import annotations
 
+#: The catalogue supports the identity columns this Build publishes.
+UPGRADED = "catalogue:upgraded"
 #: Every claim deletion has run; the selected objects are no longer certified.
 DECERTIFIED = "catalogue:decertified"
 #: Decertification and runtime-state reset are complete. Physical work needs it.

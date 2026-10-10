@@ -813,17 +813,34 @@ select OrderId from Sales.Orders;
 
 
 def _file_node(tmp_path, executor, **kwargs):
+    """A file outside the project folder, run against the one item named."""
+
     from datetime import datetime, timezone
 
-    from weaver.test_file import source_file_node
+    from weaver.operations.project import Project
+    from weaver.test_file import file_validations, source_validation_nodes
+    from weaver.workspaces import TargetDeclaration, Workspace
 
-    return source_file_node(
+    item = WeaverItemId.parse("Warehouse/Reporting")
+    workspace = Workspace(
+        workspace="Analytics",
+        targets={item: TargetDeclaration(physical=WAREHOUSE_TARGET.name)},
+    )
+    path = _source(tmp_path, "Sales.OrdersReconcile.sql", FILE_TEST)
+    validations = file_validations(
+        [str(path)],
+        project=Project(tmp_path / "project", workspace),
+        items=[item],
+    )
+    (node,) = source_validation_nodes(
         _FileSession(executor),
-        targets=[WAREHOUSE_TARGET],
-        path=_source(tmp_path, "Sales.OrdersReconcile.sql", FILE_TEST),
+        workspace=workspace,
+        validations=validations,
         started=datetime.now(timezone.utc),
+        collect=True,
         **kwargs,
     )
+    return node
 
 
 @weaver_test()
@@ -883,5 +900,118 @@ def test_a_source_dry_run_compiles_and_dispatches_nothing(tmp_path):
 
     assert node.status == PLANNED
     assert not node.executed
-    assert node.logical_id == "Sales.OrdersReconcile"
+    assert node.logical_id == "Warehouse/Reporting/Sales.OrdersReconcile"
+    assert node.physical_target == "Warehouse/Reporting_WH"
     assert executor.statements == []
+
+
+# --- choosing source files ----------------------------------------------------
+
+FILE_ASSUMPTION = """/*
+Assumption ID: Sales.NoOrphans
+
+Description: Every order has a customer.
+*/
+select OrderId from Sales.Orders where CustomerId is null;
+"""
+
+
+@pytest.fixture
+def source_project(tmp_path, monkeypatch):
+    """A project folder whose Warehouse/Reporting has a Test and an Assumption."""
+
+    from factories import schema_document, warehouse_table
+
+    from weaver.operations.project import Project
+    from weaver.workspaces import Workspace
+
+    root = tmp_path / "project"
+    item = root / "Warehouse/Reporting"
+    for relative, text in (
+        ("schemas/Sales.yml", schema_document("Sales")),
+        ("Sales.Orders.sql", warehouse_table("Sales.Orders")),
+        ("Sales.Expected.sql", warehouse_table("Sales.Expected")),
+        ("tests/Sales.OrdersReconcile.sql", FILE_TEST),
+        ("assumptions/Sales.NoOrphans.sql", FILE_ASSUMPTION),
+    ):
+        (item / relative).parent.mkdir(parents=True, exist_ok=True)
+        (item / relative).write_text(text, encoding="utf-8")
+    monkeypatch.chdir(root)
+    return Project(root, Workspace(workspace="Analytics"))
+
+
+def _chosen(project, files, items=()):
+    from weaver.test_file import file_validations
+
+    return [
+        str(each.logical)
+        for each in file_validations(
+            files, project=project, items=[WeaverItemId.parse(i) for i in items]
+        )
+    ]
+
+
+@weaver_test()
+def test_a_declared_file_runs_against_its_own_item(source_project):
+    assert _chosen(
+        source_project, ["Warehouse/Reporting/tests/Sales.OrdersReconcile.sql"]
+    ) == ["Warehouse/Reporting/Sales.OrdersReconcile"]
+
+
+@weaver_test()
+def test_repeated_files_select_each_once(source_project):
+    test = "Warehouse/Reporting/tests/Sales.OrdersReconcile.sql"
+    assumption = "Warehouse/Reporting/assumptions/Sales.NoOrphans.sql"
+
+    assert _chosen(source_project, [test, assumption, test]) == [
+        "Warehouse/Reporting/Sales.OrdersReconcile",
+        "Warehouse/Reporting/Sales.NoOrphans",
+    ]
+
+
+@weaver_test()
+def test_a_directory_selects_the_validations_declared_beneath_it(source_project):
+    assert _chosen(source_project, ["Warehouse/Reporting"]) == [
+        "Warehouse/Reporting/Sales.NoOrphans",
+        "Warehouse/Reporting/Sales.OrdersReconcile",
+    ]
+
+
+@weaver_test()
+def test_a_glob_selects_every_file_it_matches(source_project):
+    assert _chosen(source_project, ["Warehouse/*/assumptions/*.sql"]) == [
+        "Warehouse/Reporting/Sales.NoOrphans"
+    ]
+
+
+@weaver_test()
+def test_a_glob_that_matches_nothing_is_refused_by_name(source_project):
+    from weaver.errors import CommandError
+
+    with pytest.raises(CommandError, match="no file matches 'Lakehouse/\\*/tests/\\*'"):
+        _chosen(source_project, ["Lakehouse/*/tests/*"])
+
+
+@weaver_test()
+def test_a_file_outside_the_project_needs_one_item(source_project, tmp_path):
+    from weaver.errors import CommandError
+
+    scratch = _source(tmp_path, "Sales.OrdersReconcile.sql", FILE_TEST)
+
+    with pytest.raises(CommandError, match="name the one item to run it against"):
+        _chosen(source_project, [str(scratch)])
+    assert _chosen(source_project, [str(scratch)], ["Warehouse/Inventory"]) == [
+        "Warehouse/Inventory/Sales.OrdersReconcile"
+    ]
+
+
+@weaver_test()
+def test_a_declared_file_of_an_item_not_named_is_refused(source_project):
+    from weaver.errors import CommandError
+
+    with pytest.raises(CommandError, match="validates Warehouse/Reporting"):
+        _chosen(
+            source_project,
+            ["Warehouse/Reporting/tests/Sales.OrdersReconcile.sql"],
+            ["Warehouse/Inventory"],
+        )

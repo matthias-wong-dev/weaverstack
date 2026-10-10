@@ -13,7 +13,7 @@ from .spark import identifier
 
 if TYPE_CHECKING:  # pragma: no cover - for type readers only
     from .catalogue.state import Catalogue
-    from .runtime.folder_load import StagingFolder
+    from .runtime.folder_load import FolderFiles, StagingFolder
     from .runtime.load_result import LoadResult
 
 #: Repeated here so the authoring surface does not import the runtime.
@@ -347,13 +347,29 @@ class Folder(WeaverObject):
     def path(self) -> Path:
         """Return this folder's mounted path for Python file access::
 
-            for file in Sales__Export(self).path().glob("*.json"):
-                ...
+            (staging.path / "orders.json").write_bytes(
+                (Sales__Export(self).path() / "orders.json").read_bytes()
+            )
 
         The path uses the resolved Lakehouse rather than the notebook's default.
+        A listing through it can lag a delete made elsewhere; list with
+        :meth:`current_files`, :meth:`files_since` or :meth:`latest_files`.
         """
 
         return self.lakehouse.folder_path(*self.identity)
+
+    def current_files(self, *patterns: str) -> list[Path]:
+        """Return this folder's files as OneLake lists them now::
+
+            for file in Sales__Export(self).current_files("*.json"):
+                ...
+
+        Patterns match as a File key does. With none, every file is returned.
+        """
+
+        from .runtime.folder_load import current_files
+
+        return current_files(self._files(), patterns)
 
     def spark_path(self) -> str:
         """Return this folder's ``abfss://`` address for Spark::
@@ -372,14 +388,14 @@ class Folder(WeaverObject):
 
         from .runtime.folder_load import files_since
 
-        return files_since(self.path(), bookmark)
+        return files_since(self._files(), bookmark)
 
     def latest_files(self) -> dict[Path, datetime]:
         """Return current files from the latest change that left files in place."""
 
         from .runtime.folder_load import latest_files
 
-        return latest_files(self.path())
+        return latest_files(self._files())
 
     def deleted_since(self, bookmark: datetime) -> dict[Path, datetime]:
         """Return files deleted strictly after an aware ``bookmark`` and their UTC times.
@@ -390,7 +406,7 @@ class Folder(WeaverObject):
 
         from .runtime.folder_load import deleted_since
 
-        return deleted_since(self.path(), bookmark)
+        return deleted_since(self._files(), bookmark)
 
     def staging_folder(self) -> "StagingFolder":
         """Return the staging directory available to this ``read()``.
@@ -434,6 +450,15 @@ class Folder(WeaverObject):
     def _staging_path(self) -> Path:
         destination = self.path()
         return destination.with_name(f"{destination.name}{STAGING_SUFFIX}")
+
+    def _files(self) -> "FolderFiles":
+        from .locations import Location
+        from .runtime.folder_load import FolderFiles
+
+        path = self.path()
+        return FolderFiles(
+            self.lakehouse.files_store(), Location(self.spark_path()), path
+        )
 
     def load(self, fault_tolerant: bool = False, reload: bool = False) -> "LoadResult":
         """Run and record this folder's load.
@@ -480,10 +505,12 @@ class Folder(WeaverObject):
 
         # Adopt before read() so file history includes existing destination files.
         # Static folders retain their original load-once contents.
+        destination = self._files()
+        staging = destination.sibling(STAGING_SUFFIX)
         if not contract.static:
-            adopt_existing_files(self.path())
+            adopt_existing_files(destination)
 
-        issued = new_staging_folder(self.path(), self._staging_path())
+        issued = new_staging_folder(destination, staging)
         self._issued_staging = issued
         try:
             staged, deletes = self._read_result()
@@ -494,8 +521,8 @@ class Folder(WeaverObject):
             elif staged is None:
                 result = load_folder(
                     contract=contract,
-                    destination=self.path(),
-                    staging=issued.path,
+                    destination=destination,
+                    staging=staging,
                     deletes=deletes,
                     fault_tolerant=fault_tolerant,
                 )
@@ -508,15 +535,15 @@ class Folder(WeaverObject):
             else:
                 result = load_folder(
                     contract=contract,
-                    destination=self.path(),
-                    staging=issued.path,
+                    destination=destination,
+                    staging=staging,
                     deletes=deletes,
                     fault_tolerant=fault_tolerant,
                 )
         finally:
             # Never hand a later load this load's staging directory.
             self._issued_staging = None
-        remove_staging(issued.path)
+        remove_staging(staging)
         return self._bookmarked(result, began)
 
 

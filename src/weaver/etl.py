@@ -27,6 +27,7 @@ from .declaration.metadata import FOLDER, PYTHON, SPARK_SQL, TABLE, ObjectId
 from .declaration.model import (
     FILE_SHAPE,
     PROCEDURE_SHAPE,
+    SEMANTIC_MODEL,
     WAREHOUSE,
     WeaverDocumentId,
     WeaverItemId,
@@ -170,6 +171,14 @@ def item_view_objects(
     return tuple(sorted(found, key=str))
 
 
+def item_loadable_objects(
+    repository: WeaverRepository, *, item: WeaverItemId
+) -> tuple[WeaverDocumentId, ...]:
+    if item in repository.semantic_models:
+        return (WeaverDocumentId.model_root(item),)
+    return item_bookmarkable_objects(repository, item=item)
+
+
 def item_data_nodes(
     repository: WeaverRepository, *, item: WeaverItemId
 ) -> tuple[WeaverDocumentId, ...]:
@@ -178,7 +187,7 @@ def item_data_nodes(
     return tuple(
         sorted(
             {
-                *item_bookmarkable_objects(repository, item=item),
+                *item_loadable_objects(repository, item=item),
                 *item_view_objects(repository, item=item),
             },
             key=str,
@@ -199,7 +208,11 @@ def item_validated_objects(
     compiles to is how the Test is run.
     """
 
-    if item.item_type == WAREHOUSE:
+    if item.item_type == SEMANTIC_MODEL:
+        # Each runs from its catalogue definition and compiles to nothing.
+        model = next((each for each in repository.items if each.identity == item), None)
+        origins = model.validations if model is not None else ()
+    elif item.item_type == WAREHOUSE:
         origins = (
             programmable.origin
             for programmable in repository.programmables.values()
@@ -251,7 +264,7 @@ def item_validation_artefacts(
     validations come from the repository's generated Programmables.
     """
 
-    if _is_builtin(item) or item.item_type == WAREHOUSE:
+    if _is_builtin(item) or item.item_type in {WAREHOUSE, SEMANTIC_MODEL}:
         return ()
     model = next((each for each in repository.items if each.identity == item), None)
     if model is None:

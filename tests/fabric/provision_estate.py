@@ -1,6 +1,6 @@
 """Provision the permanent Weaver Fabric pytest estate.
 
-Creates any missing Lakehouses and Warehouses in PYTEST_WORKSPACE, and the
+Creates missing Lakehouses, Warehouses and the SemanticModel in PYTEST_WORKSPACE, and the
 external estate in PYTEST_WORKSPACE_EXT that shortcut tests point at. Existing
 items are reused and existing external contents are left as they are. Nothing is
 deleted.
@@ -24,6 +24,7 @@ Optional environment variables:
     WEAVER_PYTEST_CONSUMER
     WEAVER_PYTEST_WAREHOUSE_PRODUCER
     WEAVER_PYTEST_WAREHOUSE
+    WEAVER_PYTEST_SEMANTIC_MODEL
     WEAVER_PYTEST_EXTERNAL
     WEAVER_PYTEST_EXTERNAL_WAREHOUSE
 """
@@ -52,6 +53,7 @@ from weaver.fabric import (
     find_workspace,
 )
 from weaver.fabric.auth import desktop_credential, use_credential
+from weaver.fabric.resources import SEMANTIC_MODEL
 
 DEFAULT_WORKSPACE = "PYTEST_WORKSPACE"
 
@@ -79,6 +81,14 @@ WAREHOUSE_ROLES = {
     # Where a mirrored Warehouse item is built. Emptied by every mirror.
     "warehouse_mirror": "PYTEST_WH_MIRROR",
     **performance_estate.WAREHOUSE_ROLES,
+}
+
+
+SEMANTIC_MODEL_ROLES = {
+    # Bound by hand to a connection its owner configures; the suite restores it.
+    "semantic_model": "PYTEST_SM",
+    # Reshaped freely by the suite; needs no connection.
+    "scratch_semantic_model": "PYTEST_SM_SCRATCH",
 }
 
 
@@ -301,6 +311,23 @@ def provision_external(client: FabricClient, host_workspace) -> list[str]:
     return failures
 
 
+def create_semantic_model(workspace, name, *, client):
+    from support.semantic_models import fixture_parts
+
+    from weaver.semantic_models.definition import encode_parts
+
+    definition = encode_parts(fixture_parts())
+    response = client.request(
+        "POST",
+        f"workspaces/{workspace.id}/semanticModels",
+        payload={"displayName": name, "definition": definition},
+        expected=(201, 202),
+        retry_transient=False,
+    )
+    client.wait_for_operation(response, timeout=300)
+    return find_item(workspace, name, item_type=SEMANTIC_MODEL, client=client)
+
+
 def main() -> int:
     # The chain a `weaver` command uses, as the suite installs: the Azure CLI
     # where `az login` has produced an identity, and the persisted browser
@@ -359,6 +386,23 @@ def main() -> int:
 
         action = "CREATED" if created else "EXISTS "
         print(f"{action}  Warehouse  {item.name} ({item.id})")
+
+    for role, default_name in SEMANTIC_MODEL_ROLES.items():
+        name = configured_name(role, default_name)
+        try:
+            item, created = find_or_create(
+                workspace=workspace,
+                client=client,
+                name=name,
+                item_type=SEMANTIC_MODEL,
+                create=create_semantic_model,
+            )
+        except Exception as exc:
+            failures.append(f"SemanticModel {name}: {type(exc).__name__}: {exc}")
+            print(f"FAILED  SemanticModel  {name}: {exc}")
+            continue
+        action = "CREATED" if created else "EXISTS "
+        print(f"{action}  SemanticModel  {item.name} ({item.id})")
 
     from weaver.workspaces import Workspace
 

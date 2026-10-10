@@ -4,11 +4,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import cached_property
-from typing import Mapping
+from typing import TYPE_CHECKING, Mapping
 
 from ..errors import GraphError
 from ..graph import Graph
 from .result import RunError
+
+if TYPE_CHECKING:
+    from ..fabric.resources import Item
 
 
 @dataclass(frozen=True)
@@ -30,9 +33,12 @@ class RunNode:
     publication_of: object | None = None
     publication_targets: tuple[object, ...] = ()
     produced_by: str | None = None
+    bound_item: Item | None = None
     #: A refresh barrier only: the ``(schema, table)`` pairs it syncs, or
     #: ``None`` for every table.
     refresh_tables: tuple[tuple[str, str], ...] | None = ()
+    #: A semantic refresh only: every recorded source is read in Direct Lake.
+    direct_lake: bool = False
 
     @property
     def sort_key(self) -> tuple[str, str, str, str, str]:
@@ -123,7 +129,9 @@ def _load_graph(request, state) -> RunGraph:
                 publication_of=node.publication_of,
                 publication_targets=node.publication_targets,
                 produced_by=node.produced_by,
+                bound_item=node.bound_item,
                 refresh_tables=node.refresh_tables,
+                direct_lake=node.direct_lake,
                 role="load",
             )
             for node in dag.nodes
@@ -135,14 +143,17 @@ def _load_graph(request, state) -> RunGraph:
 
 
 def _test_graph(request, state) -> RunGraph:
+    from ..errors import ValidationError
+    from ..installed import refuse_uncertified_models
     from ..test_execution import primitive_kind
     from ..test_plan import ValidationEstate, validation_order
 
-    estate = ValidationEstate.from_catalogue(state.catalogue)
-    if request.name is not None:
-        selected = (estate.named(request.name, request.items),)
-    else:
-        selected = validation_order(estate.for_items(request.items))
+    dag = state.catalogue.dag()
+    refuse_uncertified_models(
+        dag, request.items, operation="Test", error=ValidationError
+    )
+    estate = ValidationEstate.of(dag)
+    selected = validation_order(estate.matching(request.names, request.items))
     return RunGraph(
         nodes=tuple(
             RunNode(

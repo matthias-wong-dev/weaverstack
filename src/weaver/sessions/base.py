@@ -13,7 +13,7 @@ from abc import ABC, abstractmethod
 from concurrent.futures import Executor, ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Any, Callable, Iterator, Sequence
+from typing import TYPE_CHECKING, Any, Callable, Iterator, Sequence
 
 from ..delta_protocol import (
     DirectDeltaAction,
@@ -26,6 +26,9 @@ from ..targets import ItemRef
 from ..workspaces import Workspace
 from .resources import Resource
 from .telemetry import SessionTelemetry
+
+if TYPE_CHECKING:
+    from ..fabric.resources import Item
 
 
 def workspace_context(workspace: Workspace) -> tuple:
@@ -74,6 +77,8 @@ class ReportingFrame:
     started: float = field(default_factory=time.monotonic)
     elapsed: float | None = None
     failed: bool = False
+    #: The work found nothing to do, as a Static object's load does once loaded.
+    skipped: bool = False
     #: Runs beside other frames of its Step, off the frame stack.
     concurrent: bool = False
     #: What the work produced, for presentation beside its duration.
@@ -98,6 +103,8 @@ class ReportingFrame:
             mapping["detail"] = self.detail
         if self.failed:
             mapping["failed"] = True
+        if self.skipped:
+            mapping["skipped"] = True
         return mapping
 
 
@@ -274,6 +281,42 @@ class Session(ABC):
 
         reference = item if isinstance(item, ItemRef) else ItemRef(item)
         return self.scope(workspace).resolve_item(reference, item_type=item_type)
+
+    def semantic_model(
+        self, item: ItemRef | str | Item, *, workspace: Workspace | None = None
+    ):
+        from ..fabric.resources import Item
+
+        if isinstance(item, Item):
+            from ..fabric.semantic_model import validate_bound_model
+
+            validate_bound_model(item)
+        reference = item if isinstance(item, (ItemRef, Item)) else ItemRef(item)
+        return self.scope(workspace).semantic_model(reference)
+
+    def report_item(self, item: ItemRef | str | Item, *, workspace=None):
+        from ..fabric.report import validate_bound_report
+        from ..fabric.resources import Item
+
+        if isinstance(item, Item):
+            validate_bound_report(item)
+        reference = item if isinstance(item, (ItemRef, Item)) else ItemRef(item)
+        return self.scope(workspace).report_item(reference)
+
+    def semantic_source(
+        self, item, *, item_type, schema, name, include_columns=True, workspace=None
+    ):
+        from .semantic_sources import semantic_source
+
+        return semantic_source(
+            self,
+            item,
+            item_type=item_type,
+            schema=schema,
+            name=name,
+            include_columns=include_columns,
+            workspace=workspace,
+        )
 
     # --- execution capabilities ---------------------------------------------
 
@@ -883,6 +926,8 @@ class WorkspaceScope:
         self._resolver = resolver
         self._store = store
         self._resources: list[Resource] = []
+        self._semantic_models: dict[str | tuple[str, str], Any] = {}
+        self._reports: dict[str | tuple[str, str], Any] = {}
         #: Candidate Lakehouses for Livy attachment, not execution destinations.
         self._offered_spark_homes: set[str] = set()
         #: An exact attachment a frozen bundle requires. It outranks every offer.
@@ -995,6 +1040,63 @@ class WorkspaceScope:
         if getattr(resolver, "cache_hits", 0) > before:
             self.telemetry.count("resolve.item.cache_hits")
         return resolved
+
+    def semantic_model(self, item: ItemRef | Item):
+        from ..fabric.resources import Item
+        from ..fabric.semantic_model import SemanticModelClient
+
+        key = (item.workspace_id, item.id) if isinstance(item, Item) else item.name
+        with self._lock:
+            if key not in self._semantic_models:
+                power_bi = self._power_bi_client()
+                resolved = (
+                    item
+                    if isinstance(item, Item)
+                    else self.resolve_item(item, item_type="SemanticModel")
+                )
+                self._semantic_models[key] = SemanticModelClient(
+                    resolved.workspace_id,
+                    resolved.id,
+                    fabric=self.resolver.client,
+                    power_bi=power_bi,
+                )
+            return self._semantic_models[key]
+
+    def report_item(self, item):
+        from ..fabric.report import ReportClient
+        from ..fabric.resources import Item
+
+        key = (item.workspace_id, item.id) if isinstance(item, Item) else item.name
+        with self._lock:
+            if key not in self._reports:
+                resolved = (
+                    item
+                    if isinstance(item, Item)
+                    else self.resolve_item(item, item_type="Report")
+                )
+                self._reports[key] = ReportClient(
+                    resolved.workspace_id,
+                    resolved.id,
+                    fabric=self.resolver.client,
+                    power_bi_factory=self._power_bi_client,
+                )
+            return self._reports[key]
+
+    def _power_bi_client(self):
+        from ..fabric.auth import POWER_BI_SCOPE, TokenProvider
+        from ..fabric.client import FabricClient
+        from ..fabric.semantic_model import POWER_BI_API
+
+        source = getattr(self.resolver.client, "_token_source", None)
+        if not isinstance(source, TokenProvider):
+            raise CommandError(
+                "This Session cannot share its Fabric credential with Power BI."
+            )
+        return FabricClient(
+            api_base_url=POWER_BI_API,
+            token=TokenProvider(POWER_BI_SCOPE, source._credential()),
+            telemetry=self.telemetry,
+        )
 
     # --- resources ----------------------------------------------------------
 

@@ -252,6 +252,35 @@ class MutationBindings:
             )
         )
 
+    def semantic_model(self, bound):
+        if bound.kind != "semanticmodel":
+            raise InstallError(f"{bound.display} is not a SemanticModel")
+        resolved = self.session.resolve_item(
+            bound.name, item_type="SemanticModel", workspace=self.workspace
+        )
+        if (
+            bound.workspace_id is not None
+            and resolved.workspace_id != bound.workspace_id
+        ):
+            raise InstallError(f"{bound.display} resolved in a different workspace")
+        if bound.item_id != bound.name and resolved.id != bound.item_id:
+            raise InstallError(
+                f"{bound.display} has a different item ID; regenerate the bundle"
+            )
+        return self.session.semantic_model(bound.name, workspace=self.workspace)
+
+    def report_item(self, bound):
+        if bound.kind != "report":
+            raise InstallError(f"{bound.display} is not a Report")
+        resolved = self.session.resolve_item(
+            bound.name, item_type="Report", workspace=self.workspace
+        )
+        if resolved.workspace_id != bound.workspace_id or resolved.id != bound.item_id:
+            raise InstallError(
+                f"{bound.display} has a different physical binding; regenerate the bundle"
+            )
+        return self.session.report_item(bound.name, workspace=self.workspace)
+
     def resolve_target(self, bound: BoundTarget) -> ResolvedTarget:
         # Resolve once so executors never derive paths or inherit a Lakehouse.
         item = ItemRef(bound.item_id)
@@ -265,7 +294,7 @@ class MutationBindings:
     def _resolved(self, bound: BoundTarget, item: ItemRef, method: str):
         """Resolve a Lakehouse address; Warehouse actions use TDS instead."""
 
-        if bound.kind == WAREHOUSE_TARGET:
+        if bound.kind != "lakehouse":
             return None
         resolve = getattr(self.resolver, method, None)
         if resolve is None:

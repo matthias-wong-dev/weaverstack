@@ -6,8 +6,15 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Mapping
 
 from ..errors import BuildError
-from ..targets import WAREHOUSE_TARGET
+from ..targets import LAKEHOUSE_TARGET
 from .serialization import checked_mapping
+
+_KIND_NAMES = {
+    "lakehouse": "Lakehouse",
+    "warehouse": "Warehouse",
+    "semanticmodel": "SemanticModel",
+    "report": "Report",
+}
 
 if TYPE_CHECKING:
     from ..spark import FabricSparkTarget
@@ -42,10 +49,8 @@ class BoundTarget:
 
         from ..spark import FabricSparkTarget
 
-        if self.kind == WAREHOUSE_TARGET:
-            raise BuildError(
-                f"{self.display} is a Warehouse and has no Spark destination"
-            )
+        if self.kind != LAKEHOUSE_TARGET:
+            raise BuildError(f"{self.display} has no Spark destination")
         if not self.workspace_name:
             raise BuildError(
                 f"cannot render a Fabric Spark statement for {self.display} "
@@ -60,7 +65,9 @@ class BoundTarget:
     @property
     def display(self) -> str:
         kind = (self.kind or "").strip()
-        return f"{kind.title()}/{self.name}" if kind else str(self.name)
+        if not kind:
+            return str(self.name)
+        return f"{_KIND_NAMES.get(kind.casefold(), kind.title())}/{self.name}"
 
     def to_mapping(self) -> dict[str, Any]:
         mapping: dict[str, Any] = {

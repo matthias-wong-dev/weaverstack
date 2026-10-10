@@ -470,15 +470,41 @@ def test_a_warehouse_procedure_that_predates_the_contract_says_to_rebuild():
 
     class Old:
         def call_procedure(self, procedure, *, inputs=(), outputs=()):
-            raise SqlExecutionError(
-                "SQL execution failed: Procedure or function [_].[Load Sales.Customer] "
-                "has too many arguments specified."
-            )
+            raise SqlExecutionError("SQL execution failed: reworded by the driver")
+
+        def query(self, statement, parameters=None):
+            assert parameters == ["[_].[Load Sales.Customer]"]
+            return [{"name": "@fault_tolerant"}]
 
     node = _warehouse_node()
     session = SimpleNamespace(sql_executor=lambda target, workspace=None: Old())
 
     with pytest.raises(LoadError, match="Rebuild"):
+        dispatch_primitive(node, session=session)
+
+
+@weaver_test()
+@pytest.mark.parametrize(
+    "parameters",
+    [[{"name": "@fault_tolerant"}, {"name": "@return_refusal"}], [], None],
+    ids=["current", "missing", "unreadable"],
+)
+def test_a_failed_call_to_a_current_procedure_keeps_its_own_error(parameters):
+    from weaver.sql.errors import SqlExecutionError
+
+    class Current:
+        def call_procedure(self, procedure, *, inputs=(), outputs=()):
+            raise SqlExecutionError("has too many arguments specified")
+
+        def query(self, statement, parameters_=None):
+            if parameters is None:
+                raise SqlExecutionError("sys.parameters is unavailable")
+            return parameters
+
+    node = _warehouse_node()
+    session = SimpleNamespace(sql_executor=lambda target, workspace=None: Current())
+
+    with pytest.raises(SqlExecutionError, match="too many arguments"):
         dispatch_primitive(node, session=session)
 
 

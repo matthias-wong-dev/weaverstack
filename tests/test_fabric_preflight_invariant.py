@@ -259,6 +259,32 @@ def test_every_missing_item_is_reported_together():
 
 
 @weaver_test()
+def test_a_missing_semantic_model_or_report_is_left_for_build_to_create():
+    from weaver.build_bundle.targets import ReportBinding, SemanticModelBinding
+
+    client = _complete_estate()
+    bindings = ItemBindings(
+        (
+            ItemBinding(
+                WeaverItemId.parse("SemanticModel/Sales"),
+                SemanticModelBinding(ItemRef("Sales"), workspace_name=WORKSPACE),
+            ),
+            ItemBinding(
+                WeaverItemId.parse("Report/Sales"),
+                ReportBinding(ItemRef("Sales"), workspace_name=WORKSPACE),
+            ),
+        )
+    )
+
+    found = _preflight(client, bindings)
+
+    assert ("Sales_LH", "Lakehouse") in {
+        (item.name, item.type) for item in found.inventory
+    }
+    assert client.item_listings == 1
+
+
+@weaver_test()
 def test_a_name_that_exists_as_the_wrong_type_says_so():
     """The common mistake, and the one a bare absence sends you hunting for."""
 

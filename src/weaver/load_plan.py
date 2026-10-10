@@ -8,21 +8,31 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from functools import cached_property
-from typing import Mapping, Sequence
+from typing import TYPE_CHECKING, Mapping, Sequence
 
 from .catalogue.state import Catalogue
-from .declaration.model import OBJECT_SHAPE, WeaverDocumentId, WeaverItemId
+from .declaration.model import (
+    OBJECT_SHAPE,
+    WeaverDocumentId,
+    WeaverItemId,
+)
 from .errors import GraphError, LoadError
 from .graph import Graph
 from .installed import (
     PYTHON_FOLDER,
     PYTHON_TABLE,
+    SEMANTIC_REFRESH,
     WAREHOUSE_PROCEDURE,
     InstalledDag,
     InstalledNode,
+    refuse_uncertified_models,
 )
 from .load_report import DEPENDENCY_EXTERNAL, LoadMessage, info
+from .selection import name_patterns
 from .targets import PhysicalObjectRef, PhysicalTargetRef
+
+if TYPE_CHECKING:
+    from .fabric.resources import Item
 
 #: Barrier kinds written to plan files and task logs.
 ENDPOINT_REFRESH = "endpoint_refresh"
@@ -32,6 +42,7 @@ PRIMITIVE_KINDS = (
     WAREHOUSE_PROCEDURE,
     PYTHON_TABLE,
     PYTHON_FOLDER,
+    SEMANTIC_REFRESH,
     ENDPOINT_REFRESH,
     ONELAKE_PUBLICATION,
 )
@@ -68,9 +79,13 @@ class LoadNode:
     publication_targets: tuple[OneLakeReadiness, ...] = ()
     #: A publication barrier only. The load node that publishes what it waits for.
     produced_by: str | None = None
+    bound_item: Item | None = None
     #: A refresh barrier only. The ``(schema, table)`` pairs read through the
     #: endpoint, or ``None`` when a read needs every table synced.
     refresh_tables: tuple[tuple[str, str], ...] | None = ()
+    #: A semantic refresh only. Every recorded source is read in Direct Lake,
+    #: which uses single sign-on, so no connection is bound or needed.
+    direct_lake: bool = False
 
     @property
     def sort_key(self) -> tuple[str, str, str, str]:
@@ -162,17 +177,20 @@ def load_dag(
     """The physical load graph for one set of items.
 
     Dependencies order the selection but never enlarge it: an edge is kept only
-    where both ends were named. ``names`` narrows it to named loadables, an
-    operator override that adds neither nodes nor ordering edges. A Lakehouse
-    selector carries its area, ``Tables/Schema.Object`` or
-    ``Files/Schema.Object``, and a bare ``Schema.Object`` is accepted where it
-    reaches one object.
+    where both ends were named. ``names`` narrows it to the loadables its
+    regular expressions match, an operator override that adds neither nodes nor
+    ordering edges. A Lakehouse name carries its area, ``Tables/Schema.Object``
+    or ``Files/Schema.Object``, and a bare ``Schema.Object`` is accepted where
+    it reaches one object.
 
     ``selection`` is an execution filter over logical loadable identities,
     decided by the caller. Only the loadables it names run. The traversal
     continues through the ones it leaves out, so two selected loadables keep the
     order the graph gives them. ``None`` selects every loadable the requested
     items own.
+
+    A semantic model that records no managed source waits for every other node
+    in the plan. One that records sources waits for those alone.
     """
 
     requested = tuple(dict.fromkeys(items))
@@ -214,6 +232,7 @@ class _Planner:
             visited: set[str] = set()
             for node in seeds:
                 self._select(node, visited, allowed_items=allowed_items)
+            self._order_untraced_models_last()
         dag = LoadDag(
             nodes=tuple(sorted(self.nodes.values(), key=lambda node: node.sort_key)),
             edges=tuple(sorted(self.edges)),
@@ -225,6 +244,27 @@ class _Planner:
         dag.order()
         return dag
 
+    def _order_untraced_models_last(self) -> None:
+        """Make each untraced semantic model wait for every other load node.
+
+        Nothing loads from a semantic model, so these edges cannot form a cycle.
+        """
+
+        models = {
+            node_id: node
+            for node_id, node in self.nodes.items()
+            if node.primitive_kind == SEMANTIC_REFRESH
+        }
+        untraced = [
+            node_id
+            for node_id, node in models.items()
+            if self.dag.is_untraced_model(self.dag.node(node.logical_id))
+        ]
+        others = [node_id for node_id in self.nodes if node_id not in models]
+        self.edges.update(
+            (upstream, model) for model in untraced for upstream in others
+        )
+
     def _seeds(
         self,
         requested: tuple[WeaverItemId, ...],
@@ -232,21 +272,18 @@ class _Planner:
         names: tuple[str, ...],
     ) -> tuple[InstalledNode, ...]:
         available = self.dag.loadables(items=requested)
+        refuse_uncertified_models(
+            self.dag, requested, operation="Load", error=LoadError
+        )
         if not names:
             return self._chosen(available)
 
-        selected: list[InstalledNode] = []
-        seen: set[str] = set()
-        for written in names:
-            name = str(written).strip()
-            if not name:
-                raise LoadError("a load name must be a non-empty load selector")
-            node = self._one_loadable(name, available)
-            if node.node_id in seen:
-                continue
-            seen.add(node.node_id)
-            selected.append(node)
-        return self._chosen(tuple(selected))
+        chosen: set[str] = set()
+        for text, pattern in name_patterns(names, error=LoadError):
+            chosen.update(
+                node.node_id for node in self._matching(text, pattern, available)
+            )
+        return self._chosen(tuple(node for node in available if node.node_id in chosen))
 
     def _chosen(self, nodes: tuple[InstalledNode, ...]) -> tuple[InstalledNode, ...]:
         if self.selection is None:
@@ -256,40 +293,41 @@ class _Planner:
     def _is_chosen(self, node: InstalledNode) -> bool:
         return self.selection is None or node.identity in self.selection
 
-    def _one_loadable(
-        self, name: str, available: tuple[InstalledNode, ...]
-    ) -> InstalledNode:
-        """The single loadable one written selector names.
+    @staticmethod
+    def _matching(
+        text: str, pattern, available: tuple[InstalledNode, ...]
+    ) -> list[InstalledNode]:
+        """The loadables one pattern selects.
 
-        A Lakehouse holds a Folder and a table of one ``Schema.Object`` apart by
-        area, so the precise selector is ``load_key``. The bare ``Schema.Object``
-        remains accepted where it reaches one object.
+        A pattern matches the area-qualified ``load_key``, or the bare
+        ``Schema.Object`` where that names one object in an item: a Lakehouse
+        Folder and table of one ``Schema.Object`` are told apart only by area.
         """
 
-        folded = name.casefold()
-        precise = [node for node in available if node.load_key.casefold() == folded]
-        candidates = precise or [
-            node for node in available if (node.load_name or "").casefold() == folded
+        precise = [node for node in available if pattern.fullmatch(node.load_key)]
+        bare = [
+            node
+            for node in available
+            if node not in precise and pattern.fullmatch(node.load_name or "")
         ]
-        if not candidates:
+        areas: dict[tuple, set[str]] = {}
+        for node in bare:
+            key = (node.item, (node.load_name or "").casefold())
+            areas.setdefault(key, set()).add(node.load_key)
+        for keys in areas.values():
+            if len(keys) > 1:
+                raise LoadError(
+                    f"{text!r} names more than one installed loadable object: "
+                    f"{', '.join(sorted(keys))}. Choose an area-qualified name"
+                )
+        matched = precise + bare
+        if not matched:
             known = ", ".join(sorted({node.load_key for node in available}))
             raise LoadError(
-                f"no loadable object named {name!r} is installed in the "
-                f"requested items. Installed: {known or 'none'}"
+                f"no installed loadable object in the requested items matches "
+                f"'{text}'. Installed: {known or 'none'}"
             )
-        if len(candidates) == 1:
-            return candidates[0]
-        keys = sorted({node.load_key for node in candidates})
-        if len(keys) > 1:
-            raise LoadError(
-                f"{name!r} names more than one installed loadable object: "
-                f"{', '.join(keys)}. Choose an area-qualified name"
-            )
-        found = ", ".join(node.node_id for node in candidates)
-        raise LoadError(
-            f"{name!r} names more than one installed loadable object "
-            f"({found}). Qualify the request with a single item"
-        )
+        return matched
 
     def _refuse_ambiguity(self, items: tuple[WeaverItemId, ...]) -> None:
         """Stop if a target this request dispatches into holds a duplicated address.
@@ -329,10 +367,15 @@ class _Planner:
             upstream_id = self._select(producer, visited, allowed_items=allowed_items)
             if crossed is None:
                 self.edges.add((upstream_id, node.node_id))
-            elif isinstance(crossed, OneLakeReadiness):
+            elif (
+                isinstance(crossed, OneLakeReadiness) or crossed == ONELAKE_PUBLICATION
+            ):
                 # OneLake publishes a Warehouse commit after the transaction, so
                 # the barrier replaces the direct edge, as the refresh does.
-                barrier = self._publication_node(self.nodes[upstream_id], crossed)
+                barrier = self._publication_node(
+                    self.nodes[upstream_id],
+                    None if crossed == ONELAKE_PUBLICATION else crossed,
+                )
                 self.edges.add((upstream_id, barrier.node_id))
                 self.edges.add((barrier.node_id, node.node_id))
             else:
@@ -358,7 +401,21 @@ class _Planner:
             )
 
     def _load_node(self, installed: InstalledNode) -> LoadNode:
-        node_id = f"load:{installed.target}/{installed.load_key}"
+        if installed.artefact_kind == SEMANTIC_REFRESH:
+            from .errors import ConfigError
+            from .fabric.semantic_model import validate_bound_model
+
+            try:
+                validate_bound_model(installed.bound_item)
+            except ConfigError as exc:
+                raise LoadError(
+                    f"{exc}. Build {installed.item} before loading it."
+                ) from exc
+        node_id = (
+            f"load:{installed.target}"
+            if installed.artefact_kind == SEMANTIC_REFRESH
+            else f"load:{installed.target}/{installed.load_key}"
+        )
         node = self.nodes.get(node_id)
         if node is None:
             node = LoadNode(
@@ -368,7 +425,19 @@ class _Planner:
                 primitive_kind=installed.artefact_kind,
                 physical_object=installed.physical,
                 primitive_id=installed.artefact,
-                primitive_object=installed.artefact_physical(installed.artefact_type),
+                primitive_object=(
+                    installed.artefact_physical(installed.artefact_type)
+                    if installed.artefact is not None
+                    else None
+                ),
+                bound_item=installed.bound_item,
+                direct_lake=installed.artefact_kind == SEMANTIC_REFRESH
+                and {
+                    edge.source_mode
+                    for edge in self.dag.reads(installed.identity)
+                    if edge.semantic_table is not None
+                }
+                == {"directLake"},
             )
             self.nodes[node_id] = node
         return node
@@ -386,7 +455,11 @@ class _Planner:
             physical_target=producer.physical_target,
             primitive_kind=ONELAKE_PUBLICATION,
             publication_of=identity,
-            publication_targets=tuple(dict.fromkeys((*readiness, crossed))),
+            publication_targets=tuple(
+                dict.fromkeys(
+                    (*readiness, *((crossed,) if crossed is not None else ()))
+                )
+            ),
             produced_by=producer.node_id,
         )
         self.nodes[node_id] = node
@@ -478,6 +551,16 @@ class _Planner:
                 if edge.through is None
                 else self._crossing(producer, consumer, edge.through)
             )
+            if edge.semantic_table is not None:
+                if producer.target.is_lakehouse and edge.source_access == "sql":
+                    crossing = producer.target
+                elif (
+                    producer.target.kind == "warehouse"
+                    and producer.object_type == "table"
+                    and edge.source_access == "sql"
+                    and edge.source_mode == "directLake"
+                ):
+                    crossing = ONELAKE_PUBLICATION
             producers.append((producer, crossing))
         return tuple(producers)
 

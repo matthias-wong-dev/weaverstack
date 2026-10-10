@@ -399,6 +399,9 @@ def test_build_reports_selection_after_the_bundle_and_before_installation(
         def report(self, lines):
             events.append(("report", tuple(lines)))
 
+        def warn(self, message):
+            events.append(("warn", message))
+
     class Installer:
         def __init__(self, *_args, **_kwargs):
             pass
@@ -513,6 +516,37 @@ def test_install_selection_does_not_expose_the_internal_catalogue_item():
     assert all(line.endswith("up to date") for line in rendered.splitlines()[1:])
 
 
+@weaver_test()
+def test_a_long_item_name_keeps_its_status_apart():
+    from weaver.build_bundle import (
+        BuildSelection,
+        Impact,
+        ItemBinding,
+        ItemBindings,
+        LakehouseBinding,
+    )
+    from weaver.declaration.model import WeaverItemId
+    from weaver.operations.build import _selection_lines
+    from weaver.targets import ItemRef
+
+    names = ("Lakehouse/Sales", "Lakehouse/Quarterly reporting archive")
+    bindings = ItemBindings(
+        tuple(
+            ItemBinding(
+                WeaverItemId.parse(name),
+                LakehouseBinding(ItemRef(f"{i}_LH"), workspace_name="Analytics"),
+            )
+            for i, name in enumerate(names)
+        )
+    )
+    selection = BuildSelection(Impact((), (), ()), (), (), ())
+
+    lines = _selection_lines(selection, bindings)[1:]
+
+    assert [line.split("  ")[1] for line in lines] == list(names)
+    assert len({line.index("up to date") for line in lines}) == 1
+
+
 # --- and missing context is a sentence ----------------------------------------
 
 
@@ -540,6 +574,7 @@ def test_a_workspace_without_a_catalogue_says_both_ways_to_give_one(
 
     message = str(raised.value)
     assert "catalogue=" in message
+    assert "--catalogue" in message
     assert "workspace configuration" in message
 
 

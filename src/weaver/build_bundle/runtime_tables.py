@@ -1,8 +1,8 @@
 """Plan runtime-state writes around physical build work.
 
-Before physical work, rebuilt loadables become Pending with sentinel bookmarks,
-rebuilt validations become Pending, and undeclared rows are removed. Resetting
-bookmarks first makes a failed build repeat the next load in full. Successful
+Before physical work, rebuilt loadables and validations become Pending, and
+undeclared rows are removed. Tables and folders also receive sentinel bookmarks,
+so a failed build repeats their next load in full. Successful
 View DDL records Succeeded afterwards. All writes are scoped to the items being
 reconciled because these tables are shared across installations.
 """
@@ -32,10 +32,11 @@ from ..catalogue.tables import (
     SUCCEEDED,
     TEST_STATUS,
 )
-from ..declaration.model import WeaverDocumentId, WeaverItemId
+from ..declaration.model import SEMANTIC_MODEL, WeaverDocumentId, WeaverItemId
 from ..etl import (
     item_bookmarkable_objects,
     item_data_nodes,
+    item_loadable_objects,
     item_validated_objects,
     item_view_objects,
 )
@@ -59,7 +60,7 @@ def _identity_row(identity: WeaverDocumentId) -> dict:
     return bookmark_row(identity)
 
 
-# Views have lifecycle state but no cursor; bookmarks cover loadables only.
+# Bookmarks cover Tables and Folders; Views and semantic models have status only.
 _POPULATIONS = {
     BY_DATA_NODE: item_data_nodes,
     BY_LOADABLE: item_bookmarkable_objects,
@@ -139,10 +140,37 @@ def runtime_state_establishment(
     return tuple(established)
 
 
+def changed_semantic_validations(
+    repository, catalogue, *, items: Iterable[WeaverItemId]
+) -> frozenset[WeaverDocumentId]:
+    """Semantic validations whose installed definition this Build replaces.
+
+    They compile to nothing, so their ``_.SemanticModelTest`` row stands in for
+    the artefact whose rebuild resets a validation's status.
+    """
+
+    from ..catalogue.tables import SEMANTIC_MODEL_TEST
+
+    changed = set()
+    for item in items:
+        if item.item_type != SEMANTIC_MODEL:
+            continue
+        installed = {
+            (row.get("schema_name"), row.get("object_name")): row.get("signature")
+            for row in catalogue.rows.get(item, {}).get(SEMANTIC_MODEL_TEST.name, ())
+        }
+        for identity in item_validated_objects(repository, item=item):
+            key = (identity.object_id.schema, identity.object_id.object)
+            source = repository.source_documents[identity]
+            if installed.get(key) != source.effective_signature:
+                changed.add(identity)
+    return frozenset(changed)
+
+
 def _load_status_state(repository, *, item, selected) -> list[dict]:
     return [
         {**_identity_row(identity), "result": PENDING}
-        for identity in item_bookmarkable_objects(repository, item=item)
+        for identity in item_loadable_objects(repository, item=item)
         if identity in selected
     ]
 

@@ -242,7 +242,9 @@ class RunRecord:
             LOAD_STATUS,
             load_status_row(node, identity, workflow_id=self.workflow_id),
         )
-        if node.executed:
+        from .resolution import SEMANTIC_REFRESH
+
+        if node.executed and node.primitive_kind != SEMANTIC_REFRESH:
             # A statistic describes a load that ran. A blocked node did nothing,
             # and a row of zeroes for it would read as a load that moved nothing.
             self.catalogue.submit(

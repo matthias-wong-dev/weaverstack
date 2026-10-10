@@ -104,8 +104,8 @@ class _TableReader(_Bound):
 class _FolderReader(_Bound):
     """A folder presented through a shortcut.
 
-    Change history is read through the local shortcut path and requires a
-    logical source.
+    Change history is read through the shortcut in this item's Files and
+    requires a logical source.
     """
 
     def __init__(
@@ -116,7 +116,32 @@ class _FolderReader(_Bound):
         self._name = name
 
     def path(self):
+        """The shortcut's mounted path. A listing through it can lag a delete
+        made elsewhere; list with :meth:`current_files`."""
+
         return self.lakehouse.folder_path(self._schema, self._name)
+
+    def current_files(self, *patterns: str):
+        """The files beneath this shortcut as OneLake lists them now::
+
+            for path in Sales__Landing(self).current_files("*.json"):
+                ...
+
+        Patterns match as a File key does. With none, every file is returned.
+        """
+
+        from .runtime.folder_load import current_files
+
+        return current_files(self._files(), patterns)
+
+    def _files(self):
+        from .locations import Location
+        from .runtime.folder_load import FolderFiles
+
+        path = self.path()
+        return FolderFiles(
+            self.lakehouse.files_store(), Location(self.spark_path()), path
+        )
 
     def spark_path(self) -> str:
         return self.lakehouse.folder_spark_path(self._schema, self._name)
@@ -134,7 +159,7 @@ class _FolderReader(_Bound):
         from .runtime.folder_load import files_since
 
         self._logical_source()
-        return files_since(self.path(), bookmark)
+        return files_since(self._files(), bookmark)
 
     def latest_files(self):
         """The current files from the newest change that left files in place."""
@@ -142,7 +167,7 @@ class _FolderReader(_Bound):
         from .runtime.folder_load import latest_files
 
         self._logical_source()
-        return latest_files(self.path())
+        return latest_files(self._files())
 
     def deleted_since(self, bookmark):
         """Files deleted strictly after an aware ``bookmark``, and when.
@@ -154,7 +179,7 @@ class _FolderReader(_Bound):
         from .runtime.folder_load import deleted_since
 
         self._logical_source()
-        return deleted_since(self.path(), bookmark)
+        return deleted_since(self._files(), bookmark)
 
 
 class _SchemaReader(_Bound):

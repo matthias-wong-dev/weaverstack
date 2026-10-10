@@ -881,7 +881,7 @@ from weaver import Folder
 
 class Clock__Days(Folder):
     def read(self):
-        day = len(list(self.path().glob("day-*.json")))
+        day = len(self.current_files("day-*.json"))
         with self.staging_folder() as staging:
             (staging.path / f"day-{day:05d}.json").write_text(
                 json.dumps({"Day": day}) + "\\n", encoding="utf-8"
@@ -911,7 +911,7 @@ class Clock__Day(Table):
     def read(self):
         days = sorted(
             int(path.stem.split("-")[1])
-            for path in Clock__Days(self).path().glob("day-*.json")
+            for path in Clock__Days(self).current_files("day-*.json")
         )
         return self.spark.createDataFrame([(day,) for day in days], "Day int")
 '''
@@ -995,9 +995,9 @@ def _row(epoch: int, offset: int) -> str:
 
 class {source.schema}__{source.name}(Folder):
     def read(self):
-        day = max(0, len(list(Clock__Days(self).path().glob("day-*.json"))) - 1)
+        day = max(0, len(Clock__Days(self).current_files("day-*.json")) - 1)
         current = (day + PHASE) // PERIOD
-        held = {{path.name for path in self.path().glob("*.csv")}}
+        held = {{path.name for path in self.current_files("*.csv")}}
         with self.staging_folder() as staging:
             for epoch in range(current + 1):
                 name = f"part-{{epoch:05d}}.csv"
@@ -1303,9 +1303,9 @@ from weaver import Folder
 
 class {node.schema}__{node.name}(Folder):
     def read(self):
-        held = {{path.name for path in self.path().glob("*.csv")}}
+        held = {{path.name for path in self.current_files("*.csv")}}
         with self.staging_folder() as staging:
-            for path in sorted({shortcut}(self).path().glob("*.csv")):
+            for path in {shortcut}(self).current_files("*.csv"):
                 if path.name not in held:
                     shutil.copyfile(path, staging.path / path.name)
         return staging, []

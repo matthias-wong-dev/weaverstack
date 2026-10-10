@@ -132,16 +132,20 @@ class _Estate:
         moved=None,
         declared: bool = True,
         is_static: bool = False,
+        built=None,
     ) -> "_Estate":
         """One installed object, with the state its most recent load left.
 
         ``loaded`` is when that load settled and ``moved`` is where it left the
-        bookmark, which is what says the object's data changed.
+        bookmark, which is what says the object's data changed. ``built`` is
+        when a build last certified it.
         """
 
         parsed = document_id(identity)
         tables = self._tables(parsed.item)
-        tables[REGISTRY.name].append(registry_row(parsed, object_type=object_type))
+        tables[REGISTRY.name].append(
+            registry_row(parsed, object_type=object_type, build_datetime=built)
+        )
         if declared and object_type in ("table", "view"):
             tables[TABLE_DICTIONARY.name].append(
                 _dictionary_row(parsed, object_type=object_type, is_static=is_static)
@@ -796,6 +800,38 @@ def test_a_validation_whose_data_moved_after_it_passed_is_stale():
 
 
 @weaver_test()
+@pytest.mark.parametrize("built", [at(1), at(1).replace(tzinfo=None).isoformat()])
+def test_a_validation_whose_subject_was_rebuilt_after_it_passed_is_stale(built):
+    """A rebuild resets the subject to Pending, which settles nothing."""
+
+    report = (
+        _Estate()
+        .table(f"{RAW}/Tables/Sales.Order", result="pending", built=built)
+        .validation(f"{RAW}/Sales.Integrity", result="succeeded", ran=at(3))
+        .reads(f"{RAW}/Sales.Integrity", "Sales.Order")
+        .report()
+    )
+
+    (stale,) = about(report.tests, TEST_STALE_DEPENDENCY)
+    assert stale.message == (
+        f"{RAW}/Tables/Sales.Order has been built since this validation passed"
+    )
+
+
+@weaver_test()
+def test_a_validation_that_passed_after_its_subject_was_built_is_green():
+    report = (
+        _Estate()
+        .table(f"{RAW}/Tables/Sales.Order", loaded=at(4), moved=at(4), built=at(5))
+        .validation(f"{RAW}/Sales.Integrity", result="succeeded", ran=at(3))
+        .reads(f"{RAW}/Sales.Integrity", "Sales.Order")
+        .report()
+    )
+
+    assert report.tests.status == GREEN
+
+
+@weaver_test()
 def test_time_alone_does_not_make_a_validation_stale():
     """A validation's freshness is tied to whether the data it reads moved."""
 
@@ -1026,10 +1062,6 @@ def test_the_mapping_is_json_safe():
         .validation(f"{RAW}/Sales.Integrity", result="failed", ran=at(1))
         .report(
             load_history=LoadHistory(
-                workflow_ids=("workflow-1",),
-                started_at=at(30),
-                completed_at=at(29),
-                counts={"succeeded": 1},
                 statistics=(_statistic("Sales.Order", rows_read=5412),),
             )
         )
@@ -1049,7 +1081,7 @@ def test_arrays_stay_present_when_empty():
     )
 
     assert mapping["sections"]["tests"]["findings"] == []
-    assert mapping["current_load"] is None
+    assert mapping["load_activity"] == []
 
 
 # --- the bounded activity window ----------------------------------------------
@@ -1058,7 +1090,7 @@ def test_arrays_stay_present_when_empty():
 def _window(*statistics) -> LoadHistory:
     """One catalogue's load history, in the shape its read carries."""
 
-    return LoadHistory(workflow_ids=("workflow-1",), statistics=tuple(statistics))
+    return LoadHistory(statistics=tuple(statistics))
 
 
 def _statistic(name: str, *, item: str = RAW, duration_ms=None, **counts) -> dict:
@@ -1162,7 +1194,7 @@ def test_counts_are_preserved_exactly():
 def test_a_catalogue_read_without_a_window_reports_no_activity():
     report = _Estate().table(f"{RAW}/Tables/Sales.Order", loaded=at(1)).report()
 
-    assert report.current_load is None
+    assert report.current_load.counts == {"succeeded": 1}
     assert report.load_activity == ()
 
 

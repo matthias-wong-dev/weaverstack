@@ -19,6 +19,7 @@ from .tables import (
     KEY_DICTIONARY,
     OBJECT_TYPES,
     REGISTRY,
+    SEMANTIC_TABLES,
     TABLE_DICTIONARY,
     CatalogueTable,
 )
@@ -79,10 +80,10 @@ def bookmark_row(identity: WeaverDocumentId, at=None) -> dict:
 @dataclass(frozen=True)
 class CatalogueClaimRule:
     table: CatalogueTable
-    predicate_columns: tuple[str, str] = ("schema_name", "object_name")
+    predicate_columns: tuple[str, ...] = ("schema_name", "object_name")
 
-    def values(self, identity) -> tuple[str, str]:
-        return catalogue_columns(identity)
+    def values(self, identity) -> tuple[str, ...]:
+        return catalogue_columns(identity)[: len(self.predicate_columns)]
 
     def owns(self, row: Mapping[str, object], identity: WeaverDocumentId) -> bool:
         expected = self.values(identity)
@@ -135,6 +136,19 @@ CATALOGUE_CLAIMS_BY_OBJECT_TYPE: Mapping[str, tuple[CatalogueClaimRule, ...]] = 
     "stored_procedure": (CatalogueClaimRule(REGISTRY),),
     # Schema shortcuts certify a namespace owned by their source item.
     "schema": (CatalogueClaimRule(REGISTRY),),
+    "semantic_model": (
+        CatalogueClaimRule(REGISTRY, predicate_columns=()),
+        *(CatalogueClaimRule(table, predicate_columns=()) for table in SEMANTIC_TABLES),
+        CatalogueClaimRule(DEPENDENCY, predicate_columns=("referencing_schema_name",)),
+    ),
+    "report": (
+        CatalogueClaimRule(REGISTRY, predicate_columns=()),
+        CatalogueClaimRule(
+            DEPENDENCY,
+            predicate_columns=("referencing_schema_name", "referencing_object_name"),
+        ),
+    ),
+    "source_artifact": (CatalogueClaimRule(REGISTRY),),
 }
 
 

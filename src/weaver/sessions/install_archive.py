@@ -152,9 +152,11 @@ try:
         for _dependency in ("pyarrow", "yaml", "requests", "azure.identity", "mssql_python"):
             importlib.import_module(_dependency)
         if metadata.version("deltalake") != {WRITER_VERSION!r}:
-            _archive_reason = "archive installation requires deltalake {WRITER_VERSION}"
-    except (ImportError, metadata.PackageNotFoundError) as _missing:
-        _archive_reason = "archive dependency unavailable: " + str(_missing)
+            _archive_reason = "its deltalake is not {WRITER_VERSION}"
+    except ImportError as _missing:
+        _archive_reason = "it is missing " + str(_missing.name or _missing)
+    except metadata.PackageNotFoundError:
+        _archive_reason = "it is missing deltalake"
     if _archive_reason is not None:
         _archive_result = {{"status": "declined", "mutated": False, "reason": _archive_reason}}
     else:
@@ -316,7 +318,19 @@ def execute_mutation_in_fabric(
         if result.get("archive_sha256") != carrier.sha256:
             raise BuildError("mutation carrier result differs")
         if result.get("status") == "declined" and result.get("mutated") is False:
-            raise BuildError(result["reason"])
+            # Nothing ran, so the refusal is known rather than uncertain.
+            reason = (
+                f"Fabric's Spark session cannot run this build: {result['reason']}. "
+                "Publish the project's Environment with weaver fabric environment "
+                "publish, then build again."
+            )
+            record["status"] = "declined"
+            record["error"] = reason
+            return MutationReport(
+                plan.bundle_id,
+                tuple(MutationResult(a.id, "failed", error=reason) for a in actions),
+                invocation_id=invocation_id,
+            )
         if result.get("status") != "completed" or result.get("request") != request:
             raise BuildError("mutation result differs from request")
         report = decode_report(plan, result["report"], invocation_id=invocation_id)

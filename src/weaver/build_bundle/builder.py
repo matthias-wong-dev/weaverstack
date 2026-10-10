@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from ..declaration.repository import WeaverRepository
 from ..locations import Location
@@ -25,9 +25,13 @@ class Builder:
     #: Resolved before planning starts. The planner completes it with the Spark
     #: attachment its action set requires; it makes no calls of its own.
     execution: ExecutionIdentity
+    #: Receives each authoring warning found while compiling the selection.
+    warn: Callable[[str], None] | None = field(default=None, compare=False)
 
     def build(self, *, output: Location | None = None) -> BuildBundle:
         from ..catalogue.state import reconcile_catalogue_state
+        from ..semantic_models.binding import bind_semantic_sources
+        from ..semantic_models.expressions import bind_expression_sources
         from .planner import generate_item_build_bundle
         from .workflow import validate_build_request
 
@@ -39,8 +43,25 @@ class Builder:
         )
         if output is None:
             raise ValueError("Builder.build needs an output location for the bundle")
+        repository = bind_expression_sources(
+            self.repository, self.state.semantic_expressions
+        )
+        repository = bind_semantic_sources(
+            repository, self.state.semantic_sources, self.bindings.by_item
+        )
+        # Without a catalogue Load orders nothing, so tracing changes nothing.
+        if self.warn is not None and self.catalogue_binding is not None:
+            from ..semantic_models.lineage import untraced_warning
+
+            for item, contribution in sorted(
+                repository.semantic_models.items(), key=lambda pair: str(pair[0])
+            ):
+                if item in self.bindings.by_item:
+                    message = untraced_warning(item, contribution)
+                    if message:
+                        self.warn(message)
         return generate_item_build_bundle(
-            self.repository,
+            repository,
             bindings=self.bindings,
             output=output,
             store=self.source_store,

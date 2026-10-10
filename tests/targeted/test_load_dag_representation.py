@@ -203,8 +203,33 @@ def test_a_name_is_resolved_case_insensitively_within_the_requested_targets(esta
 
 @weaver_test()
 def test_an_unknown_load_name_lists_the_installed_loadables(estate):
-    with pytest.raises(LoadError, match="no loadable object named 'Sales.Missing'"):
+    with pytest.raises(LoadError, match="matches 'Sales.Missing'. Installed: "):
         load_dag(estate, items=(PRODUCER,), names=("Sales.Missing",))
+
+
+@weaver_test()
+def test_a_name_matches_whole_names_only(estate):
+    with pytest.raises(LoadError, match="matches 'Sales.Ord'"):
+        load_dag(estate, items=(PRODUCER,), names=("Sales.Ord",))
+
+
+@weaver_test()
+def test_each_of_several_names_must_match_something(estate):
+    """One unmatched name is refused by name, even beside one that matched."""
+
+    with pytest.raises(LoadError) as raised:
+        load_dag(estate, items=(PRODUCER,), names=("Sales.Order", "Sales.Missing"))
+
+    assert "'Sales.Missing'" in str(raised.value)
+    assert "'Sales.Order'" not in str(raised.value).partition("Installed")[0]
+
+
+@weaver_test()
+def test_a_name_that_is_not_a_regular_expression_is_refused(estate):
+    with pytest.raises(LoadError) as raised:
+        load_dag(estate, items=(PRODUCER,), names=("Sales.(",))
+
+    assert "'Sales.(' is not a valid regular expression" in str(raised.value)
 
 
 # --- selecting a Lakehouse object by area -------------------------------------
@@ -327,17 +352,40 @@ def test_the_bare_and_area_qualified_spellings_of_one_object_select_it_once(area
 
 
 @weaver_test()
-def test_one_selector_reaching_two_requested_items_asks_for_a_narrower_scope(areas):
-    """Area-qualifying cannot help here: the two differ by item, not by area."""
+def test_one_name_reaching_two_requested_items_selects_both(areas):
+    dag = load_dag(areas, items=(LANDING, STAGING), names=("Tables/Sales.Order",))
 
-    with pytest.raises(LoadError) as raised:
-        load_dag(areas, items=(LANDING, STAGING), names=("Tables/Sales.Order",))
+    assert node_ids(dag) == (
+        "load:Lakehouse/Landing_LH/Tables/Sales.Order",
+        "load:Lakehouse/Staging_LH/Tables/Sales.Order",
+    )
 
-    message = str(raised.value)
-    assert "Qualify the request with a single item" in message
-    # The logical items, which is what narrowing the scope names.
-    assert "Lakehouse/Landing/Tables/Sales.Order" in message
-    assert "Lakehouse/Staging/Tables/Sales.Order" in message
+
+@weaver_test()
+def test_a_regular_expression_selects_every_object_it_matches(areas):
+    dag = load_dag(
+        areas, items=(LANDING, STAGING, CURATED), names=(r"Tables/Sales\.\w+",)
+    )
+
+    assert node_ids(dag) == (
+        "load:Lakehouse/Landing_LH/Tables/Sales.Customer",
+        "load:Lakehouse/Landing_LH/Tables/Sales.Order",
+        "load:Lakehouse/Staging_LH/Tables/Sales.Order",
+    )
+
+
+@weaver_test()
+def test_several_names_select_the_union_of_their_matches(areas):
+    dag = load_dag(
+        areas,
+        items=(LANDING, CURATED),
+        names=("Files/.*", r"Sales\.Summ.*"),
+    )
+
+    assert node_ids(dag) == (
+        "load:Lakehouse/Landing_LH/Files/Sales.Customer",
+        "load:Warehouse/Curated_WH/Sales.Summary",
+    )
 
 
 @weaver_test()

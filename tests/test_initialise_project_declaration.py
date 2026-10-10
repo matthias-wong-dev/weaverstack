@@ -106,6 +106,23 @@ def test_the_workflow_runs_build_load_and_test(tmp_path):
 
     entries, _path = load_workflow("full", file=str(tmp_path / "workflow.yml"))
 
+    assert entries == [
+        "build --item Lakehouse --item Warehouse",
+        "build --item PowerBI",
+        "load",
+        "test",
+        "health",
+    ]
+
+
+@weaver_test()
+def test_a_project_with_no_power_bi_builds_in_one_step(tmp_path):
+    from weaver_cli.workflow import load_workflow
+
+    _project(tmp_path, "both", example=False)
+
+    entries, _path = load_workflow("full", file=str(tmp_path / "workflow.yml"))
+
     assert entries == ["build", "load", "test", "health"]
 
 
@@ -179,7 +196,9 @@ def test_generation_is_deterministic(tmp_path):
 
 @weaver_test()
 def test_a_project_with_neither_item_says_so():
-    with pytest.raises(CommandError, match="Lakehouse, a Warehouse, or both"):
+    with pytest.raises(
+        CommandError, match="Lakehouse, a Warehouse, or a SemanticModel"
+    ):
         ProjectRequest(workspace=WORKSPACE, catalogue="Catalogue", environment="Weaver")
 
 
@@ -192,6 +211,86 @@ def test_an_empty_item_keeps_its_folders(tmp_path):
     assert (tmp_path / "Lakehouse" / "Landing" / "Tables" / ".gitkeep").is_file()
     assert (tmp_path / "Lakehouse" / "Landing" / "Files" / ".gitkeep").is_file()
     assert (tmp_path / "Warehouse" / "Curated" / ".gitkeep").is_file()
+
+
+# --- the example's Power BI project ----------------------------------------------
+
+READS = {
+    "lakehouse": ("Lakehouse/Landing", "Customer", "Region code"),
+    "warehouse": ("Warehouse/Curated", "CustomerByRegion", "Region name"),
+    "both": ("Warehouse/Curated", "CustomerByRegion", "Region name"),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(SHAPES))
+@weaver_test()
+def test_the_example_model_reads_the_last_source_by_its_logical_name(tmp_path, shape):
+    """Naming the expression after the item is what lets Build bind it."""
+
+    from weaver.declaration.repository import parse_item_repository
+    from weaver.locations import Location
+
+    _, files = _project(tmp_path, shape, example=True)
+    item, entity, region = READS[shape]
+    model = "PowerBI/Sales/Sales.SemanticModel/definition"
+
+    assert files[f"{model}/expressions.tmdl"].startswith(f"expression '{item}' = ")
+    table = files[f"{model}/tables/Customer.tmdl"]
+    assert f"entityName: {entity}\n" in table
+    assert f"expressionSource: '{item}'\n" in table
+    assert f"sourceColumn: {region}\n" in table
+    repository = parse_item_repository(Location(tmp_path.as_posix()))
+    (report,) = repository.reports.values()
+    assert str(report.model) == "SemanticModel/Sales"
+    configured = load_workspace(tmp_path / "workspace-config.yml")
+    assert {"SemanticModel/Sales", "Report/Sales"} <= {
+        str(target) for target in configured.targets
+    }
+
+
+@pytest.mark.parametrize("shape", sorted(SHAPES))
+@weaver_test()
+def test_the_example_report_describes_the_items_the_project_chose(tmp_path, shape):
+    import json
+
+    request, files = _project(tmp_path, shape, example=True)
+    visual = json.loads(
+        files[
+            "PowerBI/Sales/Sales.Report/definition/pages/overview/visuals/"
+            "introduction/visual.json"
+        ]
+    )
+    (general,) = visual["visual"]["objects"]["general"]
+    text = "\n".join(
+        "".join(run["value"] for run in paragraph["textRuns"])
+        for paragraph in general["properties"]["paragraphs"]
+    )
+
+    assert text.startswith("Hello from Weaver\nThis example traces")
+    for item in request.items:
+        assert item in text
+    assert ("Lakehouse/Landing" in text) == ("lakehouse" in SHAPES[shape])
+
+
+@weaver_test()
+def test_the_example_takes_the_semantic_model_name(tmp_path):
+    request = ProjectRequest(
+        workspace=WORKSPACE,
+        catalogue="Catalogue",
+        environment="Weaver",
+        lakehouse="Landing",
+        semantic_model="Orders",
+        example=True,
+    )
+    files = _generated_files(request)
+
+    assert "PowerBI/Orders/Orders.pbip" in files
+    assert "PowerBI/Orders/Orders.tmdl" not in files
+    assert request.items == (
+        "Lakehouse/Landing",
+        "SemanticModel/Orders",
+        "Report/Orders",
+    )
 
 
 # --- names become paths, so they are validated before any path is built --------

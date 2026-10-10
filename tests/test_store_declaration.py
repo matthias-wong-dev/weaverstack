@@ -43,6 +43,28 @@ def test_exists_and_is_directory(store, root):
 
 
 @weaver_test()
+def test_copy_and_move_make_parents_and_move_replaces(store, root):
+    store.write(root / "a" / "staged.csv", b"new")
+    store.write(root / "b" / "current.csv", b"old")
+
+    store.copy(root / "a" / "staged.csv", root / "b" / "nested" / "tmp")
+    store.move(root / "b" / "nested" / "tmp", root / "b" / "current.csv")
+
+    assert store.read(root / "a" / "staged.csv") == b"new"
+    assert store.read(root / "b" / "current.csv") == b"new"
+    assert not store.exists(root / "b" / "nested" / "tmp")
+
+
+@weaver_test()
+def test_one_file_copies_to_the_driver(store, root, tmp_path):
+    store.write(root / "a" / "staged.csv", b"bytes")
+
+    store.copy_file_to_local(root / "a" / "staged.csv", tmp_path / "out" / "copy")
+
+    assert (tmp_path / "out" / "copy").read_bytes() == b"bytes"
+
+
+@weaver_test()
 def test_listing_carries_metadata_not_just_names(store, root):
     """Every incremental strategy depends on this."""
     store.write(root / "file.txt", b"1234567890")

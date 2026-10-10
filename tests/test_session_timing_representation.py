@@ -198,6 +198,34 @@ def test_a_failed_task_is_marked_as_one():
 
 
 @weaver_test()
+def test_a_skipped_sub_step_is_marked_apart_from_a_success():
+    from weaver.sessions.console import SKIPPED_MARK
+
+    out = io.StringIO()
+    with ConsoleSession(progress=out) as session:
+        with session.task("Load"):
+            with session.step("Execute"):
+                done = session.open_concurrent_substep("Load Sales.Customer")
+                session.close_concurrent_substep(done)
+                skipped = session.open_concurrent_substep("Load Ref.Country")
+                skipped.skipped = True
+                skipped.note = "skipped"
+                session.close_concurrent_substep(skipped)
+
+    finished = [
+        line
+        for line in out.getvalue().splitlines()
+        if line.lstrip().startswith(("✓", SKIPPED_MARK))
+    ]
+    assert any(
+        line.startswith(f"{SKIPPED_MARK}   Load Ref.Country  (skipped)")
+        for line in finished
+    )
+    assert any(line.startswith("✓   Load Sales.Customer") for line in finished)
+    assert skipped.to_mapping()["skipped"] is True
+
+
+@weaver_test()
 def test_progress_can_be_silenced_entirely():
     """A library caller is not a console, and must not be printed at."""
 

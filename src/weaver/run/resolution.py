@@ -20,8 +20,10 @@ PYTHON_TABLE = "python_table"
 PYTHON_FOLDER = "python_folder"
 ENDPOINT_REFRESH = "endpoint_refresh"
 ONELAKE_PUBLICATION = "onelake_publication"
+SEMANTIC_REFRESH = "semantic_refresh"
 #: How a validation is reached, from where it is installed.
 PYTHON_VALIDATION = "python_validation"
+SEMANTIC_VALIDATION = "semantic_validation"
 #: The primitive kinds that run on Spark, as deployed modules.
 SPARK_KINDS = (PYTHON_TABLE, PYTHON_FOLDER, PYTHON_VALIDATION)
 
@@ -71,7 +73,9 @@ def resolve(node, *, can_refresh: bool = True) -> Resolved:
     elif node.primitive_kind not in (
         WAREHOUSE_PROCEDURE,
         PYTHON_VALIDATION,
+        SEMANTIC_VALIDATION,
         ONELAKE_PUBLICATION,
+        SEMANTIC_REFRESH,
     ):
         messages.append(
             error(
@@ -112,6 +116,9 @@ def _refresh(node, *, can_refresh: bool) -> Resolved:
 def _where(node) -> str | None:
     """Name the installed procedure or module without resolving a physical path."""
 
+    if node.primitive_kind == SEMANTIC_REFRESH:
+        item = node.bound_item
+        return f"groups/{item.workspace_id}/datasets/{item.id}/refreshes"
     if node.primitive_kind == WAREHOUSE_PROCEDURE:
         from ..etl import load_procedure_name
 

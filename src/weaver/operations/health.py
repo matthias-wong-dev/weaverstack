@@ -18,6 +18,9 @@ from ..catalogue.tables import (
     LOAD_STATUS,
     MIRROR,
     REGISTRY,
+    SEMANTIC_MODEL,
+    SEMANTIC_MODEL_TABLE,
+    SEMANTIC_MODEL_TEST,
     SHORTCUT,
     TABLE_DICTIONARY,
     TEST_DICTIONARY,
@@ -36,6 +39,9 @@ HEALTH_TABLES = (
     FOLDER_DICTIONARY,
     TEST_DICTIONARY,
     DEPENDENCY,
+    SEMANTIC_MODEL,
+    SEMANTIC_MODEL_TABLE,
+    SEMANTIC_MODEL_TEST,
     SHORTCUT,
     MIRROR,
     LOAD_STATUS,
@@ -165,7 +171,7 @@ def _inventories(session, *, workspace, targets, dag):
 
     from ..build_bundle.prune import read_lakehouse_inventory, read_warehouse_inventory
     from ..build_bundle.targets import BoundTarget
-    from ..targets import ItemRef, WarehouseTarget
+    from ..targets import WAREHOUSE_TARGET, ItemRef, WarehouseTarget
 
     bound_items = {}
     for item, target in dag.installations.items():
@@ -173,6 +179,9 @@ def _inventories(session, *, workspace, targets, dag):
 
     found = {}
     for target in targets:
+        if not target.is_lakehouse and target.kind != WAREHOUSE_TARGET:
+            # Power BI objects live in their definitions, which Build reads back.
+            continue
         item = bound_items.get(target)
         bound = BoundTarget(
             id=f"{target.kind}-{target.name}",

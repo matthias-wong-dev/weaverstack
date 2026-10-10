@@ -1,0 +1,654 @@
+"""Native source annotations join the public Build and catalogue lifecycle."""
+
+import pytest
+from support.semantic_models import source_model
+from support.weaver_test import weaver_test
+from test_semantic_annotation_declaration import ITEM, source_project
+from test_semantic_source_build_cycle import (
+    SubmittedDefinition,
+    answer_catalogue,
+    capture_publication,
+    read_bindings,
+    source_catalogue,
+    source_session,
+    submitted_parts,
+)
+
+import weaver
+
+
+@weaver_test()
+def test_source_annotation_generates_columns_descriptions_and_managed_lineage(
+    tmp_path, monkeypatch
+):
+    root = source_project(tmp_path)
+    observed = source_model(relations={"Sales": "Sales"})
+    observed["model"]["tables"][0]["annotations"] = [
+        {"name": "Weaver.Source", "value": "Warehouse/Serving/Cake.Sales"}
+    ]
+    with source_session() as session:
+        session.answer_semantic_model(
+            "Demo", "Reporting_Dev", SubmittedDefinition(observed)
+        )
+        answer_catalogue(session, source_catalogue(), read_bindings())
+        published = capture_publication(monkeypatch, session)
+        result = weaver.build(
+            root, items=f"{ITEM}=SemanticModel/Reporting_Dev", session=session
+        )
+        assert result.succeeded, result.errors
+        parts = submitted_parts(session)
+        table = parts["definition/tables/Sales.tmdl"]
+        assert b"column 'Id'" in table and b"dataType: int64" in table
+        assert b"column 'Label'" in table and b"dataType: string" in table
+        assert b"Sales description" in table and b"Sales key" in table
+        assert b"mode: directLake" in table
+        assert b"expressionSource: 'Warehouse/Serving'" in table
+        assert b"annotation 'Weaver.Source' = Warehouse/Serving/Cake.Sales" in table
+        assert b"expression 'Warehouse/Serving'" in parts["definition/expressions.tmdl"]
+        rows = published()[ITEM]
+        assert rows["SemanticModelTable"][0]["description"] == "Sales description"
+        assert (
+            rows["SemanticModelTable"][0]["source_mode"],
+            rows["SemanticModelTable"][0]["source_access"],
+        ) == ("directLake", "sql")
+        assert {
+            (r["referencing_object_name"], r["dependency_reference"])
+            for r in rows["Dependency"]
+        } == {("Sales", "Warehouse/Serving/Cake.Sales")}
+        assert not session.spark_sql and not session.python
+
+
+@weaver_test()
+def test_source_annotation_reuses_one_expression_for_two_consuming_tables(
+    tmp_path, monkeypatch
+):
+    root = source_project(tmp_path)
+    path = root / str(ITEM) / f"{ITEM.item_name}.tmdl"
+    path.write_text(
+        path.read_text()
+        + "\ntable SalesAgain\n\tannotation Weaver.Source = Warehouse/Serving/Cake.Sales\n"
+    )
+    observed = source_model(relations={"Sales": "Sales", "SalesAgain": "Sales"})
+    for table in observed["model"]["tables"]:
+        table["annotations"] = [
+            {"name": "Weaver.Source", "value": "Warehouse/Serving/Cake.Sales"}
+        ]
+    with source_session() as session:
+        session.answer_semantic_model(
+            "Demo", "Reporting_Dev", SubmittedDefinition(observed)
+        )
+        answer_catalogue(session, source_catalogue(), read_bindings())
+        published = capture_publication(monkeypatch, session)
+        result = weaver.build(
+            root, items=f"{ITEM}=SemanticModel/Reporting_Dev", session=session
+        )
+        assert result.succeeded, result.errors
+        parts = submitted_parts(session)
+        assert (
+            parts["definition/expressions.tmdl"].count(
+                b"expression 'Warehouse/Serving'"
+            )
+            == 1
+        )
+        assert {
+            (r["referencing_object_name"], r["dependency_reference"])
+            for r in published()[ITEM]["Dependency"]
+        } == {
+            ("Sales", "Warehouse/Serving/Cake.Sales"),
+            ("SalesAgain", "Warehouse/Serving/Cake.Sales"),
+        }
+        assert (
+            len(
+                [
+                    sql
+                    for sql in session.tsql
+                    if "INFORMATION_SCHEMA.COLUMNS" in sql and "Cake" in sql
+                ]
+            )
+            == 1
+        )
+
+
+@pytest.mark.parametrize("scope", ["model", "table"])
+@weaver_test()
+def test_source_generated_columns_receive_auto_hide_policy(tmp_path, scope):
+    root = source_project(tmp_path)
+    path = root / str(ITEM) / f"{ITEM.item_name}.tmdl"
+    source = path.read_text()
+    policy = 'annotation Weaver.AutoHideColumns = "I?"\n'
+    path.write_text(
+        ("model Model\n\t" + policy + "\n" + source)
+        if scope == "model"
+        else source + "\t" + policy
+    )
+    observed = source_model(relations={"Sales": "Sales"})
+    sales = observed["model"]["tables"][0]
+    sales["annotations"] = [
+        {"name": "Weaver.Source", "value": "Warehouse/Serving/Cake.Sales"}
+    ]
+    annotations = (
+        observed["model"].setdefault("annotations", [])
+        if scope == "model"
+        else sales["annotations"]
+    )
+    annotations.append({"name": "Weaver.AutoHideColumns", "value": '"I?"'})
+    sales["columns"][0]["isHidden"] = True
+    with source_session() as session:
+        session.answer_semantic_model(
+            "Demo", "Reporting_Dev", SubmittedDefinition(observed)
+        )
+        answer_catalogue(session, source_catalogue(), read_bindings())
+        result = weaver.build(
+            root, items=f"{ITEM}=SemanticModel/Reporting_Dev", session=session
+        )
+        assert result.succeeded, result.errors
+        assert b"isHidden" in submitted_parts(session)["definition/tables/Sales.tmdl"]
+
+
+@weaver_test()
+def test_authored_columns_refine_the_columns_a_source_generates(tmp_path):
+    root = source_project(tmp_path)
+    path = root / str(ITEM) / f"{ITEM.item_name}.tmdl"
+    path.write_text(
+        path.read_text() + "\n\tcolumn Label\n\t\tisHidden\n\t\tsortByColumn: Id\n"
+    )
+    observed = source_model(relations={"Sales": "Sales"})
+    sales = observed["model"]["tables"][0]
+    sales["annotations"] = [
+        {"name": "Weaver.Source", "value": "Warehouse/Serving/Cake.Sales"}
+    ]
+    sales["columns"][1].update(isHidden=True, sortByColumn="Id")
+    with source_session() as session:
+        session.answer_semantic_model(
+            "Demo", "Reporting_Dev", SubmittedDefinition(observed)
+        )
+        answer_catalogue(session, source_catalogue(), read_bindings())
+        result = weaver.build(
+            root, items=f"{ITEM}=SemanticModel/Reporting_Dev", session=session
+        )
+        assert result.succeeded, result.errors
+    from weaver.semantic_models import TmdlDefinition
+
+    columns = TmdlDefinition(submitted_parts(session)).model.tables["Sales"].columns
+    assert [
+        (c.name, c.sourceColumn, c.dataType, c.isHidden, c.sortByColumn)
+        for c in columns
+    ] == [
+        ("Label", "Label", "string", True, "Id"),
+        ("Id", "Id", "int64", None, None),
+    ]
+
+
+@pytest.mark.parametrize(
+    "reference, housekeeping",
+    [
+        (
+            "Warehouse/Serving/Cake.Sales",
+            {
+                "Row insert datetime": "datetime2",
+                "Row update datetime": "datetime2",
+                "Row delete datetime": "datetime2",
+                "Row signature": "varbinary",
+            },
+        ),
+        (
+            "Lakehouse/Serving/Tables/Cake.Sales",
+            {
+                "row_insert_datetime": "datetime2",
+                "row_update_datetime": "datetime2",
+                "row_delete_datetime": "datetime2",
+                "row_signature": "varchar",
+            },
+        ),
+    ],
+)
+@weaver_test()
+def test_generation_leaves_out_weaver_housekeeping_columns(
+    tmp_path, reference, housekeeping
+):
+    from weaver.declaration.repository import parse_item_repository
+    from weaver.locations import Location
+    from weaver.semantic_models import TmdlDefinition
+    from weaver.semantic_models.binding import bind_semantic_sources
+
+    root = source_project(tmp_path, value=reference)
+    names = list(housekeeping)
+    path = root / str(ITEM) / f"{ITEM.item_name}.tmdl"
+    # An authored column brings one back; its dataType avoids the binary type.
+    path.write_text(
+        path.read_text()
+        + f"\tcolumn '{names[1]}'\n"
+        + f"\tcolumn Signature\n\t\tdataType: string\n\t\tsourceColumn: {names[3]}\n"
+    )
+    source = {
+        "reference": reference,
+        "server": "serving.example",
+        "database": "Serving_Dev",
+        "schema": "Cake",
+        "object": "Sales",
+        "object_type": "table",
+        "source_columns": [
+            {"column_name": "Id", "data_type": "bigint"},
+            {"column_name": "source_file", "data_type": "varchar"},
+            *(
+                {"column_name": name, "data_type": kind}
+                for name, kind in housekeeping.items()
+            ),
+        ],
+    }
+    repository = parse_item_repository(Location(root.as_posix()))
+    compiled = bind_semantic_sources(repository, {reference: source}, {ITEM})
+    columns = (
+        TmdlDefinition(compiled.semantic_models[ITEM].parts)
+        .model.tables["Sales"]
+        .columns
+    )
+    assert [(c.name, c.sourceColumn, c.dataType) for c in columns] == [
+        (names[1], names[1], "dateTime"),
+        ("Signature", names[3], "string"),
+        ("Id", "Id", "int64"),
+        ("source_file", "source_file", "string"),
+    ]
+
+
+class _Inventory:
+    def __init__(self, installed=()):
+        self.installed = set(installed)
+
+    def physical_type(self, identity):
+        return "view" if identity in self.installed else None
+
+
+@pytest.mark.parametrize("state", ["unchanged", "changed", "new"])
+@weaver_test()
+def test_refined_columns_read_a_selected_source_view_unless_it_is_rebuilt(
+    tmp_path, state
+):
+    """A View built in the same Build has no shape until installation."""
+
+    import copy
+
+    from test_semantic_source_build_cycle import SOURCE
+
+    from weaver.build_bundle.semantic_sources import read_semantic_sources
+    from weaver.catalogue.state import Catalogue
+    from weaver.declaration.model import WeaverDocumentId
+    from weaver.declaration.repository import parse_item_repository
+    from weaver.errors import BuildError
+    from weaver.locations import Location
+
+    root = source_project(tmp_path)
+    path = root / str(ITEM) / f"{ITEM.item_name}.tmdl"
+    path.write_text(path.read_text() + "\n\tcolumn Label\n\t\tisHidden\n")
+    folder = root / str(SOURCE)
+    folder.mkdir(parents=True)
+    (folder / "Cake.yml").write_text(
+        "Schema ID: Cake\nDescription: Cake records.\n", encoding="utf-8"
+    )
+    (folder / "Cake.Sales.sql").write_text(
+        "/*\nView ID: Cake.Sales\nDescription: Sales facts.\nLineage: Constant\n*/\nSELECT CAST(1 AS BIGINT) AS Id, 'sale' AS Label\n",
+        encoding="utf-8",
+    )
+    repository = parse_item_repository(Location(root.as_posix()))
+    view = WeaverDocumentId.parse("Warehouse/Serving/Cake.Sales")
+    rows = copy.deepcopy(dict(source_catalogue().rows))
+    rows[SOURCE]["Registry"] = tuple(
+        {
+            **row,
+            "object_type": "view",
+            "signature": repository.source_documents[view].physical_signature
+            if state == "unchanged"
+            else "before",
+        }
+        for row in rows[SOURCE]["Registry"]
+        if row["object_name"] == "Sales" and state != "new"
+    )
+    bindings = read_bindings()
+    inventories = {item: _Inventory() for item in bindings.by_item}
+    inventories[SOURCE] = _Inventory(() if state == "new" else (view,))
+    with source_session() as session:
+
+        def read():
+            return read_semantic_sources(
+                repository,
+                bindings,
+                Catalogue(rows),
+                session=session,
+                workspace=session.workspace,
+                inventories=inventories,
+            )
+
+        if state == "unchanged":
+            observed = read()["Warehouse/Serving/Cake.Sales"]
+            assert [c["column_name"] for c in observed["source_columns"]] == [
+                "Id",
+                "Label",
+            ]
+        else:
+            with pytest.raises(BuildError, match="unavailable before installation"):
+                read()
+
+
+@pytest.mark.parametrize(
+    "failure, diagnostic",
+    [
+        (
+            "missing_object",
+            r"Reporting.tmdl:2: Weaver.Source Warehouse/Serving/Cake.Missing is not "
+            "an installed or selected Table or View",
+        ),
+        ("missing_columns", "no source columns"),
+        ("unsupported_type", "unsupported type"),
+        ("missing_column", "Cake.Sales has no column Missing"),
+    ],
+)
+@weaver_test()
+def test_source_annotation_refuses_unresolved_generation_before_mutation(
+    tmp_path, failure, diagnostic
+):
+    from weaver.errors import BuildError
+
+    root = source_project(tmp_path)
+    path = root / str(ITEM) / f"{ITEM.item_name}.tmdl"
+    if failure == "missing_object":
+        path.write_text(path.read_text().replace("Cake.Sales", "Cake.Missing"))
+    elif failure == "missing_column":
+        path.write_text(path.read_text() + "\n\tcolumn Missing\n\t\tisHidden\n")
+    with source_session() as session:
+        answer_catalogue(session, source_catalogue(), read_bindings())
+        if failure == "missing_columns":
+            session.source_columns = []
+        elif failure == "unsupported_type":
+            session.source_columns = [{"column_name": "Id", "data_type": "binary"}]
+        with pytest.raises(BuildError, match=diagnostic):
+            weaver.build(
+                root, items=f"{ITEM}=SemanticModel/Reporting_Dev", session=session
+            )
+        assert not any(
+            kind == "update_definition"
+            for kind, _ in session.semantic_model("Reporting_Dev").calls
+        )
+        assert not any("MERGE" in statement for statement in session.tsql)
+        assert not session.spark_sql and not session.python
+
+
+LINEAGE_ONLY = '\tpartition Native = calculated\n\t\tsource = ROW("Value", 1)\n'
+
+
+def refused_before_deployment(session):
+    assert not any(
+        kind == "update_definition"
+        for kind, _ in session.semantic_model("Reporting_Dev").calls
+    )
+    assert not any("MERGE" in statement for statement in session.tsql)
+
+
+@pytest.mark.parametrize(
+    "reference", ["Warehouse/Serving/Cake.Missing", "Warehouse/Absent/Cake.Sales"]
+)
+@weaver_test()
+def test_lineage_only_source_must_name_an_installed_relation(tmp_path, reference):
+    import re
+
+    from weaver.errors import BuildError
+
+    root = source_project(tmp_path, value=reference)
+    path = root / str(ITEM) / f"{ITEM.item_name}.tmdl"
+    path.write_text(path.read_text() + LINEAGE_ONLY)
+    item = reference.rsplit("/", 1)[0]
+    with source_session() as session:
+        answer_catalogue(session, source_catalogue(), read_bindings())
+        with pytest.raises(
+            BuildError,
+            match="^"
+            + re.escape(
+                f"SemanticModel/Reporting/Reporting.tmdl:2: Weaver.Source {reference} "
+                "is not an installed or selected Table or View. Correct the "
+                f"reference, or build {item} first"
+            )
+            + "$",
+        ):
+            weaver.build(
+                root, items=f"{ITEM}=SemanticModel/Reporting_Dev", session=session
+            )
+        refused_before_deployment(session)
+
+
+@pytest.mark.parametrize(
+    "reference, configured, declared, refusal",
+    [
+        ("Warehouse/Serving/Cake.Sales", True, False, None),
+        ("Warehouse/Serving/Cake.Sales", False, True, None),
+        (
+            "Warehouse/Serving/Cake.Sales",
+            False,
+            False,
+            "names Warehouse/Serving, which is not a project item or configured "
+            "target. Correct the reference, or add a targets: entry for "
+            "Warehouse/Serving",
+        ),
+        (
+            "Warehouse/Serving/Cake.Missing",
+            True,
+            True,
+            "is not a Table or View that Warehouse/Serving declares. Correct the "
+            "reference",
+        ),
+    ],
+)
+@weaver_test()
+def test_lineage_only_source_without_a_catalogue_names_a_known_item(
+    tmp_path, reference, configured, declared, refusal
+):
+    import re
+
+    from test_semantic_source_build_cycle import SOURCE
+
+    from weaver.errors import BuildError
+    from weaver.workspaces import TargetDeclaration, Workspace
+
+    root = source_project(tmp_path, value=reference)
+    path = root / str(ITEM) / f"{ITEM.item_name}.tmdl"
+    path.write_text(path.read_text() + LINEAGE_ONLY)
+    if declared:
+        folder = root / str(SOURCE)
+        folder.mkdir(parents=True)
+        (folder / "Cake.yml").write_text(
+            "Schema ID: Cake\nDescription: Cake records.\n", encoding="utf-8"
+        )
+        (folder / "Cake.Sales.sql").write_text(
+            "/*\nTable ID: Cake.Sales\nDescription: Sales facts.\n"
+            "Lineage: Constant\nPrimary key: Id\nSchema:\n  Id: bigint\n*/\n"
+            "SELECT CAST(1 AS BIGINT) AS Id\n",
+            encoding="utf-8",
+        )
+    workspace = Workspace(
+        workspace="Demo",
+        targets={SOURCE: TargetDeclaration("Serving_Dev")} if configured else {},
+    )
+    with source_session(workspace=workspace) as session:
+        if refusal is None:
+            result = weaver.build(
+                root,
+                items=f"{ITEM}=SemanticModel/Reporting_Dev",
+                bundle_only=True,
+                bundle_path=tmp_path / "bundle",
+                session=session,
+            )
+            assert result.succeeded
+            return
+        with pytest.raises(
+            BuildError,
+            match=re.escape(
+                f"SemanticModel/Reporting/Reporting.tmdl:2: Weaver.Source {reference} "
+                + refusal
+            )
+            + "$",
+        ):
+            weaver.build(
+                root, items=f"{ITEM}=SemanticModel/Reporting_Dev", session=session
+            )
+        refused_before_deployment(session)
+
+
+@weaver_test()
+def test_source_annotation_uses_the_typed_lakehouse_sql_endpoint(tmp_path, monkeypatch):
+    import copy
+    import json
+
+    from support.workspaces import _identifier
+    from test_semantic_source_build_cycle import (
+        ItemBindings,
+        SourceInventory,
+        SourceSession,
+        effective_item_bindings,
+        parse_build_item,
+    )
+
+    from weaver.catalogue.state import Catalogue
+    from weaver.declaration.model import WeaverItemId
+    from weaver.fabric.resolution import FabricResolver
+    from weaver.store import FilesystemStore
+    from weaver.workspaces import TargetDeclaration, Workspace
+
+    logical = WeaverItemId.parse("Lakehouse/Curated")
+    root = source_project(tmp_path, value="Lakehouse/Curated/Tables/Cake.Sales")
+    original = source_catalogue().rows[WeaverItemId.parse("Warehouse/Serving")]
+    rows = copy.deepcopy(original)
+    rows = {
+        key: [
+            {
+                **row,
+                "item_type": "Lakehouse",
+                "item_name": "Curated",
+                **(
+                    {"schema_name": "Tables/" + row["schema_name"]}
+                    if "schema_name" in row
+                    else {}
+                ),
+            }
+            for row in values
+        ]
+        for key, values in rows.items()
+    }
+    catalogue = Catalogue({logical: rows})
+    workspace = Workspace(
+        workspace="Demo",
+        catalogue="Warehouse/Catalogue",
+        targets={logical: TargetDeclaration(physical="Serving_Dev")},
+    )
+
+    class LakehouseInventory(SourceInventory):
+        def get_json(self, path, **kwargs):
+            if "/lakehouses/" in path:
+                self.requested.append(path)
+                return {
+                    "properties": {
+                        "sqlEndpointProperties": {
+                            "id": _identifier("SQLEndpoint", "Serving_Dev"),
+                            "connectionString": "lake.datawarehouse.fabric.microsoft.com",
+                        }
+                    }
+                }
+            return super().get_json(path, **kwargs)
+
+    inventory = LakehouseInventory(
+        "Demo",
+        [
+            ("Warehouse", "Catalogue"),
+            ("Warehouse", "Serving_Dev"),
+            ("Lakehouse", "Serving_Dev"),
+            ("SemanticModel", "Reporting_Dev"),
+        ],
+    )
+    observed = source_model(lakehouse=True, relations={"Sales": "Sales"})
+    observed["model"]["tables"][0]["annotations"] = [
+        {"name": "Weaver.Source", "value": "Lakehouse/Curated/Tables/Cake.Sales"}
+    ]
+    with SourceSession(
+        workspace=workspace,
+        resolver=FabricResolver(workspace, client=inventory),
+        store=FilesystemStore(),
+    ) as session:
+        session.answer_semantic_model(
+            "Demo", "Reporting_Dev", SubmittedDefinition(observed)
+        )
+        bindings = effective_item_bindings(
+            ItemBindings(
+                (
+                    parse_build_item(f"{ITEM}=SemanticModel/Reporting_Dev"),
+                    parse_build_item("Lakehouse/Curated=Lakehouse/Serving_Dev"),
+                )
+            ),
+            control_item="Catalogue",
+            workspace_name="Demo",
+        )
+        answer_catalogue(session, catalogue, bindings)
+        published = capture_publication(monkeypatch, session)
+        result = weaver.build(
+            root, items=f"{ITEM}=SemanticModel/Reporting_Dev", session=session
+        )
+        assert result.succeeded, result.errors
+        parts = submitted_parts(session)
+        # The Lakehouse's SQL endpoint, named as people name it in a connection.
+        assert (
+            b'Sql.Database("lake.datawarehouse.fabric.microsoft.com", "Serving_Dev")'
+            in parts["definition/expressions.tmdl"]
+        )
+        assert any("TABLE_SCHEMA = N'Cake'" in sql for sql in session.tsql)
+        table = published()[ITEM]["SemanticModelTable"][0]
+        assert table["description"] == "Sales description"
+        assert table["source_access"] == "sql"
+        # Only Installation names the physical item.
+        assert "Serving_Dev" not in json.dumps(table)
+        assert (
+            published()[ITEM]["Dependency"][0]["dependency_reference"]
+            == "Lakehouse/Curated/Tables/Cake.Sales"
+        )
+        assert not session.spark_sql and not session.python
+
+
+@weaver_test()
+def test_import_model_generates_navigation_partitions_with_lineage(
+    tmp_path, monkeypatch
+):
+    root = source_project(tmp_path)
+    extension = root / str(ITEM) / f"{ITEM.item_name}.tmdl"
+    extension.write_text(
+        "model Model\n\tdefaultMode: import\n\n" + extension.read_text()
+    )
+    navigation = (
+        'let\n    Source = #"Warehouse/Serving",\n'
+        '    Data = Source{[Schema="Cake",Item="Sales"]}[Data]\nin\n    Data'
+    )
+    observed = source_model(relations={"Sales": "Sales"})
+    observed["model"]["defaultMode"] = "import"
+    observed["model"]["tables"][0]["partitions"] = [
+        {
+            "name": "Sales",
+            "mode": "import",
+            "source": {"type": "m", "expression": navigation},
+        }
+    ]
+    observed["model"]["tables"][0]["annotations"] = [
+        {"name": "Weaver.Source", "value": "Warehouse/Serving/Cake.Sales"}
+    ]
+    with source_session() as session:
+        session.answer_semantic_model(
+            "Demo", "Reporting_Dev", SubmittedDefinition(observed)
+        )
+        answer_catalogue(session, source_catalogue(), read_bindings())
+        published = capture_publication(monkeypatch, session)
+        result = weaver.build(
+            root, items=f"{ITEM}=SemanticModel/Reporting_Dev", session=session
+        )
+        assert result.succeeded, result.errors
+        table = submitted_parts(session)["definition/tables/Sales.tmdl"].decode()
+        assert "partition 'Sales' = m" in table and "mode: import" in table
+        assert 'Source{[Schema="Cake",Item="Sales"]}[Data]' in table
+        assert "column 'Id'" in table and "entity" not in table
+        rows = published()[ITEM]
+        assert {
+            (r["referencing_object_name"], r["dependency_reference"])
+            for r in rows["Dependency"]
+        } == {("Sales", "Warehouse/Serving/Cake.Sales")}

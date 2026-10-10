@@ -189,6 +189,7 @@ class OneLakeDfsClient:
                     f"{method} {url.split('?')[0]} returned {response.status_code}: "
                     f"{_response_message(response)}",
                     executor="OneLake",
+                    status_code=response.status_code,
                 )
             return response
 

@@ -1,0 +1,104 @@
+{
+  "compatibilityLevel": 1606,
+  "model": {
+    "culture": "en-US",
+    "dataAccessOptions": {
+      "legacyRedirects": true,
+      "returnErrorValuesAsNull": true
+    },
+    "defaultPowerBIDataSourceVersion": "powerBI_V3",
+    "relationships": [
+      {
+        "name": "Sales_Product",
+        "fromColumn": "ProductId",
+        "fromTable": "Sales",
+        "toColumn": "ProductId",
+        "toTable": "Product"
+      }
+    ],
+    "sourceQueryCulture": "en-US",
+    "tables": [
+      {
+        "name": "Sales",
+        "columns": [
+          {
+            "name": "Id",
+            "dataType": "int64",
+            "sourceColumn": "Id",
+            "summarizeBy": "none"
+          },
+          {
+            "name": "ProductId",
+            "dataType": "int64",
+            "sourceColumn": "ProductId",
+            "summarizeBy": "none"
+          },
+          {
+            "name": "Amount",
+            "dataType": "decimal",
+            "formatString": "$#,##0.00",
+            "sourceColumn": "Amount",
+            "summarizeBy": "sum"
+          }
+        ],
+        "description": "Sales entered for the importer boundary.",
+        "measures": [
+          {
+            "name": "Revenue",
+            "description": "Revenue from the two probe rows.",
+            "expression": "SUM(Sales[Amount])",
+            "formatString": "$#,##0.00"
+          }
+        ],
+        "partitions": [
+          {
+            "name": "Sales",
+            "mode": "import",
+            "source": {
+              "expression": [
+                "let",
+                "    Source = #table(type table [Id = Int64.Type, ProductId = Int64.Type, Amount = Currency.Type], {{1, 10, 12.5}, {2, 20, 7.5}})",
+                "in",
+                "    Source"
+              ],
+              "type": "m"
+            }
+          }
+        ]
+      },
+      {
+        "name": "Product",
+        "columns": [
+          {
+            "name": "ProductId",
+            "dataType": "int64",
+            "isKey": true,
+            "sourceColumn": "ProductId",
+            "summarizeBy": "none"
+          },
+          {
+            "name": "ProductName",
+            "dataType": "string",
+            "sourceColumn": "ProductName",
+            "summarizeBy": "none"
+          }
+        ],
+        "partitions": [
+          {
+            "name": "Product",
+            "mode": "import",
+            "source": {
+              "expression": [
+                "let",
+                "    Source = #table(type table [ProductId = Int64.Type, ProductName = text], {{10, \"Cake\"}, {20, \"Coffee\"}})",
+                "in",
+                "    Source"
+              ],
+              "type": "m"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

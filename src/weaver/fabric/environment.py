@@ -403,9 +403,12 @@ def import_external_libraries(
 
 
 def publish_state(environment: Item, *, client: FabricClient) -> str:
+    return _publish_details(environment, client=client).get("state", "")
+
+
+def _publish_details(environment: Item, *, client: FabricClient) -> dict:
     info = client.get_json(_environment_base(environment))
-    details = (info.get("properties") or {}).get("publishDetails") or {}
-    return details.get("state", "")
+    return (info.get("properties") or {}).get("publishDetails") or {}
 
 
 def upload_wheel(environment: Item, wheel: Path, *, client: FabricClient) -> None:
@@ -474,13 +477,30 @@ def publish_and_wait(
     timeout: float = 1800.0,
     poll_interval: float = 15.0,
 ) -> str:
-    client.request(
+    """Publish the staged definition and return this publication's final state.
+
+    A long-running operation ties its own outcome to this request. Without one,
+    the details Fabric held before submission are a previous publication's, so
+    their terminal state is not this one's.
+    """
+
+    before = _publish_details(environment, client=client)
+    response = client.request(
         "POST",
         f"{_staging_base(environment)}/publish?beta=false",
         expected=(200, 202),
     )
+    if response.status_code == 202:
+        client.wait_for_operation(
+            response, timeout=timeout, poll_interval=poll_interval
+        )
+        before = None
     return wait_for_publish(
-        environment, client=client, timeout=timeout, poll_interval=poll_interval
+        environment,
+        client=client,
+        timeout=timeout,
+        poll_interval=poll_interval,
+        previous=before,
     )
 
 
@@ -490,20 +510,37 @@ def wait_for_publish(
     client: FabricClient,
     timeout: float = 1800.0,
     poll_interval: float = 15.0,
+    previous: dict | None = None,
 ) -> str:
-    """Poll a publication already under way until it reaches a terminal state."""
+    """Poll a publication already under way until it reaches a terminal state.
+
+    With ``previous``, a terminal state counts once the publication's version
+    or start time differs from it, or once a state in progress has been seen.
+    """
 
     deadline = time.time() + timeout
     seen = ""
+    current = previous is None
     while time.time() < deadline:
-        seen = publish_state(environment, client=client)
-        if seen.casefold() in _TERMINAL_PUBLISH:
+        details = _publish_details(environment, client=client)
+        seen = details.get("state", "")
+        terminal = seen.casefold() in _TERMINAL_PUBLISH
+        current = (
+            current
+            or not terminal
+            or _publication(details) != _publication(previous or {})
+        )
+        if current and terminal:
             return seen
         time.sleep(poll_interval)
     raise FabricError(
         "Environment publish did not finish within "
         f"{int(timeout)} seconds. Last state: {seen!r}."
     )
+
+
+def _publication(details: dict) -> tuple:
+    return (details.get("targetVersion"), details.get("startTime"))
 
 
 def already_published(
@@ -728,8 +765,7 @@ def _settled(status: str, environment: Item, *, client: FabricClient) -> None:
 
     if status.casefold() in {"success", "succeeded"}:
         return
-    info = client.get_json(_environment_base(environment))
-    details = (info.get("properties") or {}).get("publishDetails") or {}
+    details = _publish_details(environment, client=client)
     components = details.get("componentPublishInfo") or {}
     failed = sorted(
         name

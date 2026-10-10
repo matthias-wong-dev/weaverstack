@@ -13,7 +13,14 @@ from typing import Mapping
 from ..catalogue.claims import without_claims
 from ..catalogue.state import Catalogue
 from ..catalogue.tables import ROLE_SHORTCUT
-from ..declaration.model import LAKEHOUSE, WAREHOUSE, WeaverItemId, WeaverRepository
+from ..declaration.model import (
+    LAKEHOUSE,
+    SEMANTIC_MODEL,
+    WAREHOUSE,
+    WeaverDocumentId,
+    WeaverItemId,
+    WeaverRepository,
+)
 from ..errors import BuildError
 from ..etl import item_runtime_artefacts, load_schemas, runtime_artefacts
 from ..locations import Location
@@ -33,6 +40,7 @@ from .dependencies import (
     DECERTIFIED,
     PHYSICAL_COMPLETE,
     PREPARED,
+    UPGRADED,
     catalogue_step_key,
 )
 from .documents import lakehouse_build_stages, warehouse_build_stages
@@ -45,12 +53,18 @@ from .executors.sql_endpoint_refresh import (
     START_TABLES_EXECUTOR,
 )
 from .executors.sql_endpoint_refresh import CONTRACTS as ENDPOINT_REFRESH_CONTRACTS
-from .incremental import installed_as_pointer, select_build, stale_through_shortcuts
+from .incremental import (
+    BuildSelection,
+    installed_as_pointer,
+    select_build,
+    stale_through_shortcuts,
+)
 from .models import OMIT_TARGET_UNBOUND, OmittedNode
 from .prune import TargetInventory, lakehouse_prune_stage, warehouse_prune_stage
 from .runtime import item_runtime_removals, item_runtime_stages
 from .runtime_tables import (
     VIEW_STATE_SLUG,
+    changed_semantic_validations,
     render_runtime_state_reconciliation,
     runtime_state_establishment,
     runtime_state_invalidation,
@@ -71,18 +85,27 @@ def generate_item_build_bundle(
     target_inventories: Mapping[WeaverItemId, TargetInventory] | None = None,
     catalogue: Catalogue,
     stale_claims: tuple = (),
-    catalogue_binding: WarehouseBinding,
+    catalogue_binding: WarehouseBinding | None,
     execution: ExecutionIdentity | None = None,
     shortcut_sources: Mapping[str, object] | None = None,
 ) -> BuildBundle:
     if catalogue_binding is None:
-        raise BuildError("Select a catalogue Warehouse before building")
+        from .workflow import require_catalogue_for
+
+        require_catalogue_for(bindings)
     if execution is None:
         # The bindings already name the workspace. An orchestrated build resolves
         # ids and the Environment and passes them in; planning alone knows
         # neither, and says so rather than inventing them.
         execution = ExecutionIdentity(
-            workspace_name=catalogue_binding.workspace_name or ""
+            workspace_name=next(
+                (
+                    b.workspace_name
+                    for b in (catalogue_binding, *(e.target for e in bindings.entries))
+                    if getattr(b, "workspace_name", None)
+                ),
+                "",
+            )
         )
     by_item = bindings.by_item
     if not by_item:
@@ -107,13 +130,16 @@ def generate_item_build_bundle(
     selected_ids = selected_documents | selected_shortcuts | selected_loads
     certifiable_ids = selected_ids | selected_validations
 
-    targets = tuple(
-        by_item[item].to_bound_target() for item in sorted(by_item, key=str)
-    )
-    target_by_item = {
-        item: by_item[item].to_bound_target() for item in sorted(by_item, key=str)
-    }
+    from .semantic import bind_semantic_target
+
     inventories = dict(target_inventories or {})
+    target_by_item = {
+        item: bind_semantic_target(
+            by_item[item].to_bound_target(), inventories.get(item)
+        )
+        for item in sorted(by_item, key=str)
+    }
+    targets = tuple(target_by_item.values())
     for item, target in target_by_item.items():
         inventory = inventories.get(item)
         if inventory is None:
@@ -123,28 +149,28 @@ def generate_item_build_bundle(
                 f"inventory for {item} describes {inventory.target_id}, not {target.id}"
             )
 
-    # Freshness may depend on an item outside this build, so read it before
-    # narrowing ``registered`` to bound items.
-    stale_consumers = stale_through_shortcuts(
-        repository, catalogue.registered, bound_items=by_item
-    )
-    registered = {
-        identity: document
-        for identity, document in catalogue.registered.items()
-        if identity.item in by_item
-    }
-    selection = select_build(
-        repository,
-        registered,
-        selected=selected_ids,
-        stale_consumers=stale_consumers,
-        inventories=inventories,
-        mirrored=catalogue.mirrors,
+    from .reports import bind_reports
+
+    repository = bind_reports(repository, target_by_item, catalogue)
+    registered = _registered_in(catalogue, by_item)
+    selection = select_items(
+        repository, catalogue, by_item=by_item, inventories=inventories
     )
     selected_for_drop = set(selection.selected_for_drop)
     selected_for_build = set(selection.selected_for_build)
     removed = set(registered) - selected_ids
 
+    if catalogue_binding is None:
+        return _semantic_bundle_without_catalogue(
+            repository,
+            selection=selection,
+            selected_for_build=selected_for_build,
+            certifiable_ids=certifiable_ids,
+            target_by_item=target_by_item,
+            execution=execution,
+            output=output,
+            store=store,
+        )
     catalogue_target = _catalogue_target(catalogue_binding, targets)
     if all(target.id != catalogue_target.id for target in targets):
         targets = targets + (catalogue_target,)
@@ -166,7 +192,14 @@ def generate_item_build_bundle(
         source for source in installed_sources.values() if source.id not in declared_ids
     )
 
-    stages: list[PlannedStage] = []
+    from .catalogue_actions import render_catalogue_upgrade
+
+    upgrade = render_catalogue_upgrade(catalogue, catalogue_target=catalogue_target)
+    stages: list[PlannedStage] = (
+        [upgrade.declaring(provides=(UPGRADED, PREPARED))]
+        if upgrade is not None
+        else []
+    )
     omitted: list[OmittedNode] = []
 
     # Decertify everything rebuilt, including pointers refreshed in place.
@@ -184,7 +217,11 @@ def generate_item_build_bundle(
         stale_claims=stale_claims,
     )
     if catalogue_before is not None:
-        stages.append(catalogue_before.declaring(provides=(DECERTIFIED, PREPARED)))
+        stages.append(
+            catalogue_before.declaring(
+                requires=(UPGRADED,), provides=(DECERTIFIED, PREPARED)
+            )
+        )
 
     # Runtime state is reset here, between decertification and the first
     # physical action, and never after it. See
@@ -198,7 +235,8 @@ def generate_item_build_bundle(
     established_state = runtime_state_establishment(
         repository,
         items=tuple(target_by_item),
-        selected_for_build=selected_for_build,
+        selected_for_build=selected_for_build
+        | changed_semantic_validations(repository, catalogue, items=target_by_item),
         holds_table=_catalogue_holds(inventories),
     )
     reconciliation = render_runtime_state_reconciliation(
@@ -208,7 +246,9 @@ def generate_item_build_bundle(
     )
     if reconciliation is not None:
         stages.append(
-            reconciliation.declaring(requires=(DECERTIFIED,), provides=(PREPARED,))
+            reconciliation.declaring(
+                requires=(UPGRADED, DECERTIFIED), provides=(PREPARED,)
+            )
         )
 
     view_state = view_state_establishment(
@@ -270,6 +310,11 @@ def generate_item_build_bundle(
             catalogue_target=catalogue_target,
             # Compare publication against the catalogue after claim deletion.
             current=catalogue_after_deletions,
+            selected_models={
+                identity
+                for identity in selected_for_build
+                if identity.item in repository.semantic_models
+            },
         ),
     ]
     # Publication certifies only physical work that succeeded, and the Registry
@@ -393,6 +438,35 @@ def _refuse_selected_omissions(omitted: list[OmittedNode]) -> None:
     raise BuildError(f"selected object(s) could not be materialised: {details}")
 
 
+def select_items(
+    repository: WeaverRepository, catalogue, *, by_item: Mapping, inventories
+) -> BuildSelection:
+    """Select what a Build of ``by_item`` creates, drops and rebuilds."""
+
+    documents, shortcuts, loads, _validations = _selectable(repository, by_item)
+    # Freshness may depend on an item outside this build, so read it before
+    # narrowing ``registered`` to bound items.
+    stale_consumers = stale_through_shortcuts(
+        repository, catalogue.registered, bound_items=by_item
+    )
+    return select_build(
+        repository,
+        _registered_in(catalogue, by_item),
+        selected=documents | shortcuts | loads,
+        stale_consumers=stale_consumers,
+        inventories=inventories,
+        mirrored=catalogue.mirrors,
+    )
+
+
+def _registered_in(catalogue, by_item: Mapping) -> dict:
+    return {
+        identity: document
+        for identity, document in catalogue.registered.items()
+        if identity.item in by_item and document.object_role != "source"
+    }
+
+
 def _selectable(
     repository: WeaverRepository, by_item: Mapping
 ) -> tuple[set, set, set, set]:
@@ -401,6 +475,16 @@ def _selectable(
             identity
             for identity, source in repository.source_documents.items()
             if identity.item in by_item and not source.is_validation
+        }
+        | {
+            WeaverDocumentId.parse(str(item))
+            for item in repository.semantic_models
+            if item in by_item
+        }
+        | {
+            WeaverDocumentId.report_root(item)
+            for item in repository.reports
+            if item in by_item
         },
         {
             declaration.destination
@@ -512,6 +596,28 @@ def plan_item_build(
         shortcut_sources=shortcut_sources,
         mirrored=mirrored,
     )
+    if item.item_type == SEMANTIC_MODEL:
+        from .semantic import semantic_readback_stage, semantic_stage
+
+        stages = ()
+        if WeaverDocumentId.parse(str(item)) in selected_for_build:
+            stages = (semantic_stage(repository, item, target),)
+            if any(
+                contribution.model == item
+                and WeaverDocumentId.report_root(report) in selected_for_build
+                for report, contribution in repository.reports.items()
+            ):
+                stages += (semantic_readback_stage(repository, item, target),)
+        return PlannedItem(stages, (), frozenset())
+    if item.item_type == "Report":
+        from .reports import report_stages
+
+        stages = (
+            report_stages(repository, item, target)
+            if WeaverDocumentId.report_root(item) in selected_for_build
+            else ()
+        )
+        return PlannedItem(stages, (), frozenset())
     if item.item_type == LAKEHOUSE:
         return _plan_lakehouse_item(**arguments)
     if item.item_type == WAREHOUSE:
@@ -743,6 +849,76 @@ def installed_shortcut_sources(
             logical_item_name=item.item_name,
         )
     return found
+
+
+def _semantic_bundle_without_catalogue(
+    repository,
+    *,
+    selection,
+    selected_for_build,
+    certifiable_ids,
+    target_by_item,
+    execution,
+    output,
+    store,
+):
+    """Deploy and read back semantic models in a workspace with no catalogue.
+
+    Nothing is installed or certified, so each selected model deploys and its
+    readback verifies the definition on the model itself.
+    """
+
+    from ..mutation.models import MutationPlan
+    from .semantic import semantic_readback_stage, semantic_stage
+
+    stages: list[PlannedStage] = []
+    for item, target in target_by_item.items():
+        if item.item_type == "Report":
+            from .reports import report_stages
+
+            if WeaverDocumentId.report_root(item) in selected_for_build:
+                stages.extend(report_stages(repository, item, target))
+        elif WeaverDocumentId.parse(str(item)) in selected_for_build:
+            stages.append(semantic_stage(repository, item, target))
+            stages.append(semantic_readback_stage(repository, item, target))
+    targets = tuple(target_by_item.values())
+    sequences, payloads, target_changes, required = enumerate_stages(
+        stages, targets=targets, completion_target_id=targets[0].id
+    )
+    omitted = [
+        OmittedNode(
+            node_id=str(identity),
+            reason=OMIT_TARGET_UNBOUND,
+            detail=f"item {identity.item} is not bound",
+        )
+        for identity in sorted(repository.source_documents, key=str)
+        if identity not in certifiable_ids
+    ]
+    plan = MutationPlan(
+        targets=targets,
+        sequences=sequences,
+        execution=BundleExecution.of(
+            execution, catalogue_target_id=None, spark_home_target_id=None
+        ),
+        build_envelope={
+            "repository_name": repository.name,
+            "repository_signature": repository.signature,
+            "selection": selection.to_mapping(),
+            "omitted_nodes": [
+                node.to_mapping()
+                for node in sorted(omitted, key=lambda n: (n.node_id, n.reason))
+            ],
+            "target_changes": {
+                key: [change.to_mapping() for change in value]
+                for key, value in sorted(target_changes.items())
+            },
+            "runtime_state": [],
+            "runtime_state_established": [],
+        },
+        required_completion=required,
+    )
+    plan = replace(plan, bundle_id=compute_bundle_id(plan))
+    return write_bundle(output, plan=plan, payloads=payloads, store=store)
 
 
 def _catalogue_target(binding: WarehouseBinding, targets):

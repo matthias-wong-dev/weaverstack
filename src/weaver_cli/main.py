@@ -66,7 +66,7 @@ Set up a Weaver project and its Fabric items.
 Choose a catalogue Warehouse, Environment, Lakehouse and/or Warehouse.
 Missing items are created.
 
-Optionally add Sales example source files.\
+Optionally add the Sales example, with a Power BI model and Report.\
 """
 
 WIPE_DESCRIPTION = """\
@@ -75,8 +75,29 @@ Empty physical Fabric items and the catalogue that records them.
 Naming targets selects exactly those physical items. Naming none selects the
 estate recorded in the catalogue.
 
-A resolved catalogue is emptied last. Pass --unbind to keep it and remove its
-claims for the emptied targets.\
+A resolved catalogue is emptied last for Warehouse and Lakehouse selections.
+Pass --unbind to keep it and remove its claims for the emptied targets.
+
+SemanticModel-only selections keep the catalogue and remove their own claims.
+Semantic wipe retains the Fabric item. --preserve-data-source keeps one Automatic
+SQL / Direct Lake source in a hidden columnless table. Unsupported source and
+connection forms are refused before mutation.\
+"""
+
+UNBIND_DESCRIPTION = """\
+Remove the catalogue's claims for physical items. Nothing in Fabric changes.
+
+Use it after deleting an item in Fabric, or to stop managing one. Unbinding an
+item that still exists asks for confirmation.\
+"""
+
+TEST_DESCRIPTION = """\
+Run Tests and Assumptions for the selected items.
+
+Catalogue mode runs the validations installed in the Weaver catalogue and
+records their results. File mode runs validations from the project folder
+against the deployed objects and records nothing. Test uses file mode when
+--file is given or no catalogue is configured.\
 """
 
 DOCTOR_DESCRIPTION = """\
@@ -85,7 +106,10 @@ Check Microsoft Fabric connectivity.
 Name a workspace to probe its items: TDS for a Warehouse; OneLake and Livy for
 a Lakehouse. Project configuration is not read.
 
-Checking a Lakehouse starts a Fabric Spark session and can take a minute.\
+Checking a Lakehouse starts a Fabric Spark session and can take a minute.
+
+Use --semantic-model NAME to check only Power BI authentication, model definition
+and DAX access through REST.\
 """
 
 
@@ -111,6 +135,8 @@ def _kind_requirements(values) -> set[str]:
     wanted: set[str] = set()
     for value in values or ():
         kind, _name = _kind_and_name(value)
+        if kind in {"semanticmodel", "powerbi", "report"}:
+            continue
         if kind.startswith("warehouse"):
             wanted.add(TDS)
         else:
@@ -146,7 +172,7 @@ def _requires_run(args) -> frozenset[str]:
 
 
 def _requires_build(args) -> frozenset[str]:
-    """Avoid Spark for Warehouse-only builds.
+    """Avoid Spark for Warehouse and SemanticModel builds.
 
     An unscoped build needs the superset because arguments do not reveal source
     or configured items.
@@ -185,6 +211,14 @@ def _requires_wipe(args) -> frozenset[str]:
     if not targets:
         return requirements(AUTH, RESOLVER, ONELAKE, TDS)
     return requirements(AUTH, RESOLVER, TDS, *_kind_requirements(targets))
+
+
+def _requires_unbind(args) -> frozenset[str]:
+    """The catalogue over TDS and the workspace's item list; no target is opened."""
+
+    from weaver.sessions.requirements import AUTH, RESOLVER, TDS, requirements
+
+    return requirements(AUTH, RESOLVER, TDS)
 
 
 def _requires_mirror(args) -> frozenset[str]:
@@ -238,6 +272,8 @@ def _requires_doctor(args) -> frozenset[str]:
         requirements,
     )
 
+    if getattr(args, "semantic_model", None) is not None:
+        return requirements(AUTH, RESOLVER)
     return requirements(AUTH, RESOLVER, ONELAKE, LIVY, TDS)
 
 
@@ -374,6 +410,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     doctor.add_argument("--json", action="store_true", help="Emit the result as JSON.")
     doctor.add_argument("--workspace", required=True, help="Fabric workspace to check.")
+    doctor.add_argument(
+        "--semantic-model",
+        metavar="NAME",
+        help="Check this semantic model's authentication, definition and DAX access only.",
+    )
     add_non_interactive(doctor)
     doctor.set_defaults(handler=handle_doctor, requires=_requires_doctor)
 
@@ -426,6 +467,19 @@ def build_parser() -> argparse.ArgumentParser:
         help=argparse.SUPPRESS,
     )
     build.add_argument(
+        "--data-source",
+        dest="data_sources",
+        action="append",
+        metavar="EXPRESSION=KIND/NAME",
+        help="Substitute a shared M source expression with a Warehouse or Lakehouse.",
+    )
+    build.add_argument(
+        "--bind-data-sources",
+        action="store_true",
+        help="After deploying a semantic model, bind each of its SQL data sources "
+        "to the connection that reaches it.",
+    )
+    build.add_argument(
         "--bundle-only",
         action="store_true",
         help="Create a deployment bundle without installing it.",
@@ -452,8 +506,9 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="*",
         metavar="ITEM",
         help=(
-            "Weaver items to load, as Lakehouse/Name or Warehouse/Name. "
-            "Naming none loads every installed item."
+            "Weaver items to load, as Lakehouse/Name, Warehouse/Name or "
+            "SemanticModel/Name. PowerBI or PowerBI/<project> names the semantic "
+            "models of the project folder. Naming none loads every installed item."
         ),
     )
     load.add_argument(
@@ -475,12 +530,13 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         metavar="NAME",
         help=(
-            "Load one installed object, as Tables/Schema.Object or "
-            "Files/Schema.Object in a Lakehouse and Schema.Object in a "
-            "Warehouse. A bare Schema.Object is accepted where it names one "
-            "object. Repeat to select more than one."
+            "Load only installed objects whose whole name matches this regular "
+            "expression: Tables/Schema.Object or Files/Schema.Object in a "
+            "Lakehouse, Schema.Object in a Warehouse. A bare Schema.Object is "
+            "accepted where it names one object. Repeat to select more."
         ),
     )
+    _add_source_arg(load)
     load.add_argument(
         "--fault-tolerant",
         action="store_true",
@@ -527,15 +583,19 @@ def build_parser() -> argparse.ArgumentParser:
     load.set_defaults(handler=handle_load, requires=_requires_run)
 
     validate = subcommands.add_parser(
-        "test", help="Run Tests and Assumptions installed for the selected items."
+        "test",
+        help="Run Tests and Assumptions for the selected items.",
+        description=TEST_DESCRIPTION,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     validate.add_argument(
         "items",
         nargs="*",
         metavar="ITEM",
         help=(
-            "Weaver items to validate, as Lakehouse/Name or Warehouse/Name. "
-            "Naming none validates every installed item."
+            "Weaver items to validate, as Lakehouse/Name, Warehouse/Name or "
+            "SemanticModel/Name. PowerBI or PowerBI/<project> names the semantic "
+            "models of the project folder. Naming none validates every item."
         ),
     )
     validate.add_argument(
@@ -551,17 +611,28 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         help=argparse.SUPPRESS,
     )
-    selection = validate.add_mutually_exclusive_group()
-    selection.add_argument(
+    validate.add_argument(
         "--name",
-        metavar="Schema.Object",
-        help="Run one installed validation and return diagnostic rows.",
+        dest="names",
+        action="append",
+        metavar="PATTERN",
+        help=(
+            "Run only validations whose whole Schema.Object matches this regular "
+            "expression, with their diagnostic rows. Repeat to select more."
+        ),
     )
-    selection.add_argument(
+    validate.add_argument(
         "--file",
+        dest="files",
+        action="append",
         metavar="PATH",
-        help="Compile and run a source file without installing it.",
+        help=(
+            "Run validations from source in file mode: a file, a directory or a "
+            "glob. A file outside the project folder runs against the one item "
+            "named. Repeat to select more."
+        ),
     )
+    _add_source_arg(validate)
     validate.add_argument(
         "--dry-run",
         action="store_true",
@@ -584,7 +655,8 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         metavar="ITEM",
         help=(
-            "Weaver item to report on, as Lakehouse/Name or Warehouse/Name. "
+            "Weaver item to report on, as Lakehouse/Name, Warehouse/Name or "
+            "SemanticModel/Name. "
             "Repeat to select more than one. Naming none reports on the whole "
             "installed estate."
         ),
@@ -610,7 +682,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     wipe = subcommands.add_parser(
         "wipe",
-        help="Empty a physical Lakehouse or Warehouse, and its catalogue.",
+        help="Empty physical Lakehouses, Warehouses or semantic models.",
         description=WIPE_DESCRIPTION,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -619,7 +691,7 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="*",
         metavar="TARGET",
         help=(
-            "Physical items to empty, as Lakehouse/Name or Warehouse/Name. "
+            "Physical items to empty: Lakehouse/Name, Warehouse/Name or SemanticModel/Name. "
             "Naming none empties the estate the catalogue records."
         ),
     )
@@ -631,6 +703,11 @@ def build_parser() -> argparse.ArgumentParser:
             "Keep the catalogue and remove its claims for the named targets. "
             "Requires a catalogue and at least one target."
         ),
+    )
+    wipe.add_argument(
+        "--preserve-data-source",
+        action="store_true",
+        help="Retain one Automatic SQL / Direct Lake source in a hidden columnless table.",
     )
     wipe.add_argument(
         "--dry-run", action="store_true", help="Show the estate this would empty."
@@ -647,6 +724,31 @@ def build_parser() -> argparse.ArgumentParser:
         requires=_requires_wipe,
         lakehouses=_physical_target_lakehouses,
     )
+
+    unbind = subcommands.add_parser(
+        "unbind",
+        help="Remove the catalogue's claims for physical items.",
+        description=UNBIND_DESCRIPTION,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    unbind.add_argument(
+        "targets",
+        nargs="+",
+        metavar="TARGET",
+        help="Physical items to unbind: Lakehouse/Name, Warehouse/Name or SemanticModel/Name.",
+    )
+    _add_workspace_args(unbind, include_environment=False)
+    unbind.add_argument(
+        "--dry-run", action="store_true", help="Show what this would unbind."
+    )
+    unbind.add_argument(
+        "--yes",
+        action="store_true",
+        help="Unbind items that still exist without asking.",
+    )
+    unbind.add_argument("--json", action="store_true", help="Emit the result as JSON.")
+    add_non_interactive(unbind)
+    unbind.set_defaults(handler=handle_unbind, requires=_requires_unbind)
 
     mirror = subcommands.add_parser(
         "mirror",
@@ -1016,11 +1118,17 @@ def _add_initialise_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--lakehouse", help="Lakehouse for Delta tables and files.")
     parser.add_argument("--warehouse", help="Warehouse for SQL tables and views.")
     parser.add_argument(
+        "--semantic-model",
+        metavar="NAME",
+        help="Add PowerBI/NAME/NAME.tmdl, or name the example's Power BI project. "
+        "Build creates the SemanticModel.",
+    )
+    parser.add_argument(
         "--example",
         dest="example",
         action="store_true",
         default=None,
-        help="Add Sales example source files.",
+        help="Add the Sales example: source files and a Power BI project that reads them.",
     )
     parser.add_argument(
         "--no-example",
@@ -1044,6 +1152,17 @@ def _add_initialise_args(parser: argparse.ArgumentParser) -> None:
         "--publish-environment",
         action="store_true",
         help="Publish the project Environment after setup.",
+    )
+
+
+def _add_source_arg(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--source",
+        metavar="SOURCE",
+        help=(
+            "Project folder, or an abfss location inside a Fabric session. "
+            "Defaults to the current directory or Notebook Resources."
+        ),
     )
 
 
@@ -1266,6 +1385,7 @@ def _load_once(args: argparse.Namespace) -> int:
                 workspace,
                 items=run_items(args) or None,
                 names=args.names,
+                source=args.source,
                 fault_tolerant=args.fault_tolerant,
                 dry_run=args.dry_run,
                 reload=args.reload,
@@ -1305,6 +1425,7 @@ def _run_load(
     *,
     items,
     names=None,
+    source=None,
     fault_tolerant: bool,
     dry_run: bool,
     reload: bool = False,
@@ -1320,6 +1441,7 @@ def _run_load(
         return weaver.load(
             items,
             names=names,
+            source=source,
             fault_tolerant=fault_tolerant,
             dry_run=dry_run,
             reload=reload,
@@ -1344,6 +1466,7 @@ def _print_load(report) -> None:
     listed = [node for node in report.nodes if report.dry_run or _needs_attention(node)]
     if listed:
         print()
+    waits_for = _waits_for(report)
     for node in listed:
         mark = _status_symbol(node.status)
         colour = _status_colour(node.status)
@@ -1353,6 +1476,10 @@ def _print_load(report) -> None:
         print(
             f"  {_style(mark, colour)} {_style(status, colour)} {node.node_id}{counts}"
         )
+        if report.dry_run and waits_for.get(node.node_id):
+            after = f"after {_first_few(waits_for[node.node_id])}"
+            # Under the node ID.
+            print(f"{'':<29}{_style(after, _DIM)}")
         for message in node.messages:
             if message.severity != "info":
                 message_colour = _RED if message.severity == "error" else _AMBER
@@ -1366,6 +1493,25 @@ def _print_load(report) -> None:
             print(f"\n{prefix} {message.message}")
     if report.workflow_id:
         print(f"\n  Workflow: {_style(report.workflow_id, _DIM)}")
+
+
+def _waits_for(report) -> dict[str, list[str]]:
+    """Each node's direct upstream nodes, in the order the plan lists them."""
+
+    position = {node.node_id: index for index, node in enumerate(report.nodes)}
+    found: dict[str, list[str]] = {}
+    for upstream, downstream in report.edges:
+        found.setdefault(downstream, []).append(upstream)
+    return {
+        node_id: sorted(upstreams, key=lambda each: position.get(each, len(position)))
+        for node_id, upstreams in found.items()
+    }
+
+
+def _first_few(names, shown: int = 3) -> str:
+    if len(names) <= shown + 1:
+        return ", ".join(names)
+    return f"{', '.join(names[:shown])} and {len(names) - shown} more"
 
 
 def _needs_attention(node) -> bool:
@@ -1423,7 +1569,13 @@ def _print_load_summary(report) -> None:
     if counts[SKIPPED]:
         print(f"  {counts[SKIPPED]:>3} skipped")
 
-    executed_loaders = [node for node in loaders if node.executed]
+    from weaver.installed import SEMANTIC_REFRESH
+
+    executed_loaders = [
+        node
+        for node in loaders
+        if node.executed and node.primitive_kind != SEMANTIC_REFRESH
+    ]
     if not executed_loaders:
         return
     print("  Rows")
@@ -1471,8 +1623,9 @@ def _test_once(args: argparse.Namespace) -> int:
         report = _run_test(
             workspace,
             items=run_items(args) or None,
-            name=args.name,
-            file=args.file,
+            names=args.names,
+            files=args.files,
+            source=args.source,
             dry_run=args.dry_run,
             session=opened,
         )
@@ -1480,9 +1633,7 @@ def _test_once(args: argparse.Namespace) -> int:
     if args.json:
         print(
             _json_document(
-                _test_mapping(
-                    report, targeted=args.name is not None or args.file is not None
-                )
+                _test_mapping(report, targeted=bool(args.names or args.files))
             )
         )
     else:
@@ -1490,7 +1641,9 @@ def _test_once(args: argparse.Namespace) -> int:
     return 1 if report.status in (FAILED, INVALID) else 0
 
 
-def _run_test(workspace, *, items, name, file, dry_run: bool, session=None):
+def _run_test(
+    workspace, *, items, names, files, source=None, dry_run: bool, session=None
+):
     """Dispatch Warehouse validations over TDS and Lakehouse modules in-session."""
 
     from weaver.sessions.host import use_or_create_session
@@ -1498,8 +1651,9 @@ def _run_test(workspace, *, items, name, file, dry_run: bool, session=None):
     with use_or_create_session(session, workspace=workspace) as opened:
         return weaver.test(
             items,
-            name=name,
-            file=file,
+            names=names,
+            files=files,
+            source=source,
             dry_run=dry_run,
             session=opened,
             **_command_context(workspace),
@@ -1708,6 +1862,7 @@ def handle_wipe(args: argparse.Namespace) -> int:
         plan = weaver.plan_wipe(
             args.targets,
             unbind=args.unbind,
+            preserve_data_source=args.preserve_data_source,
             session=opened,
             **_command_context(workspace),
         )
@@ -1748,8 +1903,60 @@ def handle_wipe(args: argparse.Namespace) -> int:
         print(json.dumps(result.to_mapping(), indent=2))
     else:
         print("Wipe complete\n")
+        width = max([26, *(len(item.target) for item in result.items)])
         for item in result.items:
-            print(f"  {item.describe()}")
+            print(f"  {item.describe(width)}")
+    return 0
+
+
+def handle_unbind(args: argparse.Namespace) -> int:
+    """Show the plan, and confirm only when an unbound item still exists."""
+
+    import json
+
+    workspace = _resolve_workspace(args)
+
+    with _running_session(args, workspace) as opened:
+        plan = weaver.plan_unbind(
+            args.targets, session=opened, **_command_context(workspace)
+        )
+        if args.dry_run:
+            if args.json:
+                print(json.dumps(plan.to_mapping(), indent=2))
+            else:
+                print(plan.describe())
+                print("\nNothing was changed.")
+            return 0
+
+        if not args.json:
+            print(plan.describe())
+            print()
+
+        remaining = plan.still_in_fabric
+        if remaining and not authorised(args):
+            named = ", ".join(remaining)
+            if args.json or not can_prompt(args):
+                _render_error(
+                    CommandError(
+                        f"{named} {'is' if len(remaining) == 1 else 'are'} still in "
+                        "Fabric and would no longer be managed. "
+                        "Pass --yes to unbind, or delete the item first."
+                    ),
+                    args=args,
+                )
+                return 1
+            if not confirm(args, f"{named} would no longer be managed. Unbind? [y/N] "):
+                _render_error(CommandError("Cancelled."), args=args)
+                return 1
+
+        result = weaver.unbind(plan=plan, session=opened)
+
+    if args.json:
+        print(json.dumps(result.to_mapping(), indent=2))
+    else:
+        print("Unbind complete\n")
+        for item in result.logical_items:
+            print(f"  {item}")
     return 0
 
 
@@ -1841,6 +2048,8 @@ def _build_once(args: argparse.Namespace) -> int:
             result = weaver.build(
                 args.source,
                 items=args.items,
+                data_sources=args.data_sources,
+                bind_data_sources=args.bind_data_sources,
                 bundle_only=args.bundle_only,
                 bundle_path=args.bundle_path,
                 session=opened,
@@ -1855,11 +2064,20 @@ def _build_once(args: argparse.Namespace) -> int:
         print(json.dumps(payload, indent=2))
     else:
         _print_build(result)
-        for error in result.errors:
-            # Show the operation and source before lower-level diagnostics.
+        for block in failure_blocks(result.errors):
             print()
-            print(_indented(error.describe()), file=sys.stderr)
+            print(_indented(block), file=sys.stderr)
     return 0 if result.succeeded else 1
+
+
+def failure_blocks(errors) -> list[str]:
+    """One block per failed action, or one for a cause every action shares."""
+
+    shared = {error.message for error in errors}
+    if len(errors) > 1 and len(shared) == 1:
+        return [f"{len(errors)} actions failed: {shared.pop()}"]
+    # Each names the operation and source before lower-level diagnostics.
+    return [error.describe() for error in errors]
 
 
 def _print_action_counts(report, *, indent: str = "  ") -> None:
@@ -1985,6 +2203,7 @@ def _initialise_once(args: argparse.Namespace, *, session):
         workspace=args.workspace,
         lakehouse=args.lakehouse,
         warehouse=args.warehouse,
+        semantic_model=getattr(args, "semantic_model", None),
         example=bool(args.example),
         publish_environment=args.publish_environment,
         dry_run=args.dry_run,
@@ -2000,10 +2219,16 @@ def handle_doctor(args: argparse.Namespace) -> int:
 
     from .doctor import render
 
+    named = (
+        {"semantic_model": args.semantic_model}
+        if args.semantic_model is not None
+        else {}
+    )
     _prefer_desktop_credential(args)
     report = doctor(
         workspace=args.workspace,
         session=_session(args),
+        **named,
     )
     if args.json:
         print(json.dumps(report.to_mapping(), indent=2))

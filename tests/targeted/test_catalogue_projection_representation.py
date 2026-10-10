@@ -347,8 +347,21 @@ def test_catalogue_from_repository_has_all_artefacts(tmp_path):
     from factories import full_estate
 
     from weaver.catalogue.tables import OBJECT_TYPES
+    from weaver.declaration.repository import parse_item_repository
+    from weaver.locations import Location
 
-    repository = full_estate(tmp_path / "repo")
+    full_estate(tmp_path / "repo")
+    semantic = tmp_path / "repo/SemanticModel/Reporting"
+    semantic.mkdir(parents=True)
+    (semantic / f"{semantic.name}.tmdl").write_text(
+        'table Example\n\tpartition Example = calculated\n\t\tsource = ROW("Value", 1)\n',
+        encoding="utf-8",
+    )
+    repository = parse_item_repository(Location((tmp_path / "repo").as_posix()))
+    from test_powerbi_project_declaration import native
+
+    native(tmp_path / "repo")
+    repository = parse_item_repository(Location((tmp_path / "repo").as_posix()))
     catalogue = Catalogue.from_repository(repository)
 
     # Every type but ``schema``, which only a schema shortcut carries and which

@@ -23,6 +23,7 @@ from .test_plan import InstalledValidation
 #: Runtime primitives for installed validations.
 WAREHOUSE_PROCEDURE = "warehouse_procedure"
 PYTHON_VALIDATION = "python_validation"
+SEMANTIC_VALIDATION = "semantic_validation"
 
 
 def run_installed_validation(
@@ -42,9 +43,19 @@ def run_installed_validation(
     validation runs in beside others.
     """
 
-    environment = _capabilities(session, workspace, runtime_scope, spark)
     try:
         validation.require_installed()
+        if primitive_kind(validation) == SEMANTIC_VALIDATION:
+            from .semantic_validation import run_semantic_validation
+
+            result, diagnostics = run_semantic_validation(
+                validation,
+                session=session,
+                workspace=workspace,
+                collect=collect_diagnostics,
+            )
+            return _WithDiagnostics(result, diagnostics)
+        environment = _capabilities(session, workspace, runtime_scope, spark)
         if primitive_kind(validation) == WAREHOUSE_PROCEDURE:
             result, diagnostics = _dispatch_warehouse(
                 validation, environment, collect_diagnostics
@@ -118,6 +129,8 @@ def _capabilities(session, workspace, runtime_scope, spark=None):
 
 
 def primitive_kind(validation: InstalledValidation) -> str:
+    if validation.is_semantic:
+        return SEMANTIC_VALIDATION
     if validation.target.kind == LAKEHOUSE_TARGET:
         return PYTHON_VALIDATION
     return WAREHOUSE_PROCEDURE
