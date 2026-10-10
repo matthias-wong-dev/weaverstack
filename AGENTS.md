@@ -829,7 +829,11 @@ an execution runs and travel with either.
 `_.Load` and `_.Test` are checked-in `.sql` under `src/weaver/fragments/`, read by
 `read_repository_fragment` like the catalogue declaration and the standard
 per-item schema and folder documents. Static Weaver-owned repository content is a
-fragment; nothing renders it from Python.
+fragment; nothing renders it from Python. The one composition step is the
+Catalogue Dashboard's renderer: `dashboard.js` and `dashboard.css` are checked
+in beside its model and `weaver.catalogue_dashboard.dashboard_files` inlines them
+into the model's `Renderer` measure as one DAX string. Its pure logic is tested
+under Node from `tests/js`.
 
 **Who records is the interface.** A lower execution primitive never writes
 operational catalogue state. A run records centrally, and a standalone wrapper
