@@ -4,10 +4,10 @@
 
     catalogue/            the Warehouse/_weaver catalogue declaration
     standard/<ItemType>/  what every normal item of that type receives
-    browser/              the Catalogue Browser's Power BI project
+    dashboard/            the Catalogue Dashboard's Power BI project
 
 The first two are item-relative and read by
-:func:`weaver.declaration.repository.read_repository_fragment`; ``browser`` is
+:func:`weaver.declaration.repository.read_repository_fragment`; ``dashboard`` is
 project-relative and read by the Power BI project readers. Each goes through
 the same readers as an authored tree, so what a build composes is what is
 reviewed here.
@@ -19,8 +19,8 @@ from importlib.resources import files as resource_files
 
 #: The fragment holding Weaver's catalogue declaration.
 CATALOGUE = "catalogue"
-#: The fragment holding the Catalogue Browser's Power BI project.
-BROWSER = "browser"
+#: The fragment holding the Catalogue Dashboard's Power BI project.
+DASHBOARD = "dashboard"
 
 
 def fragment_files(name: str) -> dict[str, bytes]:
@@ -48,4 +48,4 @@ def standard_fragment(item_type: str) -> dict[str, bytes]:
     return fragment_files(f"standard/{item_type}")
 
 
-__all__ = ["BROWSER", "CATALOGUE", "fragment_files", "standard_fragment"]
+__all__ = ["DASHBOARD", "CATALOGUE", "fragment_files", "standard_fragment"]

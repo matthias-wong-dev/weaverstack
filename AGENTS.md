@@ -86,7 +86,7 @@ and hand ordering, layers, ancestry and subgraphs to it. `Catalogue.dag()`
 derives the installed managed graph from catalogue rows already in memory, and
 it is the one place a persisted `dependency_reference` is interpreted. Load
 planning, validation planning and health read it. Build publishes it per item
-as `_.BrowserNode` and `_.BrowserEdge` through `weaver.installed.item_dag`,
+as `_.GraphNode` and `_.GraphEdge` through `weaver.installed.item_dag`,
 which reads one item's rows and assumes the upstreams they name in other items,
 so an item's rows never depend on another item's state. The projection is
 advisory and never blocks Build, Wipe or Mirror.

@@ -1,9 +1,9 @@
 /*
-Table ID: _.BrowserEdge
+Table ID: _.GraphEdge
 
 Description: >-
   One row per edge of the installed graph, scoped to the downstream node's
-  item. Both ends are BrowserNode IDs, except that an External edge's
+  item. Both ends are GraphNode IDs, except that an External edge's
   upstream is the reference as its author wrote it.
 
 Lineage: >-

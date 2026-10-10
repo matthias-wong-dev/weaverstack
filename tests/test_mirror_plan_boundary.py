@@ -598,7 +598,7 @@ def test_a_warehouse_reading_another_mirrored_warehouse_waits_for_its_reconstruc
 
 
 @weaver_test()
-def test_a_mirror_forks_the_browser_rows_only_when_the_source_has_them():
+def test_a_mirror_forks_the_graph_rows_only_when_the_source_has_them():
     from dataclasses import replace
 
     resolved = _resolved("Model", "Warehouse")
@@ -608,9 +608,9 @@ def test_a_mirror_forks_the_browser_rows_only_when_the_source_has_them():
         return payloads[_actions(plan)[PUBLISH].payload].decode()
 
     held = publish_script(resolved)
-    older = publish_script(replace(resolved, browsed=False))
+    older = publish_script(replace(resolved, graphed=False))
 
-    for table in ("BrowserNode", "BrowserEdge"):
+    for table in ("GraphNode", "GraphEdge"):
         assert f"[Weaver].[_].[{table}]" in held
         assert f"[Weaver].[_].[{table}]" not in older
     assert "[Weaver].[_].[Registry]" in older

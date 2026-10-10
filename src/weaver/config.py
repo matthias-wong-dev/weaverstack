@@ -31,7 +31,7 @@ _KEYS = {
     "execution",
     "targets",
     "data_sources",
-    "catalogue_browser",
+    "catalogue_dashboard",
 }
 
 _RETIRED_KEYS = ("lakehouses", "warehouses")
@@ -75,8 +75,8 @@ def parse_workspace(payload: Any, base_dir: str | Path | None = None) -> Workspa
             execution=_execution(payload.get("execution"), where="execution"),
             targets=_targets(payload.get("targets")),
             data_sources=payload.get("data_sources", {}),
-            catalogue_browser=_optional_text(
-                payload.get("catalogue_browser"), where="catalogue_browser"
+            catalogue_dashboard=_optional_text(
+                payload.get("catalogue_dashboard"), where="catalogue_dashboard"
             ),
         )
     except TypeError as exc:
@@ -131,7 +131,7 @@ def resolve_workspace(
         else ExecutionSettings(),
         "targets": configured.targets if configured is not None else {},
         "data_sources": configured.data_sources if configured is not None else {},
-        "catalogue_browser": configured.catalogue_browser
+        "catalogue_dashboard": configured.catalogue_dashboard
         if configured is not None
         else None,
     }

@@ -1,4 +1,4 @@
-"""The built-in Catalogue Browser composes, deploys and builds like a project."""
+"""The built-in Catalogue Dashboard composes, deploys and builds like a project."""
 
 import json
 import re
@@ -9,11 +9,11 @@ from test_semantic_model_build_cycle import DefinitionClient
 from test_semantic_source_build_cycle import SourceInventory
 
 import weaver
-from weaver.catalogue_browser import (
-    BROWSER,
-    BROWSER_ITEMS,
-    BROWSER_MODEL,
-    BROWSER_REPORT,
+from weaver.catalogue_dashboard import (
+    DASHBOARD,
+    DASHBOARD_ITEMS,
+    DASHBOARD_MODEL,
+    DASHBOARD_REPORT,
 )
 from weaver.declaration.repository import parse_item_repository
 from weaver.errors import DiscoveryError
@@ -29,9 +29,9 @@ HTML_CONTENT_SECURE = "htmlContent443BE3AD55E043BF878BED274D3A6865"
 
 #: Every catalogue table the model reads, by model table.
 SOURCES = {
-    "BrowserNode": "BrowserNode",
-    "BrowserEdge": "BrowserEdge",
-    "Focus": "BrowserNode",
+    "GraphNode": "GraphNode",
+    "GraphEdge": "GraphEdge",
+    "Focus": "GraphNode",
     "LoadStatus": "LoadStatus",
     "Log": "Log",
     "LoadStatistic": "LoadStatistic",
@@ -73,12 +73,14 @@ def project(tmp_path):
     return root
 
 
-def parse(root, *, browser=True):
-    return parse_item_repository(Location(root.as_posix()), catalogue_browser=browser)
+def parse(root, *, dashboard=True):
+    return parse_item_repository(
+        Location(root.as_posix()), catalogue_dashboard=dashboard
+    )
 
 
-def browser_model(tmp_path):
-    return parse(project(tmp_path)).semantic_models[BROWSER_MODEL]
+def dashboard_model(tmp_path):
+    return parse(project(tmp_path)).semantic_models[DASHBOARD_MODEL]
 
 
 def measures(parts):
@@ -94,23 +96,23 @@ def measures(parts):
 
 
 @weaver_test()
-def test_a_project_composes_the_browser_only_when_it_is_configured(tmp_path):
+def test_a_project_composes_the_dashboard_only_when_it_is_configured(tmp_path):
     root = project(tmp_path)
 
-    plain = parse(root, browser=False)
-    assert not set(BROWSER_ITEMS) & {item.identity for item in plain.items}
-    assert BROWSER not in plain.powerbi_projects
+    plain = parse(root, dashboard=False)
+    assert not set(DASHBOARD_ITEMS) & {item.identity for item in plain.items}
+    assert DASHBOARD not in plain.powerbi_projects
 
     composed = parse(root)
-    assert set(BROWSER_ITEMS) <= {item.identity for item in composed.items}
-    assert set(composed.powerbi_projects[BROWSER].items) == set(BROWSER_ITEMS)
-    assert composed.reports[BROWSER_REPORT].model == BROWSER_MODEL
-    model = composed.semantic_models[BROWSER_MODEL]
+    assert set(DASHBOARD_ITEMS) <= {item.identity for item in composed.items}
+    assert set(composed.powerbi_projects[DASHBOARD].items) == set(DASHBOARD_ITEMS)
+    assert composed.reports[DASHBOARD_REPORT].model == DASHBOARD_MODEL
+    model = composed.semantic_models[DASHBOARD_MODEL]
     assert model.refresh_after_deploy
     assert dict(model.source_references) == {
         table: f"Warehouse/_weaver/_.{relation}" for table, relation in SOURCES.items()
     }
-    # The Browser is package content: it changes the repository, never the folder.
+    # The Dashboard is package content: it changes the repository, never the folder.
     assert composed.signature != plain.signature
     assert not (root / "PowerBI").exists()
 
@@ -118,13 +120,13 @@ def test_a_project_composes_the_browser_only_when_it_is_configured(tmp_path):
 @pytest.mark.parametrize(
     "authored",
     [
-        "PowerBI/Reporting/Catalogue Browser.tmdl",
-        "PowerBI/Catalogue Browser/Sales.tmdl",
+        "PowerBI/Reporting/Catalogue Dashboard.tmdl",
+        "PowerBI/Catalogue Dashboard/Sales.tmdl",
     ],
     ids=["same logical model", "same project folder"],
 )
 @weaver_test()
-def test_a_projects_own_browser_is_refused_rather_than_replaced(tmp_path, authored):
+def test_a_projects_own_dashboard_is_refused_rather_than_replaced(tmp_path, authored):
     root = project(tmp_path)
     path = root / authored
     path.parent.mkdir(parents=True)
@@ -132,15 +134,15 @@ def test_a_projects_own_browser_is_refused_rather_than_replaced(tmp_path, author
         'table Calendar\n\tpartition Calendar = calculated\n\t\tsource = ROW("Year", 2026)\n'
     )
 
-    # Without the Browser configured it is an ordinary project.
-    parse(root, browser=False)
-    with pytest.raises(DiscoveryError, match="is the built-in Catalogue Browser"):
+    # Without the Dashboard configured it is an ordinary project.
+    parse(root, dashboard=False)
+    with pytest.raises(DiscoveryError, match="is the built-in Catalogue Dashboard"):
         parse(root)
 
 
 @weaver_test()
 def test_the_model_declares_its_measures_in_display_folders(tmp_path):
-    found = measures(browser_model(tmp_path).parts)
+    found = measures(dashboard_model(tmp_path).parts)
 
     assert {
         folder: {name for name, (_, f, _) in found.items() if f == folder}
@@ -154,7 +156,7 @@ def test_the_model_declares_its_measures_in_display_folders(tmp_path):
 def test_the_measures_quote_every_table_and_avoid_reserved_names(tmp_path):
     """LOG is a function and ROWS is reserved, so an unquoted table breaks DAX."""
 
-    model = browser_model(tmp_path)
+    model = dashboard_model(tmp_path)
     tables = {table.name for table in TmdlDefinition(model.parts).model.tables}
     for name, (_, _, expression) in measures(model.parts).items():
         assert not re.search(r"\bVAR\s+rows\b", expression, re.IGNORECASE), name
@@ -165,7 +167,7 @@ def test_the_measures_quote_every_table_and_avoid_reserved_names(tmp_path):
 
 @weaver_test()
 def test_the_graph_window_is_bounded_before_any_svg_is_built(tmp_path):
-    expression = measures(browser_model(tmp_path).parts)["Graph SVG"][2]
+    expression = measures(dashboard_model(tmp_path).parts)["Graph SVG"][2]
 
     # Twelve unrolled hops each way, and Max means twelve.
     assert len(re.findall(r"VAR _u\d+ = ", expression)) == 12
@@ -180,8 +182,8 @@ def test_the_graph_window_is_bounded_before_any_svg_is_built(tmp_path):
 @weaver_test()
 def test_the_report_uses_html_content_secure_and_native_slicers(tmp_path):
     repository = parse(project(tmp_path))
-    parts = repository.reports[BROWSER_REPORT].parts
-    names = set(measures(repository.semantic_models[BROWSER_MODEL].parts))
+    parts = repository.reports[DASHBOARD_REPORT].parts
+    names = set(measures(repository.semantic_models[DASHBOARD_MODEL].parts))
 
     report = json.loads(parts["definition/report.json"])
     assert report["publicCustomVisuals"] == [HTML_CONTENT_SECURE]
@@ -221,12 +223,12 @@ def test_the_report_uses_html_content_secure_and_native_slicers(tmp_path):
 
 
 @weaver_test()
-def test_build_compiles_and_deploys_the_browser_through_the_power_bi_step(tmp_path):
+def test_build_compiles_and_deploys_the_dashboard_through_the_power_bi_step(tmp_path):
     root = project(tmp_path)
     workspace = Workspace(
         workspace="Demo",
         catalogue="Warehouse/Catalogue",
-        catalogue_browser="Estate Browser",
+        catalogue_dashboard="Estate Dashboard",
     )
     session = TestSession(
         workspace=workspace,
@@ -237,18 +239,18 @@ def test_build_compiles_and_deploys_the_browser_through_the_power_bi_step(tmp_pa
                 "Demo",
                 [
                     ("Warehouse", "Catalogue"),
-                    ("SemanticModel", "Estate Browser"),
-                    ("Report", "Estate Browser"),
+                    ("SemanticModel", "Estate Dashboard"),
+                    ("Report", "Estate Dashboard"),
                 ],
             ),
         ),
     )
     model = DefinitionClient()
-    session.answer_semantic_model("Demo", "Estate Browser", model)
+    session.answer_semantic_model("Demo", "Estate Dashboard", model)
     from test_report_build_cycle import ReportBoundary
 
     report = ReportBoundary([])
-    session.answer_report("Demo", "Estate Browser", report)
+    session.answer_report("Demo", "Estate Dashboard", report)
 
     execute = session.execute_mutation
 
@@ -267,13 +269,13 @@ def test_build_compiles_and_deploys_the_browser_through_the_power_bi_step(tmp_pa
     result = weaver.build(root, items="PowerBI", session=session)
 
     assert result.succeeded, result.errors
-    assert set(result.items) >= {str(BROWSER_MODEL), str(BROWSER_REPORT)}
+    assert set(result.items) >= {str(DASHBOARD_MODEL), str(DASHBOARD_REPORT)}
     calls = [method for method, _ in model.calls]
     assert calls[:3] == ["update_definition", "refresh", "invalid_measures"]
     submitted = decode_parts(model.calls[0][1]["definition"])
-    node = submitted["definition/tables/BrowserNode.tmdl"].decode()
+    node = submitted["definition/tables/GraphNode.tmdl"].decode()
     assert "mode: directLake" in node
-    assert "entityName: BrowserNode" in node and "schemaName: _" in node
+    assert "entityName: GraphNode" in node and "schemaName: _" in node
     assert "column 'Node ID'" in node
     assert set(measures(submitted)) == set().union(*MEASURES.values())
     assert report.calls == ["update", "read"]

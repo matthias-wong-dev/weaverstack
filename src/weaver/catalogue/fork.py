@@ -18,10 +18,10 @@ from ..declaration.model import WAREHOUSE
 from .builtin import BUILTIN_ITEM
 from .tables import (
     AUDIT_COLUMN_NAMES,
-    BROWSER_TABLES,
     CATALOGUE_SCHEMA,
     CATALOGUE_TABLES,
     CURRENT_STATE_TABLES,
+    GRAPH_TABLES,
     HISTORY_TABLES,
     MIRROR,
     PROJECTED_TABLES,
@@ -35,7 +35,7 @@ FORKED_TABLES = PROJECTED_TABLES + CURRENT_STATE_TABLES
 
 #: Forked only when the source holds them. A catalogue built by an older Weaver
 #: does not, and its items gain the rows on their next build.
-OPTIONAL_TABLES = BROWSER_TABLES
+OPTIONAL_TABLES = GRAPH_TABLES
 
 _AUDIT_TYPE = "datetime2(6)"
 
@@ -100,13 +100,13 @@ def _excluding_builtin(table) -> str:
 
 
 def fork_statements(
-    *, source_catalogue: str, borrowed: bool = False, browsed: bool = True
+    *, source_catalogue: str, borrowed: bool = False, graphed: bool = True
 ) -> tuple[str, ...]:
     """Return the state-copy statements, including ``_.Mirror`` when present."""
 
     statements = [
         copy_statement(table, source_catalogue=source_catalogue)
-        for table in copied_tables(browsed=browsed)
+        for table in copied_tables(graphed=graphed)
     ]
     if borrowed:
         statements.append(create_statement(MIRROR))
@@ -114,23 +114,23 @@ def fork_statements(
     return tuple(statements)
 
 
-def copied_tables(*, borrowed: bool = False, browsed: bool = True) -> tuple:
+def copied_tables(*, borrowed: bool = False, graphed: bool = True) -> tuple:
     """Return copied tables in order, with an existing ``_.Mirror`` last.
 
-    ``browsed`` says whether the source holds :data:`OPTIONAL_TABLES`.
+    ``graphed`` says whether the source holds :data:`OPTIONAL_TABLES`.
     """
 
     forked = tuple(
-        table for table in FORKED_TABLES if browsed or table not in OPTIONAL_TABLES
+        table for table in FORKED_TABLES if graphed or table not in OPTIONAL_TABLES
     )
     return forked + (MIRROR,) if borrowed else forked
 
 
 def forked_table_names(
-    *, borrowed: bool = False, browsed: bool = True
+    *, borrowed: bool = False, graphed: bool = True
 ) -> tuple[str, ...]:
     return tuple(
-        table.name for table in copied_tables(borrowed=borrowed, browsed=browsed)
+        table.name for table in copied_tables(borrowed=borrowed, graphed=graphed)
     )
 
 

@@ -24,15 +24,15 @@ from .claims import catalogue_columns
 from .render import Row
 from .state import Catalogue
 from .tables import (
-    BROWSER_EDGE,
-    BROWSER_NODE,
-    BROWSER_TABLES,
     CATALOGUE_SCHEMA,
     EDGE_DEPENDENCY,
     EDGE_EXTERNAL,
     EDGE_SHORTCUT,
     EDGE_VALIDATION,
     FOLDER_DICTIONARY,
+    GRAPH_EDGE,
+    GRAPH_NODE,
+    GRAPH_TABLES,
     ROLE_SHORTCUT,
     SEMANTIC_MODEL_TABLE,
     SIGNATURE,
@@ -43,10 +43,10 @@ from .tables import (
 SEARCH_TEXT_BYTES = 4000
 
 
-def with_browser_rows(
+def with_graph_rows(
     catalogue: Catalogue, repository, *, current: Catalogue | None = None, warn=None
 ) -> Catalogue:
-    """Add each item's BrowserNode and BrowserEdge rows to desired state.
+    """Add each item's GraphNode and GraphEdge rows to desired state.
 
     The projection is advisory. An item whose rows cannot be projected keeps
     its ``current`` rows, so publication leaves them alone, and ``warn`` says so.
@@ -56,17 +56,17 @@ def with_browser_rows(
     for item, tables in catalogue.rows.items():
         merged = dict(tables)
         try:
-            projected = browser_rows(
+            projected = graph_rows(
                 _with_semantic_sources(item, tables, repository), item
             )
         except Exception as exc:
             kept = current.rows.get(item, {}) if current is not None else {}
             projected = {
-                table.name: tuple(kept.get(table.name, ())) for table in BROWSER_TABLES
+                table.name: tuple(kept.get(table.name, ())) for table in GRAPH_TABLES
             }
             if warn is not None:
                 warn(
-                    f"Catalogue Browser graph for {item} was not updated: "
+                    f"Catalogue Dashboard graph for {item} was not updated: "
                     f"{_reason(exc)}. The Build continued."
                 )
         merged.update(projected)
@@ -105,10 +105,8 @@ def _with_semantic_sources(item, tables, repository) -> Catalogue:
     )
 
 
-def browser_rows(
-    catalogue: Catalogue, item: WeaverItemId
-) -> dict[str, tuple[Row, ...]]:
-    """BrowserNode and BrowserEdge rows for ``item``, from its rows alone."""
+def graph_rows(catalogue: Catalogue, item: WeaverItemId) -> dict[str, tuple[Row, ...]]:
+    """GraphNode and GraphEdge rows for ``item``, from its rows alone."""
 
     from ..installed import item_dag
 
@@ -151,7 +149,7 @@ def browser_rows(
         )
         for (downstream, upstream, kind), passes in sorted(through.items())
     )
-    return {BROWSER_NODE.name: nodes, BROWSER_EDGE.name: edges}
+    return {GRAPH_NODE.name: nodes, GRAPH_EDGE.name: edges}
 
 
 def _descriptions(tables) -> dict[tuple[str, str], str]:
@@ -207,12 +205,12 @@ def _label(identity) -> str:
 
 
 def _is_internal(identity) -> bool:
-    """The catalogue item, the Catalogue Browser over it, and the ``_`` surface
+    """The catalogue item, the Catalogue Dashboard over it, and the ``_`` surface
     the catalogue presents in every item."""
 
-    from ..catalogue_browser import BROWSER_ITEMS
+    from ..catalogue_dashboard import DASHBOARD_ITEMS
 
-    if identity.item == BUILTIN_ITEM or identity.item in BROWSER_ITEMS:
+    if identity.item == BUILTIN_ITEM or identity.item in DASHBOARD_ITEMS:
         return True
     schema = (
         identity.schema

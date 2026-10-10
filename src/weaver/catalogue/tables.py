@@ -98,7 +98,7 @@ TARGET_TYPE_VOCABULARY = {"logical": "Logical", "physical": "Physical"}
 
 TEST_TYPE_VOCABULARY = {ROLE_TEST: "Test", ROLE_ASSUMPTION: "Assumption"}
 
-#: What a node of the installed graph is, as a browser presents it.
+#: What a node of the installed graph is, as a dashboard presents it.
 NODE_KIND_VOCABULARY = {
     "table": "Table",
     "view": "View",
@@ -976,8 +976,8 @@ SEMANTIC_TABLES = (
 )
 
 
-BROWSER_NODE = CatalogueTable(
-    name="BrowserNode",
+GRAPH_NODE = CatalogueTable(
+    name="GraphNode",
     description=(
         "One row per node of the installed graph, scoped to its item, so a "
         "report can draw lineage without resolving references."
@@ -990,7 +990,7 @@ BROWSER_NODE = CatalogueTable(
             "node_id",
             not_null=True,
             sql_type=LIST_TYPE,
-            description="The node's installed identity, as BrowserEdge names it.",
+            description="The node's installed identity, as GraphEdge names it.",
         ),
         CatalogueColumn(
             "node_kind",
@@ -1031,11 +1031,11 @@ BROWSER_NODE = CatalogueTable(
     ),
 )
 
-BROWSER_EDGE = CatalogueTable(
-    name="BrowserEdge",
+GRAPH_EDGE = CatalogueTable(
+    name="GraphEdge",
     description=(
         "One row per edge of the installed graph, scoped to the downstream "
-        "node's item, with both ends as BrowserNode IDs."
+        "node's item, with both ends as GraphNode IDs."
     ),
     key=(
         SCOPE_ITEM_TYPE,
@@ -1077,7 +1077,7 @@ BROWSER_EDGE = CatalogueTable(
 )
 
 #: The installed graph, projected per item for reports that cannot resolve it.
-BROWSER_TABLES = (BROWSER_NODE, BROWSER_EDGE)
+GRAPH_TABLES = (GRAPH_NODE, GRAPH_EDGE)
 
 
 #: Dictionary reconciliation order, kept stable for payloads and reports.
@@ -1093,7 +1093,7 @@ DICTIONARY_TABLES = (
     DEPENDENCY,
     SHORTCUT,
     *SEMANTIC_TABLES,
-    *BROWSER_TABLES,
+    *GRAPH_TABLES,
 )
 
 #: Reconciliation order: descriptions, binding, then certification.
@@ -1562,9 +1562,9 @@ CATALOGUE_TABLES = PROJECTED_TABLES + RUNTIME_TABLES
 
 #: Projected state, borrowed nodes and bookmarks read by a run. Status tables are
 #: written by runs but only read by builds; see ``state.READ_FOR_BUILD``. The
-#: browser tables restate the graph a run derives from the rest.
+#: graph tables restate the graph a run derives from the rest.
 READABLE_TABLES = (
-    tuple(table for table in PROJECTED_TABLES if table not in BROWSER_TABLES)
+    tuple(table for table in PROJECTED_TABLES if table not in GRAPH_TABLES)
     + BORROWED_TABLES
     + (BOOKMARK,)
 )

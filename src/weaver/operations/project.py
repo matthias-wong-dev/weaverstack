@@ -50,7 +50,7 @@ class Project:
         with prepare_repository(
             location,
             source_store=store,
-            catalogue_browser=self._workspace.catalogue_browser is not None,
+            catalogue_dashboard=self._workspace.catalogue_dashboard is not None,
         ) as prepared:
             return prepared.repository
 

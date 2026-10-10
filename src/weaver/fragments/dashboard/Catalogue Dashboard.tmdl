@@ -1,14 +1,14 @@
 /// Every installed node, as the graph draws it.
-table BrowserNode
-    annotation 'Weaver.Source' = Warehouse/_weaver/_.BrowserNode
+table GraphNode
+    annotation 'Weaver.Source' = Warehouse/_weaver/_.GraphNode
 
 /// Every installed edge between nodes.
-table BrowserEdge
-    annotation 'Weaver.Source' = Warehouse/_weaver/_.BrowserEdge
+table GraphEdge
+    annotation 'Weaver.Source' = Warehouse/_weaver/_.GraphEdge
 
 /// The installed nodes again, for picking the focus without filtering the graph.
 table Focus
-    annotation 'Weaver.Source' = Warehouse/_weaver/_.BrowserNode
+    annotation 'Weaver.Source' = Warehouse/_weaver/_.GraphNode
 
 table LoadStatus
     annotation 'Weaver.Source' = Warehouse/_weaver/_.LoadStatus
@@ -262,15 +262,15 @@ table Browser
     measure 'Focus node' = ```
         VAR _latestLoad = CALCULATE(MAX('LoadStatus'[Completed datetime]), REMOVEFILTERS('LoadStatus'))
         VAR _recent = CALCULATE(
-            MIN('BrowserNode'[Node ID]),
-            REMOVEFILTERS('BrowserNode'),
-            'BrowserNode'[Is internal] = FALSE(),
+            MIN('GraphNode'[Node ID]),
+            REMOVEFILTERS('GraphNode'),
+            'GraphNode'[Is internal] = FALSE(),
             TREATAS(
                 CALCULATETABLE(SUMMARIZE('LoadStatus', 'LoadStatus'[Item type], 'LoadStatus'[Item name], 'LoadStatus'[Schema name], 'LoadStatus'[Object name]), REMOVEFILTERS('LoadStatus'), 'LoadStatus'[Completed datetime] = _latestLoad),
-                'BrowserNode'[Item type], 'BrowserNode'[Item name], 'BrowserNode'[Schema name], 'BrowserNode'[Object name]
+                'GraphNode'[Item type], 'GraphNode'[Item name], 'GraphNode'[Schema name], 'GraphNode'[Object name]
             )
         )
-        VAR _first = CALCULATE(MIN('BrowserNode'[Node ID]), REMOVEFILTERS('BrowserNode'), 'BrowserNode'[Is internal] = FALSE())
+        VAR _first = CALCULATE(MIN('GraphNode'[Node ID]), REMOVEFILTERS('GraphNode'), 'GraphNode'[Is internal] = FALSE())
         RETURN COALESCE(SELECTEDVALUE('Focus'[Node ID]), _recent, _first)
         ```
         displayFolder: Graph
@@ -290,15 +290,15 @@ table Browser
         VAR _focusPick = SELECTEDVALUE('Focus'[Node ID])
         VAR _latestLoad = CALCULATE(MAX('LoadStatus'[Completed datetime]), REMOVEFILTERS('LoadStatus'))
         VAR _recent = CALCULATE(
-            MIN('BrowserNode'[Node ID]),
-            REMOVEFILTERS('BrowserNode'),
-            'BrowserNode'[Is internal] = FALSE(),
+            MIN('GraphNode'[Node ID]),
+            REMOVEFILTERS('GraphNode'),
+            'GraphNode'[Is internal] = FALSE(),
             TREATAS(
                 CALCULATETABLE(SUMMARIZE('LoadStatus', 'LoadStatus'[Item type], 'LoadStatus'[Item name], 'LoadStatus'[Schema name], 'LoadStatus'[Object name]), REMOVEFILTERS('LoadStatus'), 'LoadStatus'[Completed datetime] = _latestLoad),
-                'BrowserNode'[Item type], 'BrowserNode'[Item name], 'BrowserNode'[Schema name], 'BrowserNode'[Object name]
+                'GraphNode'[Item type], 'GraphNode'[Item name], 'GraphNode'[Schema name], 'GraphNode'[Object name]
             )
         )
-        VAR _first = CALCULATE(MIN('BrowserNode'[Node ID]), REMOVEFILTERS('BrowserNode'), 'BrowserNode'[Is internal] = FALSE())
+        VAR _first = CALCULATE(MIN('GraphNode'[Node ID]), REMOVEFILTERS('GraphNode'), 'GraphNode'[Is internal] = FALSE())
         VAR _focus = COALESCE(_focusPick, _recent, _first) & ""
         VAR _upPick = SELECTEDVALUE('Upstream depth'[Hops], 2)
         VAR _downPick = SELECTEDVALUE('Downstream depth'[Hops], 2)
@@ -307,40 +307,40 @@ table Browser
         VAR _mode = SELECTEDVALUE('Graph colouring'[Colouring], "Status")
         VAR _nodes = CALCULATETABLE(
             SELECTCOLUMNS(
-                'BrowserNode',
-                "@n", 'BrowserNode'[Node ID] & "",
-                "@label", 'BrowserNode'[Label] & "",
-                "@item", 'BrowserNode'[Item label] & "",
-                "@kind", 'BrowserNode'[Node kind] & "",
-                "@it", 'BrowserNode'[Item type] & "",
-                "@in", 'BrowserNode'[Item name] & "",
-                "@sch", 'BrowserNode'[Schema name] & "",
-                "@obj", 'BrowserNode'[Object name] & ""
+                'GraphNode',
+                "@n", 'GraphNode'[Node ID] & "",
+                "@label", 'GraphNode'[Label] & "",
+                "@item", 'GraphNode'[Item label] & "",
+                "@kind", 'GraphNode'[Node kind] & "",
+                "@it", 'GraphNode'[Item type] & "",
+                "@in", 'GraphNode'[Item name] & "",
+                "@sch", 'GraphNode'[Schema name] & "",
+                "@obj", 'GraphNode'[Object name] & ""
             ),
-            REMOVEFILTERS('BrowserNode')
+            REMOVEFILTERS('GraphNode')
         )
-        VAR _filtered = CALCULATETABLE(VALUES('BrowserNode'[Node ID]), KEEPFILTERS('BrowserNode'[Is internal] = FALSE()))
+        VAR _filtered = CALCULATETABLE(VALUES('GraphNode'[Node ID]), KEEPFILTERS('GraphNode'[Is internal] = FALSE()))
         VAR _statusFiltered = ISFILTERED('Status'[Status])
         VAR _picked = VALUES('Status'[Status])
         VAR _loaded = CALCULATETABLE(
-            VALUES('BrowserNode'[Node ID]),
-            REMOVEFILTERS('BrowserNode'),
-            TREATAS(CALCULATETABLE(SUMMARIZE('LoadStatus', 'LoadStatus'[Item type], 'LoadStatus'[Item name], 'LoadStatus'[Schema name], 'LoadStatus'[Object name]), REMOVEFILTERS('LoadStatus')), 'BrowserNode'[Item type], 'BrowserNode'[Item name], 'BrowserNode'[Schema name], 'BrowserNode'[Object name])
+            VALUES('GraphNode'[Node ID]),
+            REMOVEFILTERS('GraphNode'),
+            TREATAS(CALCULATETABLE(SUMMARIZE('LoadStatus', 'LoadStatus'[Item type], 'LoadStatus'[Item name], 'LoadStatus'[Schema name], 'LoadStatus'[Object name]), REMOVEFILTERS('LoadStatus')), 'GraphNode'[Item type], 'GraphNode'[Item name], 'GraphNode'[Schema name], 'GraphNode'[Object name])
         )
         VAR _tested = CALCULATETABLE(
-            VALUES('BrowserNode'[Node ID]),
-            REMOVEFILTERS('BrowserNode'),
-            TREATAS(CALCULATETABLE(SUMMARIZE('TestStatus', 'TestStatus'[Item type], 'TestStatus'[Item name], 'TestStatus'[Schema name], 'TestStatus'[Object name]), REMOVEFILTERS('TestStatus')), 'BrowserNode'[Item type], 'BrowserNode'[Item name], 'BrowserNode'[Schema name], 'BrowserNode'[Object name])
+            VALUES('GraphNode'[Node ID]),
+            REMOVEFILTERS('GraphNode'),
+            TREATAS(CALCULATETABLE(SUMMARIZE('TestStatus', 'TestStatus'[Item type], 'TestStatus'[Item name], 'TestStatus'[Schema name], 'TestStatus'[Object name]), REMOVEFILTERS('TestStatus')), 'GraphNode'[Item type], 'GraphNode'[Item name], 'GraphNode'[Schema name], 'GraphNode'[Object name])
         )
         VAR _loadPicked = CALCULATETABLE(
-            VALUES('BrowserNode'[Node ID]),
-            REMOVEFILTERS('BrowserNode'),
-            TREATAS(CALCULATETABLE(SUMMARIZE('LoadStatus', 'LoadStatus'[Item type], 'LoadStatus'[Item name], 'LoadStatus'[Schema name], 'LoadStatus'[Object name]), REMOVEFILTERS('LoadStatus'), 'LoadStatus'[Result] IN _picked), 'BrowserNode'[Item type], 'BrowserNode'[Item name], 'BrowserNode'[Schema name], 'BrowserNode'[Object name])
+            VALUES('GraphNode'[Node ID]),
+            REMOVEFILTERS('GraphNode'),
+            TREATAS(CALCULATETABLE(SUMMARIZE('LoadStatus', 'LoadStatus'[Item type], 'LoadStatus'[Item name], 'LoadStatus'[Schema name], 'LoadStatus'[Object name]), REMOVEFILTERS('LoadStatus'), 'LoadStatus'[Result] IN _picked), 'GraphNode'[Item type], 'GraphNode'[Item name], 'GraphNode'[Schema name], 'GraphNode'[Object name])
         )
         VAR _testPicked = CALCULATETABLE(
-            VALUES('BrowserNode'[Node ID]),
-            REMOVEFILTERS('BrowserNode'),
-            TREATAS(CALCULATETABLE(SUMMARIZE('TestStatus', 'TestStatus'[Item type], 'TestStatus'[Item name], 'TestStatus'[Schema name], 'TestStatus'[Object name]), REMOVEFILTERS('TestStatus'), 'TestStatus'[Result] IN _picked), 'BrowserNode'[Item type], 'BrowserNode'[Item name], 'BrowserNode'[Schema name], 'BrowserNode'[Object name])
+            VALUES('GraphNode'[Node ID]),
+            REMOVEFILTERS('GraphNode'),
+            TREATAS(CALCULATETABLE(SUMMARIZE('TestStatus', 'TestStatus'[Item type], 'TestStatus'[Item name], 'TestStatus'[Schema name], 'TestStatus'[Object name]), REMOVEFILTERS('TestStatus'), 'TestStatus'[Result] IN _picked), 'GraphNode'[Item type], 'GraphNode'[Item name], 'GraphNode'[Schema name], 'GraphNode'[Object name])
         )
         VAR _noStatus = "No status" IN _picked
         VAR _allowed = DISTINCT(
@@ -349,24 +349,24 @@ table Browser
                     FILTER(
                         _filtered,
                         NOT _statusFiltered
-                            || 'BrowserNode'[Node ID] IN _loadPicked
-                            || 'BrowserNode'[Node ID] IN _testPicked
-                            || (_noStatus && NOT ('BrowserNode'[Node ID] IN _loaded) && NOT ('BrowserNode'[Node ID] IN _tested))
+                            || 'GraphNode'[Node ID] IN _loadPicked
+                            || 'GraphNode'[Node ID] IN _testPicked
+                            || (_noStatus && NOT ('GraphNode'[Node ID] IN _loaded) && NOT ('GraphNode'[Node ID] IN _tested))
                     ),
-                    "@n", 'BrowserNode'[Node ID] & ""
+                    "@n", 'GraphNode'[Node ID] & ""
                 ),
                 ROW("@n", _focus)
             )
         )
         VAR _edgesAll = SELECTCOLUMNS(
-            ALL('BrowserEdge'[Downstream node ID], 'BrowserEdge'[Upstream node ID], 'BrowserEdge'[Edge kind]),
-            "@d", 'BrowserEdge'[Downstream node ID] & "",
-            "@u", 'BrowserEdge'[Upstream node ID] & "",
-            "@kind", 'BrowserEdge'[Edge kind] & ""
+            ALL('GraphEdge'[Downstream node ID], 'GraphEdge'[Upstream node ID], 'GraphEdge'[Edge kind]),
+            "@d", 'GraphEdge'[Downstream node ID] & "",
+            "@u", 'GraphEdge'[Upstream node ID] & "",
+            "@kind", 'GraphEdge'[Edge kind] & ""
         )
         VAR _graph = FILTER(_edgesAll, [@kind] <> "External")
         VAR _base = UNION(
-            CALCULATETABLE(SELECTCOLUMNS(VALUES('BrowserNode'[Node ID]), "@n", 'BrowserNode'[Node ID] & ""), REMOVEFILTERS('BrowserNode'), 'BrowserNode'[Is internal] = FALSE()),
+            CALCULATETABLE(SELECTCOLUMNS(VALUES('GraphNode'[Node ID]), "@n", 'GraphNode'[Node ID] & ""), REMOVEFILTERS('GraphNode'), 'GraphNode'[Is internal] = FALSE()),
             ROW("@n", _focus)
         )
         VAR _walk = FILTER(_graph, [@d] IN _base && [@u] IN _base)
@@ -670,18 +670,18 @@ table Browser
         VAR _focus = [Focus node]
         VAR _node = CALCULATETABLE(
             SELECTCOLUMNS(
-                'BrowserNode',
-                "@it", 'BrowserNode'[Item type] & "",
-                "@in", 'BrowserNode'[Item name] & "",
-                "@sch", 'BrowserNode'[Schema name] & "",
-                "@obj", 'BrowserNode'[Object name] & "",
-                "@label", 'BrowserNode'[Label] & "",
-                "@kind", 'BrowserNode'[Node kind] & "",
-                "@item", 'BrowserNode'[Item label] & "",
-                "@desc", 'BrowserNode'[Description] & ""
+                'GraphNode',
+                "@it", 'GraphNode'[Item type] & "",
+                "@in", 'GraphNode'[Item name] & "",
+                "@sch", 'GraphNode'[Schema name] & "",
+                "@obj", 'GraphNode'[Object name] & "",
+                "@label", 'GraphNode'[Label] & "",
+                "@kind", 'GraphNode'[Node kind] & "",
+                "@item", 'GraphNode'[Item label] & "",
+                "@desc", 'GraphNode'[Description] & ""
             ),
-            REMOVEFILTERS('BrowserNode'),
-            'BrowserNode'[Node ID] = _focus
+            REMOVEFILTERS('GraphNode'),
+            'GraphNode'[Node ID] = _focus
         )
         VAR _it = MAXX(_node, [@it])
         VAR _in = MAXX(_node, [@in])
@@ -713,23 +713,23 @@ table Browser
         VAR _checks = NATURALINNERJOIN(
             SELECTCOLUMNS(
                 FILTER(
-                    ALL('BrowserEdge'[Downstream node ID], 'BrowserEdge'[Upstream node ID], 'BrowserEdge'[Edge kind]),
-                    'BrowserEdge'[Upstream node ID] = _focus && 'BrowserEdge'[Edge kind] = "Validation"
+                    ALL('GraphEdge'[Downstream node ID], 'GraphEdge'[Upstream node ID], 'GraphEdge'[Edge kind]),
+                    'GraphEdge'[Upstream node ID] = _focus && 'GraphEdge'[Edge kind] = "Validation"
                 ),
-                "@n", 'BrowserEdge'[Downstream node ID] & ""
+                "@n", 'GraphEdge'[Downstream node ID] & ""
             ),
             CALCULATETABLE(
                 SELECTCOLUMNS(
-                    'BrowserNode',
-                    "@n", 'BrowserNode'[Node ID] & "",
-                    "@vlabel", 'BrowserNode'[Label] & "",
-                    "@vkind", 'BrowserNode'[Node kind] & "",
-                    "@vit", 'BrowserNode'[Item type] & "",
-                    "@vin", 'BrowserNode'[Item name] & "",
-                    "@vsch", 'BrowserNode'[Schema name] & "",
-                    "@vobj", 'BrowserNode'[Object name] & ""
+                    'GraphNode',
+                    "@n", 'GraphNode'[Node ID] & "",
+                    "@vlabel", 'GraphNode'[Label] & "",
+                    "@vkind", 'GraphNode'[Node kind] & "",
+                    "@vit", 'GraphNode'[Item type] & "",
+                    "@vin", 'GraphNode'[Item name] & "",
+                    "@vsch", 'GraphNode'[Schema name] & "",
+                    "@vobj", 'GraphNode'[Object name] & ""
                 ),
-                REMOVEFILTERS('BrowserNode')
+                REMOVEFILTERS('GraphNode')
             )
         )
         VAR _checked = ADDCOLUMNS(
@@ -742,8 +742,8 @@ table Browser
             REMOVEFILTERS('ColumnDictionary'),
             TREATAS({ ( _it, _in, _sch, _obj ) }, 'ColumnDictionary'[Item type], 'ColumnDictionary'[Item name], 'ColumnDictionary'[Schema name], 'ColumnDictionary'[Object name])
         )
-        VAR _ups = COUNTROWS(FILTER(ALL('BrowserEdge'[Downstream node ID], 'BrowserEdge'[Upstream node ID]), 'BrowserEdge'[Downstream node ID] = _focus)) + 0
-        VAR _downs = COUNTROWS(FILTER(ALL('BrowserEdge'[Downstream node ID], 'BrowserEdge'[Upstream node ID]), 'BrowserEdge'[Upstream node ID] = _focus)) + 0
+        VAR _ups = COUNTROWS(FILTER(ALL('GraphEdge'[Downstream node ID], 'GraphEdge'[Upstream node ID]), 'GraphEdge'[Downstream node ID] = _focus)) + 0
+        VAR _downs = COUNTROWS(FILTER(ALL('GraphEdge'[Downstream node ID], 'GraphEdge'[Upstream node ID]), 'GraphEdge'[Upstream node ID] = _focus)) + 0
         VAR _head = "font-size:11px;font-weight:600;letter-spacing:0.5px;color:#64748B;margin:14px 0 6px"
         VAR _cell = "padding:4px 8px;border-bottom:1px solid #E2E8F0;vertical-align:top"
         RETURN

@@ -420,28 +420,28 @@ class _SourceTables:
         return _Sql()
 
 
-def _source_tables(*, browser: bool) -> tuple[str, ...]:
+def _source_tables(*, graphed: bool) -> tuple[str, ...]:
     from weaver.catalogue.fork import FORKED_TABLES, OPTIONAL_TABLES
 
     return tuple(
-        table.name for table in FORKED_TABLES if browser or table not in OPTIONAL_TABLES
+        table.name for table in FORKED_TABLES if graphed or table not in OPTIONAL_TABLES
     )
 
 
-@pytest.mark.parametrize("browser", (True, False))
+@pytest.mark.parametrize("graphed", (True, False))
 @weaver_test()
-def test_a_source_without_the_browser_tables_still_mirrors(monkeypatch, browser):
-    """An older catalogue forks what it has; its items gain browser rows on build."""
+def test_a_source_without_the_graph_tables_still_mirrors(monkeypatch, graphed):
+    """An older catalogue forks what it has; its items gain graph rows on build."""
 
     from weaver.operations.mirror import check_mirror
 
     plan = _plan(monkeypatch, _workspace())
 
     resolved = check_mirror(
-        plan, session=_SourceTables(_source_tables(browser=browser))
+        plan, session=_SourceTables(_source_tables(graphed=graphed))
     )
 
-    assert resolved.browsed is browser
+    assert resolved.graphed is graphed
 
 
 @weaver_test()
@@ -449,7 +449,7 @@ def test_a_source_missing_a_required_table_is_still_refused(monkeypatch):
     from weaver.operations.mirror import check_mirror
 
     plan = _plan(monkeypatch, _workspace())
-    held = tuple(name for name in _source_tables(browser=True) if name != "Registry")
+    held = tuple(name for name in _source_tables(graphed=True) if name != "Registry")
 
     with pytest.raises(CommandError, match="not compatible with this Weaver"):
         check_mirror(plan, session=_SourceTables(held))

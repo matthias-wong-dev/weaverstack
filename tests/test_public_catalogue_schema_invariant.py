@@ -251,7 +251,7 @@ PUBLIC_SCHEMA: dict[str, tuple[str, ...]] = {
         "Signature",
         *AUDIT,
     ),
-    "BrowserNode": (
+    "GraphNode": (
         "Item type",
         "Item name",
         "Schema name",
@@ -266,7 +266,7 @@ PUBLIC_SCHEMA: dict[str, tuple[str, ...]] = {
         "Signature",
         *AUDIT,
     ),
-    "BrowserEdge": (
+    "GraphEdge": (
         "Item type",
         "Item name",
         "Downstream node ID",

@@ -29,7 +29,7 @@ from weaver.build_bundle.execution import ExecutionIdentity
 from weaver.build_bundle.models import BUILD_TABLE, DROP_TABLE
 from weaver.build_bundle.workflow import BuildState
 from weaver.catalogue.state import Catalogue
-from weaver.catalogue.tables import BROWSER_TABLES, PROJECTED_TABLES
+from weaver.catalogue.tables import GRAPH_TABLES, PROJECTED_TABLES
 from weaver.declaration.model import WeaverItemId
 from weaver.locations import Location
 from weaver.store import FilesystemStore
@@ -256,7 +256,7 @@ def test_empty_registry_recovers_existing_protected_catalogue_tables(estate, tmp
 
 
 @weaver_test()
-def test_a_build_creates_the_browser_tables_an_older_catalogue_lacks(estate, tmp_path):
+def test_a_build_creates_the_graph_tables_an_older_catalogue_lacks(estate, tmp_path):
     repository = estate["repository"]
     bindings = effective_item_bindings(
         item_bindings(("Lakehouse/Sales", "Sales_LH")),
@@ -264,7 +264,7 @@ def test_a_build_creates_the_browser_tables_an_older_catalogue_lacks(estate, tmp
         workspace_name=WORKSPACE,
     )
     bound = {entry.item: entry.to_bound_target() for entry in bindings.entries}
-    introduced = {f"_.{table.name}" for table in BROWSER_TABLES}
+    introduced = {f"_.{table.name}" for table in GRAPH_TABLES}
     held = tuple(
         sorted(
             identity.object_id.qualified
@@ -306,7 +306,7 @@ def test_a_build_creates_the_browser_tables_an_older_catalogue_lacks(estate, tmp
 
 
 @weaver_test()
-def test_a_browser_graph_failure_is_a_build_warning(estate, tmp_path, monkeypatch):
+def test_a_graph_failure_is_a_build_warning(estate, tmp_path, monkeypatch):
     import weaver.installed as installed
 
     real = installed.item_dag
@@ -344,7 +344,7 @@ def test_a_browser_graph_failure_is_a_build_warning(estate, tmp_path, monkeypatc
     ).build(output=Location(str(tmp_path / "warned-bundle")))
 
     assert warned == [
-        "Catalogue Browser graph for Lakehouse/Sales was not updated: unexpected. "
+        "Catalogue Dashboard graph for Lakehouse/Sales was not updated: unexpected. "
         "The Build continued."
     ]
     published = next(
@@ -355,9 +355,9 @@ def test_a_browser_graph_failure_is_a_build_warning(estate, tmp_path, monkeypatc
     statements = json.loads(
         estate["store"].read(bundle.location.join(*published.payload.split("/")))
     )
-    (browser,) = [line for line in statements if "[_].[BrowserNode]" in line]
-    assert "N'_weaver'" in browser
-    assert "N'Sales'" not in browser
+    (graph,) = [line for line in statements if "[_].[GraphNode]" in line]
+    assert "N'_weaver'" in graph
+    assert "N'Sales'" not in graph
 
 
 @weaver_test()

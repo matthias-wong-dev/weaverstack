@@ -130,7 +130,7 @@ def build(
     with prepare_repository(
         source_location,
         source_store=source_store,
-        catalogue_browser=resolved_workspace.catalogue_browser is not None,
+        catalogue_dashboard=resolved_workspace.catalogue_dashboard is not None,
     ) as prepared:
         selected = _item_bindings(
             items, resolved_workspace, repository=prepared.repository

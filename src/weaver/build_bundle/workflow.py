@@ -555,14 +555,14 @@ def prepare_repository(
     source: Location,
     *,
     source_store: Store,
-    catalogue_browser: bool = False,
+    catalogue_dashboard: bool = False,
 ) -> Iterator[PreparedRepository]:
     with _temp_copy(source, source_store, prefix="weaver-repository-") as root:
         store = FilesystemStore()
         repository = parse_item_repository(
             Location(root.as_posix()),
             store=store,
-            catalogue_browser=catalogue_browser,
+            catalogue_dashboard=catalogue_dashboard,
         )
         yield PreparedRepository(repository=repository, store=store)
 
@@ -743,7 +743,7 @@ def build_item_repository_source(
     with prepare_repository(
         source,
         source_store=source_store,
-        catalogue_browser=getattr(workspace, "catalogue_browser", None) is not None,
+        catalogue_dashboard=getattr(workspace, "catalogue_dashboard", None) is not None,
     ) as prepared:
         from ..semantic_models.binding import begin_semantic_sources
 

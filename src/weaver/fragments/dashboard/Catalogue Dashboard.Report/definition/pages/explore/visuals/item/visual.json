@@ -1,13 +1,13 @@
 {
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.0.0/schema.json",
-  "name": "kind",
+  "name": "item",
   "position": {
-    "x": 896,
+    "x": 668,
     "y": 12,
-    "z": 4,
+    "z": 3,
     "height": 60,
-    "width": 180,
-    "tabOrder": 4
+    "width": 220,
+    "tabOrder": 3
   },
   "visual": {
     "visualType": "slicer",
@@ -20,15 +20,15 @@
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "BrowserNode"
+                      "Entity": "GraphNode"
                     }
                   },
-                  "Property": "Node kind"
+                  "Property": "Item label"
                 }
               },
-              "queryRef": "BrowserNode.Node kind",
-              "nativeQueryRef": "Node kind",
-              "displayName": "Kind",
+              "queryRef": "GraphNode.Item label",
+              "nativeQueryRef": "Item label",
+              "displayName": "Item",
               "active": true
             }
           ]

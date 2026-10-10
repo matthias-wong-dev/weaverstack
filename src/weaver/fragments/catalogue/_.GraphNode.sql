@@ -1,10 +1,10 @@
 /*
-Table ID: _.BrowserNode
+Table ID: _.GraphNode
 
 Description: >-
   One row per node of the installed graph, scoped to its item: data objects,
   shortcut destinations, Tests, Assumptions, semantic models and Reports. A
-  report reads it with BrowserEdge to draw lineage without resolving Weaver
+  report reads it with GraphEdge to draw lineage without resolving Weaver
   references.
 
 Lineage: >-
@@ -54,7 +54,7 @@ Column notes:
   Object name: >-
     The node's name, as Registry stores it.
   Node ID: >-
-    The node's installed identity, as BrowserEdge names it.
+    The node's installed identity, as GraphEdge names it.
   Node kind: >-
     Table, View, Folder, Shortcut, Test, Assumption, Semantic model or Report.
   Label: >-

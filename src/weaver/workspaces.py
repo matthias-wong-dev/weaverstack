@@ -245,21 +245,21 @@ def _target_declarations(
     return MappingProxyType(resolved)
 
 
-def _validate_browser(workspace: "Workspace") -> None:
-    from .catalogue_browser import BROWSER_ITEMS
+def _validate_dashboard(workspace: "Workspace") -> None:
+    from .catalogue_dashboard import DASHBOARD_ITEMS
 
-    name = workspace.catalogue_browser
+    name = workspace.catalogue_dashboard
     if not workspace.catalogue:
         raise ConfigError(
-            f"catalogue_browser: {name} reads the Weaver catalogue, and no catalogue "
+            f"catalogue_dashboard: {name} reads the Weaver catalogue, and no catalogue "
             "is configured. Add catalogue: Warehouse/<name> to workspace "
             "configuration."
         )
     for item, declaration in workspace.targets.items():
-        if item in BROWSER_ITEMS:
+        if item in DASHBOARD_ITEMS:
             raise ConfigError(
-                f"targets: {item} is the built-in Catalogue Browser, which "
-                "catalogue_browser: deploys. Remove this targets: entry."
+                f"targets: {item} is the built-in Catalogue Dashboard, which "
+                "catalogue_dashboard: deploys. Remove this targets: entry."
             )
         if (
             item.item_type in {SEMANTIC_MODEL, REPORT}
@@ -267,7 +267,7 @@ def _validate_browser(workspace: "Workspace") -> None:
         ):
             raise ConfigError(
                 f"targets: {item} deploys to {declaration.physical}, which "
-                "catalogue_browser: names for the Catalogue Browser. Choose another "
+                "catalogue_dashboard: names for the Catalogue Dashboard. Choose another "
                 "Fabric item for one of them."
             )
 
@@ -285,8 +285,8 @@ class Workspace:
     execution: ExecutionSettings = field(default_factory=ExecutionSettings)
     targets: Mapping[WeaverItemId, TargetDeclaration] = field(default_factory=dict)
     data_sources: Mapping[str, str] = field(default_factory=dict)
-    #: The Fabric item the built-in Catalogue Browser model and Report deploy to.
-    catalogue_browser: str | None = None
+    #: The Fabric item the built-in Catalogue Dashboard model and Report deploy to.
+    catalogue_dashboard: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -305,13 +305,13 @@ class Workspace:
         if not isinstance(self.execution, ExecutionSettings):
             raise ConfigError("execution must be ExecutionSettings")
         object.__setattr__(self, "targets", _target_declarations(self.targets))
-        if self.catalogue_browser is not None:
+        if self.catalogue_dashboard is not None:
             object.__setattr__(
                 self,
-                "catalogue_browser",
-                validate_name(self.catalogue_browser, what="catalogue_browser"),
+                "catalogue_dashboard",
+                validate_name(self.catalogue_dashboard, what="catalogue_dashboard"),
             )
-            _validate_browser(self)
+            _validate_dashboard(self)
         from .semantic_models.expressions import source_mappings
 
         if not isinstance(self.data_sources, Mapping):
@@ -339,15 +339,15 @@ class Workspace:
 
     @property
     def bound_targets(self) -> Mapping[WeaverItemId, TargetDeclaration]:
-        """``targets``, with the Catalogue Browser's items when it is configured."""
+        """``targets``, with the Catalogue Dashboard's items when it is configured."""
 
-        if self.catalogue_browser is None:
+        if self.catalogue_dashboard is None:
             return self.targets
-        from .catalogue_browser import BROWSER_ITEMS
+        from .catalogue_dashboard import DASHBOARD_ITEMS
 
-        declaration = TargetDeclaration(self.catalogue_browser)
+        declaration = TargetDeclaration(self.catalogue_dashboard)
         return MappingProxyType(
-            {**self.targets, **dict.fromkeys(BROWSER_ITEMS, declaration)}
+            {**self.targets, **dict.fromkeys(DASHBOARD_ITEMS, declaration)}
         )
 
     def target_for(self, item: WeaverItemId):

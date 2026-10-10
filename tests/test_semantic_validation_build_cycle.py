@@ -84,11 +84,11 @@ def test_validations_publish_their_dictionary_definition_and_dependencies(
 
 
 @weaver_test()
-def test_the_browser_rows_are_the_models_installed_graph(tmp_path, monkeypatch):
+def test_the_graph_rows_are_the_models_installed_graph(tmp_path, monkeypatch):
     """The model, its validations and their reads, as the catalogue graph has them.
 
     The graph is read once the build's rows and Fabric's deployed tables are both
-    installed; the browser rows were projected before deployment.
+    installed; the graph rows were projected before deployment.
     """
 
     from weaver.catalogue.state import Catalogue
@@ -103,10 +103,10 @@ def test_the_browser_rows_are_the_models_installed_graph(tmp_path, monkeypatch):
     dag = Catalogue({**source_catalogue().rows, **rows}).dag()
     validations = {node.node_id for node in dag.nodes if node.is_validation}
 
-    nodes = {row["node_id"] for row in rows[ITEM]["BrowserNode"]}
+    nodes = {row["node_id"] for row in rows[ITEM]["GraphNode"]}
     edges = {
         (row["upstream_node_id"], row["downstream_node_id"], row["edge_kind"])
-        for row in rows[ITEM]["BrowserEdge"]
+        for row in rows[ITEM]["GraphEdge"]
     }
 
     assert nodes == {node.node_id for node in dag.nodes if node.item == ITEM}
@@ -121,7 +121,7 @@ def test_the_browser_rows_are_the_models_installed_graph(tmp_path, monkeypatch):
     }
     assert (str(ITEM), f"{ITEM}/Sales.RevenueIsPositive", "validation") in edges
     assert ("Warehouse/Serving/Cake.Sales", str(ITEM), "dependency") in edges
-    kinds = {row["label"]: row["node_kind"] for row in rows[ITEM]["BrowserNode"]}
+    kinds = {row["label"]: row["node_kind"] for row in rows[ITEM]["GraphNode"]}
     assert kinds == {
         ITEM.item_name: "semantic_model",
         "Sales.RevenueReconciles": "test",

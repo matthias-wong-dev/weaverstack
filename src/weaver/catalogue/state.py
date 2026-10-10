@@ -31,9 +31,9 @@ from .tables import (
     BOOKMARK,
     BOOKMARK_SENTINEL,
     BORROWED_TABLES,
-    BROWSER_TABLES,
     BUILD_DATETIME,
     CURRENT_STATE_TABLES,
+    GRAPH_TABLES,
     INSTALLATION,
     LOAD_STATUS,
     MIRROR,
@@ -634,7 +634,7 @@ INTRODUCED_TABLES = frozenset(
         TEST_STATUS.name,
         SEMANTIC_MODEL_TEST.name,
         *(table.name for table in SEMANTIC_TABLES),
-        *(table.name for table in BROWSER_TABLES),
+        *(table.name for table in GRAPH_TABLES),
     }
 )
 

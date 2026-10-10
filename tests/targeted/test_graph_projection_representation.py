@@ -1,9 +1,9 @@
-"""The browser tables restate the installed graph, one item at a time.
+"""The graph tables restate the installed graph, one item at a time.
 
-`_.BrowserNode` and `_.BrowserEdge` exist so a report that cannot resolve a
+`_.GraphNode` and `_.GraphEdge` exist so a report that cannot resolve a
 Weaver reference can still walk the graph. They are only useful if they are the
 graph `Catalogue.dag()` reads, so the central claim here is parity: once a
-build's rows are installed, the union of every item's browser rows is that
+build's rows are installed, the union of every item's graph rows is that
 graph's nodes and edges.
 
 Pure Python. The rows are the ones `desired_catalogue` publishes, and the graph
@@ -31,14 +31,14 @@ from weaver.build_bundle.catalogue_actions import (
     render_catalogue_after_build,
 )
 from weaver.build_bundle.planner import certifiable_identities
-from weaver.catalogue.browser import SEARCH_TEXT_BYTES, browser_rows
+from weaver.catalogue.graph_rows import SEARCH_TEXT_BYTES, graph_rows
 from weaver.catalogue.reconcile import publish
 from weaver.catalogue.state import Catalogue
 from weaver.catalogue.tables import (
-    BROWSER_EDGE,
-    BROWSER_NODE,
-    BROWSER_TABLES,
     DEPENDENCY,
+    GRAPH_EDGE,
+    GRAPH_NODE,
+    GRAPH_TABLES,
     INSTALLATION,
     REGISTRY,
     TABLE_DICTIONARY,
@@ -88,10 +88,10 @@ def _rows(catalogue: Catalogue, table) -> list[dict]:
     ]
 
 
-def _browsed(catalogue: Catalogue):
-    """The browser rows' nodes, resolved edges and External edges."""
+def _graphed(catalogue: Catalogue):
+    """The graph rows' nodes, resolved edges and External edges."""
 
-    nodes = {row["node_id"] for row in _rows(catalogue, BROWSER_NODE)}
+    nodes = {row["node_id"] for row in _rows(catalogue, GRAPH_NODE)}
     edges = {
         (
             row["upstream_node_id"],
@@ -99,12 +99,12 @@ def _browsed(catalogue: Catalogue):
             row["edge_kind"],
             row["through_node_id"],
         )
-        for row in _rows(catalogue, BROWSER_EDGE)
+        for row in _rows(catalogue, GRAPH_EDGE)
         if row["edge_kind"] != "external"
     }
     external = {
         (row["downstream_node_id"], row["upstream_node_id"])
-        for row in _rows(catalogue, BROWSER_EDGE)
+        for row in _rows(catalogue, GRAPH_EDGE)
         if row["edge_kind"] == "external"
     }
     return nodes, edges, external
@@ -146,17 +146,17 @@ def _graph(dag, *, items=None):
 
 
 @weaver_test()
-def test_the_browser_rows_are_the_installed_graph(repository):
+def test_the_graph_rows_are_the_installed_graph(repository):
     built = built_catalogue(repository, _bindings(SALES, REPORTING))
 
-    nodes, edges, external = _browsed(built)
+    nodes, edges, external = _graphed(built)
     expected_nodes, expected_edges, expected_external = _graph(built.dag())
 
     assert nodes == expected_nodes
     assert edges == expected_edges
     assert external == expected_external == set()
     # The fixture reaches every kind the claim depends on.
-    kinds = {row["node_kind"] for row in _rows(built, BROWSER_NODE)}
+    kinds = {row["node_kind"] for row in _rows(built, GRAPH_NODE)}
     assert {"table", "view", "folder", "shortcut", "test", "assumption"} <= kinds
     assert {kind for _up, _down, kind, _through in edges} == {
         "dependency",
@@ -169,7 +169,7 @@ def test_the_browser_rows_are_the_installed_graph(repository):
 def test_a_read_through_a_shortcut_names_the_source_and_the_shortcut(repository):
     built = built_catalogue(repository, _bindings(SALES, REPORTING))
 
-    _nodes, edges, _external = _browsed(built)
+    _nodes, edges, _external = _graphed(built)
 
     assert (
         str(CUSTOMER),
@@ -191,7 +191,7 @@ def test_an_unresolved_read_is_an_external_edge_to_what_its_author_wrote(reposit
 
     installed = _desired(repository, _bindings(SALES, REPORTING), omitted={CUSTOMER})
 
-    nodes, edges, external = _browsed(installed)
+    nodes, edges, external = _graphed(installed)
     expected = _graph(installed.dag(), items={SALES})
 
     sales_nodes = {node for node in nodes if node.startswith(f"{SALES}/")}
@@ -228,9 +228,9 @@ def test_a_physical_read_is_an_external_edge():
         }
     )
 
-    rows = browser_rows(catalogue, item)
+    rows = graph_rows(catalogue, item)
 
-    (edge,) = rows[BROWSER_EDGE.name]
+    (edge,) = rows[GRAPH_EDGE.name]
     assert (edge["upstream_node_id"], edge["downstream_node_id"]) == (
         "Ledger.dbo.Customer",
         str(consumer),
@@ -253,10 +253,10 @@ def test_an_items_rows_come_from_its_own_rows_alone(repository):
     alone = _desired(repository, _bindings(REPORTING))
     together = built_catalogue(repository, _bindings(SALES, REPORTING))
 
-    for table in BROWSER_TABLES:
+    for table in GRAPH_TABLES:
         assert alone.rows[REPORTING][table.name] == together.rows[REPORTING][table.name]
     assert SALES not in alone.rows
-    upstreams = {row["upstream_node_id"] for row in _rows(alone, BROWSER_EDGE)}
+    upstreams = {row["upstream_node_id"] for row in _rows(alone, GRAPH_EDGE)}
     assert str(CUSTOMER) in upstreams
 
 
@@ -266,7 +266,7 @@ def test_rows_are_published_only_for_the_items_a_build_binds(repository):
 
     built = built_catalogue(repository, _bindings(SALES, REPORTING))
     departed = {
-        **_rows(built, BROWSER_NODE)[0],
+        **_rows(built, GRAPH_NODE)[0],
         "item_type": "Lakehouse",
         "item_name": "Sales",
         "schema_name": "Tables/DWG",
@@ -277,7 +277,7 @@ def test_rows_are_published_only_for_the_items_a_build_binds(repository):
         {
             item: {
                 **tables,
-                BROWSER_NODE.name: tables[BROWSER_NODE.name]
+                GRAPH_NODE.name: tables[GRAPH_NODE.name]
                 + ((departed,) if item == SALES else ()),
             }
             for item, tables in built.rows.items()
@@ -299,15 +299,15 @@ def test_rows_are_published_only_for_the_items_a_build_binds(repository):
         for stage in stages
         for content in stage.payloads.values()
         for line in json.loads(content)
-        if any(f"[{table.name}]" in line for table in BROWSER_TABLES)
+        if any(f"[{table.name}]" in line for table in GRAPH_TABLES)
     ]
     (delete,) = lines
-    assert delete.startswith("DELETE FROM [_].[BrowserNode]")
+    assert delete.startswith("DELETE FROM [_].[GraphNode]")
     assert "N'Sales'" in delete and "N'Reporting'" not in delete
 
 
 @weaver_test()
-def test_an_unchanged_estate_publishes_no_browser_rows(repository):
+def test_an_unchanged_estate_publishes_no_graph_rows(repository):
     """Two separate projections of one estate agree row for row."""
 
     first = built_catalogue(repository, _bindings(SALES, REPORTING))
@@ -320,12 +320,12 @@ def test_an_unchanged_estate_publishes_no_browser_rows(repository):
     assert not any(
         f"[{table.name}]" in statement
         for statement in publication.statements
-        for table in BROWSER_TABLES
+        for table in GRAPH_TABLES
     )
 
 
 @weaver_test()
-def test_a_catalogue_without_browser_rows_gains_them_on_the_next_build(repository):
+def test_a_catalogue_without_graph_rows_gains_them_on_the_next_build(repository):
     """An estate built before these tables existed fills them in unchanged."""
 
     built = built_catalogue(repository, _bindings(SALES, REPORTING))
@@ -334,7 +334,7 @@ def test_a_catalogue_without_browser_rows_gains_them_on_the_next_build(repositor
             item: {
                 name: rows
                 for name, rows in tables.items()
-                if name not in {table.name for table in BROWSER_TABLES}
+                if name not in {table.name for table in GRAPH_TABLES}
             }
             for item, tables in built.rows.items()
         }
@@ -345,10 +345,10 @@ def test_a_catalogue_without_browser_rows_gains_them_on_the_next_build(repositor
     touched = {
         table.name
         for statement in publication.statements
-        for table in (*BROWSER_TABLES, TABLE_DICTIONARY, REGISTRY)
+        for table in (*GRAPH_TABLES, TABLE_DICTIONARY, REGISTRY)
         if f"[{table.name}]" in statement
     }
-    assert touched == {BROWSER_NODE.name, BROWSER_EDGE.name}
+    assert touched == {GRAPH_NODE.name, GRAPH_EDGE.name}
 
 
 @weaver_test()
@@ -379,7 +379,7 @@ def test_an_item_whose_graph_fails_keeps_its_rows_and_the_build_goes_on(
                 name: rows
                 for name, rows in tables.items()
                 # Sales has none yet; Reporting holds rows its graph no longer has.
-                if item != SALES or name not in {t.name for t in BROWSER_TABLES}
+                if item != SALES or name not in {t.name for t in GRAPH_TABLES}
             }
             for item, tables in built.rows.items()
         }
@@ -398,7 +398,7 @@ def test_an_item_whose_graph_fails_keeps_its_rows_and_the_build_goes_on(
     )
 
     assert warned == [
-        "Catalogue Browser graph for Warehouse/Reporting was not updated: "
+        "Catalogue Dashboard graph for Warehouse/Reporting was not updated: "
         "Rpt.CustomerReport depends on itself. The Build continued."
     ]
     lines = [
@@ -406,9 +406,9 @@ def test_an_item_whose_graph_fails_keeps_its_rows_and_the_build_goes_on(
         for stage in stages
         for content in stage.payloads.values()
         for line in json.loads(content)
-        if any(f"[{table.name}]" in line for table in BROWSER_TABLES)
+        if any(f"[{table.name}]" in line for table in GRAPH_TABLES)
     ]
-    assert lines, "Sales' browser rows still publish"
+    assert lines, "Sales' graph rows still publish"
     assert all("N'Sales'" in line for line in lines)
     assert not any("N'Reporting'" in line for line in lines)
 
@@ -419,7 +419,7 @@ def test_an_item_whose_graph_fails_keeps_its_rows_and_the_build_goes_on(
 @weaver_test()
 def test_a_node_carries_its_name_item_description_and_search_text(repository):
     built = built_catalogue(repository, _bindings(SALES, REPORTING))
-    by_id = {row["node_id"]: row for row in _rows(built, BROWSER_NODE)}
+    by_id = {row["node_id"]: row for row in _rows(built, GRAPH_NODE)}
 
     customer = by_id[str(CUSTOMER)]
     assert (customer["schema_name"], customer["object_name"]) == (
@@ -447,12 +447,12 @@ def test_a_node_carries_its_name_item_description_and_search_text(repository):
 @weaver_test()
 def test_the_catalogue_and_its_surface_are_internal(repository):
     built = built_catalogue(repository, _bindings(SALES, REPORTING))
-    by_id = {row["node_id"]: row for row in _rows(built, BROWSER_NODE)}
+    by_id = {row["node_id"]: row for row in _rows(built, GRAPH_NODE)}
 
     internal = {node for node, row in by_id.items() if row["is_internal"]}
 
     assert "Warehouse/_weaver/_.Registry" in internal
-    assert "Warehouse/_weaver/_.BrowserNode" in internal
+    assert "Warehouse/_weaver/_.GraphNode" in internal
     assert "Lakehouse/Sales/Tables/_.Log" in internal
     assert "Warehouse/Reporting/_.LoadStatus" in internal
     assert all(
@@ -484,7 +484,7 @@ def test_search_text_stays_within_its_column():
         }
     )
 
-    (node,) = browser_rows(catalogue, item)[BROWSER_NODE.name]
+    (node,) = graph_rows(catalogue, item)[GRAPH_NODE.name]
 
     stored = node["search_text"].encode("utf-8")
     assert len(stored) <= SEARCH_TEXT_BYTES
@@ -492,27 +492,29 @@ def test_search_text_stays_within_its_column():
 
 
 @weaver_test()
-def test_the_catalogue_browser_is_internal():
+def test_the_catalogue_dashboard_is_internal():
     from weaver.build_bundle.targets import ItemBindings, parse_build_item
-    from weaver.catalogue_browser import BROWSER_ITEMS
+    from weaver.catalogue_dashboard import DASHBOARD_ITEMS
 
-    composed = parse_item_repository(Location(str(CROSS_ITEM)), catalogue_browser=True)
+    composed = parse_item_repository(
+        Location(str(CROSS_ITEM)), catalogue_dashboard=True
+    )
     bindings = effective_item_bindings(
         ItemBindings(
             item_bindings(("Lakehouse/Sales", "Sales_LH")).entries
             + tuple(
-                parse_build_item(f"{item}={item.item_type}/Estate Browser")
-                for item in BROWSER_ITEMS
+                parse_build_item(f"{item}={item.item_type}/Estate Dashboard")
+                for item in DASHBOARD_ITEMS
             )
         ),
         control_item=ItemRef("Weaver"),
         workspace_name=WORKSPACE,
     )
-    rows = _rows(built_catalogue(composed, bindings), BROWSER_NODE)
-    browser = [row for row in rows if row["item_name"] == "Catalogue Browser"]
+    rows = _rows(built_catalogue(composed, bindings), GRAPH_NODE)
+    dashboard = [row for row in rows if row["item_name"] == "Catalogue Dashboard"]
 
-    assert {row["item_type"] for row in browser} == {"SemanticModel", "Report"}
-    assert all(row["is_internal"] for row in browser)
+    assert {row["item_type"] for row in dashboard} == {"SemanticModel", "Report"}
+    assert all(row["is_internal"] for row in dashboard)
     assert not any(
         row["is_internal"]
         for row in rows
