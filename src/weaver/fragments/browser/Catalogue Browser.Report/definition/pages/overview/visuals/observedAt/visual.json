@@ -1,0 +1,38 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.0.0/schema.json",
+  "name": "observedAt",
+  "position": {
+    "x": 16,
+    "y": 680,
+    "z": 2,
+    "height": 32,
+    "width": 1248,
+    "tabOrder": 2
+  },
+  "visual": {
+    "visualType": "htmlContent443BE3AD55E043BF878BED274D3A6865",
+    "query": {
+      "queryState": {
+        "content": {
+          "projections": [
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Browser"
+                    }
+                  },
+                  "Property": "Observed at line"
+                }
+              },
+              "queryRef": "Browser.Observed at line",
+              "nativeQueryRef": "Observed at line"
+            }
+          ]
+        }
+      }
+    },
+    "drillFilterOtherVisuals": true
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.0.0/schema.json",
+  "name": "details",
+  "position": {
+    "x": 948,
+    "y": 84,
+    "z": 7,
+    "height": 624,
+    "width": 316,
+    "tabOrder": 7
+  },
+  "visual": {
+    "visualType": "htmlContent443BE3AD55E043BF878BED274D3A6865",
+    "query": {
+      "queryState": {
+        "content": {
+          "projections": [
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Browser"
+                    }
+                  },
+                  "Property": "Focus details"
+                }
+              },
+              "queryRef": "Browser.Focus details",
+              "nativeQueryRef": "Focus details"
+            }
+          ]
+        }
+      }
+    },
+    "drillFilterOtherVisuals": true
+  }
+}

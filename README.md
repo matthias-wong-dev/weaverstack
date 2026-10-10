@@ -156,6 +156,24 @@ Build reports that the check did not run. Failed updates or readback checks leav
 the selected model uncertified. Every selected model compiles and deploys, even
 when its effective signature matches the installed model.
 
+### Catalogue Browser
+
+`catalogue_browser:` in workspace configuration adds Weaver's built-in
+semantic model and Report over the catalogue, deployed to the Fabric item it
+names:
+
+```yaml
+catalogue: Warehouse/Weaver
+catalogue_browser: Catalogue Browser
+```
+
+`weaver build --item PowerBI` builds them with the project's own Power BI
+items. The Report shows estate health, the lineage around a chosen object and
+the latest run. It renders with the certified HTML Content (Secure) visual and
+filters with native slicers. Its live pages refresh every 30 seconds, or at
+the capacity's minimum interval when that is longer. A project's own
+`Catalogue Browser` model or Report is refused while the key is set.
+
 ### Shared data sources
 
 A PBIP can use one shared M expression per logical data source. Table queries

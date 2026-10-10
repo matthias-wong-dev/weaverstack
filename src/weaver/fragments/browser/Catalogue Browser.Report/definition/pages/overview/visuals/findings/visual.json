@@ -1,0 +1,60 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.0.0/schema.json",
+  "name": "findings",
+  "position": {
+    "x": 16,
+    "y": 168,
+    "z": 1,
+    "height": 500,
+    "width": 1248,
+    "tabOrder": 1
+  },
+  "visual": {
+    "visualType": "htmlContent443BE3AD55E043BF878BED274D3A6865",
+    "query": {
+      "queryState": {
+        "content": {
+          "projections": [
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Browser"
+                    }
+                  },
+                  "Property": "Findings"
+                }
+              },
+              "queryRef": "Browser.Findings",
+              "nativeQueryRef": "Findings"
+            }
+          ]
+        }
+      }
+    },
+    "drillFilterOtherVisuals": true,
+    "visualContainerObjects": {
+      "title": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "text": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Findings'"
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}
