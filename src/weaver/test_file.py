@@ -219,11 +219,23 @@ def source_validation_nodes(
     started: datetime,
     dry_run: bool = False,
     collect: bool = False,
+    concurrency: int | None = None,
 ) -> tuple[ValidationNodeReport, ...]:
-    """Run each validation in turn and report it."""
+    """Execute source validations with the invocation and resource limits."""
 
+    from .concurrency import validate_concurrency
     from .operations.items import uncatalogued_target
 
+    validate_concurrency(concurrency)
+    if concurrency is not None and not dry_run and validations:
+        return _scheduled_source_nodes(
+            session,
+            workspace=workspace,
+            validations=validations,
+            started=started,
+            collect=collect,
+            concurrency=concurrency,
+        )
     nodes = []
     for validation in validations:
         target = uncatalogued_target(workspace, validation.item)
@@ -257,6 +269,68 @@ def source_validation_nodes(
     return tuple(nodes)
 
 
+def _scheduled_source_nodes(
+    session, *, workspace, validations, started, collect, concurrency
+):
+    from .catalogue.state import Catalogue
+    from .operations.items import uncatalogued_target
+    from .run.graph import RunGraph, RunNode
+    from .run.runner import Lanes, Runner, RunRequest, needs_spark
+    from .run.state import RunState
+
+    nodes = tuple(
+        RunNode(
+            node_id=str(index),
+            logical_id=validation.logical,
+            physical_target=uncatalogued_target(workspace, validation.item),
+            primitive_kind=_primitive(
+                validation, uncatalogued_target(workspace, validation.item)
+            ),
+            role=validation.source.kind,
+            installed=validation,
+        )
+        for index, validation in enumerate(validations)
+    )
+    request = RunRequest.test(
+        tuple(dict.fromkeys(each.item for each in validations)),
+        fault_tolerant=True,
+        concurrency=concurrency,
+    )
+    runner = Runner(
+        RunState(Catalogue(rows={})),
+        request,
+        workspace=workspace,
+        graph=RunGraph(nodes=nodes, items=request.items),
+    )
+    if needs_spark(runner.graph):
+        session.spark(workspace)
+    reports = {}
+
+    def dispatch(node, **asked):
+        validation = node.installed
+        report = _execute(
+            session,
+            workspace=workspace,
+            validation=validation,
+            target=node.physical_target,
+            collect=collect,
+            isolated=True,
+            common={
+                "logical_id": str(validation.logical),
+                "kind": validation.source.kind,
+                "physical_target": str(node.physical_target),
+                "primitive_kind": node.primitive_kind,
+                "dispatch_location": validation.path,
+                "started_at": started.isoformat(),
+            },
+        )
+        reports[node.node_id] = report
+        return report.result
+
+    runner.run(session=session, dispatch=dispatch, lanes=Lanes.configured(workspace))
+    return tuple(reports[str(index)] for index in range(len(validations)))
+
+
 def _primitive(validation: SourceValidation, target: PhysicalTargetRef) -> str:
     if validation.item.item_type == SEMANTIC_MODEL:
         return SEMANTIC_VALIDATION
@@ -265,7 +339,9 @@ def _primitive(validation: SourceValidation, target: PhysicalTargetRef) -> str:
     return WAREHOUSE_PROCEDURE
 
 
-def _execute(session, *, workspace, validation, target, collect, common):
+def _execute(
+    session, *, workspace, validation, target, collect, common, isolated=False
+):
     document = validation.source
     try:
         if document.language == PYTHON:
@@ -277,7 +353,7 @@ def _execute(session, *, workspace, validation, target, collect, common):
             result, diagnostics = _run_semantic(session, workspace, validation, target)
         elif target.kind == LAKEHOUSE_TARGET:
             result, diagnostics = _run_spark(
-                session, document, target, workspace=workspace
+                session, document, target, workspace=workspace, isolated=isolated
             )
         else:
             result, diagnostics = _run_warehouse(
@@ -378,7 +454,9 @@ def _run_warehouse(session, document, target: PhysicalTargetRef, *, workspace):
     )
 
 
-def _run_spark(session, document, target: PhysicalTargetRef, *, workspace):
+def _run_spark(
+    session, document, target: PhysicalTargetRef, *, workspace, isolated=False
+):
     """Run the Spark SQL program through the same runtime as an installed module."""
 
     from .declaration.spark_sql_module import addressed
@@ -393,6 +471,10 @@ def _run_spark(session, document, target: PhysicalTargetRef, *, workspace):
     spark = session.spark(workspace)
     if spark is None:
         raise ValidationError("running a Spark SQL validation needs a Spark session")
+    if isolated:
+        from .run.dispatch import isolated_spark
+
+        spark = isolated_spark(spark)
     if document.language != SPARK_SQL:
         raise CommandError(
             f"a {document.language} validation cannot run against {target}"

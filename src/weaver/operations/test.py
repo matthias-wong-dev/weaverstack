@@ -42,6 +42,7 @@ def test(
     environment: str | None = None,
     workspace_config: str | Path | None = None,
     dry_run: bool = False,
+    concurrency: int | None = None,
     session=None,
 ) -> ValidationRunReport:
     """Run the Tests and Assumptions of the named items.
@@ -71,6 +72,9 @@ def test(
     report distinguishes findings from validations that could not be evaluated.
     """
 
+    from ..concurrency import validate_concurrency
+
+    validate_concurrency(concurrency)
     selected_names = tuple(text for text, _ in name_patterns(names, error=CommandError))
     selected_files = _files(files)
     resolved = operation_workspace(
@@ -103,6 +107,7 @@ def test(
                     names=selected_names,
                     files=selected_files,
                     dry_run=dry_run,
+                    concurrency=concurrency,
                 )
             else:
                 report = run_test(
@@ -111,6 +116,7 @@ def test(
                     items=requested,
                     names=selected_names,
                     dry_run=dry_run,
+                    concurrency=concurrency,
                 )
             frame.failed = not report.succeeded
             return report
@@ -131,6 +137,7 @@ def run_test(
     names: Sequence[str] = (),
     state=None,
     dry_run: bool = False,
+    concurrency: int | None = None,
 ) -> ValidationRunReport:
     """Run installed validations through a prepared Session, and record them.
 
@@ -171,6 +178,7 @@ def run_test(
         dry_run=dry_run,
         # Validations are independent; a finding does not block the rest.
         fault_tolerant=True,
+        concurrency=concurrency,
     )
     with session.step("Build run graph"):
         runner = validation_runner(workspace, state, request)
@@ -201,6 +209,7 @@ def run_source_test(
     names: Sequence[str] = (),
     files: Sequence[str] = (),
     dry_run: bool = False,
+    concurrency: int | None = None,
 ) -> ValidationRunReport:
     """Run validations from source through a prepared Session, recording nothing."""
 
@@ -238,6 +247,7 @@ def run_source_test(
             started=started,
             dry_run=dry_run,
             collect=bool(names or files),
+            concurrency=concurrency,
         ),
         entry=run_source_test_in_fabric,
         arguments=lambda: {
@@ -245,6 +255,7 @@ def run_source_test(
             "started": started.isoformat(),
             "dry_run": dry_run,
             "collect": bool(names or files),
+            "concurrency": concurrency,
         },
         decode=_decoded,
         records_catalogue=False,
@@ -253,7 +264,14 @@ def run_source_test(
 
 
 def execute_source_test(
-    session, *, workspace, validations, started, dry_run=False, collect=False
+    session,
+    *,
+    workspace,
+    validations,
+    started,
+    dry_run=False,
+    collect=False,
+    concurrency=None,
 ) -> ValidationRunReport:
     from ..test_file import source_validation_nodes
 
@@ -265,6 +283,7 @@ def execute_source_test(
             started=started,
             dry_run=dry_run,
             collect=collect,
+            concurrency=concurrency,
         )
     return _reported(nodes=nodes, started=started, workflow_id=None)
 

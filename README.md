@@ -31,6 +31,32 @@ weaver build
 With `--non-interactive`, Weaver uses a configured service principal or Azure
 CLI sign-in and does not open a browser.
 
+## Invocation concurrency
+
+Build, Load and Test accept `--concurrency N` and Python `concurrency=N`.
+N is a positive integer limiting total simultaneous execution across all
+resources for that invocation. Workspace resource limits and dependency ordering
+still apply. Omission keeps the configured defaults; workspace configuration is
+unchanged. File-mode Tests run serially by default and use the run scheduler
+when concurrency is supplied. Dry-run and bundle-only commands validate the
+value but execute no work and retain the same plan identity.
+
+```bash
+weaver build --concurrency 2
+weaver load Warehouse/Reporting --concurrency 2
+weaver test Lakehouse/Landing --concurrency 2
+```
+
+In a Fabric notebook with an existing Session:
+
+```python
+import weaver
+
+weaver.build(source, session=session, concurrency=2)
+weaver.load("Lakehouse/Landing", session=session, concurrency=2)
+weaver.test("Lakehouse/Landing", session=session, concurrency=2)
+```
+
 ## Semantic model Build
 
 A Power BI source project lives under `PowerBI/<project>/`. Each native

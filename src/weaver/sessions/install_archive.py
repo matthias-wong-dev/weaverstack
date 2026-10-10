@@ -203,6 +203,7 @@ def execute_mutation_in_fabric(
     timeout=600,
     build_datetime=None,
     observer=None,
+    concurrency=None,
 ):
     """Submit one complete plan once; an uncertain invocation is never replayed.
 
@@ -215,6 +216,7 @@ def execute_mutation_in_fabric(
     from uuid import uuid4
 
     from ..build_bundle.execution import execution_workspace, spark_home_of
+    from ..concurrency import validate_concurrency
     from ..errors import BuildError
     from ..fabric.onelake import abfss_path
     from ..mutation.executor import MutationReport, MutationResult, validate_inputs
@@ -222,6 +224,7 @@ def execute_mutation_in_fabric(
     from ..workspaces import CARRIER_AREA
     from .mutation_report import decode_report
 
+    validate_concurrency(concurrency)
     payloads = validate_inputs(plan, payloads)
     actions = [a for _, _, a in plan.actions()]
     invocation_id = uuid4().hex
@@ -261,7 +264,9 @@ def execute_mutation_in_fabric(
     from .archive_runtime import execution_capacity
 
     # Fabric runs the plan with this deployment's capacity, which the plan omits.
-    workers, limits = execution_capacity(plan, session.workspace)
+    workers, limits = execution_capacity(
+        plan, session.workspace, concurrency=concurrency
+    )
     request = {
         "plan_id": plan.bundle_id,
         "invocation_id": invocation_id,

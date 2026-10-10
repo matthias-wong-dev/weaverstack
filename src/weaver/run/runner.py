@@ -116,10 +116,13 @@ class RunRequest:
     #: Recursively expand original Load seeds within the requested items.
     ancestors: bool = False
     descendants: bool = False
+    concurrency: int | None = None
 
     def __post_init__(self) -> None:
+        from ..concurrency import validate_concurrency
         from ..errors import CommandError
 
+        validate_concurrency(self.concurrency)
         if not self.items:
             raise CommandError(f"{self.kind} needs at least one item")
         if self.selected is not None and self.kind != LOAD:
@@ -165,6 +168,7 @@ class RunRequest:
             ignore_stability_threshold=bool(payload.get("ignore_stability_threshold")),
             ancestors=bool(payload.get("ancestors")),
             descendants=bool(payload.get("descendants")),
+            concurrency=payload.get("concurrency"),
         )
 
     def to_mapping(self) -> dict:
@@ -181,6 +185,7 @@ class RunRequest:
             "ignore_stability_threshold": self.ignore_stability_threshold,
             "ancestors": self.ancestors,
             "descendants": self.descendants,
+            "concurrency": self.concurrency,
         }
 
 
@@ -256,13 +261,14 @@ class Runner:
         *,
         workspace: object | None = None,
         can_refresh: bool = True,
+        graph: RunGraph | None = None,
     ) -> None:
         self.state = state
         self.request = request
         self.workspace = workspace
         #: Whether this host has a SQL analytics endpoint.
         self.can_refresh = can_refresh
-        self._graph: RunGraph | None = None
+        self._graph: RunGraph | None = graph
         self._events: list[dict] = []
         self._runtime_scope = None
         self._publication = None
@@ -561,6 +567,11 @@ class Runner:
         def admit(pool) -> None:
             for node, resolved in runnable():
                 lane = lanes.of(node)
+                if (
+                    self.request.concurrency is not None
+                    and len(running) >= self.request.concurrency
+                ):
+                    break
                 if occupied.get(lane, 0) >= lanes.limit(lane):
                     continue
                 waiting.remove(node)
@@ -583,6 +594,8 @@ class Runner:
                 running[future] = lane
 
         workers = lanes.spark + lanes.warehouse + lanes.other
+        if self.request.concurrency is not None:
+            workers = min(workers, self.request.concurrency)
         with ThreadPoolExecutor(max_workers=workers) as pool:
             while True:
                 admit(pool)

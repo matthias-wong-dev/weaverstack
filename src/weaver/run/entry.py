@@ -98,6 +98,7 @@ def run_source_test_in_fabric(
     started: str,
     dry_run=False,
     collect=False,
+    concurrency=None,
 ) -> dict:
     """Execute parsed source definitions and return their unrecorded results."""
 
@@ -113,6 +114,7 @@ def run_source_test_in_fabric(
         started=datetime.fromisoformat(started),
         dry_run=dry_run,
         collect=collect,
+        concurrency=concurrency,
     )
     carried = report.to_mapping()
     carried["diagnostics"] = {
