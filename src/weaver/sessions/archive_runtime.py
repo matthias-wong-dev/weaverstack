@@ -116,7 +116,9 @@ WORKERS = 32
 TSQL_ROUND_TRIP = 25
 
 
-def execution_capacity(plan, workspace=None) -> tuple[int, dict[str, int]]:
+def execution_capacity(
+    plan, workspace=None, *, concurrency=None
+) -> tuple[int, dict[str, int]]:
     """The executor's workers and each resource's limit for this deployment.
 
     The Workspace's ``execution.build`` sets how many actions may occupy each
@@ -125,6 +127,9 @@ def execution_capacity(plan, workspace=None) -> tuple[int, dict[str, int]]:
     """
 
     from ..build_bundle.stages import SPARK
+    from ..concurrency import validate_concurrency
+
+    validate_concurrency(concurrency)
     from ..workspaces import BuildConcurrency
 
     build = BuildConcurrency() if workspace is None else workspace.execution.build
@@ -139,7 +144,7 @@ def execution_capacity(plan, workspace=None) -> tuple[int, dict[str, int]]:
         for _, _, action in plan.actions()
         for key in action.resources
     }
-    return WORKERS, limits
+    return WORKERS if concurrency is None else min(WORKERS, concurrency), limits
 
 
 def execute_mutation(
@@ -149,6 +154,7 @@ def execute_mutation(
     *,
     workers=None,
     limits=None,
+    concurrency=None,
     invocation_id=None,
     timeout=600,
     build_datetime=None,
@@ -176,8 +182,12 @@ def execute_mutation(
     )
 
     payloads = validate_inputs(plan, payloads)
-    capacity, configured = execution_capacity(plan, session.workspace)
+    capacity, configured = execution_capacity(
+        plan, session.workspace, concurrency=concurrency
+    )
     workers = capacity if workers is None else workers
+    if concurrency is not None:
+        workers = min(workers, capacity)
     limits = configured if limits is None else limits
     if build_datetime is None:
         from datetime import datetime, timezone

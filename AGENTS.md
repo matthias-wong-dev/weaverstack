@@ -518,7 +518,9 @@ Workspace's `execution.build` sets each capability's limit
 `onelake_concurrency`, `shortcut_concurrency`) for Build, Wipe and Mirror, and
 `weaver.sessions.archive_runtime.execution_capacity` applies it. The defaults
 suit a mid-sized capacity; an F64 sustains twice as much. The limits travel
-with an invocation, outside plan identity. They throttle execution only; an
+with an invocation, outside plan identity. Build's optional `concurrency` caps
+the total executor workers within the existing pool and resource limits. It
+travels as execution policy and leaves the bundle unchanged. They throttle execution only; an
 ordering the plan needs is an edge, never a low limit. Each Warehouse lane
 leases its own pooled connection, and four concurrent DDL lanes ran without
 conflict in Fabric. Ready T-SQL actions on one Warehouse share round trips
@@ -618,6 +620,10 @@ finish and settle, and nodes not yet started stay pending. Two concurrent load
 commands are separate writers of the same catalogue tables, which a Warehouse
 can refuse as an update conflict.
 
+Load and Test carry optional total `concurrency` in their RunRequest. Admission
+requires a free total slot and a free resource lane. Omission retains the pool
+and lanes, and every invocation leaves Workspace settings unchanged.
+
 A test run schedules the same way: Warehouse validations take Warehouse lanes
 and Lakehouse validations take Spark lanes. A finding never stops the rest.
 
@@ -644,6 +650,9 @@ target mappings resolved for the current operation, independently of cached
 resource scopes. A NotebookSession executes them in-process. Source runs retain
 selection, comparison and diagnostic semantics and write no catalogue state.
 Warehouse-only, DAX-only and dry-run source selections start no Spark session.
+Source Tests remain serial by default. Explicit `concurrency` runs the parsed
+validations through Runner with the configured lanes and total cap; concurrent
+Spark validations each use an isolated Spark session. No catalogue is read or written.
 
 ## Architecture invariants
 

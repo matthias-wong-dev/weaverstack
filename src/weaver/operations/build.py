@@ -90,6 +90,7 @@ def build(
     bind_data_sources: bool = False,
     bundle_only: bool = False,
     bundle_path: str | Path | None = None,
+    concurrency: int | None = None,
     session=None,
 ) -> BuildResult:
     """Build a source.
@@ -107,6 +108,9 @@ def build(
     creates and closes one.
     """
 
+    from ..concurrency import validate_concurrency
+
+    validate_concurrency(concurrency)
     if bundle_path is not None and not bundle_only:
         raise CommandError("bundle_path requires bundle_only=True")
 
@@ -184,6 +188,7 @@ def build(
                 bundle_only=bundle_only,
                 bundle_path=bundle_path,
                 source=source_location.value,
+                concurrency=concurrency,
             )
             opened.report(_build_context_lines(resolved_workspace, selected))
             with opened.task("Build", resolved_workspace.workspace) as frame:
@@ -347,6 +352,7 @@ def _run_build(
     source,
     requested_bindings=None,
     present_selection=True,
+    concurrency: int | None = None,
 ) -> BuildResult:
     from ..build_bundle import (
         build_repository_bundle,
@@ -426,7 +432,8 @@ def _run_build(
                 )
             )
         with session.step("Install"):
-            report = execute_bundle(bundle, session)
+            options = {} if concurrency is None else {"concurrency": concurrency}
+            report = execute_bundle(bundle, session, **options)
         _present_semantic_outcomes(report, session)
         result = BuildResult(
             source=source,

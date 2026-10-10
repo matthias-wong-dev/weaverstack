@@ -61,6 +61,7 @@ def load(
     ignore_stability_threshold: bool = False,
     stale: bool = False,
     as_of: str | datetime | None = None,
+    concurrency: int | None = None,
     session=None,
 ) -> LoadRunReport:
     """Load the installed objects the named items own.
@@ -101,6 +102,9 @@ def load(
     A supplied ``session`` carries its resolved Workspace and is left open.
     """
 
+    from ..concurrency import validate_concurrency
+
+    validate_concurrency(concurrency)
     started = datetime.now(timezone.utc)
     selected_names = _load_names(names)
     _refuse_conflicting_modes(stale=stale, reload=reload, as_of=as_of)
@@ -163,6 +167,7 @@ def load(
                 ignore_stability_threshold=ignore_stability_threshold,
                 stale=stale,
                 as_of=threshold,
+                concurrency=concurrency,
             )
             frame.failed = not report.succeeded
             return report
@@ -254,6 +259,7 @@ def run_load(
     ignore_stability_threshold: bool = False,
     stale: bool = False,
     as_of: datetime | None = None,
+    concurrency: int | None = None,
 ) -> LoadRunReport:
     """Run the catalogue graph through a Session.
 
@@ -325,6 +331,7 @@ def run_load(
         dry_run=dry_run,
         reload=reload,
         ignore_stability_threshold=ignore_stability_threshold,
+        concurrency=concurrency,
     )
     with session.step("Build run graph"):
         if state is None:

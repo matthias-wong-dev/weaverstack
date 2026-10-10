@@ -314,6 +314,26 @@ def _physical_target_lakehouses(args) -> tuple[str, ...]:
     return _target_lakehouses(getattr(args, "targets", None) or ())
 
 
+def _positive_concurrency(text):
+    from weaver.concurrency import validate_concurrency
+
+    try:
+        return validate_concurrency(int(text))
+    except (ValueError, CommandError) as exc:
+        raise argparse.ArgumentTypeError(
+            "concurrency must be a positive integer"
+        ) from exc
+
+
+def _add_concurrency_arg(parser):
+    parser.add_argument(
+        "--concurrency",
+        type=_positive_concurrency,
+        metavar="N",
+        help="Limit total simultaneous execution for this invocation; retain resource limits.",
+    )
+
+
 def _build_item_lakehouses(args) -> tuple[str, ...]:
     named = []
     for value in getattr(args, "items", None) or ():
@@ -490,6 +510,7 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="PATH",
         help="Directory to write a bundle created with --bundle-only.",
     )
+    _add_concurrency_arg(build)
     build.add_argument("--json", action="store_true", help="Emit the result as JSON.")
     add_non_interactive(build)
     _add_workspace_args(build)
@@ -538,6 +559,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     _add_source_arg(load)
+    _add_concurrency_arg(load)
     load.add_argument(
         "--ancestors",
         action="store_true",
@@ -644,6 +666,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     _add_source_arg(validate)
+    _add_concurrency_arg(validate)
     validate.add_argument(
         "--dry-run",
         action="store_true",
@@ -1408,6 +1431,7 @@ def _load_once(args: argparse.Namespace) -> int:
                 ignore_stability_threshold=args.ignore_stability_threshold,
                 stale=args.stale,
                 as_of=args.as_of,
+                concurrency=args.concurrency,
                 session=opened,
             )
     except LoadError as exc:
@@ -1450,6 +1474,7 @@ def _run_load(
     ignore_stability_threshold: bool = False,
     stale: bool = False,
     as_of=None,
+    concurrency=None,
     session=None,
 ):
 
@@ -1468,6 +1493,7 @@ def _run_load(
             ignore_stability_threshold=ignore_stability_threshold,
             stale=stale,
             as_of=as_of,
+            concurrency=concurrency,
             session=opened,
             **_command_context(workspace),
         )
@@ -1646,6 +1672,7 @@ def _test_once(args: argparse.Namespace) -> int:
             names=args.names,
             files=args.files,
             source=args.source,
+            concurrency=args.concurrency,
             dry_run=args.dry_run,
             session=opened,
         )
@@ -1662,7 +1689,15 @@ def _test_once(args: argparse.Namespace) -> int:
 
 
 def _run_test(
-    workspace, *, items, names, files, source=None, dry_run: bool, session=None
+    workspace,
+    *,
+    items,
+    names,
+    files,
+    source=None,
+    dry_run: bool,
+    concurrency=None,
+    session=None,
 ):
     """Dispatch Warehouse validations over TDS and Lakehouse modules in-session."""
 
@@ -1674,6 +1709,7 @@ def _run_test(
             names=names,
             files=files,
             source=source,
+            concurrency=concurrency,
             dry_run=dry_run,
             session=opened,
             **_command_context(workspace),
@@ -2072,6 +2108,7 @@ def _build_once(args: argparse.Namespace) -> int:
                 bind_data_sources=args.bind_data_sources,
                 bundle_only=args.bundle_only,
                 bundle_path=args.bundle_path,
+                concurrency=args.concurrency,
                 session=opened,
                 **_command_context(workspace),
             )
