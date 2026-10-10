@@ -680,6 +680,32 @@ def test_a_read_that_names_nothing_installed_is_recorded_rather_than_raised():
         f"{RAW}/Tables/Sales.A",
     )
     assert "no installed object or shortcut" in dag.unresolved_for(consumer)[0]
+    assert dag.unresolved_references == {consumer: ("Sales.Nowhere",)}
+
+
+@weaver_test()
+def test_one_items_graph_assumes_what_it_reads_elsewhere():
+    """Read on its own, an item still reaches its upstreams in other items."""
+
+    from weaver.installed import item_dag
+
+    source = document_id(f"{RAW}/Tables/Sales.Order")
+    destination = document_id(f"{REPORTING}/Sales.Order")
+    consumer = document_id(f"{REPORTING}/Sales.Summary")
+    catalogue = (
+        _Estate()
+        .shortcut(f"{REPORTING}/Sales.Order", f"{RAW}/Tables/Sales.Order")
+        .object(f"{REPORTING}/Sales.Summary")
+        .reads(f"{REPORTING}/Sales.Summary", "Sales.Order", referenced=source)
+        .catalogue()
+    )
+
+    dag = item_dag(catalogue, document_id(f"{REPORTING}/Sales.Summary").item)
+
+    assert dag.parents(destination) == (dag.node(source),)
+    assert dag.parents(consumer) == (dag.node(source),)
+    assert dag.reads(consumer)[0].through == destination
+    assert not dag.unresolved
 
 
 @weaver_test()

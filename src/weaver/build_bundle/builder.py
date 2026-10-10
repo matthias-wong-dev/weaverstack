@@ -25,7 +25,7 @@ class Builder:
     #: Resolved before planning starts. The planner completes it with the Spark
     #: attachment its action set requires; it makes no calls of its own.
     execution: ExecutionIdentity
-    #: Receives each authoring warning found while compiling the selection.
+    #: Receives each warning found while compiling the selection.
     warn: Callable[[str], None] | None = field(default=None, compare=False)
 
     def build(self, *, output: Location | None = None) -> BuildBundle:
@@ -71,6 +71,7 @@ class Builder:
             catalogue_binding=self.catalogue_binding,
             execution=self.execution,
             shortcut_sources=self.state.shortcut_sources,
+            warn=self.warn,
         )
 
     def build_in_temporary(self, prefix: str = "weaver-build-"):

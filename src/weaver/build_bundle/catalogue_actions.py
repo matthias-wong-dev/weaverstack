@@ -257,14 +257,20 @@ def desired_catalogue(
     repository,
     selected_ids: Iterable[WeaverDocumentId],
     target_by_item: Mapping,
+    *,
+    current: Catalogue | None = None,
+    warn=None,
 ) -> Catalogue:
     """Return the post-build catalogue state for ``selected_ids``.
 
     Narrowing precedes binding so Registry rows certify only selected objects,
-    while shortcut and Installation rows carry their physical targets.
+    while shortcut and Installation rows carry their physical targets. The
+    graph rows project the bound rows' graph; an item whose graph cannot be
+    projected keeps its ``current`` graph rows.
     """
 
     from .. import __version__
+    from ..catalogue.graph_rows import with_graph_rows
 
     selected_ids = set(selected_ids)
     logical = Catalogue.from_repository(repository)
@@ -289,7 +295,12 @@ def desired_catalogue(
         )
         for item in target_by_item
     }
-    return _with_installation_rows(bound, binding_rows)
+    return with_graph_rows(
+        _with_installation_rows(bound, binding_rows),
+        repository,
+        current=current,
+        warn=warn,
+    )
 
 
 DEREGISTER_MIRROR_SLUG = "deregister-mirrors"
@@ -337,6 +348,7 @@ def render_catalogue_after_build(
     catalogue_target,
     current: Catalogue | None = None,
     selected_models=(),
+    warn=None,
 ) -> tuple[PlannedStage, ...]:
     """Publish dictionaries and Installation in one batch, Registry last.
 
@@ -344,7 +356,9 @@ def render_catalogue_after_build(
     build.
     """
 
-    desired = desired_catalogue(repository, selected_ids, target_by_item)
+    desired = desired_catalogue(
+        repository, selected_ids, target_by_item, current=current, warn=warn
+    )
 
     # Diff against persisted rows so an unchanged table produces no statement.
     from .semantic import publication_catalogues, semantic_stage

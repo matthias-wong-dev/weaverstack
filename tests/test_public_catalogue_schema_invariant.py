@@ -19,12 +19,14 @@ from weaver.catalogue.tables import (
     BOOKMARK_SENTINEL,
     BOOKMARK_SENTINEL_TEXT,
     CURRENT_STATE_TABLES,
+    EDGE_KIND_VOCABULARY,
     HISTORY_TABLES,
     KEY_TYPE_VOCABULARY,
     LOAD_RESULT_VOCABULARY,
     LOAD_STATISTIC,
     LOAD_STATUS,
     LOG,
+    NODE_KIND_VOCABULARY,
     OBJECT_ROLE_VOCABULARY,
     OBJECT_TYPE_VOCABULARY,
     PROJECTED_TABLES,
@@ -246,6 +248,31 @@ PUBLIC_SCHEMA: dict[str, tuple[str, ...]] = {
         "Target schema name",
         "Target object name",
         "Target workspace name",
+        "Signature",
+        *AUDIT,
+    ),
+    "GraphNode": (
+        "Item type",
+        "Item name",
+        "Schema name",
+        "Object name",
+        "Node ID",
+        "Node kind",
+        "Label",
+        "Item label",
+        "Description",
+        "Search text",
+        "Is internal",
+        "Signature",
+        *AUDIT,
+    ),
+    "GraphEdge": (
+        "Item type",
+        "Item name",
+        "Downstream node ID",
+        "Upstream node ID",
+        "Edge kind",
+        "Through node ID",
         "Signature",
         *AUDIT,
     ),
@@ -540,6 +567,30 @@ def test_object_role_vocabulary_is_frozen():
         "shortcut": "Shortcut",
         "programmable": "Programmable",
         "source": "Source",
+    }
+
+
+@weaver_test()
+def test_node_kind_vocabulary_is_frozen():
+    assert NODE_KIND_VOCABULARY == {
+        "table": "Table",
+        "view": "View",
+        "folder": "Folder",
+        "shortcut": "Shortcut",
+        "test": "Test",
+        "assumption": "Assumption",
+        "semantic_model": "Semantic model",
+        "report": "Report",
+    }
+
+
+@weaver_test()
+def test_edge_kind_vocabulary_is_frozen():
+    assert EDGE_KIND_VOCABULARY == {
+        "dependency": "Dependency",
+        "shortcut": "Shortcut",
+        "validation": "Validation",
+        "external": "External",
     }
 
 

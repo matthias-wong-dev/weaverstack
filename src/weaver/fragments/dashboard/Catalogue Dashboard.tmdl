@@ -1,0 +1,196 @@
+model Model
+    annotation 'Weaver.AutoHideColumns' = ```
+            Signature
+            Search text
+            Is internal
+            * SK
+            Details
+            Node ID
+            Downstream node ID
+            Upstream node ID
+            Through node ID
+            Description reference
+            Lineage reference
+            ```
+
+/// Every installed node of the graph.
+table 'Graph node'
+    annotation 'Weaver.Source' = Warehouse/_weaver/_.GraphNode
+
+/// Every installed edge of the graph.
+table 'Graph edge'
+    annotation 'Weaver.Source' = Warehouse/_weaver/_.GraphEdge
+
+table 'Load status'
+    annotation 'Weaver.Source' = Warehouse/_weaver/_.LoadStatus
+
+table 'Log'
+    annotation 'Weaver.Source' = Warehouse/_weaver/_.Log
+
+table 'Load statistic'
+    annotation 'Weaver.Source' = Warehouse/_weaver/_.LoadStatistic
+
+table 'Test status'
+    annotation 'Weaver.Source' = Warehouse/_weaver/_.TestStatus
+
+table 'Test dictionary'
+    annotation 'Weaver.Source' = Warehouse/_weaver/_.TestDictionary
+
+table 'Table dictionary'
+    annotation 'Weaver.Source' = Warehouse/_weaver/_.TableDictionary
+
+table 'Column dictionary'
+    annotation 'Weaver.Source' = Warehouse/_weaver/_.ColumnDictionary
+
+table 'Semantic model table'
+    annotation 'Weaver.Source' = Warehouse/_weaver/_.SemanticModelTable
+
+table 'Semantic model relationship'
+    annotation 'Weaver.Source' = Warehouse/_weaver/_.SemanticModelRelationship
+
+table 'Key dictionary'
+    annotation 'Weaver.Source' = Warehouse/_weaver/_.KeyDictionary
+
+table 'Foreign key dictionary'
+    annotation 'Weaver.Source' = Warehouse/_weaver/_.ForeignKeyDictionary
+
+/// Every measure of the Catalogue Dashboard.
+table 'Dashboard measures'
+    annotation 'Weaver.MeasureTable' = true
+
+    /// Tests and Assumptions whose latest result is not Succeeded.
+    measure 'Red tests' = CALCULATE(COUNTROWS('Test status'), 'Test status'[Result] <> "Succeeded") + 0
+        formatString: #,##0
+        displayFolder: Health
+
+    /// Objects whose latest load Failed, raised an Error or was Blocked.
+    measure 'Failed loads' = CALCULATE(COUNTROWS('Load status'), 'Load status'[Result] IN {"Failed", "Error", "Blocked"}) + 0
+        formatString: #,##0
+        displayFolder: Health
+
+    /// Objects rebuilt and not loaded since.
+    measure 'Pending loads' = CALCULATE(COUNTROWS('Load status'), 'Load status'[Result] = "Pending") + 0
+        formatString: #,##0
+        displayFolder: Health
+
+    /// Loaded objects, Views aside, whose latest success is more than 24 hours old.
+    measure 'Stale loads' = ```
+        VAR _old = CALCULATETABLE(
+            SUMMARIZE('Load status', 'Load status'[Item type], 'Load status'[Item name], 'Load status'[Schema name], 'Load status'[Object name]),
+            'Load status'[Result] = "Succeeded",
+            'Load status'[Completed datetime] < UTCNOW() - 1
+        )
+        VAR _views = CALCULATETABLE(
+            SUMMARIZE('Table dictionary', 'Table dictionary'[Item type], 'Table dictionary'[Item name], 'Table dictionary'[Schema name], 'Table dictionary'[Object name]),
+            REMOVEFILTERS('Table dictionary'),
+            'Table dictionary'[Object type] = "view"
+        )
+        RETURN COUNTROWS(EXCEPT(_old, _views)) + 0
+        ```
+        formatString: #,##0
+        displayFolder: Health
+
+    /// When the latest load or test settled, in UTC.
+    measure 'Latest settled completion' = ```
+        MAX(
+            CALCULATE(MAX('Load status'[Completed datetime]), 'Load status'[Result] <> "Pending"),
+            CALCULATE(MAX('Test status'[Completed datetime]), 'Test status'[Result] <> "Pending")
+        )
+        ```
+        formatString: yyyy-mm-dd hh:nn:ss
+        displayFolder: Health
+
+    /// When the model answered, in UTC.
+    measure 'Observed at' = UTCNOW()
+        formatString: yyyy-mm-dd hh:nn:ss
+        displayFolder: Health
+
+    /// Nodes, edges, statuses, load statistics and described columns, as JSON.
+    measure 'Graph data' = ```
+        VAR _internal = CALCULATETABLE(VALUES('Graph node'[Node ID]), REMOVEFILTERS('Graph node'), 'Graph node'[Is internal] = TRUE())
+        VAR _nodes = FILTER('Graph node', 'Graph node'[Is internal] = FALSE())
+        VAR _ids = SELECTCOLUMNS(_nodes, "@id", 'Graph node'[Node ID])
+        VAR _edges = FILTER(
+            ALL('Graph edge'[Downstream node ID], 'Graph edge'[Upstream node ID], 'Graph edge'[Edge kind]),
+            'Graph edge'[Downstream node ID] IN _ids && NOT ('Graph edge'[Upstream node ID] IN _internal)
+        )
+        VAR _statistics = CALCULATETABLE(
+            'Load statistic',
+            TREATAS(
+                SUMMARIZE('Load status', 'Load status'[Item type], 'Load status'[Item name], 'Load status'[Schema name], 'Load status'[Object name], 'Load status'[Completed datetime]),
+                'Load statistic'[Item type], 'Load statistic'[Item name], 'Load statistic'[Schema name], 'Load statistic'[Object name], 'Load statistic'[Completed datetime]
+            )
+        )
+        VAR _columns = CALCULATETABLE(
+            FILTER('Column dictionary', NOT ISBLANK('Column dictionary'[Description])),
+            TREATAS(SUMMARIZE(_nodes, 'Graph node'[Item type], 'Graph node'[Item name], 'Graph node'[Schema name], 'Graph node'[Object name]), 'Column dictionary'[Item type], 'Column dictionary'[Item name], 'Column dictionary'[Schema name], 'Column dictionary'[Object name])
+        )
+        RETURN
+            "{""at"":" & IF(ISBLANK(UTCNOW()), "null", """" & FORMAT(UTCNOW(), "yyyy-mm-dd") & "T" & FORMAT(UTCNOW(), "hh:nn:ss") & "Z""")
+            & ",""nodes"":" & "[" & CONCATENATEX(_nodes, "[" & """" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE('Graph node'[Node ID] & "", "\", "\\"), """", "\"""), UNICHAR(13), "\r"), UNICHAR(10), "\n"), UNICHAR(9), "\t"), "<", "\u003c") & """" & "," & """" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE('Graph node'[Label] & "", "\", "\\"), """", "\"""), UNICHAR(13), "\r"), UNICHAR(10), "\n"), UNICHAR(9), "\t"), "<", "\u003c") & """" & "," & """" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE('Graph node'[Node kind] & "", "\", "\\"), """", "\"""), UNICHAR(13), "\r"), UNICHAR(10), "\n"), UNICHAR(9), "\t"), "<", "\u003c") & """" & "," & """" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE('Graph node'[Item label] & "", "\", "\\"), """", "\"""), UNICHAR(13), "\r"), UNICHAR(10), "\n"), UNICHAR(9), "\t"), "<", "\u003c") & """" & "," & """" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE('Graph node'[Item type] & "|" & 'Graph node'[Item name] & "|" & 'Graph node'[Schema name] & "|" & 'Graph node'[Object name] & "", "\", "\\"), """", "\"""), UNICHAR(13), "\r"), UNICHAR(10), "\n"), UNICHAR(9), "\t"), "<", "\u003c") & """" & "," & """" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(LEFT('Graph node'[Description], 300) & "", "\", "\\"), """", "\"""), UNICHAR(13), "\r"), UNICHAR(10), "\n"), UNICHAR(9), "\t"), "<", "\u003c") & """" & "]", ",") & "]"
+            & ",""edges"":" & "[" & CONCATENATEX(_edges, "[" & """" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE('Graph edge'[Downstream node ID] & "", "\", "\\"), """", "\"""), UNICHAR(13), "\r"), UNICHAR(10), "\n"), UNICHAR(9), "\t"), "<", "\u003c") & """" & "," & """" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE('Graph edge'[Upstream node ID] & "", "\", "\\"), """", "\"""), UNICHAR(13), "\r"), UNICHAR(10), "\n"), UNICHAR(9), "\t"), "<", "\u003c") & """" & "," & """" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE('Graph edge'[Edge kind] & "", "\", "\\"), """", "\"""), UNICHAR(13), "\r"), UNICHAR(10), "\n"), UNICHAR(9), "\t"), "<", "\u003c") & """" & "]", ",") & "]"
+            & ",""loads"":" & "[" & CONCATENATEX('Load status', "[" & """" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE('Load status'[Item type] & "|" & 'Load status'[Item name] & "|" & 'Load status'[Schema name] & "|" & 'Load status'[Object name] & "", "\", "\\"), """", "\"""), UNICHAR(13), "\r"), UNICHAR(10), "\n"), UNICHAR(9), "\t"), "<", "\u003c") & """" & "," & """" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE('Load status'[Result] & "", "\", "\\"), """", "\"""), UNICHAR(13), "\r"), UNICHAR(10), "\n"), UNICHAR(9), "\t"), "<", "\u003c") & """" & "," & IF(ISBLANK('Load status'[Started datetime]), "null", """" & FORMAT('Load status'[Started datetime], "yyyy-mm-dd") & "T" & FORMAT('Load status'[Started datetime], "hh:nn:ss") & "Z""") & "," & IF(ISBLANK('Load status'[Completed datetime]), "null", """" & FORMAT('Load status'[Completed datetime], "yyyy-mm-dd") & "T" & FORMAT('Load status'[Completed datetime], "hh:nn:ss") & "Z""") & "," & IF(ISBLANK('Load status'[Duration milliseconds]), "null", FORMAT('Load status'[Duration milliseconds], "0")) & "]", ",") & "]"
+            & ",""tests"":" & "[" & CONCATENATEX('Test status', "[" & """" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE('Test status'[Item type] & "|" & 'Test status'[Item name] & "|" & 'Test status'[Schema name] & "|" & 'Test status'[Object name] & "", "\", "\\"), """", "\"""), UNICHAR(13), "\r"), UNICHAR(10), "\n"), UNICHAR(9), "\t"), "<", "\u003c") & """" & "," & """" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE('Test status'[Result] & "", "\", "\\"), """", "\"""), UNICHAR(13), "\r"), UNICHAR(10), "\n"), UNICHAR(9), "\t"), "<", "\u003c") & """" & "," & IF(ISBLANK('Test status'[Completed datetime]), "null", """" & FORMAT('Test status'[Completed datetime], "yyyy-mm-dd") & "T" & FORMAT('Test status'[Completed datetime], "hh:nn:ss") & "Z""") & "," & IF(ISBLANK('Test status'[Failure count]), "null", FORMAT('Test status'[Failure count], "0")) & "]", ",") & "]"
+            & ",""stats"":" & "[" & CONCATENATEX(_statistics, "[" & """" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE('Load statistic'[Item type] & "|" & 'Load statistic'[Item name] & "|" & 'Load statistic'[Schema name] & "|" & 'Load statistic'[Object name] & "", "\", "\\"), """", "\"""), UNICHAR(13), "\r"), UNICHAR(10), "\n"), UNICHAR(9), "\t"), "<", "\u003c") & """" & "," & IF(ISBLANK('Load statistic'[Rows read]), "null", FORMAT('Load statistic'[Rows read], "0")) & "," & IF(ISBLANK('Load statistic'[Rows inserted]), "null", FORMAT('Load statistic'[Rows inserted], "0")) & "," & IF(ISBLANK('Load statistic'[Rows updated]), "null", FORMAT('Load statistic'[Rows updated], "0")) & "," & IF(ISBLANK('Load statistic'[Rows deleted]), "null", FORMAT('Load statistic'[Rows deleted], "0")) & "," & IF(ISBLANK('Load statistic'[Rows rejected]), "null", FORMAT('Load statistic'[Rows rejected], "0")) & "]", ",") & "]"
+            & ",""columns"":" & "[" & CONCATENATEX(_columns, "[" & """" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE('Column dictionary'[Item type] & "|" & 'Column dictionary'[Item name] & "|" & 'Column dictionary'[Schema name] & "|" & 'Column dictionary'[Object name] & "", "\", "\\"), """", "\"""), UNICHAR(13), "\r"), UNICHAR(10), "\n"), UNICHAR(9), "\t"), "<", "\u003c") & """" & "," & """" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE('Column dictionary'[Column name] & "", "\", "\\"), """", "\"""), UNICHAR(13), "\r"), UNICHAR(10), "\n"), UNICHAR(9), "\t"), "<", "\u003c") & """" & "," & """" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(LEFT('Column dictionary'[Description], 300) & "", "\", "\\"), """", "\"""), UNICHAR(13), "\r"), UNICHAR(10), "\n"), UNICHAR(9), "\t"), "<", "\u003c") & """" & "]", ",") & "]"
+            & "}"
+        ```
+        displayFolder: Data
+
+    /// Log rows of the ten latest workflows, as JSON.
+    measure 'Run data' = ```
+        VAR _flows = TOPN(
+            10,
+            ADDCOLUMNS(VALUES('Log'[Workflow ID]), "@at", CALCULATE(MAX('Log'[Completed datetime]))),
+            [@at], DESC
+        )
+        VAR _rows = TOPN(
+            2000,
+            FILTER('Log', 'Log'[Workflow ID] IN SELECTCOLUMNS(_flows, "@w", 'Log'[Workflow ID])),
+            'Log'[Completed datetime], DESC
+        )
+        VAR _log = ADDCOLUMNS(
+            _rows,
+            "@ref",
+                VAR _p = SEARCH("""node_id"": """, 'Log'[Details], 1, 0)
+                VAR _rest = IF(_p > 0, MID('Log'[Details], _p + 12, 400), "")
+                VAR _q = SEARCH("""", _rest, 1, 0)
+                RETURN IF(_q > 1, LEFT(_rest, _q - 1), "")
+        )
+        RETURN
+            "{""log"":" & "[" & CONCATENATEX(_log, "[" & """" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE('Log'[Workflow ID] & "", "\", "\\"), """", "\"""), UNICHAR(13), "\r"), UNICHAR(10), "\n"), UNICHAR(9), "\t"), "<", "\u003c") & """" & "," & """" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE('Log'[Task type] & "", "\", "\\"), """", "\"""), UNICHAR(13), "\r"), UNICHAR(10), "\n"), UNICHAR(9), "\t"), "<", "\u003c") & """" & "," & """" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE('Log'[Target type] & "", "\", "\\"), """", "\"""), UNICHAR(13), "\r"), UNICHAR(10), "\n"), UNICHAR(9), "\t"), "<", "\u003c") & """" & "," & """" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE('Log'[Target name] & "", "\", "\\"), """", "\"""), UNICHAR(13), "\r"), UNICHAR(10), "\n"), UNICHAR(9), "\t"), "<", "\u003c") & """" & "," & """" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE('Log'[Schema name] & "", "\", "\\"), """", "\"""), UNICHAR(13), "\r"), UNICHAR(10), "\n"), UNICHAR(9), "\t"), "<", "\u003c") & """" & "," & """" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE('Log'[Object name] & "", "\", "\\"), """", "\"""), UNICHAR(13), "\r"), UNICHAR(10), "\n"), UNICHAR(9), "\t"), "<", "\u003c") & """" & "," & """" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE('Log'[Result] & "", "\", "\\"), """", "\"""), UNICHAR(13), "\r"), UNICHAR(10), "\n"), UNICHAR(9), "\t"), "<", "\u003c") & """" & "," & IF(ISBLANK('Log'[Started datetime]), "null", """" & FORMAT('Log'[Started datetime], "yyyy-mm-dd") & "T" & FORMAT('Log'[Started datetime], "hh:nn:ss") & "Z""") & "," & IF(ISBLANK('Log'[Completed datetime]), "null", """" & FORMAT('Log'[Completed datetime], "yyyy-mm-dd") & "T" & FORMAT('Log'[Completed datetime], "hh:nn:ss") & "Z""") & "," & """" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE([@ref] & "", "\", "\\"), """", "\"""), UNICHAR(13), "\r"), UNICHAR(10), "\n"), UNICHAR(9), "\t"), "<", "\u003c") & """" & "]", ",") & "]" & "}"
+        ```
+        displayFolder: Data
+
+    /// Health counts, statuses and Views, as JSON.
+    measure 'Health data' = ```
+        VAR _views = CALCULATETABLE('Table dictionary', 'Table dictionary'[Object type] = "view")
+        RETURN
+            "{""at"":" & IF(ISBLANK(UTCNOW()), "null", """" & FORMAT(UTCNOW(), "yyyy-mm-dd") & "T" & FORMAT(UTCNOW(), "hh:nn:ss") & "Z""")
+            & ",""health"":{""red"":" & [Red tests] & ",""failed"":" & [Failed loads] & ",""pending"":" & [Pending loads]
+            & ",""stale"":" & [Stale loads] & ",""latest"":" & IF(ISBLANK([Latest settled completion]), "null", """" & FORMAT([Latest settled completion], "yyyy-mm-dd") & "T" & FORMAT([Latest settled completion], "hh:nn:ss") & "Z""") & "}"
+            & ",""loads"":" & "[" & CONCATENATEX('Load status', "[" & """" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE('Load status'[Item type] & "|" & 'Load status'[Item name] & "|" & 'Load status'[Schema name] & "|" & 'Load status'[Object name] & "", "\", "\\"), """", "\"""), UNICHAR(13), "\r"), UNICHAR(10), "\n"), UNICHAR(9), "\t"), "<", "\u003c") & """" & "," & """" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE('Load status'[Result] & "", "\", "\\"), """", "\"""), UNICHAR(13), "\r"), UNICHAR(10), "\n"), UNICHAR(9), "\t"), "<", "\u003c") & """" & "," & IF(ISBLANK('Load status'[Started datetime]), "null", """" & FORMAT('Load status'[Started datetime], "yyyy-mm-dd") & "T" & FORMAT('Load status'[Started datetime], "hh:nn:ss") & "Z""") & "," & IF(ISBLANK('Load status'[Completed datetime]), "null", """" & FORMAT('Load status'[Completed datetime], "yyyy-mm-dd") & "T" & FORMAT('Load status'[Completed datetime], "hh:nn:ss") & "Z""") & "," & IF(ISBLANK('Load status'[Duration milliseconds]), "null", FORMAT('Load status'[Duration milliseconds], "0")) & "]", ",") & "]"
+            & ",""tests"":" & "[" & CONCATENATEX('Test status', "[" & """" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE('Test status'[Item type] & "|" & 'Test status'[Item name] & "|" & 'Test status'[Schema name] & "|" & 'Test status'[Object name] & "", "\", "\\"), """", "\"""), UNICHAR(13), "\r"), UNICHAR(10), "\n"), UNICHAR(9), "\t"), "<", "\u003c") & """" & "," & """" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE('Test status'[Result] & "", "\", "\\"), """", "\"""), UNICHAR(13), "\r"), UNICHAR(10), "\n"), UNICHAR(9), "\t"), "<", "\u003c") & """" & "," & IF(ISBLANK('Test status'[Completed datetime]), "null", """" & FORMAT('Test status'[Completed datetime], "yyyy-mm-dd") & "T" & FORMAT('Test status'[Completed datetime], "hh:nn:ss") & "Z""") & "," & IF(ISBLANK('Test status'[Failure count]), "null", FORMAT('Test status'[Failure count], "0")) & "]", ",") & "]"
+            & ",""views"":[" & CONCATENATEX(_views, """" & SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE('Table dictionary'[Item type] & "|" & 'Table dictionary'[Item name] & "|" & 'Table dictionary'[Schema name] & "|" & 'Table dictionary'[Object name] & "", "\", "\\"), """", "\"""), UNICHAR(13), "\r"), UNICHAR(10), "\n"), UNICHAR(9), "\t"), "<", "\u003c") & """", ",") & "]"
+            & "}"
+        ```
+        displayFolder: Data
+
+    /// The dashboard's stylesheet and script.
+    measure 'Renderer' = ```
+        "{renderer}"
+        ```
+        displayFolder: Pages
+        isHidden
+
+    /// The Overview page for HTML Content.
+    measure 'Overview page' = "<div id=""wd-app"" class=""wd""></div><script>window.__WD_DATA = Object.assign({page: ""overview""}, " & [Health data] & ");</script>" & [Renderer]
+        displayFolder: Pages
+
+    /// The Explore page for HTML Content.
+    measure 'Explore page' = "<div id=""wd-app"" class=""wd""></div><script>window.__WD_DATA = Object.assign({page: ""explore""}, " & [Graph data] & ");</script>" & [Renderer]
+        displayFolder: Pages
+
+    /// The Live run page for HTML Content.
+    measure 'Live run page' = "<div id=""wd-app"" class=""wd""></div><script>window.__WD_DATA = Object.assign({page: ""live""}, " & [Graph data] & ", " & [Run data] & ");</script>" & [Renderer]
+        displayFolder: Pages

@@ -88,6 +88,7 @@ def generate_item_build_bundle(
     catalogue_binding: WarehouseBinding | None,
     execution: ExecutionIdentity | None = None,
     shortcut_sources: Mapping[str, object] | None = None,
+    warn=None,
 ) -> BuildBundle:
     if catalogue_binding is None:
         from .workflow import require_catalogue_for
@@ -315,6 +316,7 @@ def generate_item_build_bundle(
                 for identity in selected_for_build
                 if identity.item in repository.semantic_models
             },
+            warn=warn,
         ),
     ]
     # Publication certifies only physical work that succeeded, and the Registry

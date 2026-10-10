@@ -127,7 +127,11 @@ def build(
     from ..build_bundle.workflow import prepare_repository, validate_build_request
     from ..sessions.host import use_or_create_session
 
-    with prepare_repository(source_location, source_store=source_store) as prepared:
+    with prepare_repository(
+        source_location,
+        source_store=source_store,
+        catalogue_dashboard=resolved_workspace.catalogue_dashboard is not None,
+    ) as prepared:
         selected = _item_bindings(
             items, resolved_workspace, repository=prepared.repository
         )

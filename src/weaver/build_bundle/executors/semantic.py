@@ -37,6 +37,8 @@ class SemanticModelExecutor:
                 "bound": list(getattr(binding, "bound", ())),
                 "unreached": list(getattr(binding, "unreached", ())),
             }
+        if spec.get("refresh"):
+            client.refresh()
         details["measure_check"] = require_valid_measures(client, spec["item"])
         return details
 

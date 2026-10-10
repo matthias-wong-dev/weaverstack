@@ -21,6 +21,7 @@ from .tables import (
     CATALOGUE_SCHEMA,
     CATALOGUE_TABLES,
     CURRENT_STATE_TABLES,
+    GRAPH_TABLES,
     HISTORY_TABLES,
     MIRROR,
     PROJECTED_TABLES,
@@ -31,6 +32,10 @@ from .tsql import identifier, literal
 
 #: Current installed state, excluding history owned by the source installation.
 FORKED_TABLES = PROJECTED_TABLES + CURRENT_STATE_TABLES
+
+#: Forked only when the source holds them. A catalogue built by an older Weaver
+#: does not, and its items gain the rows on their next build.
+OPTIONAL_TABLES = GRAPH_TABLES
 
 _AUDIT_TYPE = "datetime2(6)"
 
@@ -95,13 +100,13 @@ def _excluding_builtin(table) -> str:
 
 
 def fork_statements(
-    *, source_catalogue: str, borrowed: bool = False
+    *, source_catalogue: str, borrowed: bool = False, graphed: bool = True
 ) -> tuple[str, ...]:
     """Return the state-copy statements, including ``_.Mirror`` when present."""
 
     statements = [
         copy_statement(table, source_catalogue=source_catalogue)
-        for table in FORKED_TABLES
+        for table in copied_tables(graphed=graphed)
     ]
     if borrowed:
         statements.append(create_statement(MIRROR))
@@ -109,13 +114,24 @@ def fork_statements(
     return tuple(statements)
 
 
-def copied_tables(*, borrowed: bool = False) -> tuple:
-    """Return copied tables in order, with an existing ``_.Mirror`` last."""
-    return FORKED_TABLES + (MIRROR,) if borrowed else FORKED_TABLES
+def copied_tables(*, borrowed: bool = False, graphed: bool = True) -> tuple:
+    """Return copied tables in order, with an existing ``_.Mirror`` last.
+
+    ``graphed`` says whether the source holds :data:`OPTIONAL_TABLES`.
+    """
+
+    forked = tuple(
+        table for table in FORKED_TABLES if graphed or table not in OPTIONAL_TABLES
+    )
+    return forked + (MIRROR,) if borrowed else forked
 
 
-def forked_table_names(*, borrowed: bool = False) -> tuple[str, ...]:
-    return tuple(table.name for table in copied_tables(borrowed=borrowed))
+def forked_table_names(
+    *, borrowed: bool = False, graphed: bool = True
+) -> tuple[str, ...]:
+    return tuple(
+        table.name for table in copied_tables(borrowed=borrowed, graphed=graphed)
+    )
 
 
 def uncopied_table_names() -> tuple[str, ...]:
@@ -130,6 +146,7 @@ def _every_declared_table_is_accounted_for() -> bool:
 
 __all__: Sequence[str] = [
     "FORKED_TABLES",
+    "OPTIONAL_TABLES",
     "copied_tables",
     "copy_statement",
     "create_statement",

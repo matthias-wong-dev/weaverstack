@@ -85,7 +85,11 @@ installed estate graph and the runtime graph each carry their own node metadata
 and hand ordering, layers, ancestry and subgraphs to it. `Catalogue.dag()`
 derives the installed managed graph from catalogue rows already in memory, and
 it is the one place a persisted `dependency_reference` is interpreted. Load
-planning, validation planning and health read it.
+planning, validation planning and health read it. Build publishes it per item
+as `_.GraphNode` and `_.GraphEdge` through `weaver.installed.item_dag`,
+which reads one item's rows and assumes the upstreams they name in other items,
+so an item's rows never depend on another item's state. The projection is
+advisory and never blocks Build, Wipe or Mirror.
 
 ## The core abstraction
 
@@ -825,7 +829,11 @@ an execution runs and travel with either.
 `_.Load` and `_.Test` are checked-in `.sql` under `src/weaver/fragments/`, read by
 `read_repository_fragment` like the catalogue declaration and the standard
 per-item schema and folder documents. Static Weaver-owned repository content is a
-fragment; nothing renders it from Python.
+fragment; nothing renders it from Python. The one composition step is the
+Catalogue Dashboard's renderer: `dashboard.js` and `dashboard.css` are checked
+in beside its model and `weaver.catalogue_dashboard.dashboard_files` inlines them
+into the model's `Renderer` measure as one DAX string. Its pure logic is tested
+under Node from `tests/js`.
 
 **Who records is the interface.** A lower execution primitive never writes
 operational catalogue state. A run records centrally, and a standalone wrapper

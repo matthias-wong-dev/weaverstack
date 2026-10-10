@@ -939,7 +939,7 @@ def _publish(compiling, resolved, catalogue, *, after) -> None:
         )
     forked = [
         copy_statement(table, source_catalogue=resolved.source.name)
-        for table in copied_tables(borrowed=resolved.borrowed)
+        for table in copied_tables(borrowed=resolved.borrowed, graphed=resolved.graphed)
     ]
     created = [create_statement(MIRROR)] if resolved.borrowed or recorded else []
     path, digest = compiling.payload(

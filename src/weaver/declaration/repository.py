@@ -287,8 +287,12 @@ def parse_item_repository(
     root: Location,
     *,
     store: Store | None = None,
+    catalogue_dashboard: bool = False,
 ) -> WeaverRepository:
-    """Read the workspace declaration without executing authored code."""
+    """Read the workspace declaration without executing authored code.
+
+    ``catalogue_dashboard`` composes the built-in Catalogue Dashboard project.
+    """
 
     store = store or FilesystemStore()
     if not store.exists(root):
@@ -298,9 +302,11 @@ def parse_item_repository(
 
     with sql_parse_cache():
         authored = _read_authored_repository(root, store)
+        dashboard = (_dashboard_part(authored),) if catalogue_dashboard else ()
         merged = merge_repository(
             _catalogue_part(),
             authored,
+            *dashboard,
             *_standard_parts(authored),
             _generated_content(authored),
         )
@@ -372,6 +378,72 @@ def _catalogue_part() -> RepositoryPart:
 
     return read_repository_fragment(
         fragment_files(CATALOGUE), item=BUILTIN_ITEM, label="catalogue"
+    )
+
+
+class _PackageFiles:
+    """A read-only Store over package data, keyed by repository-relative path."""
+
+    def __init__(self, root: Location, files: Mapping[str, bytes]) -> None:
+        self._prefix = root.value + "/"
+        self._files = files
+
+    def read(self, location: Location) -> bytes:
+        return self._files[location.value.removeprefix(self._prefix)]
+
+
+def _dashboard_part(authored: RepositoryPart) -> RepositoryPart:
+    """The built-in Catalogue Dashboard, read as the Power BI project it is.
+
+    The same readers as an authored project, over package data, so the Dashboard
+    builds through the ordinary semantic and Report pipelines.
+    """
+
+    from ..catalogue_dashboard import (
+        DASHBOARD,
+        DASHBOARD_ITEMS,
+        DASHBOARD_PROJECT,
+        dashboard_files,
+    )
+    from ..powerbi import discover_projects, read_reports
+    from ..semantic_models.composition import read_project_models
+
+    claimed = sorted(
+        str(item) for item in DASHBOARD_ITEMS if item in authored.items
+    ) + (
+        [DASHBOARD_PROJECT]
+        if any(
+            name.casefold() == DASHBOARD.casefold()
+            for name in authored.powerbi_projects
+        )
+        else []
+    )
+    if claimed:
+        raise DiscoveryError(
+            f"{claimed[0]} is the built-in Catalogue Dashboard, which "
+            "catalogue_dashboard: deploys. Rename the project's own one."
+        )
+    files = {
+        f"{DASHBOARD_PROJECT}/{relative}": data
+        for relative, data in dashboard_files().items()
+    }
+    root = Location("weaver/fragments/dashboard")
+    store = _PackageFiles(root, files)
+    projects = discover_projects(files)
+    (project,) = projects.values()
+    models = read_project_models(
+        project, root=root, store=store, paths=set(files), annotations=None
+    )
+    return RepositoryPart(
+        label="Catalogue Dashboard",
+        powerbi_projects=projects,
+        reports=read_reports(projects, paths=set(files), root=root, store=store),
+        items=project.items,
+        semantic_models={
+            item: replace(model, refresh_after_deploy=True)
+            for item, model in models.items()
+        },
+        declared_files=files,
     )
 
 

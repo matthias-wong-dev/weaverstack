@@ -53,6 +53,11 @@ def semantic_stage(repository, item, target, *, catalogue_target=None):
                     if contribution.bind_data_sources and not publishing
                     else {}
                 ),
+                **(
+                    {"refresh": True}
+                    if contribution.refresh_after_deploy and not publishing
+                    else {}
+                ),
             }
         )
         + "\n"
