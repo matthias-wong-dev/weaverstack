@@ -261,10 +261,12 @@ def desired_catalogue(
     """Return the post-build catalogue state for ``selected_ids``.
 
     Narrowing precedes binding so Registry rows certify only selected objects,
-    while shortcut and Installation rows carry their physical targets.
+    while shortcut and Installation rows carry their physical targets. The
+    browser rows project the bound rows' graph.
     """
 
     from .. import __version__
+    from ..catalogue.browser import with_browser_rows
 
     selected_ids = set(selected_ids)
     logical = Catalogue.from_repository(repository)
@@ -289,7 +291,7 @@ def desired_catalogue(
         )
         for item in target_by_item
     }
-    return _with_installation_rows(bound, binding_rows)
+    return with_browser_rows(_with_installation_rows(bound, binding_rows), repository)
 
 
 DEREGISTER_MIRROR_SLUG = "deregister-mirrors"
