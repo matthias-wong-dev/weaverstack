@@ -70,6 +70,8 @@ class ResolvedMirror:
     plan: MirrorPlan
     #: Whether the source catalogue holds a ``_.Mirror``.
     borrowed: bool = False
+    #: Whether the source catalogue holds the browser tables.
+    browsed: bool = True
     items: tuple[MirrorItem, ...] = ()
     #: Final physical target for each logical item. Resolution completes before
     #: any writes so shortcut rebuilding does not depend on item order.
@@ -193,15 +195,15 @@ def check_mirror(plan: MirrorPlan, *, session=None) -> ResolvedMirror:
     from ..sessions.host import use_or_create_session
 
     with use_or_create_session(session, workspace=plan.workspace) as opened:
-        borrowed = _prove_source(plan, session=opened)
+        borrowed, browsed = _prove_source(plan, session=opened)
         catalogue = (
             catalogue_for(opened, _source_workspace(plan)) if plan.items else None
         )
-        return resolve_mirror(plan, catalogue, borrowed=borrowed)
+        return resolve_mirror(plan, catalogue, borrowed=borrowed, browsed=browsed)
 
 
 def resolve_mirror(
-    plan: MirrorPlan, catalogue, *, borrowed: bool = False
+    plan: MirrorPlan, catalogue, *, borrowed: bool = False, browsed: bool = True
 ) -> ResolvedMirror:
     """Settle a plan against the source catalogue; ``None`` selects no items."""
 
@@ -209,6 +211,7 @@ def resolve_mirror(
     resolved = ResolvedMirror(
         plan=plan,
         borrowed=borrowed,
+        browsed=browsed,
         items=items,
         bindings=_final_bindings(plan, catalogue, items),
         installations=_installations(catalogue, items),
@@ -334,11 +337,13 @@ def _copied(workspace: Workspace, forking: ResolvedMirror, *, session) -> dict:
     sql = session.sql_executor(
         WarehouseTarget(forking.destination.item), workspace=workspace
     )
-    rows = sql.query(_count_statement(borrowed=forking.borrowed))
+    rows = sql.query(
+        _count_statement(borrowed=forking.borrowed, browsed=forking.browsed)
+    )
     counted = {str(row["Table"]): int(row["Rows"]) for row in rows}
     return {
         table.name: counted.get(table.name, 0)
-        for table in copied_tables(borrowed=forking.borrowed)
+        for table in copied_tables(borrowed=forking.borrowed, browsed=forking.browsed)
     }
 
 
@@ -412,10 +417,14 @@ def _selected_items(items, no_item: bool, workspace: Workspace) -> tuple[str, ..
     return (items,) if isinstance(items, str) else tuple(items)
 
 
-def _prove_source(plan: MirrorPlan, *, session) -> bool:
-    """Validate the source catalogue and report whether it holds ``_.Mirror``."""
+def _prove_source(plan: MirrorPlan, *, session) -> tuple[bool, bool]:
+    """Validate the source catalogue.
 
-    from ..catalogue.fork import FORKED_TABLES
+    Returns whether it holds ``_.Mirror`` and whether it holds every optional
+    table.
+    """
+
+    from ..catalogue.fork import FORKED_TABLES, OPTIONAL_TABLES
     from ..catalogue.tables import MIRROR
 
     found = _source_catalogue_tables(plan, session=session)
@@ -425,14 +434,18 @@ def _prove_source(plan: MirrorPlan, *, session) -> bool:
             "Warehouse that holds the Weaver catalogue."
         )
     missing = [
-        table.name for table in FORKED_TABLES if table.name.casefold() not in found
+        table.name
+        for table in FORKED_TABLES
+        if table not in OPTIONAL_TABLES and table.name.casefold() not in found
     ]
     if missing:
         raise CommandError(
             f"The catalogue in {plan.source} is not compatible with this Weaver "
             "version. Build against it with this version before mirroring."
         )
-    return MIRROR.name.casefold() in found
+    return MIRROR.name.casefold() in found, all(
+        table.name.casefold() in found for table in OPTIONAL_TABLES
+    )
 
 
 def _source_catalogue_tables(plan: MirrorPlan, *, session) -> set[str]:
@@ -618,7 +631,7 @@ def _refuse_unsafe(resolved: ResolvedMirror) -> None:
         )
 
 
-def _count_statement(*, borrowed: bool) -> str:
+def _count_statement(*, borrowed: bool, browsed: bool = True) -> str:
     """Count all copied tables with one Warehouse query."""
 
     from ..catalogue.fork import copied_tables
@@ -628,7 +641,7 @@ def _count_statement(*, borrowed: bool) -> str:
     return "\nunion all\n".join(
         f"select {literal(table.name)} as [Table], count(*) as [Rows] "
         f"from {identifier(CATALOGUE_SCHEMA)}.{identifier(table.name)}"
-        for table in copied_tables(borrowed=borrowed)
+        for table in copied_tables(borrowed=borrowed, browsed=browsed)
     )
 
 

@@ -402,6 +402,59 @@ def test_the_source_is_proved_before_anything_is_emptied(monkeypatch):
         weaver.mirror(plan=plan, session=_open())
 
 
+class _SourceTables:
+    """A Session reading a source catalogue that holds exactly these tables."""
+
+    closed = False
+
+    def __init__(self, names):
+        self._names = names
+
+    def sql_executor(self, _target, *, workspace=None):
+        names = self._names
+
+        class _Sql:
+            def query(self, _statement):
+                return [{"name": name} for name in names]
+
+        return _Sql()
+
+
+def _source_tables(*, browser: bool) -> tuple[str, ...]:
+    from weaver.catalogue.fork import FORKED_TABLES, OPTIONAL_TABLES
+
+    return tuple(
+        table.name for table in FORKED_TABLES if browser or table not in OPTIONAL_TABLES
+    )
+
+
+@pytest.mark.parametrize("browser", (True, False))
+@weaver_test()
+def test_a_source_without_the_browser_tables_still_mirrors(monkeypatch, browser):
+    """An older catalogue forks what it has; its items gain browser rows on build."""
+
+    from weaver.operations.mirror import check_mirror
+
+    plan = _plan(monkeypatch, _workspace())
+
+    resolved = check_mirror(
+        plan, session=_SourceTables(_source_tables(browser=browser))
+    )
+
+    assert resolved.browsed is browser
+
+
+@weaver_test()
+def test_a_source_missing_a_required_table_is_still_refused(monkeypatch):
+    from weaver.operations.mirror import check_mirror
+
+    plan = _plan(monkeypatch, _workspace())
+    held = tuple(name for name in _source_tables(browser=True) if name != "Registry")
+
+    with pytest.raises(CommandError, match="not compatible with this Weaver"):
+        check_mirror(plan, session=_SourceTables(held))
+
+
 # --- what a recreated pointer depends on --------------------------------------
 
 

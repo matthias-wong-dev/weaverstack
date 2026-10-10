@@ -76,6 +76,15 @@ def test_a_mirror_carries_the_browser_rows_of_the_items_it_copies():
     assert {BROWSER_NODE.name, BROWSER_EDGE.name} <= copied
 
 
+@weaver_test()
+def test_a_source_without_the_browser_tables_forks_the_rest():
+    copied = set(forked_table_names(browsed=False))
+    body = "\n".join(fork_statements(source_catalogue="Weaver", browsed=False))
+
+    assert copied == set(forked_table_names()) - {BROWSER_NODE.name, BROWSER_EDGE.name}
+    assert "BrowserNode" not in body and "BrowserEdge" not in body
+
+
 # --- how the statements are spelled -------------------------------------------
 
 
