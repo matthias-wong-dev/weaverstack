@@ -501,6 +501,11 @@ def build_parser() -> argparse.ArgumentParser:
         "to the connection that reaches it.",
     )
     build.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Inspect the Build plan without changing target state.",
+    )
+    build.add_argument(
         "--bundle-only",
         action="store_true",
         help="Create a deployment bundle without installing it.",
@@ -2090,6 +2095,8 @@ def handle_build(args: argparse.Namespace) -> int:
             "New: --item Lakehouse/Landing=Lakehouse/Landing_Dev"
         )
     _refuse_retired_target(args)
+    if args.dry_run and args.bundle_only:
+        raise CommandError("--dry-run and --bundle-only cannot be combined")
     if args.bundle_path and not args.bundle_only:
         raise CommandError("--bundle-path requires --bundle-only")
     return _until_fixed(args, lambda: _build_once(args))
@@ -2106,6 +2113,7 @@ def _build_once(args: argparse.Namespace) -> int:
                 items=args.items,
                 data_sources=args.data_sources,
                 bind_data_sources=args.bind_data_sources,
+                dry_run=args.dry_run,
                 bundle_only=args.bundle_only,
                 bundle_path=args.bundle_path,
                 concurrency=args.concurrency,
@@ -2148,6 +2156,9 @@ def _print_action_counts(report, *, indent: str = "  ") -> None:
 
 
 def _print_build(result) -> None:
+    if result.dry_run:
+        print(result.preview.describe())
+        return
     if result.installation and not result.installation_report.action_counts()["total"]:
         print("Installation")
         print("  nothing to install")

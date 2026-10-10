@@ -57,6 +57,31 @@ weaver.load("Lakehouse/Landing", session=session, concurrency=2)
 weaver.test("Lakehouse/Landing", session=session, concurrency=2)
 ```
 
+## Build plan inspection
+
+`weaver build --dry-run` reads the selected targets and returns the canonical
+Build plan without installation or target writes. It shows object selection,
+target bindings, physical actions, destructive removals, certification and
+runtime-state changes. Authored SQL effects that require execution are reported
+as unknown. Runtime compatibility is not checked by a dry run.
+
+```bash
+weaver build . --item Warehouse/Reporting --dry-run
+weaver build . --dry-run --json
+```
+
+Python and Fabric notebooks use `weaver.build(source, dry_run=True,
+session=session)`. The result's `preview.plan` is the frozen mutation plan;
+`result.to_mapping()` includes the structured preview and complete plan.
+Unchanged source and target state produce the same plan as execution.
+
+Dry-run requires existing physical targets, including selected Power BI items.
+It creates no items, uploads no runtime or action payloads, and changes no
+catalogue, LoadStatus, TestStatus or bookmarks. Read-only Fabric inspection may
+acquire Spark to inspect Lakehouse Views. The temporary local bundle is removed
+before the result returns. `--bundle-only` retains a deployable bundle and is
+separate from `--dry-run`; combining them is an error.
+
 ## Semantic model Build
 
 A Power BI source project lives under `PowerBI/<project>/`. Each native
