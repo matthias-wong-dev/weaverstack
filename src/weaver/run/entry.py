@@ -90,6 +90,39 @@ def run_test_in_fabric(
     return carried
 
 
+def run_source_test_in_fabric(
+    *,
+    session,
+    workspace,
+    validations: list[dict],
+    started: str,
+    dry_run=False,
+    collect=False,
+) -> dict:
+    """Execute parsed source definitions and return their unrecorded results."""
+
+    from datetime import datetime
+
+    from ..operations.test import execute_source_test
+    from ..test_file import SourceValidation
+
+    report = execute_source_test(
+        session,
+        workspace=workspace,
+        validations=tuple(SourceValidation.from_mapping(each) for each in validations),
+        started=datetime.fromisoformat(started),
+        dry_run=dry_run,
+        collect=collect,
+    )
+    carried = report.to_mapping()
+    carried["diagnostics"] = {
+        node.logical_id: list(node.diagnostics)
+        for node in report.nodes
+        if node.diagnostics is not None
+    }
+    return carried
+
+
 def _planned(session, workspace, catalogue: dict, request: dict):
     """The state and request a client planned against, writing through here."""
 
@@ -104,4 +137,9 @@ def _planned(session, workspace, catalogue: dict, request: dict):
     return RunState(catalogue=read), RunRequest.from_mapping(request)
 
 
-__all__ = ["run_load_in_fabric", "run_staged", "run_test_in_fabric"]
+__all__ = [
+    "run_load_in_fabric",
+    "run_source_test_in_fabric",
+    "run_staged",
+    "run_test_in_fabric",
+]

@@ -204,10 +204,11 @@ def run_source_test(
 ) -> ValidationRunReport:
     """Run validations from source through a prepared Session, recording nothing."""
 
+    from ..run.entry import run_source_test_in_fabric
+    from ..sessions.program import FabricRun
     from ..test_file import (
         file_validations,
         project_validations,
-        source_validation_nodes,
     )
     from .items import uncatalogued_target
 
@@ -225,7 +226,37 @@ def run_source_test(
         session, workspace=workspace, targets=targets, dry_run=dry_run
     )
     session.offer_spark_home(lakehouse_names(targets), workspace=workspace)
+
     started = datetime.now(timezone.utc)
+    run = FabricRun(
+        name="test",
+        needs_spark=not dry_run and bool(lakehouse_names(targets)),
+        call=lambda here: execute_source_test(
+            here,
+            workspace=workspace,
+            validations=validations,
+            started=started,
+            dry_run=dry_run,
+            collect=bool(names or files),
+        ),
+        entry=run_source_test_in_fabric,
+        arguments=lambda: {
+            "validations": [each.to_mapping() for each in validations],
+            "started": started.isoformat(),
+            "dry_run": dry_run,
+            "collect": bool(names or files),
+        },
+        decode=_decoded,
+        records_catalogue=False,
+    )
+    return session.execute_run(run, workspace=workspace)
+
+
+def execute_source_test(
+    session, *, workspace, validations, started, dry_run=False, collect=False
+) -> ValidationRunReport:
+    from ..test_file import source_validation_nodes
+
     with session.step("Execute"):
         nodes = source_validation_nodes(
             session,
@@ -233,7 +264,7 @@ def run_source_test(
             validations=validations,
             started=started,
             dry_run=dry_run,
-            collect=bool(names or files),
+            collect=collect,
         )
     return _reported(nodes=nodes, started=started, workflow_id=None)
 
