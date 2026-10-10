@@ -135,3 +135,23 @@ def test_removing_nothing_renders_nothing():
     result = plan_claim_deletion(_Catalogue(()), lakehouses=(), warehouses=())
 
     assert result.statements == ()
+
+
+@weaver_test()
+def test_an_unbound_item_loses_its_browser_rows_with_the_rest():
+    """Between Registry and Installation, scoped to the item alone.
+
+    A wipe that keeps the catalogue removes its targets' claims the same way.
+    """
+
+    result = plan_claim_deletion(_Catalogue(ROWS), lakehouses=("Sales_Dev",))
+
+    tables = [statement.split("\n", 1)[0] for statement in result.statements]
+    node = tables.index("DELETE FROM [_].[BrowserNode]")
+    edge = tables.index("DELETE FROM [_].[BrowserEdge]")
+    assert "Registry" in tables[0]
+    assert "Installation" in tables[-1]
+    assert 0 < min(node, edge) and max(node, edge) < len(tables) - 1
+    for index in (node, edge):
+        assert "N'Sales'" in result.statements[index]
+        assert "Inventory" not in result.statements[index]

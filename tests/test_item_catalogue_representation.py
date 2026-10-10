@@ -483,6 +483,18 @@ def test_a_catalogue_predating_an_introduced_table_still_builds():
 
 
 @weaver_test()
+def test_a_catalogue_predating_the_browser_tables_still_builds():
+    from weaver.catalogue.state import read_catalogue_state
+    from weaver.catalogue.tables import BROWSER_TABLES, PROJECTED_TABLES
+
+    older = [table.name for table in PROJECTED_TABLES if table not in BROWSER_TABLES]
+
+    state = read_catalogue_state(_shaped(*older), ())
+
+    assert state.materialised == set(older)
+
+
+@weaver_test()
 def test_an_introduced_table_does_not_excuse_a_genuinely_damaged_catalogue():
     """The exemption is for that table alone, not for whatever else is gone."""
 

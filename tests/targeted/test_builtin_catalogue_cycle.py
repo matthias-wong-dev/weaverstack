@@ -28,7 +28,7 @@ from weaver.build_bundle.execution import ExecutionIdentity
 from weaver.build_bundle.models import BUILD_TABLE, DROP_TABLE
 from weaver.build_bundle.workflow import BuildState
 from weaver.catalogue.state import Catalogue
-from weaver.catalogue.tables import PROJECTED_TABLES
+from weaver.catalogue.tables import BROWSER_TABLES, PROJECTED_TABLES
 from weaver.declaration.model import WeaverItemId
 from weaver.locations import Location
 from weaver.store import FilesystemStore
@@ -252,6 +252,56 @@ def test_empty_registry_recovers_existing_protected_catalogue_tables(estate, tmp
     assert all(
         f"N'_', N'{name.split('.', 1)[1]}'" in payload for name in catalogue_tables
     )
+
+
+@weaver_test()
+def test_a_build_creates_the_browser_tables_an_older_catalogue_lacks(estate, tmp_path):
+    repository = estate["repository"]
+    bindings = effective_item_bindings(
+        item_bindings(("Lakehouse/Sales", "Sales_LH")),
+        control_item=ItemRef("Weaver"),
+        workspace_name=WORKSPACE,
+    )
+    bound = {entry.item: entry.to_bound_target() for entry in bindings.entries}
+    introduced = {f"_.{table.name}" for table in BROWSER_TABLES}
+    held = tuple(
+        sorted(
+            identity.object_id.qualified
+            for identity in repository.source_documents
+            if identity.item == BUILTIN
+            and identity.object_id.qualified not in introduced
+        )
+    )
+    inventories = {
+        item: target_inventory(
+            target_id=target.id,
+            kind=target.kind,
+            target_name=target.name,
+            tables=held if item == BUILTIN else (),
+            schemas=("_",) if item == BUILTIN else (),
+        )
+        for item, target in bound.items()
+    }
+
+    bundle = Builder(
+        repository=repository,
+        state=BuildState(catalogue=Catalogue(rows={}), target_inventories=inventories),
+        bindings=bindings,
+        catalogue_binding=WarehouseBinding(
+            warehouse=ItemRef("Weaver"), workspace_name=WORKSPACE
+        ),
+        source_store=estate["store"],
+        execution=ExecutionIdentity(workspace_name=WORKSPACE),
+    ).build(output=Location(str(tmp_path / "upgrade-bundle")))
+
+    created = {
+        action.resource_node_id
+        for _sequence, _batch, action in bundle.plan.actions()
+        if action.resource_node_id
+        and action.resource_node_id.startswith(f"{BUILTIN}/")
+        and action.kind in {DROP_TABLE, BUILD_TABLE}
+    }
+    assert created == {f"{BUILTIN}/{name}" for name in introduced}
 
 
 @weaver_test()

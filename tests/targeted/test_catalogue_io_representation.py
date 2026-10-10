@@ -28,6 +28,7 @@ from weaver.catalogue.tables import (
     BOOKMARK,
     BOOKMARK_SENTINEL,
     BORROWED_TABLES,
+    BROWSER_TABLES,
     CATALOGUE_TABLES,
     CURRENT_STATE_TABLES,
     HISTORY_TABLES,
@@ -71,11 +72,14 @@ def test_a_run_reads_the_bookmark_and_writes_the_rest():
     A run writes a load status and a test status and never asks what they were,
     so reading them would be round trips for an answer nothing uses. It does read
     bookmarks, because an incremental load asks how far it got, and ``_.Mirror``,
-    because a borrowed object is one it must not write.
+    because a borrowed object is one it must not write. It reads no browser
+    rows, which restate the graph it derives from the rest.
     """
 
     assert set(READABLE_TABLES) == (
-        set(PROJECTED_TABLES) | set(BORROWED_TABLES) | {BOOKMARK}
+        (set(PROJECTED_TABLES) - set(BROWSER_TABLES))
+        | set(BORROWED_TABLES)
+        | {BOOKMARK}
     )
     assert not set(READABLE_TABLES) & set(HISTORY_TABLES)
 

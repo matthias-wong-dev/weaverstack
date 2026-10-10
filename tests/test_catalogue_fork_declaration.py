@@ -21,6 +21,8 @@ from weaver.catalogue.fork import (
 )
 from weaver.catalogue.tables import (
     BOOKMARK,
+    BROWSER_EDGE,
+    BROWSER_NODE,
     CATALOGUE_TABLES,
     HISTORY_TABLES,
     INSTALLATION,
@@ -63,6 +65,15 @@ def test_installed_state_and_how_far_it_has_run_both_move():
     copied = set(forked_table_names())
 
     assert {INSTALLATION.name, REGISTRY.name, BOOKMARK.name} <= copied
+
+
+@weaver_test()
+def test_a_mirror_carries_the_browser_rows_of_the_items_it_copies():
+    """They describe logical identity, so they hold in the destination too."""
+
+    copied = set(forked_table_names())
+
+    assert {BROWSER_NODE.name, BROWSER_EDGE.name} <= copied
 
 
 # --- how the statements are spelled -------------------------------------------
