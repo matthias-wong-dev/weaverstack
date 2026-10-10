@@ -123,7 +123,7 @@ def _session(default="Other"):
 
 def _external(tmp_path):
     path = tmp_path / "Sales.Match.sql"
-    path.write_text(TEST_SOURCE, encoding="utf-8")
+    path.write_bytes(TEST_SOURCE.encode("utf-8"))
     return path
 
 
@@ -196,8 +196,8 @@ def source_selection(tmp_path):
     for directory, filename, text in SOURCES.values():
         path = item / directory / filename
         path.parent.mkdir(parents=True)
-        path.write_text(text, encoding="utf-8")
-        (tmp_path / filename).write_text(text, encoding="utf-8")
+        path.write_bytes(text.encode("utf-8"))
+        (tmp_path / filename).write_bytes(text.encode("utf-8"))
 
     def select(selection, kind):
         directory, filename, _ = SOURCES[kind]

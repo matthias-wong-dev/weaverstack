@@ -117,7 +117,7 @@ def _run(observed, tmp_path, kind, case, *, dry_run=False):
         parsed.document, parsed.sql_body
     )
     path = tmp_path / "Sales.Scope.sql"
-    path.write_text(source, encoding="utf-8")
+    path.write_bytes(source.encode("utf-8"))
     report = weaver.test(
         "Warehouse/Reporting",
         source=tmp_path / "project",
