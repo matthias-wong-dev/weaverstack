@@ -26,6 +26,7 @@ from .state import Catalogue
 from .tables import (
     BROWSER_EDGE,
     BROWSER_NODE,
+    BROWSER_TABLES,
     CATALOGUE_SCHEMA,
     EDGE_DEPENDENCY,
     EDGE_EXTERNAL,
@@ -42,17 +43,39 @@ from .tables import (
 SEARCH_TEXT_BYTES = 4000
 
 
-def with_browser_rows(catalogue: Catalogue, repository) -> Catalogue:
-    """Add each item's BrowserNode and BrowserEdge rows to desired state."""
+def with_browser_rows(
+    catalogue: Catalogue, repository, *, current: Catalogue | None = None, warn=None
+) -> Catalogue:
+    """Add each item's BrowserNode and BrowserEdge rows to desired state.
+
+    The projection is advisory. An item whose rows cannot be projected keeps
+    its ``current`` rows, so publication leaves them alone, and ``warn`` says so.
+    """
 
     rows = {}
     for item, tables in catalogue.rows.items():
         merged = dict(tables)
-        merged.update(
-            browser_rows(_with_semantic_sources(item, tables, repository), item)
-        )
+        try:
+            projected = browser_rows(
+                _with_semantic_sources(item, tables, repository), item
+            )
+        except Exception as exc:
+            kept = current.rows.get(item, {}) if current is not None else {}
+            projected = {
+                table.name: tuple(kept.get(table.name, ())) for table in BROWSER_TABLES
+            }
+            if warn is not None:
+                warn(
+                    f"Catalogue Browser graph for {item} was not updated: "
+                    f"{_reason(exc)}. The Build continued."
+                )
+        merged.update(projected)
         rows[item] = MappingProxyType(merged)
     return Catalogue(rows=MappingProxyType(rows))
+
+
+def _reason(exc: Exception) -> str:
+    return (str(exc).strip() or type(exc).__name__).rstrip(".")
 
 
 def _with_semantic_sources(item, tables, repository) -> Catalogue:

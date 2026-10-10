@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -302,6 +303,61 @@ def test_a_build_creates_the_browser_tables_an_older_catalogue_lacks(estate, tmp
         and action.kind in {DROP_TABLE, BUILD_TABLE}
     }
     assert created == {f"{BUILTIN}/{name}" for name in introduced}
+
+
+@weaver_test()
+def test_a_browser_graph_failure_is_a_build_warning(estate, tmp_path, monkeypatch):
+    import weaver.installed as installed
+
+    real = installed.item_dag
+
+    def failing(catalogue, item):
+        if item == WeaverItemId.parse("Lakehouse/Sales"):
+            raise RuntimeError("unexpected")
+        return real(catalogue, item)
+
+    monkeypatch.setattr(installed, "item_dag", failing)
+    bindings = effective_item_bindings(
+        item_bindings(("Lakehouse/Sales", "Sales_LH")),
+        control_item=ItemRef("Weaver"),
+        workspace_name=WORKSPACE,
+    )
+    inventories = {
+        binding.item: target_inventory(
+            target_id=binding.to_bound_target().id,
+            target_name=binding.to_bound_target().name,
+        )
+        for binding in bindings.entries
+    }
+    warned = []
+
+    bundle = Builder(
+        repository=estate["repository"],
+        state=BuildState(catalogue=Catalogue(rows={}), target_inventories=inventories),
+        bindings=bindings,
+        catalogue_binding=WarehouseBinding(
+            warehouse=ItemRef("Weaver"), workspace_name=WORKSPACE
+        ),
+        source_store=estate["store"],
+        execution=ExecutionIdentity(workspace_name=WORKSPACE),
+        warn=warned.append,
+    ).build(output=Location(str(tmp_path / "warned-bundle")))
+
+    assert warned == [
+        "Catalogue Browser graph for Lakehouse/Sales was not updated: unexpected. "
+        "The Build continued."
+    ]
+    published = next(
+        action
+        for _sequence, _batch, action in bundle.plan.actions()
+        if action.kind == "publish_catalogue"
+    )
+    statements = json.loads(
+        estate["store"].read(bundle.location.join(*published.payload.split("/")))
+    )
+    (browser,) = [line for line in statements if "[_].[BrowserNode]" in line]
+    assert "N'_weaver'" in browser
+    assert "N'Sales'" not in browser
 
 
 @weaver_test()

@@ -351,6 +351,68 @@ def test_a_catalogue_without_browser_rows_gains_them_on_the_next_build(repositor
     assert touched == {BROWSER_NODE.name, BROWSER_EDGE.name}
 
 
+@weaver_test()
+def test_an_item_whose_graph_fails_keeps_its_rows_and_the_build_goes_on(
+    repository, monkeypatch
+):
+    """The projection is advisory: one item's failure warns and publishes nothing.
+
+    The other item's rows still publish, and the failing item's existing rows
+    are neither merged nor deleted.
+    """
+
+    import weaver.installed as installed
+    from weaver.errors import GraphError
+
+    real = installed.item_dag
+
+    def failing(catalogue, item):
+        if item == REPORTING:
+            raise GraphError("Rpt.CustomerReport depends on itself")
+        return real(catalogue, item)
+
+    monkeypatch.setattr(installed, "item_dag", failing)
+    built = built_catalogue(repository, _bindings(SALES, REPORTING))
+    current = Catalogue(
+        {
+            item: {
+                name: rows
+                for name, rows in tables.items()
+                # Sales has none yet; Reporting holds rows its graph no longer has.
+                if item != SALES or name not in {t.name for t in BROWSER_TABLES}
+            }
+            for item, tables in built.rows.items()
+        }
+    )
+    bindings = _bindings(SALES, REPORTING)
+    by_item = {binding.item: binding for binding in bindings.entries}
+    warned = []
+
+    stages = render_catalogue_after_build(
+        repository,
+        certifiable_identities(repository, by_item),
+        {binding.item: binding.to_bound_target() for binding in bindings.entries},
+        catalogue_target=by_item[SALES].to_bound_target(),
+        current=current,
+        warn=warned.append,
+    )
+
+    assert warned == [
+        "Catalogue Browser graph for Warehouse/Reporting was not updated: "
+        "Rpt.CustomerReport depends on itself. The Build continued."
+    ]
+    lines = [
+        line
+        for stage in stages
+        for content in stage.payloads.values()
+        for line in json.loads(content)
+        if any(f"[{table.name}]" in line for table in BROWSER_TABLES)
+    ]
+    assert lines, "Sales' browser rows still publish"
+    assert all("N'Sales'" in line for line in lines)
+    assert not any("N'Reporting'" in line for line in lines)
+
+
 # --- what a node says ---------------------------------------------------------
 
 
