@@ -769,11 +769,6 @@ def fixed_semantic_model_name():
 
 
 @pytest.fixture
-def fixed_semantic_model(semantic_model_session, fixed_semantic_model_name):
-    return semantic_model_session.semantic_model(fixed_semantic_model_name)
-
-
-@pytest.fixture
 def scratch_semantic_model_name():
     return _fixed_name("scratch_semantic_model")
 

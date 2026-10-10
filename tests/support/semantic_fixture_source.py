@@ -98,7 +98,6 @@ class ConfiguredSemanticSource:
     model: object
     original: dict
     native_parts: dict
-    shell_parts: dict
     expression: str
     binding: list
     shared: dict
@@ -117,7 +116,8 @@ class ConfiguredSemanticSource:
         assert len(connections) == 1 and connections[0].get("id"), (
             "Configured fixture source requires an explicit connection"
         )
-        shell = reset_definition(
+        # The guarded wipe keeps the source, so the model must admit one.
+        reset_definition(
             "Fixture",
             observed,
             parts=native,
@@ -143,7 +143,6 @@ class ConfiguredSemanticSource:
             model,
             original,
             native,
-            decode_parts(shell["definition"]),
             expression,
             [stable_connection(value) for value in connections],
             stable_connection(shared),
@@ -203,18 +202,6 @@ class ConfiguredSemanticSource:
             metadata[key].casefold() == value.casefold()
             for key, value in expected.items()
         ), "Configured fixture source differs from the Session catalogue source"
-
-    def retain(self, folder):
-        # Copy the captured native carrier; do not generate a new connector.
-        overlay = folder / f"{folder.name}.tmdl"
-        if not overlay.exists():
-            candidates = list(folder.glob("*.SemanticModel/definition/model.tmdl"))
-            assert len(candidates) == 1, "Fixture requires one native model"
-            overlay = candidates[0]
-        text = overlay.read_text(encoding="utf-8")
-        assert "__WeaverSource" not in text, "Fixture already owns a source carrier"
-        table = self.shell_parts["definition/tables/__WeaverSource.tmdl"].decode()
-        overlay.write_text(text + "\n" + table, encoding="utf-8")
 
     def require_preservation(self, preserve):
         assert preserve is True, (

@@ -157,31 +157,14 @@ def test_plain_configured_wipe_refused_before_mutation():
 
 
 @weaver_test()
-def test_retained_carrier_uses_captured_native_m_and_guards_repeat_change_cleanup(
-    tmp_path,
-):
-    model, source = contract()
-    folder = tmp_path / "RefreshAcceptance"
-    folder.mkdir()
-    target = folder / "RefreshAcceptance.tmdl"
-    target.write_text(
-        'model Model\n\ntable Calendar\n    partition Calendar = calculated\n        source = ROW("Year", 2026)\n'
-    )
-    source.retain(folder)
-    text = target.read_text()
-    assert "__WeaverSource" in text
-    assert all(line in text for line in M.splitlines())
-    parts = {
-        "definition.pbism": PARTS["definition.pbism"],
-        "definition/model.tmdl": target.read_bytes(),
-    }
+def test_guard_admits_repeated_unchanged_source_and_records_each_stage():
+    _, source = contract()
     calls = []
     session = SimpleNamespace(execute_mutation=lambda *a, **k: calls.append("mutation"))
     source.attach(session)
     for stage in ("initial", "repeat", "changed", "wipe", "rebuild"):
         p, payloads = plan(
-            encode_parts(parts),
-            executor="semantic_wipe" if stage == "wipe" else "semantic_model",
+            executor="semantic_wipe" if stage == "wipe" else "semantic_model"
         )
         session.execute_mutation(p, payloads)
     source.verify("cleanup")
@@ -445,17 +428,13 @@ def test_direct_definition_client_cannot_remove_configured_source():
 
 
 @weaver_test()
-def test_restored_fixture_admission_and_refusal_do_not_write_during_teardown(
-    tmp_path, monkeypatch
+def test_guarded_fixture_admission_and_refusal_do_not_write_during_teardown(
+    tmp_path,
 ):
-    import importlib
-    from pathlib import Path
+    from support.semantic_fixture_source import guarded_source
 
     from weaver.fabric.semantic_model import SemanticModelClient
 
-    monkeypatch.syspath_prepend(str(Path(__file__).parent / "fabric"))
-    boundary = importlib.import_module("test_semantic_model_boundary")
-    monkeypatch.setattr(boundary, "_settle_refreshes", lambda model: None)
     model = Model()
     writes = []
     model.fabric.request = lambda *a, **k: writes.append((a, k))
@@ -463,22 +442,22 @@ def test_restored_fixture_admission_and_refusal_do_not_write_during_teardown(
     session = SimpleNamespace(
         execute_mutation=lambda *a, **k: writes.append("mutation")
     )
-    fixture = boundary.restored_semantic_model.__wrapped__(model, session, tmp_path)
-    assert next(fixture) is model
-    assert model.calls[:3] == ["observed", "native", "binding"]
-    client = SemanticModelClient(
-        model.workspace_id, model.model_id, fabric=model.fabric, power_bi=object()
-    )
-    with pytest.raises(AssertionError, match="source"):
-        client.update_definition(
-            encode_parts(
-                {
-                    "definition.pbism": PARTS["definition.pbism"],
-                    "definition/model.tmdl": b"model Model\n",
-                }
-            ),
-            allow_purge_data=True,
+    with guarded_source(
+        model, session, tmp_path / "backup.json", lambda value: None, name="Sales"
+    ) as source:
+        assert source.model is model
+        assert model.calls[:3] == ["observed", "native", "binding"]
+        client = SemanticModelClient(
+            model.workspace_id, model.model_id, fabric=model.fabric, power_bi=object()
         )
-    with pytest.raises(StopIteration):
-        next(fixture)
+        with pytest.raises(AssertionError, match="source"):
+            client.update_definition(
+                encode_parts(
+                    {
+                        "definition.pbism": PARTS["definition.pbism"],
+                        "definition/model.tmdl": b"model Model\n",
+                    }
+                ),
+                allow_purge_data=True,
+            )
     assert not writes
