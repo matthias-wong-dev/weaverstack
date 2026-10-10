@@ -1002,3 +1002,34 @@ def test_health_tables_carry_the_model_source_bindings(tmp_path, monkeypatch):
 
     (model,) = (node for node in dag.nodes if node.identity.item == ITEM)
     assert model.artefact_kind == SEMANTIC_REFRESH
+
+
+@weaver_test()
+def test_a_model_reading_an_uninstalled_source_stops_only_its_own_load(
+    tmp_path, monkeypatch
+):
+    from weaver.errors import LoadError
+    from weaver.load_plan import load_dag
+
+    root = source_project(tmp_path)
+    with source_session(tmp_path / "storage") as session:
+        sources = loadable_source_catalogue()
+        answer_catalogue(session, sources, read_bindings())
+        published = capture_publication(monkeypatch, session)
+        built = weaver.build(
+            root, items=f"{ITEM}=SemanticModel/Reporting_Dev", session=session
+        )
+        assert built.succeeded, built.errors
+    rows = {**dict(sources.rows), **published()}
+    rows[SOURCE] = {
+        table: [row for row in found if row.get("object_name") != "Summary"]
+        for table, found in rows[SOURCE].items()
+    }
+    dag = Catalogue(rows).dag()
+
+    assert load_dag(dag, items=(SOURCE,)).nodes
+    with pytest.raises(LoadError) as caught:
+        load_dag(dag, items=(SOURCE, ITEM))
+    message = str(caught.value)
+    assert "Warehouse/Serving/Cake.Summary, which is not installed" in message
+    assert "remove it with weaver unbind" in message
