@@ -489,3 +489,32 @@ def test_search_text_stays_within_its_column():
     stored = node["search_text"].encode("utf-8")
     assert len(stored) <= SEARCH_TEXT_BYTES
     assert node["search_text"].startswith("dwg.customer lakehouse/sales éé")
+
+
+@weaver_test()
+def test_the_catalogue_browser_is_internal():
+    from weaver.build_bundle.targets import ItemBindings, parse_build_item
+    from weaver.catalogue_browser import BROWSER_ITEMS
+
+    composed = parse_item_repository(Location(str(CROSS_ITEM)), catalogue_browser=True)
+    bindings = effective_item_bindings(
+        ItemBindings(
+            item_bindings(("Lakehouse/Sales", "Sales_LH")).entries
+            + tuple(
+                parse_build_item(f"{item}={item.item_type}/Estate Browser")
+                for item in BROWSER_ITEMS
+            )
+        ),
+        control_item=ItemRef("Weaver"),
+        workspace_name=WORKSPACE,
+    )
+    rows = _rows(built_catalogue(composed, bindings), BROWSER_NODE)
+    browser = [row for row in rows if row["item_name"] == "Catalogue Browser"]
+
+    assert {row["item_type"] for row in browser} == {"SemanticModel", "Report"}
+    assert all(row["is_internal"] for row in browser)
+    assert not any(
+        row["is_internal"]
+        for row in rows
+        if row["item_name"] == SALES.item_name and not row["schema_name"].endswith("_")
+    )

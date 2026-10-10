@@ -207,9 +207,12 @@ def _label(identity) -> str:
 
 
 def _is_internal(identity) -> bool:
-    """The catalogue item, and the ``_`` surface it presents in every item."""
+    """The catalogue item, the Catalogue Browser over it, and the ``_`` surface
+    the catalogue presents in every item."""
 
-    if identity.item == BUILTIN_ITEM:
+    from ..catalogue_browser import BROWSER_ITEMS
+
+    if identity.item == BUILTIN_ITEM or identity.item in BROWSER_ITEMS:
         return True
     schema = (
         identity.schema
