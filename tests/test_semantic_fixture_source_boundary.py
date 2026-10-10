@@ -217,6 +217,37 @@ def test_unsupported_fixture_admission_has_no_mutation(bad):
 
 
 @weaver_test()
+@pytest.mark.parametrize("status", [403, 500])
+def test_unreadable_owner_connection_skips_the_guarded_fixture(tmp_path, status):
+    from support.semantic_fixture_source import guarded_source
+
+    from weaver.fabric.client import FabricError
+
+    model = Model()
+
+    def refuse(path):
+        raise FabricError("refused", status_code=status)
+
+    model.fabric.get_json = refuse
+    session = SimpleNamespace(execute_mutation=lambda *a, **k: None)
+    execute = session.execute_mutation
+    expected = pytest.skip.Exception if status == 403 else FabricError
+    with pytest.raises(expected) as raised:
+        with guarded_source(
+            model, session, tmp_path / "backup.json", lambda value: None, name="Sales"
+        ):
+            pytest.fail("the guarded fixture yielded")
+    if status == 403:
+        assert str(raised.value) == (
+            "Sales's connection is not readable by this sign-in; "
+            "sign in as the model's owner"
+        )
+    assert session.execute_mutation is execute
+    assert "request" not in model.calls
+    assert not (tmp_path / "backup.json").exists()
+
+
+@weaver_test()
 def test_restoration_replays_only_captured_native_source_and_owned_state(monkeypatch):
     from weaver.semantic_models.definition import decode_parts
 

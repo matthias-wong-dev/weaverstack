@@ -2,8 +2,12 @@
 
 import hashlib
 import json
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 
+import pytest
+
+from weaver.fabric.client import FabricError
 from weaver.semantic_models import TmdlDefinition
 from weaver.semantic_models.definition import decode_model, decode_parts, encode_parts
 from weaver.semantic_models.m_source import relation, sql_database
@@ -104,7 +108,7 @@ class ConfiguredSemanticSource:
     request: object = None
 
     @classmethod
-    def capture(cls, model):
+    def capture(cls, model, *, name="The configured model"):
         original = model.get_definition()
         native = decode_parts({**model.get_definition(format="TMDL"), "format": "TMDL"})
         connections = model.get_connections()
@@ -126,7 +130,15 @@ class ConfiguredSemanticSource:
         assert connections[0]["connectivityType"] == "ShareableCloud", (
             "Configured fixture source requires ShareableCloud SQL Import"
         )
-        shared = model.fabric.get_json(f"connections/{connections[0]['id']}")
+        try:
+            shared = model.fabric.get_json(f"connections/{connections[0]['id']}")
+        except FabricError as error:
+            if error.status_code != 403:
+                raise
+            pytest.skip(
+                f"{name}'s connection is not readable by this sign-in; "
+                "sign in as the model's owner"
+            )
         instance = cls(
             model,
             original,
@@ -277,3 +289,23 @@ class ConfiguredSemanticSource:
         self.model.refresh(timeout=300)
         self.verify("cleanup")
         assert decode_model(self.model.get_definition()) == decode_model(self.original)
+
+
+@contextmanager
+def guarded_source(model, session, backup, settle, *, name):
+    """Guard the configured model's source for the test, then restore it."""
+
+    source = ConfiguredSemanticSource.capture(model, name=name)
+    backup.write_text(json.dumps(source.original), encoding="utf-8")
+    print(f"Original semantic definition: {backup}")
+    source.attach(session)
+    try:
+        yield source
+    finally:
+        source.detach(session)
+        try:
+            source.restore(settle)
+            if source.touched:
+                print(f"Restored semantic model {model.workspace_id}/{model.model_id}")
+        finally:
+            print("SEMANTIC_SOURCE_EVIDENCE " + json.dumps(source.evidence))

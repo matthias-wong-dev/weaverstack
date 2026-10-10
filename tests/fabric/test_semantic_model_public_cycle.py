@@ -8,7 +8,7 @@ from contextlib import contextmanager
 from types import SimpleNamespace
 
 import pytest
-from support.semantic_fixture_source import ConfiguredSemanticSource
+from support.semantic_fixture_source import guarded_source
 from support.semantic_models import policy_path
 from support.semantic_projects import ITEM, PBIP, ROOT, SCOPE
 from support.weaver_test import register_session, weaver_test
@@ -130,48 +130,51 @@ def _build_context(fabric_workspace_item, fabric_client, name, tmp_path, *, guar
         history = read_table(connection, LOG, predicate=history_predicate)
         retained_log_ids = {row["log_sk"] for row in history}
         _settle_refreshes(model)
-        source = None
-        if guarded:
-            source = ConfiguredSemanticSource.capture(model)
-            backup = tmp_path / "original-definition.json"
-            backup.write_text(json.dumps(source.original), encoding="utf-8")
-            print(f"Original semantic definition: {backup}")
-            source.attach(session)
-        try:
-            yield SimpleNamespace(
-                session=session,
-                connection=connection,
-                model=model,
-                target=name,
-                source=source,
-                wipe=weaver.wipe if source is None else source.wipe,
-                load=(
-                    weaver.load
-                    if source is None
-                    else lambda *a, **k: source.run("load", weaver.load, *a, **k)
-                ),
+        guard = (
+            guarded_source(
+                model,
+                session,
+                tmp_path / "original-definition.json",
+                _settle_refreshes,
+                name=name,
             )
-        finally:
-            touched = True
-            if source is not None:
-                source.detach(session)
-                touched = source.touched
-            try:
-                if source is None:
-                    _settle_refreshes(model)
-                else:
-                    source.restore(_settle_refreshes)
-                    if touched:
-                        print(
-                            f"Restored semantic model {model.workspace_id}/{model.model_id}"
-                        )
-            finally:
-                if source is not None:
-                    print("SEMANTIC_SOURCE_EVIDENCE " + json.dumps(source.evidence))
-                if touched:
-                    _cleanup_catalogue(
-                        session, connection, history_predicate, retained_log_ids, claims
+            if guarded
+            else _settled(model)
+        )
+        touched = False
+        try:
+            with guard as source:
+                try:
+                    yield SimpleNamespace(
+                        session=session,
+                        connection=connection,
+                        model=model,
+                        target=name,
+                        source=source,
+                        wipe=weaver.wipe if source is None else source.wipe,
+                        load=(
+                            weaver.load
+                            if source is None
+                            else lambda *a, **k: source.run(
+                                "load", weaver.load, *a, **k
+                            )
+                        ),
                     )
+                finally:
+                    touched = source is None or source.touched
+        finally:
+            if touched:
+                _cleanup_catalogue(
+                    session, connection, history_predicate, retained_log_ids, claims
+                )
+
+
+@contextmanager
+def _settled(model):
+    try:
+        yield None
+    finally:
+        _settle_refreshes(model)
 
 
 def _cleanup_catalogue(
