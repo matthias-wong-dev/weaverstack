@@ -275,7 +275,7 @@ def _scheduled_source_nodes(
     from .catalogue.state import Catalogue
     from .operations.items import uncatalogued_target
     from .run.graph import RunGraph, RunNode
-    from .run.runner import Lanes, Runner, RunRequest
+    from .run.runner import Lanes, Runner, RunRequest, needs_spark
     from .run.state import RunState
 
     nodes = tuple(
@@ -302,6 +302,8 @@ def _scheduled_source_nodes(
         workspace=workspace,
         graph=RunGraph(nodes=nodes, items=request.items),
     )
+    if needs_spark(runner.graph):
+        session.spark(workspace)
     reports = {}
 
     def dispatch(node, **asked):

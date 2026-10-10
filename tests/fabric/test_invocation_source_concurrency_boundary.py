@@ -1,7 +1,6 @@
 """Invocation limits across the published desktop and native source-Test boundary."""
 
 import json
-import textwrap
 
 from support.weaver_test import register_session, weaver_test
 from test_lakehouse_file_dispatch_boundary import source, workspace_for
@@ -113,45 +112,45 @@ def native_program(operation):
         "from weaver.workspaces import *\n"
         f"workspace = {_workspace_literal(operation)}\n"
         f"definitions = json.loads({json.dumps(definitions())!r})\n"
-        + textwrap.dedent("""\
-        import threading, time
-        from weaver.run.runner import Runner
-        original = Runner._dispatched
-        lock = threading.Lock()
-        active = peak = 0
-        def measured(self, *args, **kwargs):
-            global active, peak
-            with lock:
-                active += 1
-                peak = max(peak, active)
-            try:
-                time.sleep(0.1)
-                return original(self, *args, **kwargs)
-            finally:
-                with lock:
-                    active -= 1
-        Runner._dispatched = measured
-        results = {}
-        try:
-            with TemporaryDirectory() as root, NotebookSession(workspace=workspace, spark=spark) as session:
-                def forbidden(*args, **kwargs):
-                    raise AssertionError('source run acquired catalogue or dispatched remotely')
-                session.flusher = forbidden
-                session.sql_executor = forbidden
-                session.execute_run_in_fabric = forbidden
-                paths = []
-                for name, body in definitions.items():
-                    path = Path(root) / name
-                    path.write_bytes(body.encode())
-                    paths.append(path)
-                for total in (1, 2):
-                    peak = 0
-                    report = weaver.test('Lakehouse/Source', files=paths, source=Path(root) / 'empty', session=session, concurrency=total)
-                    results[str(total)] = {'report': report.to_mapping(), 'peak': peak, 'active_after': active}
-        finally:
-            Runner._dispatched = original
-        emit(results)
-        """)
+        + """\
+import threading, time
+from weaver.run.runner import Runner
+original = Runner._dispatched
+lock = threading.Lock()
+active = peak = 0
+def measured(self, *args, **kwargs):
+    global active, peak
+    with lock:
+        active += 1
+        peak = max(peak, active)
+    try:
+        time.sleep(0.1)
+        return original(self, *args, **kwargs)
+    finally:
+        with lock:
+            active -= 1
+Runner._dispatched = measured
+results = {}
+try:
+    with TemporaryDirectory() as root, NotebookSession(workspace=workspace) as session:
+        def forbidden(*args, **kwargs):
+            raise AssertionError('source run acquired catalogue or dispatched remotely')
+        session.flusher = forbidden
+        session.sql_executor = forbidden
+        session.execute_run_in_fabric = forbidden
+        paths = []
+        for name, body in definitions.items():
+            path = Path(root) / name
+            path.write_bytes(body.encode())
+            paths.append(path)
+        for total in (1, 2):
+            peak = 0
+            report = weaver.test('Lakehouse/Source', files=paths, source=Path(root) / 'empty', session=session, concurrency=total)
+            results[str(total)] = {'report': report.to_mapping(), 'peak': peak, 'active_after': active}
+finally:
+    Runner._dispatched = original
+emit(results)
+"""
     )
 
 
