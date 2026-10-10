@@ -84,7 +84,7 @@ class LoadNode:
     #: endpoint, or ``None`` when a read needs every table synced.
     refresh_tables: tuple[tuple[str, str], ...] | None = ()
     #: A semantic refresh only. Every recorded source is read in Direct Lake,
-    #: which uses single sign-on and needs no connection.
+    #: which uses single sign-on, so no connection is bound or needed.
     direct_lake: bool = False
 
     @property

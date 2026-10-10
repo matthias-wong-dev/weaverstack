@@ -50,9 +50,13 @@ def dispatch_primitive(
         from ..runtime.semantic_refresh_result import SemanticRefreshResult
 
         model = session.semantic_model(node.bound_item, workspace=workspace)
+        if node.direct_lake:
+            # Direct Lake reads with single sign-on. A bound connection would
+            # replace that with the connection's identity.
+            return SemanticRefreshResult.from_response(model.refresh())
         # A new or redeployed model has no data connection until one is bound.
         binding = model.bind_data_sources()
-        for path in () if node.direct_lake else binding.unreached:
+        for path in binding.unreached:
             # Single sign-on can still reach the source, so this does not stop.
             session.warn(
                 f"{node.logical_id} reads {path}, and no connection has that "
