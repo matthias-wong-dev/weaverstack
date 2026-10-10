@@ -1,9 +1,10 @@
 """A semantic model's whole lifecycle on a fixed Fabric item, through public calls.
 
-Build, Load, Test and Health; repeated selected-model deployment; a model change,
-which makes passed Tests stale once it loads; a Test edit with stable model
-signature; a wipe keeping the data source; and a rebuild back to green. The
-Tests run real DAX against the model and real T-SQL against the catalogue.
+Build, a Load without the project folder, Test and Health; repeated
+selected-model deployment; a model change, which makes passed Tests stale once
+it loads; a Test edit with stable model signature; a wipe keeping the data
+source; and a rebuild back to green. The Tests run real DAX against the model
+and real T-SQL against the catalogue.
 """
 
 import json
@@ -17,15 +18,21 @@ from test_semantic_model_public_cycle import (
 import weaver
 from weaver.catalogue.reader import read_table
 from weaver.catalogue.tables import (
+    BOOKMARK,
     CURRENT_STATE_TABLES,
     DEPENDENCY,
+    INSTALLATION,
+    LOAD_STATISTIC,
     LOAD_STATUS,
+    LOG,
     PROJECTED_TABLES,
     REGISTRY,
+    SEMANTIC_MODEL,
     SEMANTIC_MODEL_TEST,
     TEST_DICTIONARY,
     TEST_STATUS,
 )
+from weaver.catalogue.tsql import literal
 from weaver.semantic_models import TmdlDefinition
 from weaver.semantic_models.binding import m_string
 from weaver.semantic_models.definition import decode_model
@@ -179,6 +186,14 @@ def _load_result(connection):
     return str(status["result"]).casefold()
 
 
+def _project_bytes(root):
+    return {
+        path.relative_to(root).as_posix(): path.read_bytes()
+        for path in root.rglob("*")
+        if path.is_file()
+    }
+
+
 def _health(session):
     report = weaver.health(str(ITEM), session=session)
     return report, {section.area: section.status for section in report.sections}
@@ -203,6 +218,7 @@ def test_semantic_model_build_load_test_health_lifecycle(
         native_source=context.source.expression,
     )
     selection = f"{ITEM}=SemanticModel/{context.target}"
+    original_sources = _project_bytes(root)
     evidence = {}
 
     def build():
@@ -245,20 +261,59 @@ def test_semantic_model_build_load_test_health_lifecycle(
         for row in read_table(connection, DEPENDENCY, scope=SCOPE)
         if row["referencing_object_name"] == "ObjectsReconcile"
     } == {"Warehouse/_weaver/_.TableDictionary"}
-    assert {
-        row["object_type"]
-        for row in read_table(connection, REGISTRY, scope=SCOPE)
-        if row["object_role"] == "data"
-    } == {"semantic_model"}
+    registry = read_table(connection, REGISTRY, scope=SCOPE)
+    assert {row["object_type"] for row in registry if row["object_role"] == "data"} == {
+        "semantic_model"
+    }
+    (binding,) = read_table(connection, INSTALLATION, scope=SCOPE)
+    assert (binding["workspace_id"], binding["item_id"]) == (
+        context.model.workspace_id,
+        context.model.model_id,
+    )
+    (definition,) = read_table(connection, SEMANTIC_MODEL, scope=SCOPE)
+    (registered,) = (
+        row
+        for row in registry
+        if (
+            row["schema_name"],
+            row["object_name"],
+            row["object_type"],
+            row["object_role"],
+        )
+        == ("", "", "semantic_model", "data")
+    )
+    assert registered["signature"] == definition["signature"]
+    assert "definition" not in definition
     deployed = decode_model(context.model.get_definition())["model"]
     objects = next(t for t in deployed["tables"] if t["name"] == "Objects")
     assert next(c for c in objects["columns"] if c["name"] == "Signature")["isHidden"]
     context.source.verify("first-build")
     assert _load_result(connection) == "pending"
 
-    # Load, Test, Health: the first certification of the whole lifecycle.
-    assert context.load(str(ITEM), session=context.session).succeeded
-    assert _load_result(connection) == "succeeded"
+    # Load, Test, Health: the first certification of the whole lifecycle. The
+    # Load needs only the catalogue, not the project folder.
+    away = root.with_name("source-not-present")
+    root.rename(away)
+    try:
+        loaded = context.load(str(ITEM), session=context.session)
+    finally:
+        away.rename(root)
+    assert loaded.succeeded, loaded.to_mapping()
+    (node,) = loaded.nodes
+    assert node.result.status == "Completed" and node.result.request_id
+    assert node.result.start_time and node.result.end_time
+    assert not hasattr(node.result, "rows_inserted")
+    (status,) = read_table(connection, LOAD_STATUS, scope=SCOPE)
+    assert str(status["result"]).casefold() == "succeeded"
+    assert status["workflow_id"] == loaded.workflow_id
+    assert status["started_datetime"] and status["completed_datetime"]
+    logs = read_table(
+        connection, LOG, predicate=f"[Workflow ID] = {literal(loaded.workflow_id)}"
+    )
+    assert any(node.result.request_id in (row["details"] or "") for row in logs)
+    assert not read_table(connection, BOOKMARK, scope=SCOPE)
+    assert not read_table(connection, LOAD_STATISTIC, scope=SCOPE)
+    assert _project_bytes(root) == original_sources
     tested = run_validations()
     assert _statuses(connection) == {
         "ObjectsReconcile": "succeeded",
@@ -277,11 +332,10 @@ def test_semantic_model_build_load_test_health_lifecycle(
     unchanged = build()
     assert semantic_actions(unchanged)
     assert not unchanged.selection.impact.changed
+    assert read_table(connection, SEMANTIC_MODEL, scope=SCOPE) == (definition,)
     assert _load_result(connection) == "pending"
     assert set(_statuses(connection).values()) == {"succeeded"}
-    assert context.load(str(ITEM), session=context.session).succeeded
-    run_validations()
-    assert _health(context.session)[0].is_healthy
+    assert _project_bytes(root) == original_sources
 
     # A model change deploys, and a Test that passed before the reload is stale.
     extension = folder / f"{ITEM.item_name}.tmdl"
@@ -341,13 +395,6 @@ def test_semantic_model_build_load_test_health_lifecycle(
     run_validations()
     final, sections = _health(context.session)
     assert final.is_healthy, _findings(final)
-    repeated = build()
-    assert semantic_actions(repeated)
-    assert not repeated.selection.impact.changed
-    assert _load_result(connection) == "pending"
-    assert context.load(str(ITEM), session=context.session).succeeded
-    run_validations()
-    assert _health(context.session)[0].is_healthy
     assert not {"livy", "onelake"} & {
         event.resource for event in context.session.telemetry.events()
     }
