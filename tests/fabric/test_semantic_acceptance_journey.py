@@ -336,6 +336,10 @@ def test_semantic_model_build_load_test_health_lifecycle(
     assert _load_result(connection) == "pending"
     assert set(_statuses(connection).values()) == {"succeeded"}
     assert _project_bytes(root) == original_sources
+    # Healthy again, so the change below is what makes the model unhealthy.
+    assert context.load(str(ITEM), session=context.session).succeeded
+    run_validations()
+    assert _health(context.session)[0].is_healthy
 
     # A model change deploys, and a Test that passed before the reload is stale.
     extension = folder / f"{ITEM.item_name}.tmdl"
