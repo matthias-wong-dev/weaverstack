@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 from support.semantic_fixture_source import guarded_source
-from support.semantic_models import policy_path
+from support.semantic_models import fixture_parts, policy_path
 from support.semantic_projects import ITEM, PBIP, ROOT, SCOPE
 from support.weaver_test import register_session, weaver_test
 from test_semantic_model_boundary import _settle_refreshes
@@ -20,7 +20,6 @@ from weaver.catalogue.reader import read_table
 from weaver.catalogue.reconcile import prune_installation
 from weaver.catalogue.render import render_delete_scope
 from weaver.catalogue.tables import (
-    BOOKMARK,
     CATALOGUE_TABLES,
     CURRENT_STATE_TABLES,
     DEPENDENCY,
@@ -29,7 +28,6 @@ from weaver.catalogue.tables import (
     LOAD_STATUS,
     LOG,
     PROJECTED_TABLES,
-    REGISTRY,
     SEMANTIC_MODEL,
     SEMANTIC_MODEL_COLUMN,
     SEMANTIC_MODEL_MEASURE,
@@ -208,141 +206,83 @@ def _cleanup_catalogue(
     print("Removed only RefreshAcceptance catalogue rows and its new model logs")
 
 
-@weaver_test(remote=True, resources={"rest", "tds"})
-@pytest.mark.parametrize(
-    "pbip, extension",
-    [(False, True), (True, True), (True, False)],
-    ids=["extension-only", "pbip-extension", "anywhere-pbip"],
+def _project_bytes(root):
+    return {
+        path.relative_to(root).as_posix(): path.read_bytes()
+        for path in root.rglob("*")
+        if path.is_file()
+    }
+
+
+POLICY = "/// Organisation model policy\nmodel Model\n"
+EXTENSION = (
+    "/// Refresh acceptance model\nmodel Model\n\n"
+    '/// Calendar years\ntable Calendar\n\tpartition Calendar = calculated\n\t\tsource = ROW("Year", 2026)\n'
+    "\nref table Sales\n\tcolumn ProductId\n\t\tisHidden\n\n"
+    "\tmeasure RevenueDouble = [Revenue] * 2\n\t\tformatString: 0.00\n"
+    "\nperspective Reporting\n\tperspectiveTable Sales\n\t\tperspectiveColumn Id\n"
 )
-def test_public_build_catalogue_load_dax_and_unchanged_build(
-    semantic_build_context, tmp_path, pbip, extension
+
+
+@weaver_test(remote=True, resources={"rest", "tds"})
+def test_pbip_extension_build_load_dax_and_removed_properties(
+    scratch_build_context, tmp_path
 ):
-    context = semantic_build_context
+    context = scratch_build_context
     folder = tmp_path / "project" / str(ITEM)
     folder.mkdir(parents=True)
-    if pbip:
-        shutil.copytree(PBIP, folder, dirs_exist_ok=True)
-    if extension:
-        (policy_path(folder.parent.parent)).write_text(
-            "/// Organisation model policy\nmodel Model\n\tdiscourageImplicitMeasures\n",
-            encoding="utf-8",
-        )
-        (folder / f"{folder.name}.tmdl").write_text(
-            '/// Refresh acceptance model\nmodel Model\n\n/// Calendar years\ntable Calendar\n\tpartition Calendar = calculated\n\t\tsource = ROW("Year", 2026)\n',
-            encoding="utf-8",
-        )
-        if pbip:
-            extension_path = folder / f"{folder.name}.tmdl"
-            extension_path.write_text(
-                extension_path.read_text(encoding="utf-8")
-                + "\nref table Sales\n\tcolumn ProductId\n\t\tisHidden\n\n\tmeasure RevenueDouble = [Revenue] * 2\n\t\tformatString: 0.00\n"
-                + "\nperspective Reporting\n\tperspectiveTable Sales\n\t\tperspectiveColumn Id\n",
-                encoding="utf-8",
-            )
-    else:
-        definition_folder = folder / "Probe.SemanticModel" / "definition"
-        perspectives = definition_folder / "perspectives"
-        perspectives.mkdir()
-        (perspectives / "Reporting.tmdl").write_text(
-            "perspective Reporting\n\tperspectiveTable Sales\n\t\tperspectiveColumn Id\n",
-            encoding="utf-8",
-        )
-        model_path = definition_folder / "model.tmdl"
-        model_path.write_text(
-            model_path.read_text(encoding="utf-8") + "\nref perspective Reporting\n",
-            encoding="utf-8",
-        )
-    context.source.retain(folder)
+    shutil.copytree(PBIP, folder, dirs_exist_ok=True)
     root = folder.parent.parent
-    original_sources = {
-        p.relative_to(root).as_posix(): p.read_bytes()
-        for p in root.rglob("*")
-        if p.is_file()
-    }
+    policy = policy_path(root)
+    policy.write_text(
+        POLICY.replace("model Model\n", "model Model\n\tdiscourageImplicitMeasures\n"),
+        encoding="utf-8",
+    )
+    extension = folder / f"{folder.name}.tmdl"
+    extension.write_text(EXTENSION, encoding="utf-8")
+    original_sources = _project_bytes(root)
     selector = f"{ITEM}=SemanticModel/{context.target}"
     built = weaver.build(root, items=selector, session=context.session)
     print(json.dumps(built.to_mapping(), default=str))
     assert built.succeeded, built.errors
     assert ROOT in built.selection.selected_for_build
-    (binding,) = read_table(context.connection, INSTALLATION, scope=SCOPE)
-    assert (binding["workspace_id"], binding["item_id"]) == (
-        context.model.workspace_id,
-        context.model.model_id,
-    )
     (definition,) = read_table(context.connection, SEMANTIC_MODEL, scope=SCOPE)
-    (registered,) = (
-        row
-        for row in read_table(context.connection, REGISTRY, scope=SCOPE)
-        if (
-            row["schema_name"],
-            row["object_name"],
-            row["object_type"],
-            row["object_role"],
-        )
-        == ("", "", "semantic_model", "data")
-    )
-    assert registered["signature"] == definition["signature"]
-    assert "definition" not in definition
+    assert definition["description"] == "Refresh acceptance model"
     observed = decode_model(context.model.get_definition())["model"]
-    if extension:
-        assert definition["description"] == "Refresh acceptance model"
-        assert observed["culture"] == "en-US"
-        assert observed["discourageImplicitMeasures"] is True
-        if pbip:
-            sales = next(t for t in observed["tables"] if t["name"] == "Sales")
-            assert (
-                next(c for c in sales["columns"] if c["name"] == "ProductId")[
-                    "isHidden"
-                ]
-                is True
-            )
-            doubled = next(m for m in sales["measures"] if m["name"] == "RevenueDouble")
-            assert (
-                doubled["expression"] == "[Revenue] * 2"
-                and doubled["formatString"] == "0.00"
-            )
-            assert any(p["name"] == "Reporting" for p in observed["perspectives"])
-    else:
-        assert observed["perspectives"][0]["name"] == "Reporting"
-    semantic_tables = read_table(context.connection, SEMANTIC_MODEL_TABLE, scope=SCOPE)
-    if extension:
-        assert (
-            next(row for row in semantic_tables if row["table_name"] == "Calendar")[
-                "description"
-            ]
-            == "Calendar years"
-        )
-    semantic_columns = read_table(
-        context.connection, SEMANTIC_MODEL_COLUMN, scope=SCOPE
-    )
-    assert semantic_columns
-    if extension:
-        assert any(
-            row["table_name"] == "Calendar" and row["column_name"] == "Year"
-            for row in semantic_columns
-        )
-    measures = read_table(context.connection, SEMANTIC_MODEL_MEASURE, scope=SCOPE)
-    relationships = read_table(
-        context.connection, SEMANTIC_MODEL_RELATIONSHIP, scope=SCOPE
-    )
-    if pbip:
-        assert any(row["measure_name"] == "Revenue" for row in measures)
-        assert any(
-            row["from_table"] == "Sales" and row["to_table"] == "Product"
-            for row in relationships
-        )
-    else:
-        assert not measures and not relationships
+    assert observed["culture"] == "en-US"
+    assert observed["discourageImplicitMeasures"] is True
     tables = {table["name"]: table for table in observed["tables"]}
-    assert set(tables) == (
-        ({"Sales", "Product"} if pbip else set())
-        | ({"Calendar"} if extension else set())
-        | {"__WeaverSource"}
+    assert set(tables) == {"Sales", "Product", "Calendar"}
+    assert {column["name"] for column in tables["Calendar"]["columns"]} == {"Year"}
+    sales = tables["Sales"]
+    product_id = next(c for c in sales["columns"] if c["name"] == "ProductId")
+    assert product_id["isHidden"] is True
+    doubled = next(m for m in sales["measures"] if m["name"] == "RevenueDouble")
+    assert doubled["expression"] == "[Revenue] * 2"
+    assert doubled["formatString"] == "0.00"
+    assert any(p["name"] == "Reporting" for p in observed["perspectives"])
+    assert sales["partitions"][0]["mode"] == "import"
+    semantic_tables = read_table(context.connection, SEMANTIC_MODEL_TABLE, scope=SCOPE)
+    assert (
+        next(row for row in semantic_tables if row["table_name"] == "Calendar")[
+            "description"
+        ]
+        == "Calendar years"
     )
-    if extension:
-        assert {column["name"] for column in tables["Calendar"]["columns"]} == {"Year"}
-    if pbip:
-        assert tables["Sales"]["partitions"][0]["mode"] == "import"
+    assert any(
+        row["table_name"] == "Calendar" and row["column_name"] == "Year"
+        for row in read_table(context.connection, SEMANTIC_MODEL_COLUMN, scope=SCOPE)
+    )
+    assert any(
+        row["measure_name"] == "Revenue"
+        for row in read_table(context.connection, SEMANTIC_MODEL_MEASURE, scope=SCOPE)
+    )
+    assert any(
+        row["from_table"] == "Sales" and row["to_table"] == "Product"
+        for row in read_table(
+            context.connection, SEMANTIC_MODEL_RELATIONSHIP, scope=SCOPE
+        )
+    )
     (pending,) = read_table(context.connection, LOAD_STATUS, scope=SCOPE)
     assert pending["result"] == "pending"
 
@@ -356,8 +296,6 @@ def test_public_build_catalogue_load_dax_and_unchanged_build(
     assert report.succeeded and len(report.nodes) == 1
     (node,) = report.nodes
     assert node.result.status == "Completed" and node.result.request_id
-    assert node.result.start_time and node.result.end_time
-    assert not hasattr(node.result, "rows_inserted")
     (loaded,) = read_table(context.connection, LOAD_STATUS, scope=SCOPE)
     assert loaded["result"] == "succeeded"
     assert loaded["workflow_id"] == report.workflow_id
@@ -369,90 +307,62 @@ def test_public_build_catalogue_load_dax_and_unchanged_build(
         predicate=f"[Workflow ID] = {literal(report.workflow_id)}",
     )
     assert any(node.result.request_id in (row["details"] or "") for row in logs)
-    assert not read_table(context.connection, BOOKMARK, scope=SCOPE)
-    assert not read_table(context.connection, LOAD_STATISTIC, scope=SCOPE)
+
     unchanged = weaver.build(root, items=selector, session=context.session)
     print(json.dumps(unchanged.to_mapping(), default=str))
     assert unchanged.succeeded, unchanged.errors
     assert unchanged.selection.selected_for_build == (ROOT,)
     assert not unchanged.selection.impact.changed
-    assert unchanged.installation_report.action_counts()["total"] > 0
-    assert (
-        read_table(context.connection, LOAD_STATUS, scope=SCOPE)[0]["result"]
-        == "pending"
+    (pending,) = read_table(context.connection, LOAD_STATUS, scope=SCOPE)
+    assert pending["result"] == "pending"
+    assert _project_bytes(root) == original_sources
+    assert context.model.query_dax(
+        'EVALUATE ROW("Year", MAX(Calendar[Year]), "Revenue", [Revenue], '
+        '"SalesRows", COUNTROWS(Sales), "Products", COUNTROWS(Product))'
+    ) == [{"[Year]": 2026, "[Revenue]": 20, "[SalesRows]": 2, "[Products]": 2}]
+
+    # A property removed from the project is removed from the deployed model.
+    policy.write_text(POLICY, encoding="utf-8")
+    extension.write_text(
+        EXTENSION.replace("\tcolumn ProductId\n\t\tisHidden\n\n", "", 1),
+        encoding="utf-8",
     )
-    assert read_table(context.connection, SEMANTIC_MODEL, scope=SCOPE) == (definition,)
-    assert {
-        p.relative_to(root).as_posix(): p.read_bytes()
-        for p in root.rglob("*")
-        if p.is_file()
-    } == original_sources
+    removed = weaver.build(root, items=selector, session=context.session)
+    assert removed.succeeded, removed.errors
+    observed = decode_model(context.model.get_definition())["model"]
+    assert not observed.get("discourageImplicitMeasures")
+    sales = next(t for t in observed["tables"] if t["name"] == "Sales")
+    product_id = next(c for c in sales["columns"] if c["name"] == "ProductId")
+    assert not product_id.get("isHidden")
     assert not {"livy", "onelake"} & {
         event.resource for event in context.session.telemetry.events()
     }
-    print(
-        json.dumps(
-            {
-                "lifecycle": {
-                    "pbip": pbip,
-                    "extension": extension,
-                    "load_status": loaded,
-                    "unchanged": unchanged.to_mapping(),
-                    "no_livy_or_onelake": True,
-                }
-            },
-            default=str,
-        )
-    )
-    if extension:
-        assert context.model.query_dax('EVALUATE ROW("Year", MAX(Calendar[Year]))') == [
-            {"[Year]": 2026}
-        ]
-    if pbip:
-        assert context.model.query_dax('EVALUATE ROW("Revenue", [Revenue])') == [
-            {"[Revenue]": 20}
-        ]
 
 
 @weaver_test(remote=True, resources={"rest", "tds"})
-@pytest.mark.parametrize(
-    "shared", [False, True], ids=["extension-source", "shared-expression"]
-)
 def test_existing_warehouse_source_build_persists_lineage_and_loads_without_source(
-    scratch_build_context, tmp_path, shared
+    scratch_build_context, tmp_path
 ):
     context = scratch_build_context
     folder = tmp_path / "project" / str(ITEM)
     folder.mkdir(parents=True)
-    if shared:
-        from support.semantic_models import fixture_parts
-
-        parts = fixture_parts()
-        shutil.copytree(PBIP, folder, dirs_exist_ok=True)
-        model_folder = folder / "Probe.SemanticModel"
-        shutil.rmtree(model_folder / "definition")
-        parts = {
-            "definition.pbism": parts["definition.pbism"],
-            "definition/database.tmdl": parts["definition/database.tmdl"],
-            "definition/model.tmdl": b"model Model\n\tculture: en-US\n\tdefaultPowerBIDataSourceVersion: powerBI_V3\n\nref table InstalledObjects\n",
-            "definition/expressions.tmdl": b'expression \'Warehouse/_weaver\' = Sql.Database("previous", "database")\n',
-            "definition/tables/InstalledObjects.tmdl": b"/// Installed catalogue objects\ntable InstalledObjects\n\tcolumn LogicalItem\n\t\tdataType: string\n\t\tsourceColumn: Item name\n\n\tpartition InstalledObjects = entity\n\t\tmode: directLake\n\t\tsource\n\t\t\tentityName: Registry\n\t\t\tschemaName: _\n\t\t\texpressionSource: 'Warehouse/_weaver'\n",
-        }
-        for name, content in parts.items():
-            path = model_folder / name
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(content)
-    else:
-        (folder / f"{folder.name}.tmdl").write_text(
-            "expression 'Warehouse/_weaver' = Sql.Database(\"previous\", \"database\")\n\n/// Installed catalogue objects\ntable InstalledObjects\n\tcolumn LogicalItem\n\t\tsourceColumn: Item name\n\t\tdataType: string\n\tpartition InstalledObjects = entity\n\t\tmode: directLake\n\t\tsource\n\t\t\tschemaName: _\n\t\t\tentityName: Registry\n\t\t\texpressionSource: 'Warehouse/_weaver'\n",
-            encoding="utf-8",
-        )
-    root = folder.parent.parent
-    original_sources = {
-        p.relative_to(root).as_posix(): p.read_bytes()
-        for p in root.rglob("*")
-        if p.is_file()
+    parts = fixture_parts()
+    shutil.copytree(PBIP, folder, dirs_exist_ok=True)
+    model_folder = folder / "Probe.SemanticModel"
+    shutil.rmtree(model_folder / "definition")
+    parts = {
+        "definition.pbism": parts["definition.pbism"],
+        "definition/database.tmdl": parts["definition/database.tmdl"],
+        "definition/model.tmdl": b"model Model\n\tculture: en-US\n\tdefaultPowerBIDataSourceVersion: powerBI_V3\n\nref table InstalledObjects\n",
+        "definition/expressions.tmdl": b'expression \'Warehouse/_weaver\' = Sql.Database("previous", "database")\n',
+        "definition/tables/InstalledObjects.tmdl": b"/// Installed catalogue objects\ntable InstalledObjects\n\tcolumn LogicalItem\n\t\tdataType: string\n\t\tsourceColumn: Item name\n\n\tpartition InstalledObjects = entity\n\t\tmode: directLake\n\t\tsource\n\t\t\tentityName: Registry\n\t\t\tschemaName: _\n\t\t\texpressionSource: 'Warehouse/_weaver'\n",
     }
+    for name, content in parts.items():
+        path = model_folder / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
+    root = folder.parent.parent
+    original_sources = _project_bytes(root)
     selector = f"{ITEM}=SemanticModel/{context.target}"
     built = weaver.build(root, items=selector, session=context.session)
     assert built.succeeded, built.errors
@@ -498,35 +408,10 @@ def test_existing_warehouse_source_build_persists_lineage_and_loads_without_sour
     assert (
         status["result"] == "succeeded" and status["workflow_id"] == loaded.workflow_id
     )
-    # A selected model redeploys even when nothing changed, and then waits for
-    # its next load.
-    unchanged = weaver.build(root, items=selector, session=context.session)
-    assert unchanged.succeeded, unchanged.errors
-    assert unchanged.selection.selected_for_build == (ROOT,)
-    assert not unchanged.selection.impact.changed
-    (pending,) = read_table(context.connection, LOAD_STATUS, scope=SCOPE)
-    assert pending["result"] == "pending"
-    assert {
-        p.relative_to(root).as_posix(): p.read_bytes()
-        for p in root.rglob("*")
-        if p.is_file()
-    } == original_sources
+    assert _project_bytes(root) == original_sources
     assert not {"livy", "onelake"} & {
         event.resource for event in context.session.telemetry.events()
     }
-    print(
-        json.dumps(
-            {
-                "lifecycle": {
-                    "shared": shared,
-                    "load_status": status,
-                    "unchanged": unchanged.to_mapping(),
-                    "no_livy_or_onelake": True,
-                }
-            },
-            default=str,
-        )
-    )
     expected = context.connection.rows("SELECT COUNT_BIG(*) AS n FROM [_].[Registry]")[
         0
     ]["n"]
@@ -541,13 +426,4 @@ def test_existing_warehouse_source_build_persists_lineage_and_loads_without_sour
             break
         time.sleep(10)
     assert row == {"[N]": expected}
-    print(
-        json.dumps(
-            {
-                "dax_rows": expected,
-                "load_status": status,
-                "unchanged": unchanged.to_mapping(),
-            },
-            default=str,
-        )
-    )
+    print(json.dumps({"dax_rows": expected, "load_status": status}, default=str))

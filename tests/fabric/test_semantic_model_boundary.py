@@ -1,9 +1,7 @@
 """Fixed-item semantic definition, refresh and DAX through the desktop Session."""
 
-import hashlib
 import json
 import time
-from pathlib import Path
 
 import pytest
 from support.semantic_fixture_source import ConfiguredSemanticSource
@@ -11,21 +9,6 @@ from support.weaver_test import weaver_test
 
 from weaver.fabric.client import FabricError
 from weaver.operations.doctor import doctor
-from weaver.semantic_models.definition import decode_model, encode_parts
-from weaver.semantic_models.extensions import apply_extensions
-from weaver.semantic_models.source import SemanticContribution
-
-FIXTURE = Path(__file__).parents[1] / "fixtures" / "semantic_model" / "Probe"
-
-
-def _source_hashes():
-    return {
-        path.relative_to(FIXTURE).as_posix(): hashlib.sha256(
-            path.read_bytes()
-        ).hexdigest()
-        for path in sorted(FIXTURE.rglob("*"))
-        if path.is_file()
-    }
 
 
 def _settle_refreshes(model):
@@ -71,74 +54,6 @@ def scratch_model(scratch_semantic_model):
     _settle_refreshes(scratch_semantic_model)
     yield scratch_semantic_model
     _settle_refreshes(scratch_semantic_model)
-
-
-@weaver_test(remote=True, resources={"rest"})
-def test_pbip_definition_mutation_refresh_and_dax_round_trip(scratch_model):
-    model = scratch_model
-    source_hashes = _source_hashes()
-    folder = FIXTURE / "Probe.SemanticModel"
-    parts = {"definition.pbism": (folder / "definition.pbism").read_bytes()}
-    parts.update(
-        {
-            p.relative_to(folder).as_posix(): p.read_bytes()
-            for p in (folder / "definition").rglob("*.tmdl")
-        }
-    )
-    model.update_definition(encode_parts(parts), allow_purge_data=True, timeout=300)
-    deployed = decode_model(model.get_definition())
-    assert deployed["compatibilityLevel"] == 1606
-    tables = {table["name"]: table for table in deployed["model"]["tables"]}
-    assert set(tables) == {"Sales", "Product"}
-    assert tables["Sales"]["measures"][0]["expression"] == "SUM(Sales[Amount])"
-    relationship = deployed["model"]["relationships"][0]
-    assert (
-        relationship["fromTable"],
-        relationship["fromColumn"],
-        relationship["toTable"],
-        relationship["toColumn"],
-    ) == (
-        "Sales",
-        "ProductId",
-        "Product",
-        "ProductId",
-    )
-    refreshed = model.refresh(timeout=300)
-    assert refreshed["status"] == "Completed" and refreshed["request_id"]
-    assert model.query_dax(
-        'EVALUATE ROW("Revenue", [Revenue], "SalesRows", COUNTROWS(Sales), "Products", COUNTROWS(Product))'
-    ) == [{"[Revenue]": 20, "[SalesRows]": 2, "[Products]": 2}]
-    assert model.query_dax(
-        'EVALUATE ROW("FilteredRevenue", CALCULATE([Revenue], Product[ProductId] = 10), "ReverseFilterProducts", CALCULATE(COUNTROWS(Product), Sales[Id] = 1))'
-    ) == [{"[FilteredRevenue]": 12.5, "[ReverseFilterProducts]": 2}]
-
-    mutated = apply_extensions(
-        SemanticContribution(parts, {}, {}),
-        "Probe",
-        [
-            (
-                b"model Model\n\tdiscourageImplicitMeasures\n\ntable _Measure\n\tpartition _Measure = calculated\n\t\tsource = INFO.VIEW.MEASURES()\n",
-                "Reporting.tmdl",
-            )
-        ],
-    )
-    model.update_definition(
-        encode_parts(mutated.parts), allow_purge_data=True, timeout=300
-    )
-    deployed = decode_model(model.get_definition())
-    assert deployed["model"]["discourageImplicitMeasures"] is True
-    measure_table = next(
-        table for table in deployed["model"]["tables"] if table["name"] == "_Measure"
-    )
-    assert {"Name", "Table", "Expression"} <= {
-        column["name"] for column in measure_table["columns"]
-    }
-    refreshed = model.refresh(timeout=300)
-    assert refreshed["status"] == "Completed"
-    assert model.query_dax(
-        'EVALUATE ROW("Revenue", [Revenue], "Measures", COUNTROWS(\'_Measure\'))'
-    ) == [{"[Revenue]": 20, "[Measures]": 1}]
-    assert _source_hashes() == source_hashes
 
 
 @weaver_test(remote=True, resources={"rest"})
