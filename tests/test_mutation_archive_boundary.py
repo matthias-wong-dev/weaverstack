@@ -23,7 +23,7 @@ def test_mutation_carrier_validates_payload_before_pack_and_carries_canonical_pl
     with zipfile.ZipFile(io.BytesIO(carrier.data)) as archive:
         for path, data in payloads.items():
             assert archive.read("bundle/" + path) == data
-        assert "runtime/weaver/mutation/executor.py" in archive.namelist()
+        assert not any(name.startswith("runtime/") for name in archive.namelist())
 
 
 @weaver_test()
