@@ -128,6 +128,16 @@ class ConsoleSession(Session):
 
         return execute_mutation_in_fabric(self, plan, payloads, **options)
 
+    def require_build_runtime(self, *, plan=None, workspace=None):
+        from .hosted_runtime import identity, probe_source, require_compatible
+
+        scope = self.scope(workspace)
+        scope._check_weaver_available()
+        livy = self.foreground_livy(scope)
+        result = scope.livy_run(probe_source(), name="build_runtime", livy=livy)
+        observed = result.get("runtime") if isinstance(result, dict) else None
+        return require_compatible(observed, expected=identity(), plan=plan)
+
     def execute_mutation(self, plan, payloads=None, **options):
         from .mutation_progress import StageProgress
 
