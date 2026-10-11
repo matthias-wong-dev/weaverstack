@@ -221,6 +221,7 @@ def test_protected_mirrors_copy_before_cutover_and_converge(
             catalogue=f"Warehouse/{target_catalogue}",
             session=session,
         )
+        records["owned_report"] = owned.installation_report.to_mapping()
         assert owned.succeeded
         target_root = resolver.lakehouse(ItemRef(target_name))
         assert source_snapshot(session, fabric_workspace, target_name) == before

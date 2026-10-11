@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import threading
+from dataclasses import replace
 
 from ..fabric.onelake import OneLakeDfsClient
+from ..locations import Location
+from ..store import StoreError
 from .direct_delta import create_bound_delta_table, run_direct_delta_actions
 from .notebook import NotebookSession
 
@@ -15,9 +18,20 @@ class ArchiveDfs(OneLakeDfsClient):
     def _url(self, location, query=None):
         return super()._url(self._publication_location(location), query)
 
+    def list(self, location, *, recursive=False):
+        remote = self._publication_location(location)
+        prefix = remote.value.rstrip("/") + "/"
+        entries = []
+        for entry in super().list(remote, recursive=recursive):
+            if not entry.location.value.startswith(prefix):
+                raise StoreError("archive DFS listing escaped its requested root")
+            relative = entry.location.value[len(prefix) :]
+            entries.append(replace(entry, location=location.join(relative)))
+        return entries
+
 
 class ArchiveStore:
-    """Use NotebookUtils for text and the native DFS client for arbitrary bytes."""
+    """Use DFS for inventory and byte reads, NotebookUtils for text writes."""
 
     def __init__(self, native, dfs):
         self.native = native
@@ -28,6 +42,9 @@ class ArchiveStore:
 
     def read(self, location):
         return self.dfs.read(location)
+
+    def list(self, location, *, recursive=False):
+        return self.dfs.list(location, recursive=recursive)
 
     def write(self, location, data):
         try:
@@ -276,7 +293,6 @@ def _tsql_details(action, payload):
 
 def run_mutation(root, spark, output, archive_sha256, *, workers):
     from ..build_bundle.execution import execution_workspace
-    from ..locations import Location
     from ..mutation.bundle import load_bundle
     from ..store import FilesystemStore
     from .mutation_report import encode_report, loads
