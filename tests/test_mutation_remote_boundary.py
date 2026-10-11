@@ -10,6 +10,7 @@ from test_mutation_plan_representation import _action
 
 from weaver.errors import BuildError
 from weaver.sessions import install_archive
+from weaver.sessions.hosted_runtime import identity
 
 
 @weaver_test()
@@ -74,6 +75,7 @@ def test_lost_remote_response_is_uncertain_without_replay(tmp_path):
     session = SimpleNamespace(
         scope=lambda workspace: scope,
         require_spark_home=lambda *args, **kwargs: None,
+        require_build_runtime=lambda **kwargs: identity(),
         # The wait for Spark is shown before the plan is submitted to it.
         foreground_livy=lambda scope: "waited-for session",
         direct_delta_workers=16,
@@ -144,6 +146,7 @@ def test_a_declined_build_is_a_known_failure_with_its_fix(tmp_path, monkeypatch)
     session = SimpleNamespace(
         scope=lambda workspace: scope,
         require_spark_home=lambda *args, **kwargs: None,
+        require_build_runtime=lambda **kwargs: identity(),
         foreground_livy=lambda scope: None,
         direct_delta_workers=16,
         workspace=None,
@@ -210,6 +213,7 @@ def test_carrier_is_staged_in_the_spark_home_lakehouse(tmp_path):
     session = SimpleNamespace(
         scope=lambda _: scope,
         require_spark_home=lambda *a, **kw: None,
+        require_build_runtime=lambda **kwargs: identity(),
         foreground_livy=lambda scope: None,
         direct_delta_workers=16,
         workspace=None,
