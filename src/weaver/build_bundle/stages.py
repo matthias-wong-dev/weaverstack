@@ -247,6 +247,10 @@ def action_resources(action, target) -> tuple[str, ...]:
 
     if action.executor in _TDS:
         return (f"warehouse:{target.item_id}",)
+    if action.executor == "materialise_mirror":
+        if target.kind == "warehouse":
+            return (f"warehouse:{target.item_id}",)
+        return (SPARK, f"onelake:{target.item_id}")
     if action.executor in _SPARK or action.kind == AWAIT_TABLE_SHORTCUTS:
         return (SPARK,)
     if action.executor in _ONELAKE or action.executor == "shortcut_readiness":

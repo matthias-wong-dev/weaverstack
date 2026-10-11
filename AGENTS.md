@@ -838,15 +838,21 @@ binding are one transaction, last, after every reconstruction. Until it commits
 the destination catalogue records no installation, so it never claims the
 source's items.
 
-Build localises an edited mirrored Folder or Delta Table with Prohibit Rebuild
-by copying its contents into private Files storage and verifying the copied bytes
-before shortcut removal. Directory publication preserves an occupied destination.
-Delta transaction logs and file references are checked before cutover. Retained
-bookmarks stay unchanged; the changed load definition becomes Pending. A copy
-proof in `Files/_weaver_materialisation` lets a later Build verify a cutover whose
-response was lost. This area is excluded from managed Folder inventory. Mirror
-removal and catalogue certification require successful physical materialisation.
-Unchanged mirrors retain their shortcuts. Unprotected mirrors retain reset semantics.
+Build materialises selected edited borrowed objects marked Prohibit Rebuild through
+ordinary DAG actions. The development destination is disposable; the source remains
+unchanged. Lakehouse Folders remove the destination shortcut through the shortcut
+API and recursively copy through NotebookUtils fastcp, falling back to native cp
+where fastcp is unavailable. Delta Tables remove the destination shortcut and use
+Spark SQL SHALLOW CLONE against the physical source Table. Development writes are
+local, while the clone initially references source data files: source VACUUM and
+retention can invalidate those references. This is not a physical deep copy.
+Warehouse Tables drop the local wrapper View and CTAS source rows into a local
+Table, using the qualified source Warehouse in the same workspace. Views use
+ordinary definition Build. Retained bookmarks stay unchanged; a changed Load
+definition becomes Pending. Failed physical materialisation blocks catalogue
+certification. Unchanged mirrors remain borrowed; unprotected mirrors retain reset
+semantics. Materialisation uses no private staging, file proof receipts or recovery
+cutover protocol.
 
 One disposition, one meaning. `REMOVE` takes the catalogue last, `UNBIND` keeps
 it and deletes its claims for the targets emptied and is never handed it as a

@@ -69,10 +69,8 @@ from weaver.workspaces import Workspace
 from weaver.errors import InstallError, WeaverError
 options = json.loads({options!r})
 class FailingCopyStore(FabricStore):
-    def copy(self, source, destination):
-        super().copy(source, destination)
-        if "/_weaver_materialisation/" in destination.value:
-            raise InstallError("Injected protected copy failure")
+    def copy_directory(self, source, destination):
+        raise InstallError("Injected protected copy failure")
 with NotebookSession(spark=spark, store=FailingCopyStore(), workspace=Workspace(workspace=options["workspace"], catalogue="Warehouse/" + options["catalogue"])) as native:
     try:
         result = weaver.build(options["source"], items=[{ITEM!r} + "=Lakehouse/" + options["target"]], session=native)
@@ -94,7 +92,7 @@ with NotebookSession(spark=spark, store=FailingCopyStore(), workspace=Workspace(
 
 
 @weaver_test(remote=True, resources={"rest", "tds", "livy", "onelake"})
-def test_protected_mirrors_copy_before_cutover_and_converge(
+def test_protected_mirrors_native_copy_and_shallow_clone_converge(
     fabric_workspace,
     fabric_catalogue,
     fabric_fork_catalogue,
@@ -185,7 +183,7 @@ def test_protected_mirrors_copy_before_cutover_and_converge(
             s.qualified for s in resolver.onelake_shortcuts(ItemRef(target_name))
         }
         assert source_snapshot(session, fabric_workspace, source_name) == before
-        for path in paths:
+        for path in paths[:1]:
             text = path.read_text()
             path.write_bytes(
                 text.replace("Description:", "Description: revised ", 1).encode()
@@ -210,11 +208,16 @@ def test_protected_mirrors_copy_before_cutover_and_converge(
             "Injected protected copy failure" in str(e) for e in failed["errors"]
         )
         held = resolver.onelake_shortcuts(ItemRef(target_name))
-        assert {f"{area}/{schema}/{name}" for area, schema, name in PROTECTED} <= {
-            s.qualified for s in held
-        }
+        assert "Files/Raw/CustomerCsv" not in {s.qualified for s in held}
+        assert "Tables/DWG/Customer" in {s.qualified for s in held}
         assert source_snapshot(session, fabric_workspace, source_name) == before
         records["failed_copy"] = failed
+        path = paths[1]
+        path.write_bytes(
+            path.read_text()
+            .replace("Description:", "Description: revised ", 1)
+            .encode()
+        )
         owned = weaver.build(
             str(estate.path),
             items=[target_selector],
@@ -224,7 +227,10 @@ def test_protected_mirrors_copy_before_cutover_and_converge(
         records["owned_report"] = owned.installation_report.to_mapping()
         assert owned.succeeded
         target_root = resolver.lakehouse(ItemRef(target_name))
-        assert source_snapshot(session, fabric_workspace, target_name) == before
+        assert (
+            tree_snapshot(store, target_root.join("Files", "Raw", "CustomerCsv"))
+            == before["Files/Raw/CustomerCsv"]
+        )
         held = {s.qualified for s in resolver.onelake_shortcuts(ItemRef(target_name))}
         assert not held & {
             f"{area}/{schema}/{name}" for area, schema, name in PROTECTED
@@ -240,6 +246,26 @@ def test_protected_mirrors_copy_before_cutover_and_converge(
             )[0]
 
         source_detail, owned_detail = detail(source_name), detail(target_name)
+        source_qualified = FabricSparkTarget(
+            fabric_workspace.workspace, source_name
+        ).qualify("DWG", "Customer")
+        owned_qualified = FabricSparkTarget(
+            fabric_workspace.workspace, target_name
+        ).qualify("DWG", "Customer")
+        assert (
+            session.execute_spark_sql(
+                f"SELECT * FROM {owned_qualified} EXCEPT SELECT * FROM {source_qualified}",
+                workspace=fabric_workspace,
+            )
+            == []
+        )
+        assert (
+            session.execute_spark_sql(
+                f"SELECT * FROM {source_qualified} EXCEPT SELECT * FROM {owned_qualified}",
+                workspace=fabric_workspace,
+            )
+            == []
+        )
         for key in ("minReaderVersion", "minWriterVersion", "properties"):
             assert source_detail[key] == owned_detail[key]
         records["protocol"] = {

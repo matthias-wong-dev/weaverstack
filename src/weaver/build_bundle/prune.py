@@ -64,7 +64,7 @@ from .stages import PRUNE, PlannedStage
 from .targets import WAREHOUSE_TARGET, BoundTarget
 
 #: Weaver-owned Files areas that are not item Folder objects.
-_RESERVED_FILES_AREAS = frozenset({CLI_AREA, CARRIER_AREA, "_weaver_materialisation"})
+_RESERVED_FILES_AREAS = frozenset({CLI_AREA, CARRIER_AREA})
 
 #: Delta schemas Weaver does not manage.
 _RESERVED_SCHEMAS = frozenset({"dbo", CATALOGUE_SCHEMA})

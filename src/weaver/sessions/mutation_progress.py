@@ -44,6 +44,16 @@ def _said(text: str) -> str:
 
 def stage_label(sequence, targets, count: int) -> str:
     said = _said(sequence.description or "")
+    if all(
+        action.executor in {"materialise_mirror", GATE}
+        for batch in sequence.batches
+        for action in batch.actions
+    ) and any(
+        action.executor == "materialise_mirror"
+        for batch in sequence.batches
+        for action in batch.actions
+    ):
+        return said
     names: list[str] = []
     for batch in sequence.batches:
         target = targets.get(batch.target_id)

@@ -5,14 +5,13 @@ from dataclasses import replace
 import pytest
 from support.weaver_test import weaver_test
 
-from weaver.build_bundle.executors.materialise_mirror import MaterialiseMirrorExecutor
 from weaver.locations import Location
 from weaver.sessions.archive_runtime import ArchiveDfs, ArchiveStore
 from weaver.store import Entry, StoreError
 
 
 @weaver_test()
-def test_archive_snapshot_uses_the_read_backends_inventory():
+def test_archive_inventory_and_reads_share_the_dfs_backend():
     root = Location(
         "abfss://workspace@onelake.dfs.fabric.microsoft.com/lakehouse/Tables/DWG/Customer"
     )
@@ -34,8 +33,8 @@ def test_archive_snapshot_uses_the_read_backends_inventory():
             return b"\xffparquet"
 
     store = ArchiveStore(Native(), Dfs())
-    snapshot = MaterialiseMirrorExecutor._snapshot(root, store)
-    assert set(snapshot) == {"active.parquet"}
+    assert store.list(root, recursive=True) == [Entry(active, False)]
+    assert store.read(active) == b"\xffparquet"
     assert calls == [(root, True)]
 
 
@@ -84,3 +83,56 @@ def test_archive_read_support_does_not_relax_publication_binding():
     )
     with pytest.raises(StoreError, match="bound OneLake path"):
         client._publication_location(root)
+
+
+@weaver_test()
+@pytest.mark.parametrize("folder", ["Monthly files", "文档 é", "literal%20name"])
+@pytest.mark.parametrize("native", [False, True])
+def test_archive_real_dfs_listing_accepts_canonically_encoded_names(
+    monkeypatch, folder, native
+):
+    from types import SimpleNamespace
+    from urllib.parse import quote
+
+    client = ArchiveDfs(token="test")
+    name = "lakehouse/Files/Raw/" + folder + "/nested file.bin"
+    response = SimpleNamespace(
+        status_code=200,
+        headers={},
+        json=lambda: {"paths": [{"name": name, "isDirectory": "false"}]},
+    )
+    monkeypatch.setattr(client, "_request", lambda *args, **kwargs: response)
+    root = Location(
+        (
+            "abfss://workspace@onelake.dfs.fabric.microsoft.com/lakehouse/Files/Raw/"
+            + folder
+        )
+        if native
+        else (
+            "https://onelake.dfs.fabric.microsoft.com/workspace/lakehouse/Files/Raw/"
+            + quote(folder, safe="")
+        )
+    )
+    entries = client.list(root, recursive=True)
+    assert [e.location for e in entries] == [
+        root.join("nested file.bin" if native else "nested%20file.bin")
+    ]
+
+
+@weaver_test()
+def test_archive_listing_still_rejects_a_different_directory(monkeypatch):
+    from types import SimpleNamespace
+
+    client = ArchiveDfs(token="test")
+    response = SimpleNamespace(
+        status_code=200,
+        headers={},
+        json=lambda: {"paths": [{"name": "lakehouse/Files/Raw/Sales extra/file.bin"}]},
+    )
+    monkeypatch.setattr(client, "_request", lambda *args, **kwargs: response)
+    with pytest.raises(StoreError, match="escaped"):
+        client.list(
+            Location(
+                "abfss://workspace@onelake.dfs.fabric.microsoft.com/lakehouse/Files/Raw/Sales"
+            )
+        )

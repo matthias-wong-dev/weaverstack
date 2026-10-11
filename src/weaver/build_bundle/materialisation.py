@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 
 from ..declaration.metadata import FOLDER, TABLE
-from ..declaration.model import LAKEHOUSE
+from ..declaration.model import LAKEHOUSE, WAREHOUSE
 from .changes import added
 from .dependencies import dropped_key, object_key
 from .documents import document_requirements
@@ -21,7 +21,7 @@ def protected_mirrors(repository, selected, mirrored):
         identity: mirrored[identity]
         for identity in selected
         if identity in mirrored
-        and identity.item.item_type == LAKEHOUSE
+        and identity.item.item_type in (LAKEHOUSE, WAREHOUSE)
         and identity in repository.source_documents
         and repository.source_documents[identity].kind in (FOLDER, TABLE)
         and repository.source_documents[identity].document.prohibit_rebuild
@@ -72,7 +72,7 @@ def materialisation_stage(repository, protected, *, item, target):
     return PlannedStage(
         phase=BUILD,
         slug="materialise-protected-mirrors",
-        description="preserve protected mirrored contents as owned objects",
+        description=f"Materialising {item.item_type}/{target.item_name} from {item.item_type}/{mirror.source_target}",
         batches=(
             BuildBatch(
                 id="materialise-" + str(item).replace("/", "--"),
@@ -84,4 +84,17 @@ def materialisation_stage(repository, protected, *, item, target):
         changes={target.id: tuple(changes)},
         provides=provides,
         requires=requires,
+    )
+
+
+def materialisation_stages(repository, protected, *, item, target):
+    groups = {}
+    for identity, mirror in protected.items():
+        if identity.item == item:
+            groups.setdefault((mirror.source_workspace, mirror.source_target), {})[
+                identity
+            ] = mirror
+    return tuple(
+        materialisation_stage(repository, group, item=item, target=target)
+        for _key, group in sorted(groups.items(), key=lambda pair: str(pair[0]))
     )

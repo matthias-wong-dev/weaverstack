@@ -220,9 +220,29 @@ def _describe_action(
     if action.kind == "drop_shortcut":
         consequences = ["Remove the shortcut, retaining its source content"]
     if action.kind == "materialise_mirror":
-        consequences.append(
-            "Copy protected contents into an independent local object before removing the shortcut"
-        )
+        destructive = True
+        if action.resource_node_id.startswith("Warehouse/"):
+            consequences.extend(
+                (
+                    "Drop the destination wrapper View, retaining its source Table",
+                    "CTAS source rows into a local Warehouse Table",
+                )
+            )
+        elif "/Files/" in action.resource_node_id:
+            consequences.extend(
+                (
+                    "Remove the destination shortcut, retaining its source content",
+                    "Recursively copy source Folder contents into the disposable destination",
+                )
+            )
+        else:
+            consequences.extend(
+                (
+                    "Remove the destination shortcut, retaining its source content",
+                    "SHALLOW CLONE the physical source Delta Table; development writes are local",
+                    "Source VACUUM and retention can invalidate data files referenced by the shallow clone",
+                )
+            )
     if "refresh" in operations and action.kind in {
         "create_shortcut",
     }:

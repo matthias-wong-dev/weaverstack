@@ -139,6 +139,18 @@ class FabricStore:
         if not self.fs.mkdirs(self._path(location)):
             raise StoreError(f"could not create directory {location.value}")
 
+    def copy_directory(self, source: Location, destination: Location) -> None:
+        """Copy recursively through the native bulk transport."""
+        copy = getattr(self.fs, "fastcp", None) or self.fs.cp
+        try:
+            copied = copy(self._path(source), self._path(destination), True)
+        except Exception as exc:
+            raise StoreError(
+                f"cannot copy {source.value} to {destination.value}: {exc}"
+            ) from exc
+        if copied is False:
+            raise StoreError(f"could not copy {source.value} to {destination.value}")
+
     def copy(self, source: Location, destination: Location) -> None:
         """Copy one file within OneLake."""
 
