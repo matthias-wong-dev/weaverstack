@@ -16,10 +16,10 @@ class ArchiveDfs(OneLakeDfsClient):
     """Keep native ABFSS destinations on the qualified HTTPS publication route."""
 
     def _url(self, location, query=None):
-        return super()._url(self._publication_location(location), query)
+        return super()._url(self._native_location(location), query)
 
     def list(self, location, *, recursive=False):
-        remote = self._publication_location(location)
+        remote = self._native_location(location)
         prefix = remote.value.rstrip("/") + "/"
         entries = []
         for entry in super().list(remote, recursive=recursive):

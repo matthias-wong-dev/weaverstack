@@ -339,6 +339,11 @@ class OneLakeDfsClient:
             raise StoreError("Delta publication returned an incomplete rename")
 
     def _publication_location(self, location: Location) -> Location:
+        return self._native_location(location, publication=True)
+
+    def _native_location(
+        self, location: Location, *, publication: bool = False
+    ) -> Location:
         if not location.value.startswith("abfss://"):
             return location
         address = urlsplit(location.value)
@@ -350,10 +355,11 @@ class OneLakeDfsClient:
             or address.port
             or address.query
             or address.fragment
-            or len(segments) < 3
+            or len(segments) < (3 if publication else 1)
             or any(segment in ("", ".", "..") for segment in segments)
         ):
-            raise StoreError("Delta publication needs a bound OneLake path")
+            action = "Delta publication" if publication else "OneLake access"
+            raise StoreError(f"{action} needs a bound OneLake path")
         return Location(
             OneLakePath(address.username, segments[0], "/".join(segments[1:])).url(
                 base_url=self.base_url

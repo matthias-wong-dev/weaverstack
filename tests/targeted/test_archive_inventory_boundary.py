@@ -2,12 +2,13 @@
 
 from dataclasses import replace
 
+import pytest
 from support.weaver_test import weaver_test
 
 from weaver.build_bundle.executors.materialise_mirror import MaterialiseMirrorExecutor
 from weaver.locations import Location
 from weaver.sessions.archive_runtime import ArchiveDfs, ArchiveStore
-from weaver.store import Entry
+from weaver.store import Entry, StoreError
 
 
 @weaver_test()
@@ -39,14 +40,20 @@ def test_archive_snapshot_uses_the_read_backends_inventory():
 
 
 @weaver_test()
-def test_archive_dfs_listing_preserves_the_callers_location_namespace(monkeypatch):
+@pytest.mark.parametrize("suffix", ["", "Files", "Tables", "Tables/DWG/Customer"])
+def test_archive_dfs_listing_preserves_the_callers_location_namespace(
+    monkeypatch, suffix
+):
     from weaver.fabric.onelake import OneLakeDfsClient
 
-    root = Location(
-        "abfss://workspace@onelake.dfs.fabric.microsoft.com/lakehouse/Tables/DWG/Customer"
-    )
+    root = Location("abfss://workspace@onelake.dfs.fabric.microsoft.com/lakehouse")
+    if suffix:
+        root = root.join(suffix)
     client = ArchiveDfs(token="test")
-    remote = client._publication_location(root)
+    remote = Location(
+        "https://onelake.dfs.fabric.microsoft.com/workspace/lakehouse/" + suffix
+    )
+    assert client._url(root) == remote.value
     entries = [
         Entry(remote.join("_delta_log"), True),
         Entry(remote.join("_delta_log", "00000000000000000000.json"), False),
@@ -67,3 +74,13 @@ def test_archive_dfs_listing_preserves_the_callers_location_namespace(monkeypatc
         for entry in entries
     ]
     assert calls == [(remote, True)]
+
+
+@weaver_test()
+def test_archive_read_support_does_not_relax_publication_binding():
+    client = ArchiveDfs(token="test")
+    root = Location(
+        "abfss://workspace@onelake.dfs.fabric.microsoft.com/lakehouse/Files"
+    )
+    with pytest.raises(StoreError, match="bound OneLake path"):
+        client._publication_location(root)
