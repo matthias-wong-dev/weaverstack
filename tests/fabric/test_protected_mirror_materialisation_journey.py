@@ -22,6 +22,16 @@ ITEM = "Lakehouse/Sales"
 PROTECTED = (("Files", "Raw", "CustomerCsv"), ("Tables", "DWG", "Customer"))
 
 
+def assert_unchanged_pointers(result):
+    assert result.succeeded
+    protected = {f"{ITEM}/{area}/{schema}.{name}" for area, schema, name in PROTECTED}
+    assert not [
+        action
+        for action in result.installation_report.action_results()
+        if action.resource_node_id in protected
+    ]
+
+
 def tree_snapshot(store, root):
     prefix = root.value.rstrip("/") + "/"
     return {
@@ -156,9 +166,14 @@ def test_protected_mirrors_copy_before_cutover_and_converge(
             catalogue=f"Warehouse/{target_catalogue}",
             session=session,
         )
-        assert (
-            unchanged.succeeded and not unchanged.installation_report.action_results()
-        )
+        assert_unchanged_pointers(unchanged)
+        records["unchanged_actions"] = [
+            a.to_mapping() for a in unchanged.installation_report.action_results()
+        ]
+        assert {f"{area}/{schema}/{name}" for area, schema, name in PROTECTED} <= {
+            s.qualified for s in resolver.onelake_shortcuts(ItemRef(target_name))
+        }
+        assert source_snapshot(session, fabric_workspace, source_name) == before
         for path in paths:
             text = path.read_text()
             path.write_bytes(
@@ -236,7 +251,9 @@ def test_protected_mirrors_copy_before_cutover_and_converge(
             catalogue=f"Warehouse/{target_catalogue}",
             session=session,
         )
-        assert repeat.succeeded and not repeat.installation_report.action_results()
+        assert repeat.succeeded and not tuple(
+            repeat.installation_report.action_results()
+        )
         records.update(
             source_unchanged=True, independent_writes=True, repeat_no_op=True
         )
@@ -253,7 +270,7 @@ def test_protected_mirrors_copy_before_cutover_and_converge(
                     [f"Lakehouse/{name}"],
                     catalogue=f"Warehouse/{catalogue}",
                     session=session,
-                    preserve_data_source=True,
+                    preserve_data_source=False,
                     unbind=True,
                 )
                 clean.append(
