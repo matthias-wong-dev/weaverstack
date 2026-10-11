@@ -28,8 +28,9 @@ def test_hosted_carrier_contains_only_the_sealed_plan_request_and_exact_payloads
 
 @weaver_test()
 @pytest.mark.parametrize("failed", [False, True])
+@pytest.mark.parametrize("refresh", ["none", "tables", "whole"])
 def test_carrier_bootstrap_calls_the_installed_runtime_without_import_substitution(
-    tmp_path, monkeypatch, failed
+    tmp_path, monkeypatch, failed, refresh
 ):
     import importlib
     import importlib.metadata
@@ -40,7 +41,12 @@ def test_carrier_bootstrap_calls_the_installed_runtime_without_import_substituti
     from weaver.sessions import archive_runtime
     from weaver.sessions.install_archive import bootstrap_source, read_receipt
 
-    plan, payloads = build_plan_fixture()
+    if refresh == "none":
+        plan, payloads = build_plan_fixture()
+    else:
+        from test_hosted_endpoint_runtime_boundary import mixed_plan
+
+        plan, payloads = mixed_plan(tmp_path, whole=refresh == "whole")
     carrier = pack_mutation(plan, payloads)
     incoming, output = tmp_path / "carrier.zip", tmp_path / "result.json"
     incoming.write_bytes(carrier.data)
@@ -99,8 +105,9 @@ def test_carrier_bootstrap_calls_the_installed_runtime_without_import_substituti
 
 
 @weaver_test()
+@pytest.mark.parametrize("defect", ["version", "unsupported_executor"])
 def test_hosted_bootstrap_rechecks_runtime_identity_before_plan_execution(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, defect
 ):
     import importlib
     import importlib.metadata
@@ -114,7 +121,10 @@ def test_hosted_bootstrap_rechecks_runtime_identity_before_plan_execution(
 
     plan, payloads = build_plan_fixture()
     expected = identity()
-    expected["version"] += "1"
+    if defect == "version":
+        expected["version"] += "1"
+    else:
+        expected["executors"] = [*expected["executors"], "unsupported_refresh"]
     carrier = pack_mutation(
         plan, payloads, request={"plan_id": plan.bundle_id, "runtime": expected}
     )
