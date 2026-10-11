@@ -838,6 +838,16 @@ binding are one transaction, last, after every reconstruction. Until it commits
 the destination catalogue records no installation, so it never claims the
 source's items.
 
+Build localises an edited mirrored Folder or Delta Table with Prohibit Rebuild
+by copying its contents into private Files storage and verifying the copied bytes
+before shortcut removal. Directory publication preserves an occupied destination.
+Delta transaction logs and file references are checked before cutover. Retained
+bookmarks stay unchanged; the changed load definition becomes Pending. A copy
+proof in `Files/_weaver_materialisation` lets a later Build verify a cutover whose
+response was lost. This area is excluded from managed Folder inventory. Mirror
+removal and catalogue certification require successful physical materialisation.
+Unchanged mirrors retain their shortcuts. Unprotected mirrors retain reset semantics.
+
 One disposition, one meaning. `REMOVE` takes the catalogue last, `UNBIND` keeps
 it and deletes its claims for the targets emptied and is never handed it as a
 target, `LEAVE` is the absence of one and is refused over a catalogue that

@@ -182,7 +182,9 @@ def _describe_action(
             if action.resource_node_id in matching
             else next(iter(matching), action.resource_node_id)
         )
-        if change["effect"] == "remove":
+        if action.kind == "materialise_mirror":
+            operation = "materialise"
+        elif change["effect"] == "remove":
             operation = "drop"
         elif identity in observed:
             replacing = (
@@ -217,6 +219,10 @@ def _describe_action(
         consequences.append("Remove existing target content or definition")
     if action.kind == "drop_shortcut":
         consequences = ["Remove the shortcut, retaining its source content"]
+    if action.kind == "materialise_mirror":
+        consequences.append(
+            "Copy protected contents into an independent local object before removing the shortcut"
+        )
     if "refresh" in operations and action.kind in {
         "create_shortcut",
     }:

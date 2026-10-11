@@ -235,12 +235,17 @@ def generate_item_build_bundle(
         selected_for_build=selected_for_build,
         catalogue=catalogue,
     )
+    from .materialisation import protected_mirrors
+
     established_state = runtime_state_establishment(
         repository,
         items=tuple(target_by_item),
         selected_for_build=selected_for_build
         | changed_semantic_validations(repository, catalogue, items=target_by_item),
         holds_table=_catalogue_holds(inventories),
+        preserved_data=protected_mirrors(
+            repository, selected_for_build, catalogue.mirrors
+        ),
     )
     reconciliation = render_runtime_state_reconciliation(
         runtime_state,
@@ -714,6 +719,11 @@ def _plan_item(
     runtime_destination,
     endpoint_planner,
 ) -> PlannedItem:
+    from .materialisation import materialisation_stage, protected_mirrors
+
+    preserved = protected_mirrors(repository, selected_for_build, mirrored)
+    selected_for_drop = selected_for_drop - preserved.keys()
+    selected_for_build = selected_for_build - preserved.keys()
     shortcuts = shortcut_planner(
         repository,
         item=item,
@@ -729,6 +739,11 @@ def _plan_item(
         destination=runtime_destination,
     )
     stages: list[PlannedStage] = []
+    materialisation = materialisation_stage(
+        repository, preserved, item=item, target=target
+    )
+    if materialisation is not None:
+        stages.append(materialisation)
 
     # Prune sees every declared shortcut destination, not only selected ones; an
     # unchanged shortcut remains desired state. The stage derives load artefacts.

@@ -15,6 +15,7 @@ from .copy_files import CopyFilesExecutor
 from .endpoint_objects import EndpointObjectsExecutor
 from .folder import FolderExecutor
 from .load_file import LoadFileExecutor
+from .materialise_mirror import MaterialiseMirrorExecutor
 from .report import ReportDefinitionExecutor, ReportReadbackExecutor
 from .runtime_state import RuntimeStateExecutor
 from .semantic import (
@@ -44,6 +45,7 @@ def default_executors() -> dict[str, ActionExecutor]:
         SparkTableExecutor.name: SparkTableExecutor(),
         FolderExecutor.name: FolderExecutor(),
         CopyFilesExecutor.name: CopyFilesExecutor(),
+        MaterialiseMirrorExecutor.name: MaterialiseMirrorExecutor(),
         LoadFileExecutor.name: LoadFileExecutor(),
         TSqlExecutor.name: TSqlExecutor(),
         TSqlBatchExecutor.name: TSqlBatchExecutor(),

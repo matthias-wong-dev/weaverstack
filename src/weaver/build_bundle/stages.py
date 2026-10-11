@@ -230,7 +230,7 @@ _TDS = frozenset(
         "await_endpoint_objects",
     }
 )
-_ONELAKE = frozenset({"folder", "load_file"})
+_ONELAKE = frozenset({"folder", "load_file", "materialise_mirror"})
 #: Session-scoped temporary views authored as table setup can collide.
 TEMPORARY_VIEWS = "spark:temporary-views"
 SPARK = "spark"

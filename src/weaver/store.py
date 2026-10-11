@@ -168,6 +168,19 @@ class FilesystemStore:
                 f"Cannot copy {source.value} to {destination.value}: {exc}"
             ) from exc
 
+    def publish_directory(self, source: Location, destination: Location) -> None:
+        """Publish a private directory into an absent destination."""
+        origin, target = self._local(source), self._local(destination)
+        if target.exists():
+            raise StoreError(
+                f"publication destination already exists: {destination.value}"
+            )
+        target.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            os.rename(origin, target)
+        except OSError as exc:
+            raise StoreError(f"cannot publish {source.value}: {exc}") from exc
+
     def move(self, source: Location, destination: Location) -> None:
         target = self._local(destination)
         target.parent.mkdir(parents=True, exist_ok=True)

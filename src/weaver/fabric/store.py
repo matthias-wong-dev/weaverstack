@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from ..errors import CommandError
+from ..errors import CommandError, OutcomeUnknown
 from ..locations import Location
 from ..store import Entry, StoreError, StoreNotFoundError
 
@@ -150,6 +150,22 @@ class FabricStore:
             ) from exc
         if copied is False:
             raise StoreError(f"could not copy {source.value} to {destination.value}")
+
+    def publish_directory(self, source: Location, destination: Location) -> None:
+        """Publish a private directory without replacing an occupied address."""
+        try:
+            moved = self.fs.mv(
+                self._path(source),
+                self._path(destination),
+                create_path=True,
+                overwrite=False,
+            )
+        except OutcomeUnknown:
+            raise
+        except Exception as exc:
+            raise StoreError(f"cannot publish {source.value}: {exc}") from exc
+        if moved is False:
+            raise StoreError(f"could not publish {source.value}")
 
     def move(self, source: Location, destination: Location) -> None:
         """Move one file within OneLake, replacing the destination."""

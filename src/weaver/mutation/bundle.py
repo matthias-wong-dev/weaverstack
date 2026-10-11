@@ -52,6 +52,7 @@ VALID_EXECUTORS = frozenset(
         RUNTIME_STATE_EXECUTOR,
         LAKEHOUSE_WIPE_EXECUTOR,
         COPY_FILES_EXECUTOR,
+        "materialise_mirror",
         "semantic_model",
         "semantic_catalogue",
         "semantic_readback",
@@ -81,6 +82,7 @@ _EXECUTOR_EXTENSION = {
     LOAD_FILE_EXECUTOR: ".payload",
     RUNTIME_STATE_EXECUTOR: ".runtime-state.json",
     COPY_FILES_EXECUTOR: ".copy-files.json",
+    "materialise_mirror": ".materialise-mirror.json",
     ENDPOINT_OBJECTS_EXECUTOR: ".endpoint-objects.json",
 }
 _PAYLOADLESS_EXECUTORS = frozenset({FOLDER_EXECUTOR, LAKEHOUSE_WIPE_EXECUTOR})
