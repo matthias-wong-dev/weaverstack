@@ -91,6 +91,8 @@ Canonical planning records the observed physical types, deferred SQL table shape
 and the exact catalogue claim and publication decisions for presentation.
 Grouped actions retain every destination. Logical validations describe their
 definition publication separately from generated artefact replacement.
+Physical changes retain each Table or Folder's area and exclude logical validation
+definitions.
 
 `weaver.graph.Graph` is the topology. The authored repository graphs, the
 installed estate graph and the runtime graph each carry their own node metadata

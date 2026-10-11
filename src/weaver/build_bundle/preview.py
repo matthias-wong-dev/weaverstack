@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass
 
+from ..declaration.model import FILE_SHAPE, FILES, LAKEHOUSE, TABLES
 from ..mutation.models import MutationPlan
 from ..mutation.serialization import freeze_value, thaw_value
 
@@ -22,8 +23,9 @@ class BuildPreview:
         for target_id, values in envelope.get("target_changes", {}).items():
             for change in values:
                 changes[change["action_id"]].append({"target_id": target_id, **change})
+        target_kinds = {target.id: target.kind for target in self.plan.targets}
         removals = {
-            (target_id, change["name"])
+            _physical_key({"target_id": target_id, **change}, target_kinds)
             for target_id, values in envelope.get("target_changes", {}).items()
             for change in values
             if change["effect"] == "remove"
@@ -44,6 +46,7 @@ class BuildPreview:
                 envelope,
                 removals,
                 removed_nodes,
+                target_kinds,
             )
             for sequence, batch, action in self.plan.actions()
             if action.executor != "completion_gate"
@@ -135,32 +138,56 @@ class BuildPreview:
         return "\n".join(lines)
 
 
+def _physical_key(change, target_kinds):
+    name = (
+        f"_.{change['name']}"
+        if change["object_kind"] == "runtime_reference"
+        else change["name"]
+    )
+    area = None
+    if target_kinds[change["target_id"]] == "lakehouse":
+        area = (
+            FILES
+            if change["object_kind"] in {"folder", "folder_schema", "file"}
+            else TABLES
+        )
+    return change["target_id"], area, name
+
+
 def _describe_action(
-    action, sequence, batch, changes, objects, envelope, removals, removed_nodes
+    action,
+    sequence,
+    batch,
+    changes,
+    objects,
+    envelope,
+    removals,
+    removed_nodes,
+    target_kinds,
 ):
     observed = envelope.get("observed_physical_types", {})
     described_changes = []
     for change in changes:
-        physical_name = (
-            f"_.{change['name']}"
-            if change["object_kind"] == "runtime_reference"
-            else change["name"]
-        )
-        identity = next(
-            (
-                o["identity"]
-                for o in objects
-                if o["target_id"] == change["target_id"]
-                and o["physical_name"] == physical_name
-            ),
-            action.resource_node_id,
+        target_id, area, physical_name = _physical_key(change, target_kinds)
+        matching = [
+            o["identity"]
+            for o in objects
+            if o["target_id"] == target_id
+            and o["physical_name"] == physical_name
+            and o["physical_area"] == area
+            and not o["is_validation"]
+        ]
+        identity = (
+            action.resource_node_id
+            if action.resource_node_id in matching
+            else next(iter(matching), action.resource_node_id)
         )
         if change["effect"] == "remove":
             operation = "drop"
         elif identity in observed:
             replacing = (
                 identity in removed_nodes
-                or (change["target_id"], change["name"]) in removals
+                or (target_id, area, physical_name) in removals
             )
             operation = "replace" if replacing else "refresh"
         else:
@@ -251,6 +278,7 @@ def preview_build(plan, *, repository, bindings, state) -> BuildPreview:
     definitions = envelope.get("validation_definitions", {"publish": [], "remove": []})
     published_definitions = {d["object_id"] for d in definitions["publish"]}
     removed_definitions = {d["object_id"] for d in definitions["remove"]}
+    validation_ids = set(old_validations) | published_definitions | removed_definitions
     categories = (
         (
             "prohibited",
@@ -320,6 +348,14 @@ def preview_build(plan, *, repository, bindings, state) -> BuildPreview:
             if hasattr(logical, "object_id")
             else logical.schema
         )
+        area = None
+        if logical.item.item_type == LAKEHOUSE and identity not in validation_ids:
+            area = (
+                FILES
+                if getattr(logical, "is_files", False)
+                or getattr(logical, "shape", None) == FILE_SHAPE
+                else TABLES
+            )
         objects.append(
             freeze_value(
                 {
@@ -328,6 +364,8 @@ def preview_build(plan, *, repository, bindings, state) -> BuildPreview:
                     "reason": reason,
                     "target_id": bindings.by_item[logical.item].to_bound_target().id,
                     "physical_name": physical_name,
+                    "physical_area": area,
+                    "is_validation": identity in validation_ids,
                     "definition_published": identity in published_definitions,
                     "definition_removed": identity in removed_definitions,
                     "validation_artefacts_selected": sorted(
