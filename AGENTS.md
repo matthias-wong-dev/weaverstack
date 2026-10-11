@@ -80,6 +80,18 @@ because a bundle freezes each target's item ID. A command naming
 no workspace and inheriting none reads `workspace-config.yml` in the directory
 it was run from, which is the last resort in `weaver.config.resolve_workspace`.
 
+`weaver.build(..., dry_run=True)` and `weaver build --dry-run` inspect the same
+target state and compile the same plan as execution. They return before runtime
+upload, action dispatch, installation or catalogue and status writes. Preview
+fails preflight for missing targets. No execution Environment is required.
+Bundle-only writes an executable local bundle. A dry-run preview is immutable;
+its temporary local bundle is removed before return. CLI `--json` writes the
+preview mapping to stdout.
+Canonical planning records the observed physical types, deferred SQL table shape
+and the exact catalogue claim and publication decisions for presentation.
+Grouped actions retain every destination. Logical validations describe their
+definition publication separately from generated artefact replacement.
+
 `weaver.graph.Graph` is the topology. The authored repository graphs, the
 installed estate graph and the runtime graph each carry their own node metadata
 and hand ordering, layers, ancestry and subgraphs to it. `Catalogue.dag()`

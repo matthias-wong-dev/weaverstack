@@ -59,6 +59,7 @@ def test_preview_identifies_a_whole_plan_no_op(tmp_path):
     assert mapping["certification"] == {
         "withdraw_before_work": [],
         "publish_after_success": [],
+        "remove_on_publication": [],
     }
     assert "No changes" in result.describe()
 
@@ -97,7 +98,10 @@ def test_new_estate_preview_names_creates_bindings_and_runtime_state(tmp_path):
         == "new"
     )
     creates = [a for a in mapping["actions"] if a["classification"] == "create"]
-    assert creates and all(a["physical_change"]["effect"] == "add" for a in creates)
+    assert creates and all(
+        c["effect"] == "add" for a in creates for c in a["physical_changes"]
+    )
+    assert not mapping["certification"]["withdraw_before_work"]
     assert mapping["certification"]["publish_after_success"]
     assert mapping["runtime_state_established"]
     assert "Sales_LH" in result.describe() and "Reporting_WH" in result.describe()

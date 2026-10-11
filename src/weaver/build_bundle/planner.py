@@ -32,6 +32,8 @@ from .bundle import (
 )
 from .catalogue_actions import (
     collect_claims,
+    planned_publication,
+    publication_facts,
     render_catalogue_after_build,
     render_catalogue_before_build,
     render_mirror_deregistration,
@@ -215,6 +217,7 @@ def generate_item_build_bundle(
         decertified,
         catalogue_target=catalogue_target,
         stale_claims=stale_claims,
+        claims=deleted_claims,
     )
     if catalogue_before is not None:
         stages.append(
@@ -287,6 +290,18 @@ def generate_item_build_bundle(
 
     _refuse_selected_omissions(omitted)
 
+    selected_models = {
+        identity
+        for identity in selected_for_build
+        if identity.item in repository.semantic_models
+    }
+    publication = planned_publication(
+        repository,
+        certifiable_ids,
+        target_by_item,
+        current=catalogue_after_deletions,
+        selected_models=selected_models,
+    )
     published = [
         render_runtime_state_reconciliation(
             (),
@@ -310,11 +325,8 @@ def generate_item_build_bundle(
             catalogue_target=catalogue_target,
             # Compare publication against the catalogue after claim deletion.
             current=catalogue_after_deletions,
-            selected_models={
-                identity
-                for identity in selected_for_build
-                if identity.item in repository.semantic_models
-            },
+            selected_models=selected_models,
+            publication=publication,
         ),
     ]
     # Publication certifies only physical work that succeeded, and the Registry
@@ -342,6 +354,23 @@ def generate_item_build_bundle(
         if identity not in certifiable_ids
     )
     from ..mutation.models import MutationPlan, PhysicalScope
+    from .incremental import _physical_types
+
+    table_shapes = {}
+    import json
+
+    for stage in stages:
+        for batch in stage.batches:
+            for action in batch.actions:
+                if action.executor == "spark_table":
+                    assert action.payload is not None
+                    payload = json.loads(stage.payloads[action.payload])
+                    table_shapes[action.id] = {
+                        "schema_mode": payload["schema_mode"],
+                        "declared_columns": payload["declared_columns"],
+                        "query_shape_deferred": payload["source_query"] is not None,
+                        "authored_setup_deferred": bool(payload["setup"]),
+                    }
 
     plan = MutationPlan(
         targets=targets,
@@ -369,6 +398,14 @@ def generate_item_build_bundle(
             "runtime_state_established": [
                 one.to_mapping() for one in (*established_state, *view_state)
             ],
+            **publication_facts(publication, deleted_claims),
+            "observed_physical_types": {
+                str(identity): physical
+                for identity, physical in _physical_types(
+                    repository, selected=selected_ids, inventories=inventories
+                ).items()
+            },
+            "table_shapes": table_shapes,
         },
         protected_scopes=tuple(
             PhysicalScope(source.id, "")
