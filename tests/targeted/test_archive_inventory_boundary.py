@@ -136,3 +136,30 @@ def test_archive_listing_still_rejects_a_different_directory(monkeypatch):
                 "abfss://workspace@onelake.dfs.fabric.microsoft.com/lakehouse/Files/Raw/Sales"
             )
         )
+
+
+@weaver_test()
+def test_onelake_inventory_retains_actual_names_for_physical_reconciliation(
+    monkeypatch,
+):
+    from types import SimpleNamespace
+
+    from weaver.fabric.onelake import OneLakeDfsClient
+
+    client = OneLakeDfsClient(token="test")
+    response = SimpleNamespace(
+        status_code=200,
+        headers={},
+        json=lambda: {
+            "paths": [
+                {"name": "lakehouse/Files/Raw/Monthly 文档%20", "isDirectory": "true"}
+            ]
+        },
+    )
+    monkeypatch.setattr(client, "_request", lambda *args, **kwargs: response)
+    entries = client.list(
+        Location(
+            "https://onelake.dfs.fabric.microsoft.com/workspace/lakehouse/Files/Raw"
+        )
+    )
+    assert entries[0].location.name == "Monthly 文档%20"

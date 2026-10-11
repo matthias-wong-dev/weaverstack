@@ -20,16 +20,16 @@ class ArchiveDfs(OneLakeDfsClient):
 
     def list(self, location, *, recursive=False):
         remote = self._native_location(location)
-        from urllib.parse import unquote
+        from urllib.parse import quote, unquote
 
-        prefix = remote.value.rstrip("/") + "/"
+        prefix = unquote(remote.value).rstrip("/") + "/"
         entries = []
         for entry in super().list(remote, recursive=recursive):
             if not entry.location.value.startswith(prefix):
                 raise StoreError("archive DFS listing escaped its requested root")
             relative = entry.location.value[len(prefix) :]
-            if location.value.startswith("abfss://"):
-                relative = unquote(relative)
+            if not location.value.startswith("abfss://"):
+                relative = quote(relative, safe="/")
             entries.append(replace(entry, location=location.join(relative)))
         return entries
 

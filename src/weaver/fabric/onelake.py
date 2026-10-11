@@ -236,8 +236,8 @@ class OneLakeDfsClient:
                 entries.append(
                     Entry(
                         location=Location(
-                            f"{self.base_url}/{quote(parsed.workspace, safe='')}/"
-                            f"{quote(parsed.segment, safe='')}/{quote(relative, safe='/')}"
+                            f"{self.base_url}/{parsed.workspace}/"
+                            f"{parsed.segment}/{relative}"
                         ),
                         is_directory=str(path.get("isDirectory", "false")).lower()
                         == "true",
