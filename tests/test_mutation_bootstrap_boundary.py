@@ -16,6 +16,7 @@ from test_mutation_archive_install import build_plan_fixture as legacy
 from weaver.locations import Location
 from weaver.mutation.bundle import compute_bundle_id
 from weaver.sessions.archive_runtime import execution_capacity
+from weaver.sessions.hosted_runtime import identity
 from weaver.sessions.install_archive import (
     bootstrap_source,
     pack_mutation,
@@ -29,7 +30,7 @@ from weaver.store import FilesystemStore
 @pytest.mark.parametrize("failure", [False, True])
 @pytest.mark.parametrize("late", [False, True])
 @pytest.mark.parametrize("cleanup", [False, True])
-def test_generic_bootstrap_runs_extracted_executor_and_restores_borrowed_namespace(
+def test_generic_bootstrap_runs_installed_executor_and_preserves_namespace(
     tmp_path, monkeypatch, failure, late, cleanup
 ):
     run_bootstrap(tmp_path, monkeypatch, failure=failure, late=late, cleanup=cleanup)
@@ -61,6 +62,7 @@ def run_bootstrap(
         "invocation_id": "invocation",
         "build_datetime": "2026-01-01 00:00:00.000000",
         "timeout": 600,
+        "runtime": identity(),
     }
     request["workers"], request["limits"] = execution_capacity(plan)
     if late and not failure:
@@ -144,7 +146,7 @@ def run_bootstrap(
                     workspace=options["workspace"], store=store, resolver=Resolver()
                 )
 
-            module.ArchiveSession = archive_session
+            monkeypatch.setattr(module, "ArchiveSession", archive_session)
         return module
 
     monkeypatch.setattr(importlib, "import_module", importing)
@@ -216,40 +218,29 @@ def run_bootstrap(
         for name, module in sys.modules.items()
         if name == "weaver" or name.startswith("weaver.")
     }
-    assert Path(loaded[0]).parts[-5:] == (
-        "expanded",
-        "runtime",
-        "weaver",
-        "sessions",
-        "archive_runtime.py",
-    )
+    from weaver.sessions import archive_runtime
+
+    assert Path(loaded[0]).resolve() == Path(archive_runtime.__file__).resolve()
 
 
 @weaver_test()
-def test_bootstrap_serializes_borrowed_namespace_before_second_carrier_copy(
+def test_bootstrap_serializes_installed_execution_before_second_carrier_copy(
     tmp_path, monkeypatch
 ):
-    import hashlib
-    import io
     import threading
-    import zipfile
-
-    from weaver.sessions.install_archive import Carrier
 
     # Isolation is exercised with the real generated bootstrap; no physical engine is modeled.
-    files = {
-        "runtime/weaver/__init__.py": b"",
-        "runtime/weaver/sessions/__init__.py": b"",
-        "runtime/weaver/sessions/archive_runtime.py": b"def run_mutation(*args, **kwargs):\n    return {'status': 'completed'}\n",
-    }
-    stream = io.BytesIO()
-    with zipfile.ZipFile(stream, "w") as zipped:
-        for name, data in files.items():
-            zipped.writestr(name, data)
-    carrier = Carrier(
-        stream.getvalue(),
-        {name: hashlib.sha256(data).hexdigest() for name, data in files.items()},
-    )
+    plan, payloads = legacy()
+    carrier = pack_mutation(plan, payloads)
+    from weaver.sessions import archive_runtime
+
+    executions = []
+
+    def completed(*args, **kwargs):
+        executions.append(args)
+        return {"status": "completed"}
+
+    monkeypatch.setattr(archive_runtime, "run_mutation", completed)
     incoming = tmp_path / "carrier.zip"
     incoming.write_bytes(carrier.data)
     entered, second_entered, release = (
@@ -311,3 +302,4 @@ def test_bootstrap_serializes_borrowed_namespace_before_second_carrier_copy(
         second.join(3)
     assert not first.is_alive() and not second.is_alive()
     assert errors == []
+    assert len(executions) == 2
