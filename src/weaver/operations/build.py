@@ -190,7 +190,8 @@ def build(
         with use_or_create_session(session, workspace=resolved_workspace) as opened:
             # Fabric requires a Lakehouse attachment before Spark starts, and
             # the bundle freezes the same one.
-            opened.require_spark_home(_spark_home(bindings))
+            home = _spark_home(bindings)
+            opened.require_spark_home(home, workspace=resolved_workspace)
             arguments: dict[str, Any] = dict(
                 repository=repository,
                 source_store=prepared.store,
