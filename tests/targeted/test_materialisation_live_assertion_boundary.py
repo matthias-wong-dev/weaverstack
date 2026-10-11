@@ -55,7 +55,7 @@ def test_unchanged_control_consumes_reports_and_protects_pointer_identities(
     )
     source = ast.parse(
         inspect.getsource(
-            journey.test_protected_mirrors_copy_before_cutover_and_converge
+            journey.test_protected_mirrors_native_copy_and_shallow_clone_converge
         )
     )
     statements = [
