@@ -107,9 +107,11 @@ def test_live_warehouse_preview_and_bundle_share_plan_without_writes(
         assert planned.preview.plan == bundle.plan
         assert planned.bundle_id == exported.bundle_id
         assert any(
-            a["classification"] == "create"
-            and a["physical_change"]["name"] == "Preview.Customer"
-            for a in planned.preview.to_mapping()["actions"]
+            change["classification"] == "create"
+            and change["object_kind"] == "table"
+            and change["name"] == "Preview.Customer"
+            for action in planned.preview.to_mapping()["actions"]
+            for change in action["physical_changes"]
         )
         after = {
             "target": warehouse_snapshot(session, workspace, target),

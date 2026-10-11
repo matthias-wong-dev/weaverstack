@@ -1,9 +1,12 @@
 """Canonical facts cover grouped destinations, deferred shape and publication."""
 
+import ast
 from dataclasses import replace
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
-from factories import full_estate
+from factories import _write, full_estate, schema_document, warehouse_table
 from support.weaver_test import weaver_test
 from test_build_fixed_point_cycle import _bindings, _inventories, installed_catalogue
 from test_build_preview_representation import preview
@@ -170,3 +173,44 @@ def test_retained_protected_object_has_actual_registry_publication_without_withd
         for row in state["rows"]
         if row.get("object_name") == "Customer" and row.get("item_type") == "Lakehouse"
     ]
+
+
+@weaver_test()
+def test_live_create_assertion_handles_grouped_physical_changes(tmp_path):
+    root = tmp_path / "repo"
+    full_estate(root)
+    _write(root, "Warehouse/Reporting/schemas/Preview.yml", schema_document("Preview"))
+    _write(
+        root,
+        "Warehouse/Reporting/Preview.Customer.sql",
+        warehouse_table("Preview.Customer"),
+    )
+    repository = parse_item_repository(Location(str(root)))
+    found = inventories(repository)
+    warehouse = WeaverItemId("Warehouse", "Reporting")
+    found[warehouse] = replace(
+        found[warehouse], schemas=(), tables=(), views=(), procedures=()
+    )
+    result = preview(repository, tmp_path / "plan", Catalogue({}), inventories=found)
+    assert any(
+        action["classification"] == "create" and len(action["physical_changes"]) > 1
+        for action in result.to_mapping()["actions"]
+    )
+    source = (
+        Path(__file__).resolve().parents[1] / "fabric/test_build_preview_boundary.py"
+    )
+    assertions = [
+        node
+        for node in ast.walk(ast.parse(source.read_text()))
+        if isinstance(node, ast.Assert)
+        and any(
+            isinstance(part, ast.Constant) and part.value == "Preview.Customer"
+            for part in ast.walk(node)
+        )
+    ]
+    assert len(assertions) == 1
+    module = ast.fix_missing_locations(ast.Module(body=assertions, type_ignores=[]))
+    exec(
+        compile(module, str(source), "exec"),
+        {"planned": SimpleNamespace(preview=result)},
+    )
