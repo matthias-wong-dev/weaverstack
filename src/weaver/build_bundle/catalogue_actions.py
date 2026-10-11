@@ -220,8 +220,10 @@ def render_catalogue_before_build(
     *,
     catalogue_target,
     stale_claims: Iterable[CatalogueClaim] = (),
+    claims: tuple[CatalogueClaim, ...] | None = None,
 ) -> PlannedStage | None:
-    claims = collect_claims(catalogue, identities, stale_claims=stale_claims)
+    if claims is None:
+        claims = collect_claims(catalogue, identities, stale_claims=stale_claims)
     return _stage(
         index=0,
         slug="catalogue-before-build",
@@ -337,6 +339,7 @@ def render_catalogue_after_build(
     catalogue_target,
     current: Catalogue | None = None,
     selected_models=(),
+    publication=None,
 ) -> tuple[PlannedStage, ...]:
     """Publish dictionaries and Installation in one batch, Registry last.
 
@@ -344,15 +347,16 @@ def render_catalogue_after_build(
     build.
     """
 
-    desired = desired_catalogue(repository, selected_ids, target_by_item)
+    from .semantic import semantic_stage
 
-    # Diff against persisted rows so an unchanged table produces no statement.
-    from .semantic import publication_catalogues, semantic_stage
-
-    current, desired = publication_catalogues(
-        current or Catalogue(rows={}), desired, selected_models
-    )
-    publication = publish(current, desired)
+    if publication is None:
+        publication = planned_publication(
+            repository,
+            selected_ids,
+            target_by_item,
+            current=current,
+            selected_models=selected_models,
+        )
 
     # Registry is its own final action; table plans carry the ordering.
     catalogue_statements: list[str] = [
@@ -390,3 +394,63 @@ def render_catalogue_after_build(
         for identity in sorted(selected_models, key=str)
     )
     return observed + tuple(stage for stage in rendered if stage is not None)
+
+
+def planned_publication(
+    repository, selected_ids, target_by_item, *, current, selected_models=()
+):
+    """Share the catalogue row decisions between rendering and presentation."""
+    from .semantic import publication_catalogues
+
+    desired = desired_catalogue(repository, selected_ids, target_by_item)
+    current, desired = publication_catalogues(
+        current or Catalogue(rows={}), desired, selected_models
+    )
+    return publish(current, desired)
+
+
+def publication_facts(publication, claims):
+    """Describe the exact Registry and logical-validation row decisions."""
+    from ..catalogue.tables import TEST_DICTIONARY
+    from ..declaration.model import ObjectId, WeaverItemId
+
+    def registry_ids(rows):
+        grouped = {}
+        for row in rows:
+            item = WeaverItemId(row[SCOPE_ITEM_TYPE], row[SCOPE_ITEM_NAME])
+            grouped.setdefault(item, []).append(row)
+        catalogue = Catalogue(
+            {item: {REGISTRY.name: tuple(rows)} for item, rows in grouped.items()}
+        )
+        return sorted(map(str, catalogue.registered))
+
+    def validations(rows):
+        return [
+            {
+                "object_id": str(
+                    WeaverDocumentId.validation(
+                        WeaverItemId(row[SCOPE_ITEM_TYPE], row[SCOPE_ITEM_NAME]),
+                        ObjectId(row["schema_name"], row["object_name"]),
+                    )
+                ),
+                "signature": row["signature"],
+            }
+            for row in rows
+        ]
+
+    definitions = next(
+        p for p in publication.dictionaries if p.table == TEST_DICTIONARY
+    )
+    return {
+        "certification": {
+            "withdraw_before_work": sorted(
+                {str(c.identity) for c in claims if c.rule.table == REGISTRY}
+            ),
+            "publish_after_success": registry_ids(publication.registry.changed_rows),
+            "remove_on_publication": registry_ids(publication.registry.removed_rows),
+        },
+        "validation_definitions": {
+            "publish": validations(definitions.changed_rows),
+            "remove": validations(definitions.removed_rows),
+        },
+    }

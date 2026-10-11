@@ -9,6 +9,7 @@ from typing import Any, Sequence
 
 from ..build_bundle.execution_plan import execute_bundle
 from ..build_bundle.incremental import BuildSelection
+from ..build_bundle.preview import BuildPreview
 from ..errors import BuildError, CommandError
 from ..locations import Location
 from ..sessions.host import inside_fabric_session as _inside_fabric_session
@@ -57,6 +58,8 @@ class BuildResult:
     installation_report: Any = field(default=None, repr=False, compare=False)
     #: The installation report, kept after the build's temporary bundle is gone.
     report_path: str | None = None
+    dry_run: bool = False
+    preview: BuildPreview | None = field(default=None, repr=False, compare=False)
 
     @property
     def succeeded(self) -> bool:
@@ -75,6 +78,9 @@ class BuildResult:
         if self.installation_report is not None:
             mapping["actions"] = self.installation_report.action_counts()
             mapping["report_path"] = self.report_path
+        if self.dry_run:
+            mapping["dry_run"] = True
+            mapping["preview"] = self.preview.to_mapping()
         return mapping
 
 
@@ -88,6 +94,7 @@ def build(
     workspace_config: str | Path | None = None,
     data_sources=None,
     bind_data_sources: bool = False,
+    dry_run: bool = False,
     bundle_only: bool = False,
     bundle_path: str | Path | None = None,
     concurrency: int | None = None,
@@ -104,6 +111,9 @@ def build(
     ``bind_data_sources`` binds each deployed semantic model's SQL data sources
     to the connection that reaches them, as a load does before refreshing.
 
+    ``dry_run`` returns the canonical plan without installation or target writes.
+    It reads current target state and retains no deployable bundle.
+
     A supplied ``session`` is reused and left open. Otherwise this operation
     creates and closes one.
     """
@@ -111,6 +121,8 @@ def build(
     from ..concurrency import validate_concurrency
 
     validate_concurrency(concurrency)
+    if dry_run and bundle_only:
+        raise CommandError("dry_run and bundle_only cannot be combined")
     if bundle_path is not None and not bundle_only:
         raise CommandError("bundle_path requires bundle_only=True")
 
@@ -185,6 +197,7 @@ def build(
                 bindings=bindings,
                 requested_bindings=selected,
                 catalogue_binding=control,
+                dry_run=dry_run,
                 bundle_only=bundle_only,
                 bundle_path=bundle_path,
                 source=source_location.value,
@@ -194,15 +207,16 @@ def build(
             with opened.task("Build", resolved_workspace.workspace) as frame:
                 from ..fabric.powerbi_items import create_powerbi_items
 
-                create_powerbi_items(
-                    bindings,
-                    repository,
-                    session=opened,
-                    workspace=resolved_workspace,
-                    physical=preflight.workspace if preflight else None,
-                    inventory=preflight.inventory if preflight else None,
-                    bundle_only=bundle_only,
-                )
+                if not dry_run:
+                    create_powerbi_items(
+                        bindings,
+                        repository,
+                        session=opened,
+                        workspace=resolved_workspace,
+                        physical=preflight.workspace if preflight else None,
+                        inventory=preflight.inventory if preflight else None,
+                        bundle_only=bundle_only,
+                    )
                 result = _run_build(resolved_workspace, session=opened, **arguments)
                 frame.failed = not result.succeeded
                 return result
@@ -353,6 +367,7 @@ def _run_build(
     requested_bindings=None,
     present_selection=True,
     concurrency: int | None = None,
+    dry_run: bool = False,
 ) -> BuildResult:
     from ..build_bundle import (
         build_repository_bundle,
@@ -421,6 +436,24 @@ def _run_build(
                 execution=execution,
                 output=Location((Path(temporary) / "bundle").as_posix()),
                 warn=session.warn,
+            )
+        if dry_run:
+            from ..build_bundle.preview import preview_build
+
+            return BuildResult(
+                source=source,
+                items=tuple(str(b.item) for b in requested_bindings.entries),
+                bundle_id=bundle.bundle_id,
+                installation=False,
+                bundle_path=None,
+                status="succeeded",
+                selection=BuildSelection.from_mapping(
+                    bundle.plan.build_envelope["selection"]
+                ),
+                dry_run=True,
+                preview=preview_build(
+                    bundle.plan, repository=repository, bindings=bindings, state=state
+                ),
             )
         if present_selection:
             session.report(
