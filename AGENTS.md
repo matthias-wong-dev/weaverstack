@@ -379,12 +379,14 @@ are in.
 There is one `build`, one `load` and one `test`. Every build action runs in the
 mutation executor wherever that is, and the state a build plans against is read the same
 way: the catalogue over TDS, a Lakehouse's views over Spark SQL, a Lakehouse's
-objects from storage, a Warehouse over TDS. A desktop `weaver build` needs no
-published wheel, because a plan that attaches Spark carries Weaver's runtime in
-its carrier. That plan does need Weaver's dependencies in the Spark session, so
-a Lakehouse build needs the published Environment; a build with no Spark work
-needs none. A session without them declines the carrier before any action runs,
-and Build reports that once, naming what is missing. Loads and tests of
+objects from storage, a Warehouse over TDS. Build execution in Fabric uses a
+compatible Weaver runtime published in the target Environment. Session admission
+checks the execution protocol, sealed plan format, package version, pinned Delta
+writer and required executor capabilities before transport or physical work.
+Development versions retain the existing commit/source-tree publication
+fingerprint. Planning, dry-run and bundle-only need no execution runtime.
+Warehouse and semantic-only Builds retain their no-Spark path. Power BI items
+and their physical sources are built in separate requests. Loads and tests of
 deployed Python modules use an Environment.
 `install` asks
 for nothing: a bundle carries the workspace, the catalogue, the Environment and
@@ -450,14 +452,15 @@ attaches Spark uses `execute_mutation_in_fabric(plan, payloads=None)`, which
 submits the whole plan once to Fabric. Execution on the client and in Fabric both
 use `MutationExecutor` and the existing physical executors.
 
-The internal carrier contains the canonical plan, optional payloads and matching
-Weaver runtime sources and static resources. It validates all payload hashes
-before staging. The carrier and every member have SHA-256 identities. Extraction
-validates inventory, paths, file kinds and content before creating the private
-tree. The expanded-size bound is 128 MiB; an oversized carrier is refused before
-submission. The generated bootstrap imports the extracted runtime under a
-process-shared namespace lock, drains execution, and restores borrowed modules
-and import paths.
+The internal carrier contains the canonical plan, exact payload bytes and an
+execution request naming the admitted runtime identity. Runtime sources and wheels
+are installed by explicit Environment publication. The carrier validates payload
+hashes before staging. The carrier and every member have SHA-256 identities.
+Extraction validates inventory, paths, file kinds and content before creating the
+private tree. The expanded-size bound is 128 MiB; an oversized carrier is refused
+before submission. The generated bootstrap rechecks installed runtime identity,
+executes the complete plan under a process-shared namespace lock and removes its
+private extraction. Existing modules and import paths remain in place.
 
 The carrier is staged in the plan's Spark-home Lakehouse, under
 `Files/_weaver_carriers/<invocation-id>/`, so a Lakehouse plan needs no other

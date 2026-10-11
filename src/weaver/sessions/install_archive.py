@@ -73,35 +73,24 @@ class Carrier:
 
 
 def pack_mutation(plan, payloads=None, *, request=None) -> Carrier | None:
-    """Carry a plan, exact payload bytes and the caller's matching runtime."""
+    """Carry a sealed plan and exact payload bytes to the hosted runtime."""
     from ..mutation.bundle import plan_to_yaml
     from ..mutation.executor import validate_inputs
+    from .hosted_runtime import identity
 
     payloads = validate_inputs(plan, payloads)
     files = {
         "bundle/plan.yml": plan_to_yaml(plan).encode("utf-8"),
         "request.json": json.dumps(
-            request or {"plan_id": plan.bundle_id}, sort_keys=True, allow_nan=False
+            request or {"plan_id": plan.bundle_id, "runtime": identity()},
+            sort_keys=True,
+            allow_nan=False,
         ).encode("utf-8"),
     }
     files.update({"bundle/" + path: data for path, data in payloads.items()})
-    runtime = Path(__file__).resolve().parents[1]
     size = sum(len(data) for data in files.values())
     if size > MAX_EXPANDED_BYTES:
         return None
-    for source in sorted(runtime.rglob("*")):
-        if (
-            source.suffix not in (".py", ".sql", ".yaml", ".yml", ".json")
-            or not source.is_file()
-        ):
-            continue
-        if source.is_symlink() or not source.resolve().is_relative_to(runtime):
-            raise ValueError("runtime contains an external source file")
-        data = source.read_bytes()
-        size += len(data)
-        if size > MAX_EXPANDED_BYTES:
-            return None
-        files["runtime/weaver/" + source.relative_to(runtime).as_posix()] = data
     stream = io.BytesIO()
     manifest = {}
     with zipfile.ZipFile(stream, "w", compression=zipfile.ZIP_DEFLATED) as archive:
@@ -123,7 +112,6 @@ import importlib
 import json
 import shutil
 import stat
-import sys
 import tempfile
 import zipfile
 from importlib import metadata
@@ -134,10 +122,7 @@ _archive_incoming = {incoming!r}
 _archive_output = {output!r}
 _archive_sha256 = {carrier.sha256!r}
 _archive_manifest = json.loads({json.dumps(carrier.manifest)!r})
-_archive_previous_path = list(sys.path)
-_archive_previous_modules = {{name: module for name, module in sys.modules.items() if name == "weaver" or name.startswith("weaver.")}}
 _archive_private = Path(tempfile.mkdtemp(prefix="weaver-install-"))
-_archive_switched = False
 try:
     _archive_zip = _archive_private / "carrier.zip"
     fs.cp(_archive_incoming, "file:" + str(_archive_zip), False)
@@ -157,26 +142,22 @@ try:
         _archive_reason = "it is missing " + str(_missing.name or _missing)
     except metadata.PackageNotFoundError:
         _archive_reason = "it is missing deltalake"
+    if _archive_reason is None:
+        try:
+            _archive_request = json.loads((_archive_root / "request.json").read_text())
+            _archive_required = _archive_request.get("runtime")
+            if not isinstance(_archive_required, dict):
+                raise ValueError("Build runtime identity is missing; regenerate the carrier")
+            _archive_hosted = importlib.import_module("weaver.sessions.hosted_runtime")
+            _archive_hosted.require_compatible(_archive_hosted.identity(), expected=_archive_required)
+        except Exception as _archive_runtime_error:
+            _archive_reason = str(_archive_runtime_error)
     if _archive_reason is not None:
         _archive_result = {{"status": "declined", "mutated": False, "reason": _archive_reason}}
     else:
-        for _name in _archive_previous_modules:
-            del sys.modules[_name]
-        sys.path.insert(0, str(_archive_root / "runtime"))
-        importlib.invalidate_caches()
-        _archive_switched = True
         _archive_module = importlib.import_module("weaver.sessions.archive_runtime")
-        if Path(_archive_module.__file__).resolve() != (_archive_root / "runtime/weaver/sessions/archive_runtime.py").resolve():
-            raise ValueError("archive runtime did not win import resolution")
         _archive_result = _archive_module.run_mutation(_archive_root, spark, _archive_output, _archive_sha256, workers={workers!r})
 finally:
-    if _archive_switched:
-        for _name in list(sys.modules):
-            if _name == "weaver" or _name.startswith("weaver."):
-                del sys.modules[_name]
-        sys.modules.update(_archive_previous_modules)
-        sys.path[:] = _archive_previous_path
-        importlib.invalidate_caches()
     try:
         shutil.rmtree(_archive_private)
     except Exception as _archive_cleanup_error:
@@ -246,6 +227,7 @@ def execute_mutation_in_fabric(
     )
     if home_id is not None:
         session.require_spark_home(home.name, workspace=frozen_workspace)
+    runtime = session.require_build_runtime(plan=plan, workspace=frozen_workspace)
     scope = session.scope(frozen_workspace)
     store = scope.transport_store
     area = scope.resolver.files_root(ItemRef(home.name)) / CARRIER_AREA
@@ -269,6 +251,7 @@ def execute_mutation_in_fabric(
     )
     request = {
         "plan_id": plan.bundle_id,
+        "runtime": runtime,
         "invocation_id": invocation_id,
         "build_datetime": build_datetime,
         "timeout": timeout,
