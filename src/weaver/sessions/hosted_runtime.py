@@ -10,9 +10,9 @@ PROTOCOL = 1
 
 
 def identity() -> dict:
-    from ..build_bundle.executors import default_executors
     from ..fabric.environment import local_weaver
     from ..mutation.bundle import SUPPORTED_FORMAT_VERSION
+    from .archive_runtime import mutation_drivers
 
     try:
         writer = metadata.version("deltalake")
@@ -23,7 +23,7 @@ def identity() -> dict:
         "format_version": SUPPORTED_FORMAT_VERSION,
         "version": local_weaver().version,
         "deltalake": writer,
-        "executors": sorted(default_executors()),
+        "executors": sorted(mutation_drivers({})),
     }
 
 

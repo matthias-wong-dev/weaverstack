@@ -183,18 +183,13 @@ def execute_mutation(
     Resource limits, not ``workers``, bound concurrency on each capability.
     Unless given, both come from the Session's Workspace.
     """
-    from dataclasses import replace
 
     from ..build_bundle.executors import default_executors
     from ..build_bundle.executors.base import InstallationContext
-    from ..build_bundle.executors.sql_endpoint_refresh import endpoint_refresh_drivers
-    from ..build_bundle.executors.tsql import TSqlBatchExecutor, TSqlExecutor
-    from ..build_bundle.executors.tsql_round_trip import round_trip_driver
     from ..build_bundle.installer import MutationBindings
-    from ..errors import BuildError, WeaverError
+    from ..errors import BuildError
     from ..mutation.executor import (
         MutationExecutor,
-        physical_driver,
         validate_inputs,
     )
 
@@ -240,6 +235,22 @@ def execute_mutation(
         for key, target in resolved.items()
     }
 
+    drivers = mutation_drivers(contexts, executors=executors)
+    return MutationExecutor(
+        drivers, workers=workers, limits=limits, timeout=timeout, observer=observer
+    ).execute(plan, payloads, invocation_id=invocation_id)
+
+
+def mutation_drivers(contexts, *, executors=None):
+    """Register the physical drivers supported by the installed runtime."""
+    from ..build_bundle.executors import default_executors
+    from ..build_bundle.executors.sql_endpoint_refresh import endpoint_refresh_drivers
+    from ..build_bundle.executors.tsql import TSqlBatchExecutor, TSqlExecutor
+    from ..build_bundle.executors.tsql_round_trip import round_trip_driver
+    from ..errors import WeaverError
+    from ..mutation.executor import physical_driver
+
+    executors = default_executors() if executors is None else executors
     drivers = {}
     for name, executor in executors.items():
         driver = physical_driver(
@@ -260,9 +271,7 @@ def execute_mutation(
                 batch_size=TSQL_ROUND_TRIP,
             )
     drivers.update(endpoint_refresh_drivers(contexts, outcome=error_outcome))
-    return MutationExecutor(
-        drivers, workers=workers, limits=limits, timeout=timeout, observer=observer
-    ).execute(plan, payloads, invocation_id=invocation_id)
+    return drivers
 
 
 def error_outcome(error):
