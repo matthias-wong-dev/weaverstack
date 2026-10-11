@@ -15,6 +15,7 @@ from weaver.catalogue.connection import catalogue_connection
 from weaver.catalogue.state import read_target_occupancy
 from weaver.declaration.model import WeaverItemId
 from weaver.fabric.onelake import abfss_root
+from weaver.sessions.program import FabricProgram
 from weaver.spark import FabricSparkTarget
 from weaver.targets import ItemRef
 
@@ -59,7 +60,7 @@ def failure_program(source, workspace, target, catalogue):
             "catalogue": catalogue,
         }
     )
-    return f"""
+    body = f"""
 import json
 import weaver
 from weaver.fabric.store import FabricStore
@@ -72,7 +73,7 @@ class FailingCopyStore(FabricStore):
         super().copy(source, destination)
         if "/_weaver_materialisation/" in destination.value:
             raise InstallError("Injected protected copy failure")
-with NotebookSession(spark=spark, store=FailingCopyStore(), workspace=Workspace(workspace=options["workspace"], catalogue="Warehouse/" + options["catalogue"]), progress=False) as native:
+with NotebookSession(spark=spark, store=FailingCopyStore(), workspace=Workspace(workspace=options["workspace"], catalogue="Warehouse/" + options["catalogue"])) as native:
     try:
         result = weaver.build(options["source"], items=[{ITEM!r} + "=Lakehouse/" + options["target"]], session=native)
         errors = [a.error_message for a in result.installation_report.action_results() if a.status == "failed"]
@@ -80,6 +81,16 @@ with NotebookSession(spark=spark, store=FailingCopyStore(), workspace=Workspace(
     except WeaverError as error:
         emit({{"succeeded": False, "errors": [str(error)]}})
 """
+
+    def call():
+        from pyspark.sql import SparkSession
+
+        emitted = []
+        exec(body, {"spark": SparkSession.getActiveSession(), "emit": emitted.append})
+        assert len(emitted) == 1
+        return emitted[0]
+
+    return FabricProgram("protected_copy_failure", call, body, resubmit=False)
 
 
 @weaver_test(remote=True, resources={"rest", "tds", "livy", "onelake"})
