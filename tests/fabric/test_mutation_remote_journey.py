@@ -162,9 +162,11 @@ def test_lost_response_is_uncertain_without_replay_and_normal_build_converges(
     submissions = []
 
     def lost_response(source, **options):
-        submissions.append(options)
-        run(source, **options)
-        raise OSError("qualification lost response after remote completion")
+        result = run(source, **options)
+        if options.get("name") == "mutation_archive":
+            submissions.append(options)
+            raise OSError("qualification lost response after remote completion")
+        return result
 
     with monkeypatch.context() as patcher:
         patcher.setattr(scope, "livy_run", lost_response)
