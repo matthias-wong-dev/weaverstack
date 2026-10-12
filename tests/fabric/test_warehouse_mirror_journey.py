@@ -370,8 +370,8 @@ def _protected_ctas(run, estate):
     )
     assert built.succeeded
     assert any(
-        a.kind == "materialise_mirror"
-        and a.resource_node_id == f"{ITEM}/Tables/{identity}"
+        a.executor == "materialise_mirror"
+        and a.resource_node_id == f"{ITEM}/{identity}"
         for a in built.installation_report.action_results()
     )
     assert (
@@ -381,9 +381,7 @@ def _protected_ctas(run, estate):
     after = _observe(run)
     assert after.objects[identity] == "U" and identity not in after.borrowed
     assert after.bookmarks[identity] == before.bookmarks[identity]
-    run.target_sql.execute(
-        "UPDATE [Wh].[Customer] SET [CustomerName] = N'protected development edit'"
-    )
+    run.target_sql.execute("UPDATE [Wh].[Customer] SET [CustomerName] = N'dev edit'")
     assert (
         run.source_sql.query("SELECT * FROM [Wh].[Customer] ORDER BY [CustomerId]")
         == source_rows
@@ -395,7 +393,7 @@ def _protected_ctas(run, estate):
         catalogue=f"Warehouse/{run.catalogue_name}",
     )
     assert repeat.succeeded and not any(
-        a.kind == "materialise_mirror"
+        a.executor == "materialise_mirror"
         for a in repeat.installation_report.action_results()
     )
     return {
