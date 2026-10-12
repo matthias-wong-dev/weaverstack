@@ -883,6 +883,34 @@ def test_a_warehouse_has_no_areas(tmp_path):
 
 
 @weaver_test()
+def test_authored_identity_checks_render_a_linear_number_of_names(
+    tmp_path, monkeypatch
+):
+    from weaver.declaration.repository import _read_authored_repository
+    from weaver.store import FilesystemStore
+
+    root = tmp_path / "project"
+    declarations = 64
+    for index in range(declarations):
+        _write(
+            root,
+            f"Lakehouse/Input/Tables/Core__Customer{index:03}.py",
+            _table(f"Core.Customer{index:03}"),
+        )
+    original = WeaverDocumentId.__str__
+    rendered = []
+
+    def count_render(identity):
+        rendered.append(identity)
+        return original(identity)
+
+    monkeypatch.setattr(WeaverDocumentId, "__str__", count_render)
+    part = _read_authored_repository(Location(root.as_posix()), FilesystemStore())
+    assert len(part.documents) == declarations
+    assert len(rendered) <= 20 * declarations
+
+
+@weaver_test()
 def test_a_repository_read_reuses_and_releases_its_sql_parse_cache(
     tmp_path, monkeypatch
 ):

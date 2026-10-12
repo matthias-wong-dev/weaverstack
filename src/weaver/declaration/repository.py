@@ -110,6 +110,7 @@ def _read_validation(
     root: Location,
     store: Store,
     source_documents: dict[WeaverDocumentId, SourceDocument],
+    source_folded: dict[str, WeaverDocumentId],
 ) -> None:
     directory = within[0]
     kind = VALIDATION_DIRECTORIES[directory]
@@ -143,7 +144,9 @@ def _read_validation(
 
     identity = WeaverDocumentId.validation(item, source.object_id)
     source = replace(source, logical_id=identity)
-    _insert_exact_case(source_documents, identity, source, relative, what="declaration")
+    _insert_exact_case(
+        source_documents, source_folded, identity, source, relative, what="declaration"
+    )
 
 
 def _directory_for(kind: str) -> str:
@@ -725,6 +728,8 @@ def _read_authored_repository(root: Location, store: Store) -> RepositoryPart:
         )
     source_documents: dict[WeaverDocumentId, SourceDocument] = {}
     schema_documents: dict[WeaverSchemaId, SchemaSes] = {}
+    source_folded: dict[str, WeaverDocumentId] = {}
+    schema_folded: dict[str, WeaverSchemaId] = {}
     programmables: dict[WeaverDocumentId, Programmable] = {}
     support_files: list[str] = []
     schemas_by_item: dict[WeaverItemId, list[WeaverSchemaId]] = {
@@ -757,6 +762,7 @@ def _read_authored_repository(root: Location, store: Store) -> RepositoryPart:
                 root=root,
                 store=store,
                 source_documents=source_documents,
+                source_folded=source_folded,
             )
     for relative in sorted(files):
         parts = relative.split("/")
@@ -771,6 +777,7 @@ def _read_authored_repository(root: Location, store: Store) -> RepositoryPart:
                     root=root,
                     store=store,
                     source_documents=source_documents,
+                    source_folded=source_folded,
                 )
             continue
 
@@ -821,7 +828,12 @@ def _read_authored_repository(root: Location, store: Store) -> RepositoryPart:
             )
             identity = WeaverSchemaId(item, schema.schema_id)
             _insert_exact_case(
-                schema_documents, identity, schema, relative, what="schema"
+                schema_documents,
+                schema_folded,
+                identity,
+                schema,
+                relative,
+                what="schema",
             )
             schemas_by_item[item].append(identity)
             continue
@@ -848,6 +860,7 @@ def _read_authored_repository(root: Location, store: Store) -> RepositoryPart:
                 root=root,
                 store=store,
                 source_documents=source_documents,
+                source_folded=source_folded,
             )
             continue
 
@@ -891,7 +904,7 @@ def _read_authored_repository(root: Location, store: Store) -> RepositoryPart:
         identity = WeaverDocumentId(item, source.object_id, is_files=area == FILES)
         source = replace(source, logical_id=identity)
         _insert_exact_case(
-            source_documents, identity, source, relative, what="document"
+            source_documents, source_folded, identity, source, relative, what="document"
         )
     from ..etl import ETL_SCHEMA
 
@@ -924,6 +937,7 @@ def _read_authored_repository(root: Location, store: Store) -> RepositoryPart:
     _complete_owned_schemas(
         schema_documents,
         schemas_by_item,
+        schema_folded=schema_folded,
         source_documents=source_documents,
         shortcuts=shortcuts,
     )
@@ -1318,6 +1332,7 @@ def _item_signature(
 
 def _insert_exact_case(
     destination: dict,
+    folded: dict,
     identity,
     value,
     relative: str,
@@ -1325,21 +1340,23 @@ def _insert_exact_case(
     what: str,
 ) -> None:
     rendered = str(identity)
-    for existing, existing_value in destination.items():
+    key = rendered.casefold()
+    existing = folded.get(key)
+    if existing is not None:
+        existing_value = destination[existing]
         if str(existing) == rendered:
             prior = getattr(existing_value, "relative_path", None) or str(existing)
             raise DiscoveryError(
                 f"{rendered} is declared twice: {prior} and {relative}"
             )
-        if str(existing).casefold() == rendered.casefold():
-            # Both files, so either spelling can be the one to change.
-            prior = getattr(existing_value, "relative_path", None)
-            where = f" ({prior} and {relative})" if prior else f" ({relative})"
-            raise DiscoveryError(
-                f"{rendered} and {existing} differ only by case and cannot "
-                f"coexist{where}"
-            )
+        # Both files, so either spelling can be the one to change.
+        prior = getattr(existing_value, "relative_path", None)
+        where = f" ({prior} and {relative})" if prior else f" ({relative})"
+        raise DiscoveryError(
+            f"{rendered} and {existing} differ only by case and cannot coexist{where}"
+        )
     destination[identity] = value
+    folded[key] = identity
 
 
 def _builtin_item() -> WeaverItemId:
@@ -1444,6 +1461,7 @@ def _complete_owned_schemas(
     schema_documents: dict[WeaverSchemaId, SchemaSes],
     schemas_by_item: dict[WeaverItemId, list[WeaverSchemaId]],
     *,
+    schema_folded: dict[str, WeaverSchemaId],
     source_documents: Mapping[WeaverDocumentId, SourceDocument],
     shortcuts: Iterable[ShortcutDeclaration],
 ) -> None:
@@ -1490,6 +1508,7 @@ def _complete_owned_schemas(
             identity = WeaverSchemaId(item, name)
             _insert_exact_case(
                 schema_documents,
+                schema_folded,
                 identity,
                 inferred_schema(name),
                 relative or f"{item}",
