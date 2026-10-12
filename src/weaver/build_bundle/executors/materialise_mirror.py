@@ -3,16 +3,20 @@
 from __future__ import annotations
 
 import json
+import time
 
 from ...errors import InstallError
 from ...spark import FabricSparkTarget
 from ...targets import validate_name
+from .base import Waiting
+from .shortcut import NAME_RELEASE_POLL_INTERVAL, NAME_RELEASE_TIMEOUT
 
 
 class MaterialiseMirrorExecutor:
     name = "materialise_mirror"
+    resumable = True
 
-    def execute(self, action, payload, context):
+    def execute(self, action, payload, context, state=None):
         if payload is None:
             raise InstallError(f"materialisation {action.id!r} has no payload")
         instruction = json.loads(payload)
@@ -35,8 +39,11 @@ class MaterialiseMirrorExecutor:
             item_type="Warehouse" if warehouse else "Lakehouse",
             workspace=instruction["source_workspace"],
         )
+        destination_workspace_id = (
+            context.target.bound.workspace_id or resolver.workspace.id
+        )
         same_item = (producer.workspace_id, producer.id) == (
-            context.target.bound.workspace_id,
+            destination_workspace_id,
             context.target.bound.item_id,
         )
         if same_item and (names["schema"], names["name"]) == (
@@ -83,10 +90,17 @@ class MaterialiseMirrorExecutor:
                 )
         elif context.spark_sql is None:
             raise InstallError("protected Delta materialisation requires Spark SQL")
-        if shortcuts:
+        if shortcuts and state is None:
             resolver.remove_onelake_shortcut(
                 context.target.lakehouse, path=path, name=names["name"]
             )
+            state = {"started": time.monotonic()}
+        if state is not None and context.store.exists(destination):
+            if time.monotonic() - state["started"] >= NAME_RELEASE_TIMEOUT:
+                raise InstallError(
+                    f"removed shortcut {path}/{names['name']} still occupies its path"
+                )
+            return Waiting(state, NAME_RELEASE_POLL_INTERVAL)
         if kind == "folder":
             copy(source, destination)
             mechanism = "recursive_copy"
@@ -109,7 +123,9 @@ class MaterialiseMirrorExecutor:
 
     @staticmethod
     def _warehouse(instruction, names, producer, context):
-        if producer.workspace_id != context.target.bound.workspace_id:
+        if producer.workspace_id != (
+            context.target.bound.workspace_id or context.resolver.workspace.id
+        ):
             raise InstallError(
                 "Warehouse materialisation requires a source in the destination workspace"
             )

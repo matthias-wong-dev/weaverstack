@@ -840,9 +840,10 @@ source's items.
 
 Build materialises selected edited borrowed objects marked Prohibit Rebuild through
 ordinary DAG actions. The development destination is disposable; the source remains
-unchanged. Lakehouse Folders remove the destination shortcut through the shortcut
-API and recursively copy through NotebookUtils fastcp, falling back to native cp
-where fastcp is unavailable. Delta Tables remove the destination shortcut and use
+unchanged. Lakehouse Folders and Tables remove the destination shortcut through the
+shortcut API and await release of its OneLake path before materialising. Folders
+recursively copy through NotebookUtils fastcp, falling back to native cp
+where fastcp is unavailable. Delta Tables use
 Spark SQL SHALLOW CLONE against the physical source Table. Development writes are
 local, while the clone initially references source data files: source VACUUM and
 retention can invalidate those references. This is not a physical deep copy.

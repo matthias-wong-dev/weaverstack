@@ -69,6 +69,9 @@ def native_case(tmp_path, *, kind="folder", name="Retained", warehouse=False):
             calls.append("copy-directory")
             shutil.copytree(src.path, dst.path)
 
+        def exists(self, location):
+            return False
+
         def read(self, *args):
             pytest.fail("Materialisation read file bytes")
 
@@ -155,11 +158,74 @@ def test_delta_table_removes_only_shortcut_and_shallow_clones_physical_source(tm
 
 
 @weaver_test()
+@pytest.mark.parametrize("kind", ["folder", "table"])
+def test_materialisation_waits_for_removed_shortcut_namespace_before_native_write(
+    tmp_path, kind
+):
+    from weaver.build_bundle.executors.base import Waiting
+
+    context, action, payload, calls, *_ = native_case(tmp_path, kind=kind)
+    occupied = iter((True, False))
+    context.store.exists = lambda location: next(occupied)
+    executor = default_executors()["materialise_mirror"]
+    waiting = executor.execute(action, payload, context)
+    assert isinstance(waiting, Waiting)
+    assert calls == ["remove-shortcut"]
+    context.resolver.onelake_shortcuts = lambda item: ()
+    result = executor.execute(action, payload, context, state=waiting.state)
+    assert result["mechanism"] == (
+        "recursive_copy" if kind == "folder" else "shallow_clone"
+    )
+    assert calls[0] == "remove-shortcut" and len(calls) == 2
+
+
+@weaver_test()
 def test_warehouse_table_replaces_local_wrapper_view_with_source_rows_via_ctas(
     tmp_path,
 ):
     context, action, payload, calls, *_ = native_case(
         tmp_path, kind="table", warehouse=True
+    )
+    default_executors()["materialise_mirror"].execute(action, payload, context)
+    assert calls == [
+        "DROP VIEW [Raw].[Retained];",
+        "CREATE TABLE [Raw].[Retained] AS SELECT * FROM [Source].[Raw].[Retained];",
+    ]
+
+
+@weaver_test()
+def test_warehouse_own_source_with_implicit_workspace_is_refused_before_drop(tmp_path):
+    from dataclasses import replace
+
+    from weaver.errors import InstallError
+
+    context, action, payload, calls, *_ = native_case(
+        tmp_path, kind="table", warehouse=True
+    )
+    context = replace(
+        context,
+        target=replace(
+            context.target,
+            bound=replace(context.target.bound, item_id="source-id", workspace_id=None),
+        ),
+    )
+    with pytest.raises(InstallError, match="overlaps"):
+        default_executors()["materialise_mirror"].execute(action, payload, context)
+    assert calls == []
+
+
+@weaver_test()
+def test_warehouse_ctas_uses_resolved_workspace_when_bound_target_omits_id(tmp_path):
+    from dataclasses import replace
+
+    context, action, payload, calls, *_ = native_case(
+        tmp_path, kind="table", warehouse=True
+    )
+    context = replace(
+        context,
+        target=replace(
+            context.target, bound=replace(context.target.bound, workspace_id=None)
+        ),
     )
     default_executors()["materialise_mirror"].execute(action, payload, context)
     assert calls == [
