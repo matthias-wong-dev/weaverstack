@@ -266,11 +266,23 @@ def test_protected_mirrors_native_copy_and_shallow_clone_converge(
             )
             == []
         )
-        for key in ("minReaderVersion", "minWriterVersion", "properties"):
-            assert source_detail[key] == owned_detail[key]
+        # A shallow clone records column mapping as legacy reader 2 rather than
+        # table-features reader 3, and Fabric adds its own stats properties.
+        # Readers depend on the features, so those must match.
+        assert set(owned_detail["tableFeatures"]) == set(source_detail["tableFeatures"])
+        assert owned_detail["minWriterVersion"] == source_detail["minWriterVersion"]
+        assert source_detail["properties"].items() <= owned_detail["properties"].items()
         records["protocol"] = {
-            k: source_detail[k]
-            for k in ("minReaderVersion", "minWriterVersion", "properties")
+            label: {
+                k: detail[k]
+                for k in (
+                    "minReaderVersion",
+                    "minWriterVersion",
+                    "tableFeatures",
+                    "properties",
+                )
+            }
+            for label, detail in (("source", source_detail), ("owned", owned_detail))
         }
         store.write(
             target_root.join("Files", "Raw", "CustomerCsv", "binary.bin"), b"owned edit"
