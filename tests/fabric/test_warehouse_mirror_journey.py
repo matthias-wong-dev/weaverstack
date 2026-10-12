@@ -291,6 +291,9 @@ def journey(
         ),
         observe=lambda: _observe(run),
     )
+    run.step(
+        "protected CTAS and independent writes", lambda: _protected_ctas(run, estate)
+    )
     yield run
     run.close()
 
@@ -341,6 +344,65 @@ def _change(estate) -> None:
     changed = text.replace("'Widget'", "'Widget II'")
     assert changed != text, "the declaration to change was not found"
     path.write_text(changed, encoding="utf-8")
+
+
+def _protected_ctas(run, estate):
+    """Localise an unchanged borrowed Table through the same Warehouse session."""
+    identity = "Wh.Customer"
+    before = _observe(run)
+    assert identity in before.borrowed
+    source_rows = run.source_sql.query(
+        "SELECT * FROM [Wh].[Customer] ORDER BY [CustomerId]"
+    )
+    assert source_rows
+    path = estate.path / ITEM / f"{identity}.sql"
+    text = path.read_text()
+    changed = text.replace(
+        f"Table ID: {identity}", f"Table ID: {identity}\nProhibit rebuild: true", 1
+    ).replace("Description:", "Description: protected development copy ", 1)
+    assert changed != text
+    path.write_text(changed)
+    built = weaver.build(
+        str(estate.path),
+        items=[f"{ITEM}=Warehouse/{run.target_name}"],
+        session=run.session,
+        catalogue=f"Warehouse/{run.catalogue_name}",
+    )
+    assert built.succeeded
+    assert any(
+        a.executor == "materialise_mirror"
+        and a.resource_node_id == f"{ITEM}/{identity}"
+        for a in built.installation_report.action_results()
+    )
+    assert (
+        run.target_sql.query("SELECT * FROM [Wh].[Customer] ORDER BY [CustomerId]")
+        == source_rows
+    )
+    after = _observe(run)
+    assert after.objects[identity] == "U" and identity not in after.borrowed
+    assert after.bookmarks[identity] == before.bookmarks[identity]
+    run.target_sql.execute("UPDATE [Wh].[Customer] SET [CustomerName] = N'dev edit'")
+    assert (
+        run.source_sql.query("SELECT * FROM [Wh].[Customer] ORDER BY [CustomerId]")
+        == source_rows
+    )
+    repeat = weaver.build(
+        str(estate.path),
+        items=[f"{ITEM}=Warehouse/{run.target_name}"],
+        session=run.session,
+        catalogue=f"Warehouse/{run.catalogue_name}",
+    )
+    assert repeat.succeeded and not any(
+        a.executor == "materialise_mirror"
+        for a in repeat.installation_report.action_results()
+    )
+    return {
+        "source_unchanged": True,
+        "source_rows": source_rows,
+        "bookmark_retained": True,
+        "independent_writes": True,
+        "repeat_materialisation_actions": 0,
+    }
 
 
 def _asked(sql, *queries: str) -> list[list[dict]]:
@@ -474,6 +536,12 @@ def _relations(estate: Estate) -> dict[str, str]:
 
 
 # --- what the mirror stood up -------------------------------------------------
+
+
+@weaver_test(remote=True)
+def test_protected_warehouse_ctas_retains_rows_bookmark_and_source(journey):
+    journey.require("protected CTAS and independent writes")
+    assert journey["protected CTAS and independent writes"].result["source_unchanged"]
 
 
 @weaver_test(remote=True)

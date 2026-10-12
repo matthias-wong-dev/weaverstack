@@ -200,6 +200,22 @@ def test_sql_consumers_reuse_one_parse_for_identical_text(monkeypatch):
 
 
 @weaver_test()
+def test_a_parse_scope_reuses_flat_tokens_without_sharing_the_returned_list():
+    body = "-- café\r\nselect (x + 1) from [Core].[Parent];"
+    expected = sql_statements.flatten_with_offsets(body)
+    with sql_statements.sql_parse_cache():
+        first = sql_statements.flatten_with_offsets(body)
+        second = sql_statements.flatten_with_offsets(body)
+        assert first is not second
+        assert first == second == expected
+        assert all(left is right for left, right in zip(first, second))
+        first.clear()
+        second.reverse()
+        assert sql_statements.flatten_with_offsets(body) == expected
+    assert all(body[token.start : token.end] == token.value for token in expected)
+
+
+@weaver_test()
 def test_a_parse_scope_releases_its_cached_token_trees():
     with sql_statements.sql_parse_cache() as cache:
         sql_statements.parse_sql("select 'parse-scope-contract'")
@@ -285,6 +301,74 @@ def test_a_parse_scope_releases_entries_after_an_exception():
             raise RuntimeError("scope failed")
 
     assert cache.cache_info().currsize == 0
+
+
+@weaver_test()
+@pytest.mark.parametrize("exceptional", [False, True])
+def test_flat_cache_entries_are_bounded_and_released(monkeypatch, exceptional):
+    monkeypatch.setattr(sql_statements, "SQL_PARSE_CACHE_SIZE", 2)
+    retained = None
+    try:
+        with sql_statements.sql_parse_cache():
+            retained = sql_statements._SQL_FLAT_CACHE.get()
+            first = sql_statements.flatten_with_offsets("select 0")[0]
+            for index in (1, 2):
+                sql_statements.flatten_with_offsets(f"select {index}")
+            assert retained.cache_info().currsize == 2
+            assert retained.cache_info().maxsize == 2
+            assert sql_statements.flatten_with_offsets("select 0")[0] is not first
+            if exceptional:
+                raise RuntimeError("scope failed")
+    except RuntimeError:
+        assert exceptional
+    assert retained.cache_info().currsize == 0
+    assert sql_statements._SQL_FLAT_CACHE.get() is None
+
+
+@weaver_test()
+def test_flat_tokens_are_scope_local_in_nested_reads():
+    body = "select (1 + 2)"
+    outside = sql_statements.flatten_with_offsets(body)
+    assert sql_statements.flatten_with_offsets(body)[0] is not outside[0]
+    with sql_statements.sql_parse_cache():
+        outer = sql_statements.flatten_with_offsets(body)
+        with sql_statements.sql_parse_cache():
+            inner = sql_statements.flatten_with_offsets(body)
+            assert inner == outer
+            assert inner[0] is not outer[0]
+        assert sql_statements.flatten_with_offsets(body)[0] is outer[0]
+    assert sql_statements.flatten_with_offsets(body)[0] is not outer[0]
+
+
+@weaver_test()
+def test_overlapping_flat_cache_scopes_do_not_share_tokens():
+    from threading import Event
+
+    body = "select 'concurrent-flat-scope'"
+    first_ready = Event()
+    second_ready = Event()
+
+    def first_scope():
+        with sql_statements.sql_parse_cache():
+            tokens = sql_statements.flatten_with_offsets(body)
+            first_ready.set()
+            assert second_ready.wait(10)
+            assert sql_statements.flatten_with_offsets(body)[0] is tokens[0]
+            return tokens
+
+    def second_scope():
+        assert first_ready.wait(10)
+        with sql_statements.sql_parse_cache():
+            tokens = sql_statements.flatten_with_offsets(body)
+            second_ready.set()
+            return tokens
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first = executor.submit(first_scope)
+        second = executor.submit(second_scope)
+        outer, inner = first.result(), second.result()
+    assert outer == inner
+    assert outer[0] is not inner[0]
 
 
 # --- offsets ------------------------------------------------------------------

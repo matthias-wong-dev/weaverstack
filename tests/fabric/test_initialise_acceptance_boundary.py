@@ -159,9 +159,12 @@ def test_a_generated_warehouse_project_builds_loads_and_tests(
 
         assert report.example.generated and report.environment_publication == "deferred"
         configuration = tmp_path / "workspace-config.yml"
-        built = weaver.build(tmp_path, workspace_config=configuration, session=session)
-        loaded = weaver.load(workspace_config=configuration, session=session)
-        tested = weaver.test(workspace_config=configuration, session=session)
+        items = [f"Warehouse/{emptied_disposable_warehouse.item.name}"]
+        built = weaver.build(
+            tmp_path, items=items, workspace_config=configuration, session=session
+        )
+        loaded = weaver.load(items, workspace_config=configuration, session=session)
+        tested = weaver.test(items, workspace_config=configuration, session=session)
     assert built.succeeded and loaded.succeeded and tested.succeeded
 
 

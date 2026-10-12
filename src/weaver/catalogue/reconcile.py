@@ -148,6 +148,9 @@ class TablePublication:
     #: Present only when some row is new or changed. Unchanged rows are left
     #: alone rather than merged to the same values.
     merge: str | None
+    #: The same row decisions used to render statements, for read-only planning.
+    changed_rows: tuple[Row, ...] = ()
+    removed_rows: tuple[Row, ...] = ()
 
     @property
     def statements(self) -> tuple[str, ...]:
@@ -216,6 +219,7 @@ def _publish_table(table: CatalogueTable, *, current, desired) -> TablePublicati
     """
 
     changed: list[Row] = []
+    removed: list[Row] = []
     delete_scopes: list[InstallationScope] = []
     keep: list[Row] = []
 
@@ -234,6 +238,7 @@ def _publish_table(table: CatalogueTable, *, current, desired) -> TablePublicati
         if any(key not in wanted for key in found):
             delete_scopes.append(scope)
             keep.extend(wanted.values())
+            removed.extend(row for key, row in found.items() if key not in wanted)
 
     delete = None
     if delete_scopes:
@@ -247,7 +252,13 @@ def _publish_table(table: CatalogueTable, *, current, desired) -> TablePublicati
     if changed:
         merge = render_merge(table, changed, scope=_scopes_of(changed))
 
-    return TablePublication(table=table, delete=delete, merge=merge)
+    return TablePublication(
+        table=table,
+        delete=delete,
+        merge=merge,
+        changed_rows=tuple(changed),
+        removed_rows=tuple(removed),
+    )
 
 
 def _scopes_of(rows: Iterable[Row]) -> InstallationScopes:

@@ -80,6 +80,20 @@ because a bundle freezes each target's item ID. A command naming
 no workspace and inheriting none reads `workspace-config.yml` in the directory
 it was run from, which is the last resort in `weaver.config.resolve_workspace`.
 
+`weaver.build(..., dry_run=True)` and `weaver build --dry-run` inspect the same
+target state and compile the same plan as execution. They return before runtime
+upload, action dispatch, installation or catalogue and status writes. Preview
+fails preflight for missing targets. No execution Environment is required.
+Bundle-only writes an executable local bundle. A dry-run preview is immutable;
+its temporary local bundle is removed before return. CLI `--json` writes the
+preview mapping to stdout.
+Canonical planning records the observed physical types, deferred SQL table shape
+and the exact catalogue claim and publication decisions for presentation.
+Grouped actions retain every destination. Logical validations describe their
+definition publication separately from generated artefact replacement.
+Physical changes retain each Table or Folder's area and exclude logical validation
+definitions.
+
 `weaver.graph.Graph` is the topology. The authored repository graphs, the
 installed estate graph and the runtime graph each carry their own node metadata
 and hand ordering, layers, ancestry and subgraphs to it. `Catalogue.dag()`
@@ -369,12 +383,14 @@ are in.
 There is one `build`, one `load` and one `test`. Every build action runs in the
 mutation executor wherever that is, and the state a build plans against is read the same
 way: the catalogue over TDS, a Lakehouse's views over Spark SQL, a Lakehouse's
-objects from storage, a Warehouse over TDS. A desktop `weaver build` needs no
-published wheel, because a plan that attaches Spark carries Weaver's runtime in
-its carrier. That plan does need Weaver's dependencies in the Spark session, so
-a Lakehouse build needs the published Environment; a build with no Spark work
-needs none. A session without them declines the carrier before any action runs,
-and Build reports that once, naming what is missing. Loads and tests of
+objects from storage, a Warehouse over TDS. Build execution in Fabric uses a
+compatible Weaver runtime published in the target Environment. Session admission
+checks the execution protocol, sealed plan format, package version, pinned Delta
+writer and required executor capabilities before transport or physical work.
+Development versions retain the existing commit/source-tree publication
+fingerprint. Planning, dry-run and bundle-only need no execution runtime.
+Warehouse and semantic-only Builds retain their no-Spark path. Power BI items
+and their physical sources are built in separate requests. Loads and tests of
 deployed Python modules use an Environment.
 `install` asks
 for nothing: a bundle carries the workspace, the catalogue, the Environment and
@@ -440,14 +456,15 @@ attaches Spark uses `execute_mutation_in_fabric(plan, payloads=None)`, which
 submits the whole plan once to Fabric. Execution on the client and in Fabric both
 use `MutationExecutor` and the existing physical executors.
 
-The internal carrier contains the canonical plan, optional payloads and matching
-Weaver runtime sources and static resources. It validates all payload hashes
-before staging. The carrier and every member have SHA-256 identities. Extraction
-validates inventory, paths, file kinds and content before creating the private
-tree. The expanded-size bound is 128 MiB; an oversized carrier is refused before
-submission. The generated bootstrap imports the extracted runtime under a
-process-shared namespace lock, drains execution, and restores borrowed modules
-and import paths.
+The internal carrier contains the canonical plan, exact payload bytes and an
+execution request naming the admitted runtime identity. Runtime sources and wheels
+are installed by explicit Environment publication. The carrier validates payload
+hashes before staging. The carrier and every member have SHA-256 identities.
+Extraction validates inventory, paths, file kinds and content before creating the
+private tree. The expanded-size bound is 128 MiB; an oversized carrier is refused
+before submission. The generated bootstrap rechecks installed runtime identity,
+executes the complete plan under a process-shared namespace lock and removes its
+private extraction. Existing modules and import paths remain in place.
 
 The carrier is staged in the plan's Spark-home Lakehouse, under
 `Files/_weaver_carriers/<invocation-id>/`, so a Lakehouse plan needs no other
@@ -522,7 +539,9 @@ Workspace's `execution.build` sets each capability's limit
 `onelake_concurrency`, `shortcut_concurrency`) for Build, Wipe and Mirror, and
 `weaver.sessions.archive_runtime.execution_capacity` applies it. The defaults
 suit a mid-sized capacity; an F64 sustains twice as much. The limits travel
-with an invocation, outside plan identity. They throttle execution only; an
+with an invocation, outside plan identity. Build's optional `concurrency` caps
+the total executor workers within the existing pool and resource limits. It
+travels as execution policy and leaves the bundle unchanged. They throttle execution only; an
 ordering the plan needs is an edge, never a low limit. Each Warehouse lane
 leases its own pooled connection, and four concurrent DDL lanes ran without
 conflict in Fabric. Ready T-SQL actions on one Warehouse share round trips
@@ -622,6 +641,10 @@ finish and settle, and nodes not yet started stay pending. Two concurrent load
 commands are separate writers of the same catalogue tables, which a Warehouse
 can refuse as an update conflict.
 
+Load and Test carry optional total `concurrency` in their RunRequest. Admission
+requires a free total slot and a free resource lane. Omission retains the pool
+and lanes, and every invocation leaves Workspace settings unchanged.
+
 A test run schedules the same way: Warehouse validations take Warehouse lanes
 and Lakehouse validations take Spark lanes. A finding never stops the rest.
 
@@ -641,6 +664,16 @@ no caller to a replacement until it is bootstrapped. Any other refusal is a
 known failure that leaves the session in use. A run with no Spark
 work runs on the client, over TDS, and starts no Spark session. A client never
 imports a deployed module, so it opens no runtime scope.
+
+Source Tests use the same Session run boundary. A desktop sends parsed validation
+metadata and SQL or DAX bodies, with the requested workspace, Environment and
+target mappings resolved for the current operation, independently of cached
+resource scopes. A NotebookSession executes them in-process. Source runs retain
+selection, comparison and diagnostic semantics and write no catalogue state.
+Warehouse-only, DAX-only and dry-run source selections start no Spark session.
+Source Tests remain serial by default. Explicit `concurrency` runs the parsed
+validations through Runner with the configured lanes and total cap; concurrent
+Spark validations each use an isolated Spark session. No catalogue is read or written.
 
 ## Architecture invariants
 
@@ -811,6 +844,23 @@ tables, so the Warehouse waits until it sees every object it reads. The fork, th
 binding are one transaction, last, after every reconstruction. Until it commits
 the destination catalogue records no installation, so it never claims the
 source's items.
+
+Build materialises selected edited borrowed objects marked Prohibit Rebuild through
+ordinary DAG actions. The development destination is disposable; the source remains
+unchanged. Lakehouse Folders and Tables remove the destination shortcut through the
+shortcut API and await release of its OneLake path before materialising. Folders
+recursively copy through NotebookUtils fastcp, falling back to native cp
+where fastcp is unavailable. Delta Tables use
+Spark SQL SHALLOW CLONE against the physical source Table. Development writes are
+local, while the clone initially references source data files: source VACUUM and
+retention can invalidate those references. This is not a physical deep copy.
+Warehouse Tables drop the local wrapper View and CTAS source rows into a local
+Table, using the qualified source Warehouse in the same workspace. Views use
+ordinary definition Build. Retained bookmarks stay unchanged; a changed Load
+definition becomes Pending. Failed physical materialisation blocks catalogue
+certification. Unchanged mirrors remain borrowed; unprotected mirrors retain reset
+semantics. Materialisation uses no private staging, file proof receipts or recovery
+cutover protocol.
 
 One disposition, one meaning. `REMOVE` takes the catalogue last, `UNBIND` keeps
 it and deletes its claims for the targets emptied and is never handed it as a

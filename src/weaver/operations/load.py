@@ -48,6 +48,8 @@ def load(
     items: str | Sequence[str] | None = None,
     *,
     names: str | Sequence[str] | None = None,
+    ancestors: bool = False,
+    descendants: bool = False,
     source=None,
     workspace: str | None = None,
     catalogue: str | None = None,
@@ -59,6 +61,7 @@ def load(
     ignore_stability_threshold: bool = False,
     stale: bool = False,
     as_of: str | datetime | None = None,
+    concurrency: int | None = None,
     session=None,
 ) -> LoadRunReport:
     """Load the installed objects the named items own.
@@ -75,12 +78,16 @@ def load(
     ``Tables/Schema.Object`` or ``Files/Schema.Object``; a Warehouse relation has
     none, and a bare ``Schema.Object`` is accepted where it reaches one object.
     Each must match something. It is an operator override: only the matches run,
-    without dependency expansion or dependency ordering.
+    without dependency expansion or dependency ordering by default.
+
+    ``ancestors`` and ``descendants`` recursively expand the original selected
+    loadables, separately, within the requested items. Their union runs in
+    dependency order, including required endpoint and publication barriers.
 
     ``reload`` reconstructs each selected table from zero: its ``_.Bookmark`` row
     is removed, its ``_.LoadStatus`` goes to Pending, its target is emptied, and
-    the authored load runs. It reaches what this request selected and nothing
-    downstream.
+    the authored load runs. It reaches only the final selection, including
+    requested expansion.
 
     ``ignore_stability_threshold`` waives the declared delete and update
     limits for this invocation, for when a very large change is the correct
@@ -88,13 +95,16 @@ def load(
     rows, fault tolerance is unchanged, and the selection, declarations and
     bookmarks are untouched.
 
-    ``stale`` runs the loadables ``weaver health`` reports as not green.
+    ``stale`` selects the loadables ``weaver health`` reports as not green.
     Selecting nothing is a success. ``as_of`` is the freshness cutoff that
     selection measures against, and it requires ``stale``.
 
     A supplied ``session`` carries its resolved Workspace and is left open.
     """
 
+    from ..concurrency import validate_concurrency
+
+    validate_concurrency(concurrency)
     started = datetime.now(timezone.utc)
     selected_names = _load_names(names)
     _refuse_conflicting_modes(stale=stale, reload=reload, as_of=as_of)
@@ -118,7 +128,12 @@ def load(
     )
     if not resolved_workspace.catalogue:
         _refuse_without_catalogue(
-            requested, names=selected_names, stale=stale, reload=reload
+            requested,
+            names=selected_names,
+            stale=stale,
+            reload=reload,
+            ancestors=ancestors,
+            descendants=descendants,
         )
 
     from ..sessions.host import use_or_create_session
@@ -144,18 +159,23 @@ def load(
                 items=requested,
                 state=state,
                 names=selected_names,
+                ancestors=ancestors,
+                descendants=descendants,
                 fault_tolerant=fault_tolerant,
                 dry_run=dry_run,
                 reload=reload,
                 ignore_stability_threshold=ignore_stability_threshold,
                 stale=stale,
                 as_of=threshold,
+                concurrency=concurrency,
             )
             frame.failed = not report.succeeded
             return report
 
 
-def _refuse_without_catalogue(requested, *, names, stale, reload) -> None:
+def _refuse_without_catalogue(
+    requested, *, names, stale, reload, ancestors=False, descendants=False
+) -> None:
     others = sorted(str(i) for i in requested if i.item_type != SEMANTIC_MODEL)
     if not requested or others:
         raise CommandError(
@@ -164,9 +184,10 @@ def _refuse_without_catalogue(requested, *, names, stale, reload) -> None:
             + f" needs a Weaver catalogue. {CATALOGUE_HINT}. Without one, name the "
             "semantic models to refresh"
         )
-    if names or stale or reload:
+    if names or stale or reload or ancestors or descendants:
         raise CommandError(
-            "--name, --stale and --reload need a Weaver catalogue; without one, "
+            "--name, --stale, --reload, --ancestors and --descendants need a "
+            "Weaver catalogue; without one, "
             "load refreshes the named semantic models"
         )
 
@@ -229,6 +250,8 @@ def run_load(
     workspace,
     items: Sequence[WeaverItemId],
     names: Sequence[str] = (),
+    ancestors: bool = False,
+    descendants: bool = False,
     state=None,
     fault_tolerant: bool = False,
     dry_run: bool = False,
@@ -236,6 +259,7 @@ def run_load(
     ignore_stability_threshold: bool = False,
     stale: bool = False,
     as_of: datetime | None = None,
+    concurrency: int | None = None,
 ) -> LoadRunReport:
     """Run the catalogue graph through a Session.
 
@@ -301,10 +325,13 @@ def run_load(
         items,
         names=names,
         selected=selected,
+        ancestors=ancestors,
+        descendants=descendants,
         fault_tolerant=fault_tolerant,
         dry_run=dry_run,
         reload=reload,
         ignore_stability_threshold=ignore_stability_threshold,
+        concurrency=concurrency,
     )
     with session.step("Build run graph"):
         if state is None:

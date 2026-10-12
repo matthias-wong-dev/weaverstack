@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ..declaration.model import LAKEHOUSE, SEMANTIC_MODEL, WAREHOUSE
+from ..declaration.model import LAKEHOUSE, REPORT, SEMANTIC_MODEL, WAREHOUSE
 from ..targets import ItemRef
 from .reader import read_table
 from .reconcile import prune_installation
@@ -33,6 +33,7 @@ def plan_claim_deletion(
     lakehouses=(),
     warehouses=(),
     semantic_models=(),
+    reports=(),
 ) -> ClaimDeletion:
     """Render complete catalogue deletion without inspecting physical targets."""
 
@@ -40,6 +41,7 @@ def plan_claim_deletion(
         {(LAKEHOUSE, ItemRef.parse(value).name) for value in lakehouses}
         | {(WAREHOUSE, ItemRef.parse(value).name) for value in warehouses}
         | {(SEMANTIC_MODEL, ItemRef.parse(value).name) for value in semantic_models}
+        | {(REPORT, ItemRef.parse(value).name) for value in reports}
     )
     rows = read_table(catalogue, INSTALLATION)
     scopes = sorted(
@@ -81,7 +83,7 @@ def plan_claim_deletion(
 
 
 def unbind_targets(
-    catalogue, *, lakehouses=(), warehouses=(), semantic_models=()
+    catalogue, *, lakehouses=(), warehouses=(), semantic_models=(), reports=()
 ) -> ClaimDeletion:
     """Execute target-directed catalogue deletion and touch no physical target."""
 
@@ -90,6 +92,7 @@ def unbind_targets(
         lakehouses=lakehouses,
         warehouses=warehouses,
         semantic_models=semantic_models,
+        reports=reports,
     )
     for statement in result.statements:
         catalogue.execute(statement)

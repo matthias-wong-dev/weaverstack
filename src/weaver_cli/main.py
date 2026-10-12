@@ -79,6 +79,7 @@ A resolved catalogue is emptied last for Warehouse and Lakehouse selections.
 Pass --unbind to keep it and remove its claims for the emptied targets.
 
 SemanticModel-only selections keep the catalogue and remove their own claims.
+Recorded Reports hold no data and are left as they are.
 Semantic wipe retains the Fabric item. --preserve-data-source keeps one Automatic
 SQL / Direct Lake source in a hidden columnless table. Unsupported source and
 connection forms are refused before mutation.\
@@ -313,6 +314,26 @@ def _physical_target_lakehouses(args) -> tuple[str, ...]:
     return _target_lakehouses(getattr(args, "targets", None) or ())
 
 
+def _positive_concurrency(text):
+    from weaver.concurrency import validate_concurrency
+
+    try:
+        return validate_concurrency(int(text))
+    except (ValueError, CommandError) as exc:
+        raise argparse.ArgumentTypeError(
+            "concurrency must be a positive integer"
+        ) from exc
+
+
+def _add_concurrency_arg(parser):
+    parser.add_argument(
+        "--concurrency",
+        type=_positive_concurrency,
+        metavar="N",
+        help="Limit total simultaneous execution for this invocation; retain resource limits.",
+    )
+
+
 def _build_item_lakehouses(args) -> tuple[str, ...]:
     named = []
     for value in getattr(args, "items", None) or ():
@@ -480,6 +501,11 @@ def build_parser() -> argparse.ArgumentParser:
         "to the connection that reaches it.",
     )
     build.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Inspect the Build plan without changing target state.",
+    )
+    build.add_argument(
         "--bundle-only",
         action="store_true",
         help="Create a deployment bundle without installing it.",
@@ -489,6 +515,7 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="PATH",
         help="Directory to write a bundle created with --bundle-only.",
     )
+    _add_concurrency_arg(build)
     build.add_argument("--json", action="store_true", help="Emit the result as JSON.")
     add_non_interactive(build)
     _add_workspace_args(build)
@@ -530,13 +557,24 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         metavar="NAME",
         help=(
-            "Load only installed objects whose whole name matches this regular "
+            "Select installed objects whose whole name matches this regular "
             "expression: Tables/Schema.Object or Files/Schema.Object in a "
             "Lakehouse, Schema.Object in a Warehouse. A bare Schema.Object is "
             "accepted where it names one object. Repeat to select more."
         ),
     )
     _add_source_arg(load)
+    _add_concurrency_arg(load)
+    load.add_argument(
+        "--ancestors",
+        action="store_true",
+        help="Include recursive upstream loads within the selected items.",
+    )
+    load.add_argument(
+        "--descendants",
+        action="store_true",
+        help="Include recursive downstream loads within the selected items.",
+    )
     load.add_argument(
         "--fault-tolerant",
         action="store_true",
@@ -561,7 +599,7 @@ def build_parser() -> argparse.ArgumentParser:
     load.add_argument(
         "--stale",
         action="store_true",
-        help="Load only the objects whose load health is not green.",
+        help="Select the objects whose load health is not green.",
     )
     load.add_argument(
         "--as-of",
@@ -633,6 +671,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     _add_source_arg(validate)
+    _add_concurrency_arg(validate)
     validate.add_argument(
         "--dry-run",
         action="store_true",
@@ -735,7 +774,10 @@ def build_parser() -> argparse.ArgumentParser:
         "targets",
         nargs="+",
         metavar="TARGET",
-        help="Physical items to unbind: Lakehouse/Name, Warehouse/Name or SemanticModel/Name.",
+        help=(
+            "Physical items to unbind: Lakehouse/Name, Warehouse/Name, "
+            "SemanticModel/Name or Report/Name."
+        ),
     )
     _add_workspace_args(unbind, include_environment=False)
     unbind.add_argument(
@@ -1386,12 +1428,15 @@ def _load_once(args: argparse.Namespace) -> int:
                 items=run_items(args) or None,
                 names=args.names,
                 source=args.source,
+                ancestors=args.ancestors,
+                descendants=args.descendants,
                 fault_tolerant=args.fault_tolerant,
                 dry_run=args.dry_run,
                 reload=args.reload,
                 ignore_stability_threshold=args.ignore_stability_threshold,
                 stale=args.stale,
                 as_of=args.as_of,
+                concurrency=args.concurrency,
                 session=opened,
             )
     except LoadError as exc:
@@ -1425,6 +1470,8 @@ def _run_load(
     *,
     items,
     names=None,
+    ancestors: bool = False,
+    descendants: bool = False,
     source=None,
     fault_tolerant: bool,
     dry_run: bool,
@@ -1432,6 +1479,7 @@ def _run_load(
     ignore_stability_threshold: bool = False,
     stale: bool = False,
     as_of=None,
+    concurrency=None,
     session=None,
 ):
 
@@ -1441,6 +1489,8 @@ def _run_load(
         return weaver.load(
             items,
             names=names,
+            ancestors=ancestors,
+            descendants=descendants,
             source=source,
             fault_tolerant=fault_tolerant,
             dry_run=dry_run,
@@ -1448,6 +1498,7 @@ def _run_load(
             ignore_stability_threshold=ignore_stability_threshold,
             stale=stale,
             as_of=as_of,
+            concurrency=concurrency,
             session=opened,
             **_command_context(workspace),
         )
@@ -1626,6 +1677,7 @@ def _test_once(args: argparse.Namespace) -> int:
             names=args.names,
             files=args.files,
             source=args.source,
+            concurrency=args.concurrency,
             dry_run=args.dry_run,
             session=opened,
         )
@@ -1642,7 +1694,15 @@ def _test_once(args: argparse.Namespace) -> int:
 
 
 def _run_test(
-    workspace, *, items, names, files, source=None, dry_run: bool, session=None
+    workspace,
+    *,
+    items,
+    names,
+    files,
+    source=None,
+    dry_run: bool,
+    concurrency=None,
+    session=None,
 ):
     """Dispatch Warehouse validations over TDS and Lakehouse modules in-session."""
 
@@ -1654,6 +1714,7 @@ def _run_test(
             names=names,
             files=files,
             source=source,
+            concurrency=concurrency,
             dry_run=dry_run,
             session=opened,
             **_command_context(workspace),
@@ -2034,6 +2095,8 @@ def handle_build(args: argparse.Namespace) -> int:
             "New: --item Lakehouse/Landing=Lakehouse/Landing_Dev"
         )
     _refuse_retired_target(args)
+    if args.dry_run and args.bundle_only:
+        raise CommandError("--dry-run and --bundle-only cannot be combined")
     if args.bundle_path and not args.bundle_only:
         raise CommandError("--bundle-path requires --bundle-only")
     return _until_fixed(args, lambda: _build_once(args))
@@ -2050,8 +2113,10 @@ def _build_once(args: argparse.Namespace) -> int:
                 items=args.items,
                 data_sources=args.data_sources,
                 bind_data_sources=args.bind_data_sources,
+                dry_run=args.dry_run,
                 bundle_only=args.bundle_only,
                 bundle_path=args.bundle_path,
+                concurrency=args.concurrency,
                 session=opened,
                 **_command_context(workspace),
             )
@@ -2091,6 +2156,9 @@ def _print_action_counts(report, *, indent: str = "  ") -> None:
 
 
 def _print_build(result) -> None:
+    if result.dry_run:
+        print(result.preview.describe())
+        return
     if result.installation and not result.installation_report.action_counts()["total"]:
         print("Installation")
         print("  nothing to install")

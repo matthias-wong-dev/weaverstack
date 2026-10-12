@@ -31,6 +31,57 @@ weaver build
 With `--non-interactive`, Weaver uses a configured service principal or Azure
 CLI sign-in and does not open a browser.
 
+## Invocation concurrency
+
+Build, Load and Test accept `--concurrency N` and Python `concurrency=N`.
+N is a positive integer limiting total simultaneous execution across all
+resources for that invocation. Workspace resource limits and dependency ordering
+still apply. Omission keeps the configured defaults; workspace configuration is
+unchanged. File-mode Tests run serially by default and use the run scheduler
+when concurrency is supplied. Dry-run and bundle-only commands validate the
+value but execute no work and retain the same plan identity.
+
+```bash
+weaver build --concurrency 2
+weaver load Warehouse/Reporting --concurrency 2
+weaver test Lakehouse/Landing --concurrency 2
+```
+
+In a Fabric notebook with an existing Session:
+
+```python
+import weaver
+
+weaver.build(source, session=session, concurrency=2)
+weaver.load("Lakehouse/Landing", session=session, concurrency=2)
+weaver.test("Lakehouse/Landing", session=session, concurrency=2)
+```
+
+## Build plan inspection
+
+`weaver build --dry-run` reads the selected targets and returns the canonical
+Build plan without installation or target writes. It shows object selection,
+target bindings, physical actions, destructive removals, certification and
+runtime-state changes. Authored SQL effects that require execution are reported
+as unknown. Runtime compatibility is not checked by a dry run.
+
+```bash
+weaver build . --item Warehouse/Reporting --dry-run
+weaver build . --dry-run --json
+```
+
+Python and Fabric notebooks use `weaver.build(source, dry_run=True,
+session=session)`. The result's `preview.plan` is the frozen mutation plan;
+`result.to_mapping()` includes the structured preview and complete plan.
+Unchanged source and target state produce the same plan as execution.
+
+Dry-run requires existing physical targets, including selected Power BI items.
+It creates no items, uploads no runtime or action payloads, and changes no
+catalogue, LoadStatus, TestStatus or bookmarks. Read-only Fabric inspection may
+acquire Spark to inspect Lakehouse Views. The temporary local bundle is removed
+before the result returns. `--bundle-only` retains a deployable bundle and is
+separate from `--dry-run`; combining them is an error.
+
 ## Semantic model Build
 
 A Power BI source project lives under `PowerBI/<project>/`. Each native
@@ -406,6 +457,17 @@ folder. `--name` repeats, and each value is a regular expression matched
 against the whole object name, ignoring case; one that matches nothing is an
 error.
 
+For Load, `--ancestors` and `--descendants` recursively expand the selected
+loadables through installed dependencies, within the requested items. Each
+direction starts from the original selection; both flags run their union in
+dependency order, with required endpoint and publication barriers. Plain
+`--name` keeps its operator override: only matching loads run, without dependency
+ordering. The Python options are `ancestors=True` and `descendants=True`.
+
+```bash
+weaver load Warehouse/Reporting --name 'Sales.Summary' --ancestors --workspace Analytics
+```
+
 ### Without a catalogue
 
 A workspace with no catalogue still builds and refreshes semantic models:
@@ -420,7 +482,7 @@ Load records nothing. Authored tables can retain logical `Weaver.Source` annotat
 without catalogue metadata; each names a configured or mapped target, or a Table
 or View the project declares. Tests and Assumptions run in file mode. Source
 generation, Lakehouse and Warehouse operations, installed lineage, and
-`load --stale`, `--name` or `--reload` need a catalogue.
+`load --stale`, `--name`, `--reload`, `--ancestors` or `--descendants` need a catalogue.
 
 ### Load and connections
 

@@ -178,6 +178,25 @@ def test_fabric_runs_with_the_clients_lanes():
 
 
 @weaver_test()
+def test_send_resolves_the_session_default_when_workspace_is_absent():
+    session = Fabric()
+    with session:
+        assert send(session, _run(session)) == ("decoded", {"status": "succeeded"})
+        (program,) = session.programs
+        (literal,) = [
+            line
+            for line in program.source.splitlines()
+            if line.startswith("workspace =")
+        ]
+        namespace = {}
+        exec("from weaver.workspaces import *\n" + literal, namespace)
+        assert namespace["workspace"] == WORKSPACE
+        assert len(session._scopes) == 1
+        assert session.scope().workspace is WORKSPACE
+        assert session.scope().store.files == {}
+
+
+@weaver_test()
 def test_fabric_warnings_reach_the_client():
     session = Fabric()
 
@@ -227,6 +246,20 @@ def test_a_report_that_differs_from_its_receipt_is_refused():
 
     with pytest.raises(RunError, match="incomplete"):
         _send(session, _run(session))
+
+
+@weaver_test()
+def test_lost_source_run_reports_uncertainty_without_catalogue_guidance():
+    from dataclasses import replace
+
+    session = Fabric(lost=True)
+    run = replace(_run(session), records_catalogue=False)
+    with pytest.raises(OutcomeUnknown) as failure:
+        _send(session, run)
+    assert "may have run" in str(failure.value)
+    assert "catalogue" not in str(failure.value)
+    assert len(session.programs) == 1
+    assert not session.programs[0].resubmit
 
 
 # --- what the operator sees ---------------------------------------------------

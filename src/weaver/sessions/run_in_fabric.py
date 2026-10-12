@@ -6,9 +6,9 @@ writes the frames it presents beside the arguments while it runs, and leaves its
 report there. The client presents those frames as they arrive, with the times
 Fabric measured.
 
-A run records itself in the catalogue, so a submission that may have reached
-Fabric is never sent again. When its result is lost the outcome is unknown, and
-the catalogue says what it did.
+A submission that may have reached Fabric is never sent again. When its result
+is lost the outcome is unknown. Catalogue runs retain their logs; source
+validation runs record nothing.
 """
 
 from __future__ import annotations
@@ -45,6 +45,7 @@ def send(session, run, *, workspace=None):
     from ..targets import ItemRef
     from ..workspaces import CARRIER_AREA
 
+    workspace = session.workspace_or_default(workspace)
     scope = session.scope(workspace)
     home = scope.spark_home
     if home is None:
@@ -59,15 +60,19 @@ def send(session, run, *, workspace=None):
     try:
         store.write(stage / REQUEST, json.dumps(run.arguments()).encode("utf-8"))
         program = _program(
-            run, scope.workspace, abfss_path(stage), workflow_id=session.workflow_id
+            run, workspace, abfss_path(stage), workflow_id=session.workflow_id
         )
         following = _Following(session, store, stage / PROGRESS)
         try:
             receipt = session.execute_python(program, workspace=workspace)
         except OutcomeUnknown as exc:
+            guidance = (
+                "It may have run; the catalogue log records what it did."
+                if run.records_catalogue
+                else "It may have run; source validation results were not recorded."
+            )
             raise OutcomeUnknown(
-                f"The {run.name} sent to Fabric did not report back: {exc}. It may "
-                "have run; the catalogue log records what it did."
+                f"The {run.name} sent to Fabric did not report back: {exc}. {guidance}"
             ) from exc
         finally:
             following.stop()
@@ -86,11 +91,15 @@ def _workspace_literal(workspace) -> str:
     if workspace is None:
         return "None"
     environment = None if workspace.environment is None else str(workspace.environment)
+    targets = {
+        str(item): declaration for item, declaration in workspace.targets.items()
+    }
     return (
         f"Workspace(workspace={workspace.workspace!r}, "
         f"catalogue={workspace.catalogue!r}, "
         f"environment={environment!r}, "
-        f"execution={workspace.execution!r})"
+        f"execution={workspace.execution!r}, "
+        f"targets={targets!r})"
     )
 
 
@@ -104,7 +113,7 @@ def _program(run, workspace, stage: str, *, workflow_id=None) -> FabricProgram:
     entry = run.entry
     source = (
         "from weaver.workspaces import (\n"
-        "    BuildConcurrency, ExecutionSettings, RunConcurrency, Workspace\n"
+        "    BuildConcurrency, ExecutionSettings, RunConcurrency, TargetDeclaration, Workspace\n"
         ")\n"
         "from weaver.sessions import NotebookSession\n"
         "from weaver.run.entry import run_staged\n"

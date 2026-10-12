@@ -53,6 +53,7 @@ class FabricRun:
     entry: Callable[..., dict]
     arguments: Callable[[], dict]
     decode: Callable[[dict], Any]
+    records_catalogue: bool = True
 
 
 __all__ = ["FabricProgram", "FabricRun"]

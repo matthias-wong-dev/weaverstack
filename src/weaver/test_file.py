@@ -38,6 +38,46 @@ class SourceValidation:
     #: Where it was read, for the report.
     path: str
 
+    def to_mapping(self) -> dict:
+        import yaml
+
+        return {
+            "item": str(self.item),
+            "path": self.path,
+            "source": {
+                "relative_path": self.source.relative_path,
+                "language": self.source.language,
+                "metadata": yaml.safe_dump(self.source.document.raw),
+                "sql_body": self.source.sql_body,
+                "dax_body": self.source.dax_body,
+            },
+        }
+
+    @classmethod
+    def from_mapping(cls, value: dict) -> SourceValidation:
+        from .declaration.metadata import parse_document
+        from .declaration.source import SourceDocument
+
+        item = WeaverItemId.parse(value["item"])
+        source = value["source"]
+        document = parse_document(source["metadata"], language=source["language"])
+        if not document.is_validation:
+            raise CommandError("a source validation must declare a Test or Assumption")
+        return cls(
+            item,
+            SourceDocument(
+                relative_path=source["relative_path"],
+                language=source["language"],
+                text="",
+                source_hash="",
+                document=document,
+                item_type=item.item_type,
+                sql_body=source["sql_body"],
+                dax_body=source["dax_body"],
+            ),
+            value["path"],
+        )
+
     @property
     def logical(self) -> WeaverDocumentId:
         return WeaverDocumentId.validation(self.item, self.source.object_id)
@@ -179,11 +219,23 @@ def source_validation_nodes(
     started: datetime,
     dry_run: bool = False,
     collect: bool = False,
+    concurrency: int | None = None,
 ) -> tuple[ValidationNodeReport, ...]:
-    """Run each validation in turn and report it."""
+    """Execute source validations with the invocation and resource limits."""
 
+    from .concurrency import validate_concurrency
     from .operations.items import uncatalogued_target
 
+    validate_concurrency(concurrency)
+    if concurrency is not None and not dry_run and validations:
+        return _scheduled_source_nodes(
+            session,
+            workspace=workspace,
+            validations=validations,
+            started=started,
+            collect=collect,
+            concurrency=concurrency,
+        )
     nodes = []
     for validation in validations:
         target = uncatalogued_target(workspace, validation.item)
@@ -217,6 +269,68 @@ def source_validation_nodes(
     return tuple(nodes)
 
 
+def _scheduled_source_nodes(
+    session, *, workspace, validations, started, collect, concurrency
+):
+    from .catalogue.state import Catalogue
+    from .operations.items import uncatalogued_target
+    from .run.graph import RunGraph, RunNode
+    from .run.runner import Lanes, Runner, RunRequest, needs_spark
+    from .run.state import RunState
+
+    nodes = tuple(
+        RunNode(
+            node_id=str(index),
+            logical_id=validation.logical,
+            physical_target=uncatalogued_target(workspace, validation.item),
+            primitive_kind=_primitive(
+                validation, uncatalogued_target(workspace, validation.item)
+            ),
+            role=validation.source.kind,
+            installed=validation,
+        )
+        for index, validation in enumerate(validations)
+    )
+    request = RunRequest.test(
+        tuple(dict.fromkeys(each.item for each in validations)),
+        fault_tolerant=True,
+        concurrency=concurrency,
+    )
+    runner = Runner(
+        RunState(Catalogue(rows={})),
+        request,
+        workspace=workspace,
+        graph=RunGraph(nodes=nodes, items=request.items),
+    )
+    if needs_spark(runner.graph):
+        session.spark(workspace)
+    reports = {}
+
+    def dispatch(node, **asked):
+        validation = node.installed
+        report = _execute(
+            session,
+            workspace=workspace,
+            validation=validation,
+            target=node.physical_target,
+            collect=collect,
+            isolated=True,
+            common={
+                "logical_id": str(validation.logical),
+                "kind": validation.source.kind,
+                "physical_target": str(node.physical_target),
+                "primitive_kind": node.primitive_kind,
+                "dispatch_location": validation.path,
+                "started_at": started.isoformat(),
+            },
+        )
+        reports[node.node_id] = report
+        return report.result
+
+    runner.run(session=session, dispatch=dispatch, lanes=Lanes.configured(workspace))
+    return tuple(reports[str(index)] for index in range(len(validations)))
+
+
 def _primitive(validation: SourceValidation, target: PhysicalTargetRef) -> str:
     if validation.item.item_type == SEMANTIC_MODEL:
         return SEMANTIC_VALIDATION
@@ -225,7 +339,9 @@ def _primitive(validation: SourceValidation, target: PhysicalTargetRef) -> str:
     return WAREHOUSE_PROCEDURE
 
 
-def _execute(session, *, workspace, validation, target, collect, common):
+def _execute(
+    session, *, workspace, validation, target, collect, common, isolated=False
+):
     document = validation.source
     try:
         if document.language == PYTHON:
@@ -236,9 +352,13 @@ def _execute(session, *, workspace, validation, target, collect, common):
         if validation.item.item_type == SEMANTIC_MODEL:
             result, diagnostics = _run_semantic(session, workspace, validation, target)
         elif target.kind == LAKEHOUSE_TARGET:
-            result, diagnostics = _run_spark(session, document, target)
+            result, diagnostics = _run_spark(
+                session, document, target, workspace=workspace, isolated=isolated
+            )
         else:
-            result, diagnostics = _run_warehouse(session, document, target)
+            result, diagnostics = _run_warehouse(
+                session, document, target, workspace=workspace
+            )
     except Exception as exc:  # noqa: BLE001 - any failure is the run's evidence
         message = f"{type(exc).__name__}: {exc}"
         failed = (
@@ -295,14 +415,16 @@ def _run_semantic(session, workspace, validation: SourceValidation, target):
     )
 
 
-def _run_warehouse(session, document, target: PhysicalTargetRef):
+def _run_warehouse(session, document, target: PhysicalTargetRef, *, workspace):
     """Run the generated batch directly so no procedure is left behind."""
 
     from .declaration.tsql_validation import generate_tsql_validation_batch
     from .targets import ItemRef as _ItemRef
     from .targets import WarehouseTarget as _WarehouseTarget
 
-    executor = session.sql_executor(_WarehouseTarget(_ItemRef(target.name)))
+    executor = session.sql_executor(
+        _WarehouseTarget(_ItemRef(target.name)), workspace=workspace
+    )
     if executor is None:
         raise ValidationError(
             f"a SQL capability is required to run this validation against {target}"
@@ -332,10 +454,12 @@ def _run_warehouse(session, document, target: PhysicalTargetRef):
     )
 
 
-def _run_spark(session, document, target: PhysicalTargetRef):
+def _run_spark(
+    session, document, target: PhysicalTargetRef, *, workspace, isolated=False
+):
     """Run the Spark SQL program through the same runtime as an installed module."""
 
-    from . import tokens
+    from .declaration.spark_sql_module import addressed
     from .lakehouse import lakehouse_for
     from .runtime.spark_sql_validation import (
         read_spark_sql_assumption,
@@ -344,25 +468,30 @@ def _run_spark(session, document, target: PhysicalTargetRef):
     from .runtime.test_compare import compare
     from .targets import ItemRef
 
-    if session.spark() is None:
+    spark = session.spark(workspace)
+    if spark is None:
         raise ValidationError("running a Spark SQL validation needs a Spark session")
+    if isolated:
+        from .run.dispatch import isolated_spark
+
+        spark = isolated_spark(spark)
     if document.language != SPARK_SQL:
         raise CommandError(
             f"a {document.language} validation cannot run against {target}"
         )
 
-    lakehouse = lakehouse_for(session.resolver(), ItemRef(target.name))
+    lakehouse = lakehouse_for(session.resolver(workspace), ItemRef(target.name))
     # Addressed exactly as an installed module's program is, so a file run reads
     # the same tables the installed one would.
-    sql = tokens.expand(_addressed(document.sql_body or ""), lakehouse.destination)
+    sql = addressed(document.sql_body or "", lakehouse.destination)
     what = document.object_id.qualified
 
     if document.document.kind == ASSUMPTION:
-        frame = read_spark_sql_assumption(session.spark(), sql=sql, what=what)
+        frame = read_spark_sql_assumption(spark, sql=sql, what=what)
         rows = tuple(row.asDict() for row in frame.collect())
         return AssumptionResult(violation_count=len(rows)), rows
 
-    expected, actual = read_spark_sql_test(session.spark(), sql=sql, what=what)
+    expected, actual = read_spark_sql_test(spark, sql=sql, what=what)
     frame = compare(
         expected, actual, primary_key=document.document.primary_key, what=what
     )
@@ -375,12 +504,6 @@ def _run_spark(session, document, target: PhysicalTargetRef):
         ),
         rows,
     )
-
-
-def _addressed(body: str) -> str:
-    from .declaration.spark_sql_module import addressed
-
-    return addressed(body)
 
 
 __all__ = [

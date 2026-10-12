@@ -14,6 +14,7 @@ from sqlparse.sql import Statement
 
 SQL_PARSE_CACHE_SIZE = 4096
 _SQL_PARSE_CACHE: ContextVar[Any] = ContextVar("weaver_sql_parse_cache", default=None)
+_SQL_FLAT_CACHE: ContextVar[Any] = ContextVar("weaver_sql_flat_cache", default=None)
 
 
 @dataclass(frozen=True)
@@ -69,10 +70,14 @@ def sql_parse_cache():
     def cache(sql_text: str) -> tuple[Statement, ...]:
         return tuple(sqlparse.parse(sql_text))
 
+    flat_cache = lru_cache(maxsize=SQL_PARSE_CACHE_SIZE)(_flatten_with_offsets)
     token = _SQL_PARSE_CACHE.set(cache)
+    flat_token = _SQL_FLAT_CACHE.set(flat_cache)
     try:
         yield cache
     finally:
+        flat_cache.cache_clear()
+        _SQL_FLAT_CACHE.reset(flat_token)
         cache.cache_clear()
         _SQL_PARSE_CACHE.reset(token)
 
@@ -143,6 +148,13 @@ def flatten_with_offsets(sql_text: str) -> list[SqlToken]:
     byte-identical through parsing.
     """
 
+    cache = _SQL_FLAT_CACHE.get()
+    tokens = _flatten_with_offsets(sql_text) if cache is None else cache(sql_text)
+    # Frozen tokens can be shared; callers own the list they reorder or edit.
+    return list(tokens)
+
+
+def _flatten_with_offsets(sql_text: str) -> tuple[SqlToken, ...]:
     flat: list[SqlToken] = []
     offset = 0
     depth = 0
@@ -170,7 +182,7 @@ def flatten_with_offsets(sql_text: str) -> list[SqlToken]:
             if value == "(":
                 depth += 1
 
-    return flat
+    return tuple(flat)
 
 
 def is_only_trivia(sql_text: str) -> bool:

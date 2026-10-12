@@ -344,19 +344,20 @@ def test_nothing_the_build_left_standing_is_reset(rebuilt):
 
 @weaver_test()
 def test_refusing_rebuild_protects_owned_rows_and_not_a_borrowed_address(rebuilt):
-    """``Prohibit rebuild`` guards data. A mirrored object holds none of its own.
-
-    ``Sales.Protected`` and ``Sales.Owned`` carry the same declaration flag and
-    the same dependency on the changed table. The one difference is that
-    ``Sales.Protected`` is borrowed, so materialising it destroys nothing, and
-    its inherited state has to go with the View it replaces.
-    """
+    """Protected borrowed rows materialise while their bookmark is retained."""
 
     statuses = _established(rebuilt).get(LOAD_STATUS.name, {})
     touched = _names(_physically_rebuilt(rebuilt))
 
-    assert "Protected" in touched
+    assert "Protected" not in touched
+    materialised = {
+        a.resource_node_id
+        for _, _, a in rebuilt.plan.actions()
+        if a.kind == "materialise_mirror"
+    }
+    assert _names(materialised) == {"Protected"}
     assert statuses["Protected"]["result"] == PENDING
+    assert "Protected" not in _established(rebuilt).get(BOOKMARK.name, {})
     assert "Owned" not in touched
     assert "Owned" not in statuses
 
@@ -377,4 +378,11 @@ def test_the_shapes_this_estate_is_here_to_cover_all_reach_the_build(rebuilt):
         "Unloaded",
         "Frozen",
         "Protected",
-    } <= _names(_physically_rebuilt(rebuilt))
+    } <= _names(
+        _physically_rebuilt(rebuilt)
+        | {
+            a.resource_node_id
+            for _, _, a in rebuilt.plan.actions()
+            if a.kind == "materialise_mirror"
+        }
+    )

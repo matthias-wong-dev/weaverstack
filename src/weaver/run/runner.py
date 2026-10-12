@@ -97,10 +97,10 @@ class RunRequest:
 
     kind: str
     items: tuple
-    #: Regular expressions over installed names; only what they match runs.
+    #: Regular expressions selecting original installed loadables or validations.
     names: tuple[str, ...] = ()
-    #: The installed loadables this run may execute, by logical identity.
-    #: ``None`` runs every loadable the requested items own. ``load`` only.
+    #: Original Load seeds, by logical identity, before expansion.
+    #: ``None`` selects every loadable the requested items own. ``load`` only.
     selected: tuple | None = None
     #: Continue through settled dependency failures, and report each outcome.
     fault_tolerant: bool = False
@@ -113,14 +113,22 @@ class RunRequest:
     #: ``load`` only. It waives nothing else: null and unique key checks, fault
     #: tolerance, selection and bookmarks are untouched.
     ignore_stability_threshold: bool = False
+    #: Recursively expand original Load seeds within the requested items.
+    ancestors: bool = False
+    descendants: bool = False
+    concurrency: int | None = None
 
     def __post_init__(self) -> None:
+        from ..concurrency import validate_concurrency
         from ..errors import CommandError
 
+        validate_concurrency(self.concurrency)
         if not self.items:
             raise CommandError(f"{self.kind} needs at least one item")
         if self.selected is not None and self.kind != LOAD:
             raise CommandError("selected= applies only to loads")
+        if (self.ancestors or self.descendants) and self.kind != LOAD:
+            raise CommandError("ancestors and descendants apply only to loads")
         if self.reload and self.kind != LOAD:
             raise CommandError("reload applies only to loads")
         if self.ignore_stability_threshold and self.kind != LOAD:
@@ -158,6 +166,9 @@ class RunRequest:
             dry_run=bool(payload.get("dry_run")),
             reload=bool(payload.get("reload")),
             ignore_stability_threshold=bool(payload.get("ignore_stability_threshold")),
+            ancestors=bool(payload.get("ancestors")),
+            descendants=bool(payload.get("descendants")),
+            concurrency=payload.get("concurrency"),
         )
 
     def to_mapping(self) -> dict:
@@ -172,6 +183,9 @@ class RunRequest:
             "dry_run": self.dry_run,
             "reload": self.reload,
             "ignore_stability_threshold": self.ignore_stability_threshold,
+            "ancestors": self.ancestors,
+            "descendants": self.descendants,
+            "concurrency": self.concurrency,
         }
 
 
@@ -247,13 +261,14 @@ class Runner:
         *,
         workspace: object | None = None,
         can_refresh: bool = True,
+        graph: RunGraph | None = None,
     ) -> None:
         self.state = state
         self.request = request
         self.workspace = workspace
         #: Whether this host has a SQL analytics endpoint.
         self.can_refresh = can_refresh
-        self._graph: RunGraph | None = None
+        self._graph: RunGraph | None = graph
         self._events: list[dict] = []
         self._runtime_scope = None
         self._publication = None
@@ -552,6 +567,11 @@ class Runner:
         def admit(pool) -> None:
             for node, resolved in runnable():
                 lane = lanes.of(node)
+                if (
+                    self.request.concurrency is not None
+                    and len(running) >= self.request.concurrency
+                ):
+                    break
                 if occupied.get(lane, 0) >= lanes.limit(lane):
                     continue
                 waiting.remove(node)
@@ -574,6 +594,8 @@ class Runner:
                 running[future] = lane
 
         workers = lanes.spark + lanes.warehouse + lanes.other
+        if self.request.concurrency is not None:
+            workers = min(workers, self.request.concurrency)
         with ThreadPoolExecutor(max_workers=workers) as pool:
             while True:
                 admit(pool)

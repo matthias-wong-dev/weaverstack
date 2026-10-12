@@ -12,9 +12,9 @@ from weaver.mutation.validation import validate_mutation_plan
 
 
 @weaver_test()
-def test_report_wipe_refuses_before_any_service_or_catalogue_write(tmp_path):
+def test_naming_a_report_to_wipe_points_to_unbind_before_any_service_call(tmp_path):
     _, session, *_ = prepared_project(tmp_path)
-    with pytest.raises(CommandError, match="Report wipe"):
+    with pytest.raises(CommandError, match="weaver unbind Report/Executive_Dev"):
         weaver.plan_wipe("Report/Executive_Dev", session=session)
     assert not session.resolver().client.requested and not session.tsql
 

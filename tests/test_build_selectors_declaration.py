@@ -54,13 +54,17 @@ def test_aggregate_composition_keeps_source_and_powerbi_builds_separate(
 @weaver_test()
 def test_report_target_vocabulary_does_not_enable_wipe():
     from weaver.errors import CommandError
-    from weaver.operations.wipe import WipeTarget
-    from weaver.targets import ItemRef
+    from weaver.operations.wipe import REMOVE, WipePlan, WipeTarget
+    from weaver.workspaces import Workspace
 
-    with pytest.raises(CommandError, match="Report.*wipe.*not supported"):
-        WipeTarget.parse("Report/Dashboard")
-    with pytest.raises(CommandError, match="Report.*wipe.*not supported"):
-        WipeTarget("Report", ItemRef("Dashboard"))
+    report = WipeTarget.parse("Report/Dashboard")
+    with pytest.raises(CommandError, match="weaver unbind Report/Dashboard"):
+        WipePlan(
+            workspace=Workspace(workspace="Analytics"),
+            targets=(report,),
+            catalogue=None,
+            catalogue_action=REMOVE,
+        )
 
 
 @weaver_test()

@@ -54,6 +54,7 @@ CATALOGUE_ACTIONS = (REMOVE, UNBIND, LEAVE, PHYSICAL_ONLY)
 LAKEHOUSE = "Lakehouse"
 WAREHOUSE = "Warehouse"
 SEMANTIC_MODEL = "SemanticModel"
+REPORT = "Report"
 
 EMPTIED = "emptied"
 PRESERVED = "preserved"
@@ -70,10 +71,6 @@ class WipeTarget:
     item_type: str
     item: ItemRef
 
-    def __post_init__(self):
-        if self.item_type == "Report":
-            raise CommandError("Report wipe is not supported")
-
     @classmethod
     def parse(cls, text: str) -> "WipeTarget":
         target = parse_physical_target(text, what="wipe target", error=CommandError)
@@ -85,6 +82,13 @@ class WipeTarget:
 
     def __str__(self) -> str:
         return f"{self.item_type}/{self.item}"
+
+
+def _report_refusal(target: WipeTarget) -> str:
+    return (
+        f"{target} holds no data to empty. To stop managing it, run: "
+        f"weaver unbind {target}"
+    )
 
 
 @dataclass(frozen=True)
@@ -103,6 +107,13 @@ class WipePlan:
     #: Logical items the catalogue records in each target, by target.
     installed: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
     preserve_data_source: bool = False
+    #: Recorded Reports. A Report holds no data, so it is left as it is.
+    left: tuple[WipeTarget, ...] = ()
+
+    def __post_init__(self) -> None:
+        for target in self.targets:
+            if target.item_type == REPORT:
+                raise CommandError(_report_refusal(target))
 
     def is_catalogue(self, target: WipeTarget) -> bool:
         return (
@@ -122,13 +133,17 @@ class WipePlan:
 
     def describe(self) -> str:
         names = [self._named(target) for target in self.targets]
-        width = max(len(name) for name in [*names, self.catalogue or ""])
+        left = [self._named(target) for target in self.left]
+        width = max(len(name) for name in [*names, *left, self.catalogue or ""])
         lines = [f"Wipe on {self.workspace.workspace}", "", "Empty"]
         for target, name in zip(self.targets, names):
             note = "  catalogue" if self.is_catalogue(target) else ""
             if target.item_type == SEMANTIC_MODEL and self.preserve_data_source:
                 note += "  preserve data source in a hidden columnless source table"
             lines.append(f"  {name.ljust(width)}{note}".rstrip())
+        if left:
+            lines += ["", "Left as is"]
+            lines += [f"  {name}" for name in left]
         lines.append("")
         lines.append("Catalogue")
         lines.append(f"  {self._catalogue_line(width)}")
@@ -162,6 +177,7 @@ class WipePlan:
             "catalogue_action": self.catalogue_action,
             "unbound": list(self.unbound),
             "preserve_data_source": self.preserve_data_source,
+            "left": [self._target_mapping(target) for target in self.left],
         }
 
 
@@ -276,6 +292,9 @@ def plan_wipe(
 
     values = (targets,) if isinstance(targets, str) else tuple(targets)
     selected = tuple(dict.fromkeys(WipeTarget.parse(value) for value in values))
+    for target in selected:
+        if target.item_type == REPORT:
+            raise CommandError(_report_refusal(target))
     resolved = operation_workspace(
         "wipe",
         workspace=workspace,
@@ -296,6 +315,7 @@ def plan_wipe(
     )
 
     installed: dict[str, list[str]] = {}
+    left: tuple[WipeTarget, ...] = ()
     if selected:
         discovered = selected
     else:
@@ -311,7 +331,9 @@ def plan_wipe(
             with opened.task("Read the installed estate", resolved_catalogue):
                 recorded = _installed_estate(resolved, session=opened)
         _refuse_unconfigured_installations(recorded, resolved)
-        discovered = tuple(dict.fromkeys(target for _item, target in recorded))
+        found = tuple(dict.fromkeys(target for _item, target in recorded))
+        discovered = tuple(t for t in found if t.item_type != REPORT)
+        left = tuple(t for t in found if t.item_type == REPORT)
         for item, target in recorded:
             if item != str(BUILTIN_ITEM):
                 installed.setdefault(str(target), []).append(item)
@@ -337,6 +359,7 @@ def plan_wipe(
         unbound=unbound,
         installed={key: tuple(items) for key, items in installed.items()},
         preserve_data_source=preserve_data_source,
+        left=left,
     )
 
 

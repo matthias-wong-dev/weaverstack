@@ -19,6 +19,7 @@ ROWS = (
         "item_name": "Reporting",
         "target_name": "Reporting_Dev",
     },
+    {"item_type": "Report", "item_name": "Executive", "target_name": "Executive_Dev"},
 )
 
 
@@ -80,6 +81,16 @@ def test_unbind_runs_only_the_claim_deletion(estate, monkeypatch):
     deletes = [s for s in estate.tsql if "DELETE" in s.upper()]
     assert deletes and all("Reporting" in s for s in deletes)
     assert not any("Sales" in s for s in deletes)
+
+
+@weaver_test()
+def test_a_report_claim_unbinds_like_any_other(estate):
+    result = weaver.unbind(plan=plan(estate, "Report/Executive_Dev"), session=estate)
+
+    assert result.logical_items == ("Report/Executive",)
+    deletes = [s for s in estate.tsql if "DELETE" in s.upper()]
+    assert deletes and all("Executive" in s for s in deletes)
+    assert not any("Reporting" in s or "Sales" in s for s in deletes)
 
 
 @weaver_test()

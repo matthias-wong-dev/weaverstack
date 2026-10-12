@@ -98,8 +98,8 @@ def plan_unbind(
     selected = tuple(dict.fromkeys(WipeTarget.parse(value) for value in values))
     if not selected:
         raise CommandError(
-            "unbind needs at least one target: Lakehouse/Name, Warehouse/Name or "
-            "SemanticModel/Name."
+            "unbind needs at least one target: Lakehouse/Name, Warehouse/Name, "
+            "SemanticModel/Name or Report/Name."
         )
     resolved = operation_workspace(
         "unbind",
@@ -186,6 +186,7 @@ def unbind(
     from ..wipe_plan import wipe_mutation_plan
     from .wipe import (
         LAKEHOUSE,
+        REPORT,
         SEMANTIC_MODEL,
         UNBIND,
         WAREHOUSE,
@@ -202,6 +203,7 @@ def unbind(
                 lakehouses=names(LAKEHOUSE),
                 warehouses=names(WAREHOUSE),
                 semantic_models=names(SEMANTIC_MODEL),
+                reports=names(REPORT),
             )
             # An unbind is a wipe of no targets: only the claim deletion runs.
             mutation, payloads = wipe_mutation_plan(
