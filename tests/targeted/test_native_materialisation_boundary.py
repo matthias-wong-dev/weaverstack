@@ -234,25 +234,91 @@ def test_warehouse_ctas_uses_resolved_workspace_when_bound_target_omits_id(tmp_p
     ]
 
 
+class NotebookFs:
+    """``notebookutils.fs`` as Fabric copies directories.
+
+    ``fastcp`` copies a named directory as a child of its destination, copies
+    the contents of ``directory/*``, and skips empty directories. ``cp`` copies
+    a directory to an absent destination exactly.
+    """
+
+    def __init__(self, tree, *, fast=True):
+        self.tree = dict(tree)
+        if fast:
+            self.fastcp = self._fastcp
+
+    def exists(self, path):
+        return path in self.tree
+
+    def ls(self, path):
+        prefix = path + "/"
+        return [
+            SimpleNamespace(name=key[len(prefix) :], path=key, isDir=value is None)
+            for key, value in sorted(self.tree.items())
+            if key.startswith(prefix) and "/" not in key[len(prefix) :]
+        ]
+
+    def mkdirs(self, path):
+        while path not in self.tree and "/" in path:
+            self.tree[path] = None
+            path = path.rsplit("/", 1)[0]
+        return True
+
+    def _below(self, root):
+        return {
+            key[len(root) :]: value
+            for key, value in self.tree.items()
+            if key.startswith(root + "/")
+        }
+
+    def _fastcp(self, source, destination, recurse):
+        if source.endswith("/*"):
+            source = source[:-2]
+        else:
+            destination += "/" + source.rsplit("/", 1)[1]
+        for relative, value in self._below(source).items():
+            if value is not None:
+                self.mkdirs((destination + relative).rsplit("/", 1)[0])
+                self.tree[destination + relative] = value
+        return True
+
+    def cp(self, source, destination, recurse):
+        assert destination not in self.tree
+        self.mkdirs(destination)
+        for relative, value in self._below(source).items():
+            self.tree[destination + relative] = value
+        return True
+
+
+SOURCE = (
+    "abfss://workspace@onelake.dfs.fabric.microsoft.com/source/Files/Raw/Monthly 文档"
+)
+DESTINATION = (
+    "abfss://workspace@onelake.dfs.fabric.microsoft.com/dev/Files/Raw/Monthly 文档"
+)
+
+
 @weaver_test()
 @pytest.mark.parametrize("fast", [False, True])
-def test_fabric_store_performs_one_native_recursive_directory_copy(fast):
+@pytest.mark.parametrize(
+    "contents",
+    [
+        {"/a.csv": b"a", "/_changes": None, "/_changes/1.json": b"{}", "/empty": None},
+        {"/empty": None, "/empty/deeper": None},
+        {},
+    ],
+    ids=["files-and-empty-directories", "only-empty-directories", "empty"],
+)
+def test_fabric_store_copies_directory_contents_exactly(fast, contents):
     from weaver.fabric.store import FabricStore
 
-    calls = []
-    fs = SimpleNamespace(cp=lambda *args: calls.append(("cp", args)) or True)
-    if fast:
-        fs.fastcp = lambda *args: calls.append(("fastcp", args)) or True
-    source = Location(
-        "abfss://workspace@onelake.dfs.fabric.microsoft.com/source/Files/Raw/Monthly 文档"
+    fs = NotebookFs(
+        {SOURCE: None, **{SOURCE + key: value for key, value in contents.items()}},
+        fast=fast,
     )
-    destination = Location(
-        "abfss://workspace@onelake.dfs.fabric.microsoft.com/dev/Files/Raw/Monthly 文档"
-    )
-    FabricStore(fs).copy_directory(source, destination)
-    assert calls == [
-        ("fastcp" if fast else "cp", (source.value, destination.value, True))
-    ]
+    FabricStore(fs).copy_directory(Location(SOURCE), Location(DESTINATION))
+    assert DESTINATION in fs.tree and fs.tree[DESTINATION] is None
+    assert fs._below(DESTINATION) == fs._below(SOURCE) == contents
 
 
 @weaver_test()
@@ -260,12 +326,10 @@ def test_native_directory_copy_false_result_is_a_failure():
     from weaver.fabric.store import FabricStore
     from weaver.store import StoreError
 
-    fs = SimpleNamespace(fastcp=lambda *args: False)
+    fs = NotebookFs({SOURCE: None, SOURCE + "/a.csv": b"a"})
+    fs.fastcp = lambda *args: False
     with pytest.raises(StoreError, match="copy"):
-        FabricStore(fs).copy_directory(
-            Location("abfss://workspace@host/source/Files/Raw/A"),
-            Location("abfss://workspace@host/dev/Files/Raw/A"),
-        )
+        FabricStore(fs).copy_directory(Location(SOURCE), Location(DESTINATION))
 
 
 @weaver_test()

@@ -140,16 +140,54 @@ class FabricStore:
             raise StoreError(f"could not create directory {location.value}")
 
     def copy_directory(self, source: Location, destination: Location) -> None:
-        """Copy recursively through the native bulk transport."""
-        copy = getattr(self.fs, "fastcp", None) or self.fs.cp
+        """Copy a directory's contents, empty directories included, to ``destination``.
+
+        ``fastcp`` copies a named directory as a child of its destination and
+        skips empty directories. It is given the contents (``source/*``), and the
+        empty directories are made from a listing of the source.
+        """
+        origin, target = self._path(source), self._path(destination)
+        fastcp = getattr(self.fs, "fastcp", None)
         try:
-            copied = copy(self._path(source), self._path(destination), True)
+            if fastcp is None:
+                copied = self.fs.cp(origin, target, True)
+            else:
+                has_files, empty = self._directory_shape(source)
+                copied = (
+                    fastcp(origin.rstrip("/") + "/*", target, True)
+                    if has_files
+                    else self.fs.mkdirs(target)
+                )
+                if copied is not False:
+                    copied = all(
+                        self.fs.mkdirs(self._path(destination.join(*parts)))
+                        is not False
+                        for parts in empty
+                    )
+        except StoreError:
+            raise
         except Exception as exc:
             raise StoreError(
                 f"cannot copy {source.value} to {destination.value}: {exc}"
             ) from exc
         if copied is False:
             raise StoreError(f"could not copy {source.value} to {destination.value}")
+
+    def _directory_shape(self, root: Location) -> tuple[bool, list[tuple[str, ...]]]:
+        """Whether ``root`` holds any file, and its empty directories as relative parts."""
+        has_files, empty, pending = False, [], [()]
+        while pending:
+            parts = pending.pop()
+            children = list(self.fs.ls(self._path(root.join(*parts))))
+            if parts and not children:
+                empty.append(parts)
+            for info in children:
+                name = str(getattr(info, "name", "")).rstrip("/")
+                if getattr(info, "isDir", False):
+                    pending.append((*parts, name))
+                else:
+                    has_files = True
+        return has_files, sorted(empty)
 
     def copy(self, source: Location, destination: Location) -> None:
         """Copy one file within OneLake."""
