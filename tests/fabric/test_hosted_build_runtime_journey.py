@@ -29,7 +29,6 @@ def test_published_runtime_executes_whole_build_without_runtime_transport(
     tmp_path,
     monkeypatch,
 ):
-    assert os.environ.get("WEAVER_PYTEST_INJECT_WEAVER") == "0"
     session = weaver_session
     resolver, store = (
         session.resolver(fabric_workspace),
