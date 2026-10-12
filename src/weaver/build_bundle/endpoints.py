@@ -44,6 +44,7 @@ from .targets import BoundTarget
 _ENDPOINT_MUTATING_KINDS = frozenset(
     {
         BUILD_TABLE,
+        "materialise_mirror",
         BUILD_VIEW,
         DROP_TABLE,
         DROP_VIEW,

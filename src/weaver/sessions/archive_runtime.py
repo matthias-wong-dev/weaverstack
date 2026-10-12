@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import threading
+from dataclasses import replace
 
 from ..fabric.onelake import OneLakeDfsClient
+from ..locations import Location
+from ..store import StoreError
 from .direct_delta import create_bound_delta_table, run_direct_delta_actions
 from .notebook import NotebookSession
 
@@ -13,11 +16,26 @@ class ArchiveDfs(OneLakeDfsClient):
     """Keep native ABFSS destinations on the qualified HTTPS publication route."""
 
     def _url(self, location, query=None):
-        return super()._url(self._publication_location(location), query)
+        return super()._url(self._native_location(location), query)
+
+    def list(self, location, *, recursive=False):
+        remote = self._native_location(location)
+        from urllib.parse import quote, unquote
+
+        prefix = unquote(remote.value).rstrip("/") + "/"
+        entries = []
+        for entry in super().list(remote, recursive=recursive):
+            if not entry.location.value.startswith(prefix):
+                raise StoreError("archive DFS listing escaped its requested root")
+            relative = entry.location.value[len(prefix) :]
+            if not location.value.startswith("abfss://"):
+                relative = quote(relative, safe="/")
+            entries.append(replace(entry, location=location.join(relative)))
+        return entries
 
 
 class ArchiveStore:
-    """Use NotebookUtils for text and the native DFS client for arbitrary bytes."""
+    """Use DFS for inventory and byte reads, NotebookUtils for text writes."""
 
     def __init__(self, native, dfs):
         self.native = native
@@ -28,6 +46,9 @@ class ArchiveStore:
 
     def read(self, location):
         return self.dfs.read(location)
+
+    def list(self, location, *, recursive=False):
+        return self.dfs.list(location, recursive=recursive)
 
     def write(self, location, data):
         try:
@@ -116,7 +137,9 @@ WORKERS = 32
 TSQL_ROUND_TRIP = 25
 
 
-def execution_capacity(plan, workspace=None) -> tuple[int, dict[str, int]]:
+def execution_capacity(
+    plan, workspace=None, *, concurrency=None
+) -> tuple[int, dict[str, int]]:
     """The executor's workers and each resource's limit for this deployment.
 
     The Workspace's ``execution.build`` sets how many actions may occupy each
@@ -125,6 +148,9 @@ def execution_capacity(plan, workspace=None) -> tuple[int, dict[str, int]]:
     """
 
     from ..build_bundle.stages import SPARK
+    from ..concurrency import validate_concurrency
+
+    validate_concurrency(concurrency)
     from ..workspaces import BuildConcurrency
 
     build = BuildConcurrency() if workspace is None else workspace.execution.build
@@ -139,7 +165,7 @@ def execution_capacity(plan, workspace=None) -> tuple[int, dict[str, int]]:
         for _, _, action in plan.actions()
         for key in action.resources
     }
-    return WORKERS, limits
+    return WORKERS if concurrency is None else min(WORKERS, concurrency), limits
 
 
 def execute_mutation(
@@ -149,6 +175,7 @@ def execute_mutation(
     *,
     workers=None,
     limits=None,
+    concurrency=None,
     invocation_id=None,
     timeout=600,
     build_datetime=None,
@@ -160,24 +187,23 @@ def execute_mutation(
     Resource limits, not ``workers``, bound concurrency on each capability.
     Unless given, both come from the Session's Workspace.
     """
-    from dataclasses import replace
 
     from ..build_bundle.executors import default_executors
     from ..build_bundle.executors.base import InstallationContext
-    from ..build_bundle.executors.sql_endpoint_refresh import endpoint_refresh_drivers
-    from ..build_bundle.executors.tsql import TSqlBatchExecutor, TSqlExecutor
-    from ..build_bundle.executors.tsql_round_trip import round_trip_driver
     from ..build_bundle.installer import MutationBindings
-    from ..errors import BuildError, WeaverError
+    from ..errors import BuildError
     from ..mutation.executor import (
         MutationExecutor,
-        physical_driver,
         validate_inputs,
     )
 
     payloads = validate_inputs(plan, payloads)
-    capacity, configured = execution_capacity(plan, session.workspace)
+    capacity, configured = execution_capacity(
+        plan, session.workspace, concurrency=concurrency
+    )
     workers = capacity if workers is None else workers
+    if concurrency is not None:
+        workers = min(workers, capacity)
     limits = configured if limits is None else limits
     if build_datetime is None:
         from datetime import datetime, timezone
@@ -213,6 +239,22 @@ def execute_mutation(
         for key, target in resolved.items()
     }
 
+    drivers = mutation_drivers(contexts, executors=executors)
+    return MutationExecutor(
+        drivers, workers=workers, limits=limits, timeout=timeout, observer=observer
+    ).execute(plan, payloads, invocation_id=invocation_id)
+
+
+def mutation_drivers(contexts, *, executors=None):
+    """Register the physical drivers supported by the installed runtime."""
+    from ..build_bundle.executors import default_executors
+    from ..build_bundle.executors.sql_endpoint_refresh import endpoint_refresh_drivers
+    from ..build_bundle.executors.tsql import TSqlBatchExecutor, TSqlExecutor
+    from ..build_bundle.executors.tsql_round_trip import round_trip_driver
+    from ..errors import WeaverError
+    from ..mutation.executor import physical_driver
+
+    executors = default_executors() if executors is None else executors
     drivers = {}
     for name, executor in executors.items():
         driver = physical_driver(
@@ -233,9 +275,7 @@ def execute_mutation(
                 batch_size=TSQL_ROUND_TRIP,
             )
     drivers.update(endpoint_refresh_drivers(contexts, outcome=error_outcome))
-    return MutationExecutor(
-        drivers, workers=workers, limits=limits, timeout=timeout, observer=observer
-    ).execute(plan, payloads, invocation_id=invocation_id)
+    return drivers
 
 
 def error_outcome(error):
@@ -266,7 +306,6 @@ def _tsql_details(action, payload):
 
 def run_mutation(root, spark, output, archive_sha256, *, workers):
     from ..build_bundle.execution import execution_workspace
-    from ..locations import Location
     from ..mutation.bundle import load_bundle
     from ..store import FilesystemStore
     from .mutation_report import encode_report, loads

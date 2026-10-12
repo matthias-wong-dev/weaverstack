@@ -39,6 +39,10 @@ def validate_mutation_plan(plan: MutationPlan) -> None:
             "target_changes",
             "runtime_state",
             "runtime_state_established",
+            "certification",
+            "validation_definitions",
+            "observed_physical_types",
+            "table_shapes",
         }
         if (
             not isinstance(plan.build_envelope, Mapping)

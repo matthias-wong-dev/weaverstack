@@ -271,36 +271,34 @@ def test_native_archive_store_preserves_non_utf8_payloads(tmp_path):
 
 @pytest.mark.parametrize("failure", [False, True])
 @weaver_test()
-def test_ready_archive_bootstrap_restores_the_live_interpreter(
+def test_ready_archive_bootstrap_keeps_the_live_interpreter(
     tmp_path, monkeypatch, failure
 ):
     import importlib
-    import io
     import shutil
     import sys
     import tempfile
     import types
 
-    from weaver.sessions.install_archive import Carrier, bootstrap_source, read_receipt
+    from test_mutation_archive_install import build_plan_fixture
 
-    body = (
-        "def run_mutation(*args, **kwargs):\n    raise RuntimeError('installer interrupted')\n"
-        if failure
-        else "def run_mutation(*args, **kwargs):\n    return {'status': 'completed', 'marker': 'extracted runtime'}\n"
+    from weaver.sessions import archive_runtime
+    from weaver.sessions.install_archive import (
+        bootstrap_source,
+        pack_mutation,
+        read_receipt,
     )
-    members = {
-        "runtime/weaver/__init__.py": b"",
-        "runtime/weaver/sessions/__init__.py": b"",
-        "runtime/weaver/sessions/archive_runtime.py": body.encode(),
-    }
-    stream = io.BytesIO()
-    with zipfile.ZipFile(stream, "w") as zipped:
-        for name, data in members.items():
-            zipped.writestr(name, data)
-    carrier = Carrier(
-        stream.getvalue(),
-        {name: hashlib.sha256(data).hexdigest() for name, data in members.items()},
-    )
+
+    plan, payloads = build_plan_fixture()
+    carrier = pack_mutation(plan, payloads)
+    assert carrier is not None
+
+    def hosted(*args, **kwargs):
+        if failure:
+            raise RuntimeError("installer interrupted")
+        return {"status": "completed", "marker": "installed runtime"}
+
+    monkeypatch.setattr(archive_runtime, "run_mutation", hosted)
     incoming, output = tmp_path / "carrier.zip", tmp_path / "result.json"
     incoming.write_bytes(carrier.data)
     sdk = types.ModuleType("notebookutils")
@@ -346,7 +344,7 @@ def test_ready_archive_bootstrap_restores_the_live_interpreter(
     else:
         exec(program, {"spark": object(), "emit": emitted.append})
         result = read_receipt(emitted[0], output.read_bytes())
-        assert result["marker"] == "extracted runtime"
+        assert result["marker"] == "installed runtime"
         assert result["archive_sha256"] == carrier.sha256
     assert sys.path == paths
     assert {
@@ -354,7 +352,10 @@ def test_ready_archive_bootstrap_restores_the_live_interpreter(
         for name, module in sys.modules.items()
         if name == "weaver" or name.startswith("weaver.")
     } == previous
-    assert len(private) == 1 and not private[0].exists()
+    assert (
+        len([path for path in private if path.name.startswith("weaver-install-")]) == 1
+    )
+    assert all(not path.exists() for path in private)
 
 
 @weaver_test()

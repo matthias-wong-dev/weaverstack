@@ -282,6 +282,37 @@ class OneLakeDfsClient:
             "PUT", f"{self._url(location)}?resource=directory", expected=(201, 409)
         )
 
+    def copy(self, source: Location, destination: Location) -> None:
+        """Copy binary contents through the DFS transport."""
+        self.write(destination, self.read(source))
+
+    def publish_directory(self, source: Location, destination: Location) -> None:
+        """Publish a private Files directory into an absent Files or Tables address."""
+        source = self._publication_location(source)
+        destination = self._publication_location(destination)
+        origin = parse_onelake(source, base_url=self.base_url)
+        target = parse_onelake(destination, base_url=self.base_url)
+        if (origin.workspace, origin.segment) != (target.workspace, target.segment):
+            raise StoreError("protected publication must stay in the same Lakehouse")
+        if not origin.relative.startswith("Files/") or not target.relative.startswith(
+            ("Files/", "Tables/")
+        ):
+            raise StoreError(
+                "protected publication needs a private Files stage and object destination"
+            )
+        source_path = "/".join(("", origin.workspace, origin.segment, origin.relative))
+        response = self._request(
+            "PUT",
+            self._url(destination),
+            headers={
+                "x-ms-rename-source": quote(source_path, safe="/"),
+                "If-None-Match": "*",
+            },
+            expected=(201,),
+        )
+        if response.headers.get("x-ms-continuation"):
+            raise StoreError("protected publication returned an incomplete rename")
+
     def rename_directory(self, source: Location, destination: Location) -> None:
         """Publish one validated private directory without replacing its target."""
         source = self._publication_location(source)
@@ -308,6 +339,11 @@ class OneLakeDfsClient:
             raise StoreError("Delta publication returned an incomplete rename")
 
     def _publication_location(self, location: Location) -> Location:
+        return self._native_location(location, publication=True)
+
+    def _native_location(
+        self, location: Location, *, publication: bool = False
+    ) -> Location:
         if not location.value.startswith("abfss://"):
             return location
         address = urlsplit(location.value)
@@ -319,10 +355,11 @@ class OneLakeDfsClient:
             or address.port
             or address.query
             or address.fragment
-            or len(segments) < 3
+            or len(segments) < (3 if publication else 1)
             or any(segment in ("", ".", "..") for segment in segments)
         ):
-            raise StoreError("Delta publication needs a bound OneLake path")
+            action = "Delta publication" if publication else "OneLake access"
+            raise StoreError(f"{action} needs a bound OneLake path")
         return Location(
             OneLakePath(address.username, segments[0], "/".join(segments[1:])).url(
                 base_url=self.base_url

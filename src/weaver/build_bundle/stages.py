@@ -230,7 +230,7 @@ _TDS = frozenset(
         "await_endpoint_objects",
     }
 )
-_ONELAKE = frozenset({"folder", "load_file"})
+_ONELAKE = frozenset({"folder", "load_file", "materialise_mirror"})
 #: Session-scoped temporary views authored as table setup can collide.
 TEMPORARY_VIEWS = "spark:temporary-views"
 SPARK = "spark"
@@ -247,6 +247,10 @@ def action_resources(action, target) -> tuple[str, ...]:
 
     if action.executor in _TDS:
         return (f"warehouse:{target.item_id}",)
+    if action.executor == "materialise_mirror":
+        if target.kind == "warehouse":
+            return (f"warehouse:{target.item_id}",)
+        return (SPARK, f"onelake:{target.item_id}")
     if action.executor in _SPARK or action.kind == AWAIT_TABLE_SHORTCUTS:
         return (SPARK,)
     if action.executor in _ONELAKE or action.executor == "shortcut_readiness":

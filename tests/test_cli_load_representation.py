@@ -156,6 +156,26 @@ def test_the_command_exposes_the_stale_selection():
 
 
 @weaver_test()
+@pytest.mark.parametrize(
+    "flags,ancestors,descendants",
+    [
+        ([], False, False),
+        (["--ancestors"], True, False),
+        (["--descendants"], False, True),
+        (["--ancestors", "--descendants"], True, True),
+    ],
+)
+def test_recursive_selection_flags_reach_the_public_load(
+    recorded, flags, ancestors, descendants
+):
+    assert main(_command("--name", r"Sales\.(Customer|Order)", *flags)) == 0
+
+    assert recorded[0]["ancestors"] is ancestors
+    assert recorded[0]["descendants"] is descendants
+    assert recorded[0]["names"] == [r"Sales\.(Customer|Order)"]
+
+
+@weaver_test()
 def test_more_than_one_item_is_one_request():
     parser = build_parser()
 

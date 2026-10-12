@@ -25,7 +25,11 @@ SPARK_KINDS = frozenset({"await_table_shortcuts"})
 
 
 def needs_spark(action) -> bool:
-    return action.executor in SPARK_EXECUTORS or action.kind in SPARK_KINDS
+    return (
+        action.executor in SPARK_EXECUTORS
+        or action.kind in SPARK_KINDS
+        or "spark" in getattr(action, "resources", ())
+    )
 
 
 @dataclass(frozen=True)

@@ -110,6 +110,7 @@ def runtime_state_establishment(
     items: Sequence[WeaverItemId],
     selected_for_build: Iterable[WeaverDocumentId],
     holds_table=None,
+    preserved_data=(),
 ) -> tuple[RuntimeStateEstablishment, ...]:
     """Return state written before physical work for selected objects only.
 
@@ -128,7 +129,11 @@ def runtime_state_establishment(
             row
             for item in scoped
             for row in _ESTABLISHED[table.name](
-                repository, item=item, selected=selected
+                repository,
+                item=item,
+                selected=selected - set(preserved_data)
+                if table.name == BOOKMARK.name
+                else selected,
             )
         ]
         if rows:

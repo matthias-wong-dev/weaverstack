@@ -320,9 +320,23 @@ class Session(ABC):
 
     # --- execution capabilities ---------------------------------------------
 
+    def require_build_runtime(self, *, plan=None, workspace=None):
+        """Admit the installed runtime before this Session executes a Build."""
+        from .hosted_runtime import identity, require_compatible
+
+        observed = identity()
+        return require_compatible(observed, expected=observed, plan=plan)
+
     def execute_mutation(self, plan, payloads=None, **options):
         from .archive_runtime import execute_mutation
 
+        if plan.execution.spark_home_target_id is not None:
+            from ..build_bundle.execution import execution_workspace
+
+            self.require_build_runtime(
+                plan=plan if options.get("executors") is None else None,
+                workspace=execution_workspace(plan.execution, plan),
+            )
         return execute_mutation(plan, payloads, self, **options)
 
     @abstractmethod

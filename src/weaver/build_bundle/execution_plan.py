@@ -8,7 +8,12 @@ from ..mutation.serialization import thaw_value
 from .report import ActionResult, InstallationReport, SequenceResult
 
 
-def execute_bundle(bundle, session, *, executors=None, build_datetime=None):
+def execute_bundle(
+    bundle, session, *, executors=None, build_datetime=None, concurrency=None
+):
+    from ..concurrency import validate_concurrency
+
+    validate_concurrency(concurrency)
     payloads = {
         a.payload: bundle.store.read(bundle.location.join(*a.payload.split("/")))
         for _, _, a in bundle.plan.actions()
@@ -17,6 +22,8 @@ def execute_bundle(bundle, session, *, executors=None, build_datetime=None):
     validate_inputs(bundle.plan, payloads)
     started = datetime.now(timezone.utc)
     options = {"build_datetime": build_datetime}
+    if concurrency is not None:
+        options["concurrency"] = concurrency
     if executors is not None:
         options["executors"] = executors
     report = session.execute_mutation(bundle.plan, payloads, **options)

@@ -197,6 +197,7 @@ def _mirror(run, items, source_catalogue) -> Any:
         items,
         session=run.session,
         workspace=run.workspace.workspace,
+        environment=str(run.workspace.environment),
         catalogue=f"Warehouse/{run.catalogue_name}",
         mirror=f"Warehouse/{source_catalogue.name}",
     )
