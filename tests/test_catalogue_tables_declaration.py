@@ -176,10 +176,11 @@ def test_installation_is_keyed_on_the_scope_alone():
     assert INSTALLATION.column_names == (
         "item_type",
         "item_name",
-        "target_name",
-        "weaver_version",
+        "workspace_name",
         "workspace_id",
+        "target_name",
         "item_id",
+        "weaver_version",
         "signature",
     )
     assert "target_name" in INSTALLATION.comparison_columns

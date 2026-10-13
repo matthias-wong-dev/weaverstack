@@ -69,9 +69,13 @@ def installed_rows():
 
 def answer_installed(session, rows):
     session.answer_tsql(
-        "SELECT TABLE_NAME, COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = N'_'",
+        "SELECT TABLE_NAME, COLUMN_NAME, IS_NULLABLE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = N'_'",
         [
-            {"TABLE_NAME": table.name, "COLUMN_NAME": column.public_name}
+            {
+                "TABLE_NAME": table.name,
+                "COLUMN_NAME": column.public_name,
+                "IS_NULLABLE": "NO" if column.not_null else "YES",
+            }
             for table in CATALOGUE_TABLES
             for column in table.columns
         ],
@@ -202,7 +206,7 @@ def test_public_load_refuses_missing_or_malformed_frozen_ids(monkeypatch, field,
 
 
 @weaver_test()
-def test_public_load_uses_frozen_typed_ids_without_name_resolution(monkeypatch):
+def test_public_load_resolves_renamed_workspace_but_uses_frozen_item_ids(monkeypatch):
     import requests
 
     from weaver.fabric.auth import FABRIC_SCOPE, TokenProvider
@@ -224,7 +228,14 @@ def test_public_load_uses_frozen_typed_ids_without_name_resolution(monkeypatch):
         answer = requests.Response()
         answer.status_code = 202 if method == "POST" else 200
         answer.headers = {"x-ms-request-id": REQUEST_ID}
-        answer._content = json.dumps({} if method == "POST" else COMPLETED).encode()
+        body = (
+            {"value": [{"id": WORKSPACE_ID, "displayName": "RenamedWorkspace"}]}
+            if url == "https://api.fabric.microsoft.com/v1/workspaces"
+            else {}
+            if method == "POST"
+            else COMPLETED
+        )
+        answer._content = json.dumps(body).encode()
         return answer
 
     class BoundarySession(TestSession):
@@ -240,11 +251,15 @@ def test_public_load_uses_frozen_typed_ids_without_name_resolution(monkeypatch):
         assert report.succeeded
         base = f"https://api.powerbi.com/v1.0/myorg/groups/{WORKSPACE_ID}/datasets/{MODEL_ID}/refreshes"
         assert [(method, url) for method, url, _ in sent] == [
+            ("GET", "https://api.fabric.microsoft.com/v1/workspaces"),
             ("GET", base.replace("/refreshes", "/datasources")),
             ("POST", base),
             ("GET", f"{base}/{REQUEST_ID}"),
         ]
-        assert set(scopes) == {"https://analysis.windows.net/powerbi/api/.default"}
+        assert set(scopes) == {
+            FABRIC_SCOPE,
+            "https://analysis.windows.net/powerbi/api/.default",
+        }
         assert not session.python and not session.spark_sql
 
 

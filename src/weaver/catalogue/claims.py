@@ -198,4 +198,10 @@ def without_claims(catalogue, claims):
                 if not any(claim.rule.owns(row, claim.identity) for claim in owners)
             )
         rows[item] = MappingProxyType(kept)
-    return Catalogue(rows=MappingProxyType(rows), materialised=catalogue.materialised)
+    return Catalogue(
+        rows=MappingProxyType(rows),
+        materialised=catalogue.materialised,
+        schema_additions=catalogue.schema_additions,
+        schema_removals=catalogue.schema_removals,
+        installation_upgrade=catalogue.installation_upgrade,
+    )

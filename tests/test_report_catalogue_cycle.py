@@ -12,8 +12,11 @@ from test_semantic_model_build_cycle import (
 
 from weaver.build_bundle.prune import TargetInventory
 from weaver.build_bundle.reports import bind_reports
-from weaver.build_bundle.semantic import bind_semantic_target
-from weaver.build_bundle.targets import ItemBindings, parse_build_item
+from weaver.build_bundle.targets import (
+    ItemBindings,
+    bind_inventory_target,
+    parse_build_item,
+)
 from weaver.build_bundle.workflow import read_build_state
 from weaver.catalogue.powerbi import project_report
 from weaver.catalogue.state import Catalogue, reconcile_catalogue_state
@@ -90,7 +93,7 @@ def test_bound_project_catalogue_fixed_point_report_edit_and_eager_model_impact(
     assert model_verify.id in ancestors("publish-registry")
     assert execute_bundle(first, session).succeeded
     targets = {
-        i: bind_semantic_target(b.to_bound_target(), state.target_inventories[i])
+        i: bind_inventory_target(b.to_bound_target(), state.target_inventories[i])
         for i, b in bindings.by_item.items()
     }
     bound = bind_reports(repository, targets, state.catalogue)

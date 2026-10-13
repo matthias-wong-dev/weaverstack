@@ -129,16 +129,28 @@ def test_native_and_extracted_plan_have_equal_physical_outcomes(tmp_path, failur
 
 @weaver_test()
 def test_catalogue_free_native_plan_binds_physical_workspace(tmp_path):
+    from support.workspaces import given_resolver
+
     from weaver.mutation.bundle import compute_bundle_id
     from weaver.sessions.archive_runtime import execute_mutation
     from weaver.sessions.mutation_report import decode_report, encode_report
+    from weaver.targets import ItemRef
 
+    resolver = given_resolver(lakehouses=["Sales"])
+    resolved = resolver.resolve(ItemRef("Sales"), item_type="Lakehouse")
     legacy_plan, payloads = build_plan_fixture()
     plan = legacy_plan
     plan = replace(
         plan,
         bundle_id="",
-        targets=(replace(plan.targets[0], item_name="Sales"),),
+        targets=(
+            replace(
+                plan.targets[0],
+                item_name="Sales",
+                item_id=resolved.id,
+                workspace_id=resolved.workspace_id,
+            ),
+        ),
         execution=replace(
             plan.execution, catalogue_target_id=None, spark_home_target_id="sales"
         ),
@@ -147,17 +159,13 @@ def test_catalogue_free_native_plan_binds_physical_workspace(tmp_path):
     plan = replace(plan, bundle_id=compute_bundle_id(plan))
     root = tmp_path / "physical"
 
-    class Resolver:
-        def folder_object(self, target, schema, name):
-            return Location(str(root / "Files" / schema / name))
+    resolver.folder_object = lambda target, schema, name: Location(
+        str(root / "Files" / schema / name)
+    )
+    resolver.files_root = lambda item: Location(str(root / "Files"))
+    resolver.folder_root = lambda target: Location(str(root / "Files"))
 
-        def files_root(self, item):
-            return Location(str(root / "Files"))
-
-        def folder_root(self, target):
-            return Location(str(root / "Files"))
-
-    with TestSession(store=FilesystemStore(), resolver=Resolver()) as session:
+    with TestSession(store=FilesystemStore(), resolver=resolver) as session:
         report = execute_mutation(plan, payloads, session)
         from weaver.build_bundle.execution import execution_workspace
 
