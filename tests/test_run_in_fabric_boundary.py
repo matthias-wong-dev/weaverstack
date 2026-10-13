@@ -620,7 +620,13 @@ def test_a_run_in_fabric_starts_without_an_earlier_runs_mounts(monkeypatch):
         "_notebook_utils",
         lambda: SimpleNamespace(fs=SimpleNamespace(unmount=unmounted.append)),
     )
-    monkeypatch.setitem(lakehouse._MOUNTS, landing, "/synfs/weaver/Landing")
+    monkeypatch.setitem(
+        lakehouse._MOUNTS,
+        landing,
+        lakehouse._Mount(
+            point="/weaver/Landing/test", local="/synfs/weaver/Landing/test"
+        ),
+    )
     store = Store()
     root = Location(FILES) / "run"
     store.write(root / REQUEST, b"{}")
@@ -638,5 +644,5 @@ def test_a_run_in_fabric_starts_without_an_earlier_runs_mounts(monkeypatch):
         stage=root.value,
     )
 
-    assert unmounted == ["/weaver/Landing"]
+    assert unmounted == ["/weaver/Landing/test"]
     assert seen == [{}]
