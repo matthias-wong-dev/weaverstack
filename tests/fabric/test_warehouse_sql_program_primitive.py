@@ -169,7 +169,12 @@ def warehouse(
     fabric_initialise_catalogue()
     executor = clean_disposable_warehouse.executor
     prepare_hand_installed(
-        executor, SCHEMA, fabric_workspace.catalogue_item.name, record=False
+        executor,
+        SCHEMA,
+        fabric_workspace.catalogue_item.name,
+        record=False,
+        physical_item=clean_disposable_warehouse.item,
+        workspace_name=fabric_workspace.workspace,
     )
     for table, columns in (
         (

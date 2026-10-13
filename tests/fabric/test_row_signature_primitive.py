@@ -105,7 +105,13 @@ def warehouse_signatures(
     document = read_source_document(
         f"{SCHEMA}.{OBJECT}.sql", _source().encode("utf-8"), WAREHOUSE
     )
-    prepare_hand_installed(executor, SCHEMA, fabric_workspace.catalogue_item.name)
+    prepare_hand_installed(
+        executor,
+        SCHEMA,
+        fabric_workspace.catalogue_item.name,
+        physical_item=clean_disposable_warehouse.item,
+        workspace_name=fabric_workspace.workspace,
+    )
     executor.execute_script(drop_load_script(SCHEMA, OBJECT, also=("Raw",)))
     executor.execute_script(
         f"create table [{SCHEMA}].[{RAW}] ({corpus.tsql_source_columns()});\n"
