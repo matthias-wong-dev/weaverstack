@@ -136,11 +136,36 @@ in minutes.
 
 - **Unchanged build and unchanged load** are almost entirely Weaver: the
   catalogue, planning, dispatch and each object's comparison with its source.
-- **Day loads** show how load time grows with the rows that changed.
-- **First load** is mostly Fabric moving rows, about 3.1 billion of them at
+- **Day loads** show how load time grows with the rows that changed. Each
+  starts in a new Spark session, as a scheduled daily load would. Its time
+  includes about 40 seconds waiting for the session and the minutes it runs
+  while the session scales up from one executor.
+- **First load** is mostly Fabric moving rows, about 4 billion of them at
   scale 1.
 
 The configurations run 24 Python primitives at once and 12 procedures per
 Warehouse (`execution.run`). Each node is a few small Spark jobs or T-SQL
 statements, so a load is bound by latency rather than by compute, and more
 lanes run more of it at once.
+
+## Spark capacity
+
+A load's time depends on the executors Fabric grants its Spark session. A
+session starts on one executor and scales up only while the capacity has room.
+An idle session keeps its executors until the workspace's session timeout ends
+it, 20 minutes by default. A load started beside one can therefore run on a
+single executor until the idle session expires. At scale 1 that made a day's
+load take 1,600 to 1,900 seconds instead of about 1,050. `measure` ends each
+project's Session before the other project's next step for this reason.
+
+To check what a run was granted, read the Spark application's stages from
+Fabric's monitoring API:
+
+```text
+GET /v1/workspaces/{workspace}/lakehouses/{lakehouse}/livySessions/{livyId}/applications/{appId}/1/stages
+```
+
+Each stage's `executorRunTime`, spread between `firstTaskLaunchedTime` and
+`completionTime`, gives the cores in use over time. `firstTaskLaunchedTime`
+minus `submissionTime` is how long a stage waited for a core. The application's
+`allexecutors` list can omit executors added late in its life.
