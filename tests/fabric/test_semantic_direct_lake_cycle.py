@@ -4,6 +4,7 @@ import hashlib
 import json
 from contextlib import contextmanager
 
+import pytest
 from support.semantic_projects import ITEM, ROOT, SCOPE, annotation_project
 from support.weaver_test import weaver_test
 from test_semantic_model_public_cycle import (
@@ -57,6 +58,7 @@ def _text(value):
 
 
 @weaver_test(remote=True, resources={"rest", "tds"})
+@pytest.mark.dax
 def test_generated_direct_lake_build_load_and_both_wipes(
     scratch_build_context, tmp_path
 ):

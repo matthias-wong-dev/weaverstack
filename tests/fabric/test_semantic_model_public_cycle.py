@@ -225,6 +225,7 @@ EXTENSION = (
 
 
 @weaver_test(remote=True, resources={"rest", "tds"})
+@pytest.mark.dax
 def test_pbip_extension_build_load_dax_and_removed_properties(
     scratch_build_context, tmp_path
 ):
@@ -340,6 +341,7 @@ def test_pbip_extension_build_load_dax_and_removed_properties(
 
 
 @weaver_test(remote=True, resources={"rest", "tds"})
+@pytest.mark.dax
 def test_existing_warehouse_source_build_persists_lineage_and_loads_without_source(
     scratch_build_context, tmp_path
 ):
