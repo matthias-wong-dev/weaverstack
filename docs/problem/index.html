@@ -87,8 +87,8 @@
 <section class="section">
 <div class="wrap">
 <h2>The repetition starts before the estate is large</h2>
-<p>One developer with two spreadsheets still has a repeatability problem. A Power BI project can accumulate publishing copies, manual renaming and model bindings to check in development and production.</p>
-<p>Weaver adds project organisation and environment configuration without replacing the languages or native definitions. Destination naming, supported source mapping and source credentials remain separate controls.</p>
+<p>One developer with two spreadsheets still has a repeatability problem. A larger Fabric project repeats deployment, dependency and recovery work across Lakehouses, Warehouses, semantic models and Reports.</p>
+<p>Weaver keeps that work with the project: definitions in source control, physical names in configuration and operational state in the catalogue.</p>
 <p>
 <a href="/reports/">Keep one Report project across environments</a>
 </p>
@@ -121,7 +121,7 @@
             <div class="flow-step">
 <b>T-SQL</b>
 <small>Warehouse</small>
-</div>
+</div><span class="flow-arrow" aria-hidden="true">→</span><div class="flow-step"><b>Semantic model</b><small>refresh and DAX</small></div><span class="flow-arrow" aria-hidden="true">→</span><div class="flow-step"><b>Report</b><small>model binding</small></div>
           </div>
           <p>Fabric has good tools for each step. The Warehouse query still has to wait for the Lakehouse table, and the Lakehouse table still has to wait for the files. Someone has to keep that order correct.</p>
           <p>Without Weaver, the same dependencies often appear again in pipelines, triggers or local conventions.</p>
@@ -163,7 +163,7 @@
             </div>
             <div class="card">
               <h3>What is now stale?</h3>
-              <p>A downstream table can have succeeded yesterday and still be out of date after an upstream table loads today.</p>
+              <p>A downstream Table or model can have refreshed successfully and still be stale after its source loads again.</p>
             </div>
           </div>
         </div>
@@ -188,7 +188,7 @@
             </a>
             <a class="card" href="/get-started/">
               <h3>Choose a first project</h3>
-              <p>Start with Power BI deployment or a small Fabric pipeline.</p>
+              <p>Start with a small Fabric pipeline, then add models and Reports.</p>
               <span class="go">Get started <span class="arrow" aria-hidden="true">→</span>
 </span>
             </a>
@@ -211,8 +211,8 @@
 <i>
 </i>
 </span>Weaver</span>
-<p>Keep the tools you know. Get the engineering around them without building it yourself.</p>
-<p>Free and open source under the <a href="https://github.com/matthias-wong-dev/weaverstack/blob/main/LICENSE">Mozilla Public License 2.0</a>. Platform licences and compute still apply.</p>
+<p>Build, load, test and inspect your Microsoft Fabric estate.</p>
+<p>Free and open source under the <a href="https://github.com/matthias-wong-dev/weaverstack/blob/main/LICENSE">Mozilla Public License 2.0</a>.</p>
 </div>
 <div class="footer-links">
 <ul>

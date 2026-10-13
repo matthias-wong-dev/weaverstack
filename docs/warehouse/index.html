@@ -5,18 +5,18 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#f7f7f6">
 <title>Weaver for Fabric Warehouses</title>
-<meta name="description" content="Write ordinary T-SQL while Weaver handles native structures, generated loading, incremental progress and recorded outcomes.">
+<meta name="description" content="Write T-SQL queries while Weaver handles load procedures, row changes, dependencies and progress.">
 <meta name="robots" content="index, follow, max-image-preview:large">
 <link rel="canonical" href="https://weaverstack.dev/warehouse/">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://weaverstack.dev/warehouse/">
 <meta property="og:site_name" content="Weaver">
 <meta property="og:title" content="Weaver for Fabric Warehouses">
-<meta property="og:description" content="Write ordinary T-SQL while Weaver handles native structures, generated loading, incremental progress and recorded outcomes.">
+<meta property="og:description" content="Write T-SQL queries while Weaver handles load procedures, row changes, dependencies and progress.">
 <meta property="og:image" content="https://weaverstack.dev/og.png">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Weaver for Fabric Warehouses">
-<meta name="twitter:description" content="Write ordinary T-SQL while Weaver handles native structures, generated loading, incremental progress and recorded outcomes.">
+<meta name="twitter:description" content="Write T-SQL queries while Weaver handles load procedures, row changes, dependencies and progress.">
 <link rel="icon" type="image/png" href="/favicon.png">
 <link rel="manifest" href="/site.webmanifest">
 <link rel="sitemap" type="application/xml" href="/sitemap.xml">
@@ -75,14 +75,14 @@
 <main id="main">
 <section class="page-head">
 <div class="wrap">
-<h1>Your SQL, with the repetitive engineering already done.</h1>
-<p class="lead">Keep the query recognisable. Let Weaver handle the surrounding work of installing, loading and inspecting it.</p>
+<h1>Warehouse engineering in T-SQL.</h1>
+<p class="lead">Write the query and declare the table. Weaver creates the load procedure, applies changes and records progress.</p>
 </div>
 </section>
 <section class="section">
 <div class="wrap">
-<h2>Keep ordinary T-SQL</h2>
-<p>The transformation stays a query. Native comments hold its identity, keys and schema; there is no new macro language to learn.</p>
+<h2>Keep the transformation as a query</h2>
+<p>A native SQL comment holds the Table’s identity, keys and schema. Build creates the table and load procedure; Load runs the query and applies the result.</p>
 <div class="code">
 <div class="code-bar">
 <span>Warehouse/Operations/Parcel.Depot.sql</span>
@@ -97,47 +97,32 @@ Schema:
 */
 select DepotID as [Depot ID], Depot
 from (values (1, &#x27;North&#x27;), (2, &#x27;South&#x27;)) v(DepotID, Depot);</pre></div>
-<p>Build creates the table and its generated load procedure. Load runs the query and applies the data. You do not hand-maintain a procedure for each table.</p>
-<p>
-<a class="text-link" href="https://docs.weaverstack.dev/basics/warehouse-pipeline/">Build a small Warehouse pipeline →</a>
+<p><a class="text-link" href="https://docs.weaverstack.dev/basics/warehouse-pipeline/">Build a Warehouse pipeline →</a>
 </p>
 </div>
 </section>
 <section class="section">
 <div class="wrap">
-<h2>Develop against existing data</h2>
-<p>Mirror uses views to borrow unchanged Warehouse data. Materialise selected changed work in development without copying the whole Warehouse first. Borrowed data remains at its live source, not in a frozen development snapshot.</p>
-</div>
-</section>
-<section class="section">
-<div class="wrap">
-<h2>Install changes without blindly rerunning data</h2>
-<p>Build and Load are separate. Inspect a Build preview, install a definition change, then catch up affected data. Independent work can remain untouched.</p>
-<p>Some changes replace physical structures; Build is not an in-place schema migration for every change. Protection and reconstruction have their own boundaries.</p>
-<p>
-<a class="text-link" href="https://docs.weaverstack.dev/basics/development-cycle/">Make a change and inspect its result →</a>
+<h2>Change definitions separately from loading data</h2>
+<p>Preview a Build, deploy a definition change, then load the affected work. You can review structural changes without starting every data load.</p>
+<p><a class="text-link" href="https://docs.weaverstack.dev/basics/development-cycle/">Make a change →</a>
 </p>
 </div>
 </section>
 <section class="section">
 <div class="wrap">
-<h2>Know what is current</h2>
-<p>A green run yesterday does not establish freshness after upstream data changes. Consumer bookmarks, installed definitions, failed and blocked state, row movement and validation results are recorded in the catalogue.</p>
-<p>Use that evidence to decide what to rerun instead of maintaining another set of status files.</p>
-<p>
-<a class="text-link" href="https://docs.weaverstack.dev/advanced/row-auditing-and-operational-history/">Inspect row changes and operational history →</a>
-</p>
-<p>
-<a class="text-link" href="https://docs.weaverstack.dev/advanced/run-part-of-an-estate/">Run the part you are working on →</a>
+<h2>Use existing data in development</h2>
+<p>Mirror exposes unchanged Warehouse data through views. Materialise the work you change instead of copying the entire Warehouse first.</p>
+<p><a class="text-link" href="https://docs.weaverstack.dev/advanced/mirror-and-materialisation-strategies/">Develop with Mirror →</a>
 </p>
 </div>
 </section>
 <section class="section">
 <div class="wrap">
-<h2>Cross the Lakehouse boundary without hand-built waiting steps</h2>
-<p>When supported Warehouse work reads through a Lakehouse SQL endpoint, Weaver puts the relevant upstream work and endpoint-readiness waits in the run. You maintain the query rather than another waiting pipeline.</p>
-<p>
-<a href="/features/">All Weaver features</a>
+<h2>Follow the data into the model</h2>
+<p>Warehouse Tables and Views can feed semantic models in the same project. Source dependencies order the loads and model refreshes; SQL and DAX Tests can compare their results.</p>
+<p>The catalogue records row changes, bookmarks, validation outcomes and stale work. One Health report brings the managed estate’s state together.</p>
+<p><a class="text-link" href="https://docs.weaverstack.dev/basics/power-bi/fabric-integration/">Connect a semantic model to Warehouse data →</a>
 </p>
 </div>
 </section>
@@ -156,8 +141,8 @@ from (values (1, &#x27;North&#x27;), (2, &#x27;South&#x27;)) v(DepotID, Depot);<
 <i>
 </i>
 </span>Weaver</span>
-<p>Keep the tools you know. Get the engineering around them without building it yourself.</p>
-<p>Free and open source under the <a href="https://github.com/matthias-wong-dev/weaverstack/blob/main/LICENSE">Mozilla Public License 2.0</a>. Platform licences and compute still apply.</p>
+<p>Build, load, test and inspect your Microsoft Fabric estate.</p>
+<p>Free and open source under the <a href="https://github.com/matthias-wong-dev/weaverstack/blob/main/LICENSE">Mozilla Public License 2.0</a>.</p>
 </div>
 <div class="footer-links">
 <ul>

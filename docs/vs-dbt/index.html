@@ -79,7 +79,7 @@
       <section class="page-head">
         <div class="wrap">
           <h1>Weaver vs dbt</h1>
-          <p class="lead">dbt is a strong choice when the main job is modelling transformations. Weaver connects Python, files, Lakehouses, Warehouses, loading and recovery, and also deploys native Power BI models and Reports independently of a data catalogue.</p>
+          <p class="lead">dbt manages data transformations. Weaver brings the wider Fabric estate into one project: Lakehouse files and Tables, Warehouse SQL, semantic models and Reports.</p>
         </div>
       </section>
 
@@ -105,7 +105,7 @@
             </div>
             <div class="card">
               <h3>Run results stay in Fabric</h3>
-              <p>For catalogue-backed operations, Weaver records installed definitions, load results and consumer bookmarks in a Fabric Warehouse. Standalone Power BI work does not create that history.</p>
+              <p>Weaver records installed definitions, load and model-refresh outcomes, validation results and consumer bookmarks in a Fabric Warehouse.</p>
               <p>dbt Core writes files such as <code>manifest.json</code> and <code>run_results.json</code>. State comparison uses a previous manifest.</p>
             </div>
             <div class="card">
@@ -113,7 +113,11 @@
               <p>Weaver can give a development project the current production data without copying every table. Build the parts you need to change and leave the rest behind views or OneLake shortcuts.</p>
               <p>dbt-fabric documents table cloning within one Warehouse. Mirror works across the Lakehouses and Warehouses in the Weaver project.</p>
             </div>
-          </div>
+<div class="card">
+<h3>Native semantic models and Reports</h3>
+<p>Weaver deploys PBIP/TMDL definitions, applies shared modelling rules, binds Reports to their model and runs DAX validations.</p>
+<p>dbt does not deploy native Power BI models or Reports. Its Power BI connector queries the dbt Semantic Layer; it is a different integration.</p>
+</div>          </div>
         </div>
       </section>
 
@@ -307,7 +311,7 @@
 <span class="mark no">✕</span> <span class="note">not a built-in model policy</span>
 </td>
                 </tr>
-              </tbody>
+<tr class="group"><th scope="row" colspan="3">Power BI semantic models and Reports</th></tr><tr><th scope="row">Deploy native PBIP/TMDL models and Reports</th><td class="v-yes"><span class="mark yes">✓</span></td><td class="v-no"><span class="mark no">✕</span><span class="note">not part of dbt-fabric deployment</span></td></tr><tr><th scope="row">Apply native TMDL modelling rules and compose model variants</th><td class="v-yes"><span class="mark yes">✓</span></td><td class="v-no"><span class="mark no">✕</span><span class="note">dbt semantic models define its own metrics layer</span></td></tr><tr><th scope="row">Validate DAX against Lakehouse or Warehouse SQL</th><td class="v-yes"><span class="mark yes">✓</span></td><td class="v-no"><span class="mark no">✕</span><span class="note">not a dbt-fabric validation target</span></td></tr><tr><th scope="row">Order model refreshes with managed source loads</th><td class="v-yes"><span class="mark yes">✓</span></td><td class="v-no"><span class="mark no">✕</span><span class="note">Power BI refresh is outside the adapter run</span></td></tr>              </tbody>
             </table>
           </div>
         </div>
@@ -316,11 +320,11 @@
       <section class="section">
         <div class="wrap">
           <h2>Where each tool fits</h2>
-          <p>dbt is built around transformation models across many data platforms. Weaver supports native Power BI deployment as an independent entry route, alongside Fabric projects with Python loaders, files, Lakehouses, Warehouses, cross-item dependencies and data recovery.</p>
+          <p>dbt is built around transformation models across many data platforms. Weaver is built around the Microsoft Fabric estate, from source loading and transformation to native model and Report deployment and their operational state.</p>
           <div class="cards two">
             <a class="card" href="/get-started/">
               <h3>Choose your entry route</h3>
-              <p>Deploy a native Power BI project or build a small Fabric pipeline.</p>
+              <p>Build a Fabric pipeline, then add semantic models and Reports.</p>
               <span class="go">Get started <span class="arrow" aria-hidden="true">→</span>
 </span>
             </a>
@@ -331,6 +335,7 @@
 </span>
             </a>
           </div>
+<p>dbt’s <a href="https://docs.getdbt.com/docs/platform-integrations/semantic-layer/power-bi">Power BI integration</a> lets Power BI query the dbt Semantic Layer. It does not provide the native model, Report and DAX lifecycle compared above.</p>
           <p class="small muted">Sources: <a href="https://docs.getdbt.com/reference/resource-configs/fabric-configs">dbt-fabric</a>, <a href="https://docs.getdbt.com/reference/resource-configs/fabricspark-configs">dbt-fabricspark</a> and <a href="https://learn.microsoft.com/en-us/fabric/data-warehouse/identity">Microsoft Fabric</a> documentation.</p>
         </div>
       </section>
@@ -350,8 +355,8 @@
 <i>
 </i>
 </span>Weaver</span>
-<p>Keep the tools you know. Get the engineering around them without building it yourself.</p>
-<p>Free and open source under the <a href="https://github.com/matthias-wong-dev/weaverstack/blob/main/LICENSE">Mozilla Public License 2.0</a>. Platform licences and compute still apply.</p>
+<p>Build, load, test and inspect your Microsoft Fabric estate.</p>
+<p>Free and open source under the <a href="https://github.com/matthias-wong-dev/weaverstack/blob/main/LICENSE">Mozilla Public License 2.0</a>.</p>
 </div>
 <div class="footer-links">
 <ul>

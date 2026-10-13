@@ -4,19 +4,19 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#f7f7f6">
-<title>Weaver: making Power BI and Microsoft Fabric easier to use</title>
-<meta name="description" content="Keep Python, SQL and native Power BI projects. Weaver handles the engineering around deployment, loading, validation and development.">
+<title>Weaver: data engineering for Microsoft Fabric</title>
+<meta name="description" content="Manage Fabric Lakehouses, Warehouses, semantic models and Reports in one project using Python, SQL and native Power BI files.">
 <meta name="robots" content="index, follow, max-image-preview:large">
 <link rel="canonical" href="https://weaverstack.dev/">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://weaverstack.dev/">
 <meta property="og:site_name" content="Weaver">
-<meta property="og:title" content="Weaver: making Power BI and Microsoft Fabric easier to use">
-<meta property="og:description" content="Keep Python, SQL and native Power BI projects. Weaver handles the engineering around deployment, loading, validation and development.">
+<meta property="og:title" content="Weaver: data engineering for Microsoft Fabric">
+<meta property="og:description" content="Manage Fabric Lakehouses, Warehouses, semantic models and Reports in one project using Python, SQL and native Power BI files.">
 <meta property="og:image" content="https://weaverstack.dev/og.png">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="Weaver: making Power BI and Microsoft Fabric easier to use">
-<meta name="twitter:description" content="Keep Python, SQL and native Power BI projects. Weaver handles the engineering around deployment, loading, validation and development.">
+<meta name="twitter:title" content="Weaver: data engineering for Microsoft Fabric">
+<meta name="twitter:description" content="Manage Fabric Lakehouses, Warehouses, semantic models and Reports in one project using Python, SQL and native Power BI files.">
 <link rel="icon" type="image/png" href="/favicon.png">
 <link rel="manifest" href="/site.webmanifest">
 <link rel="sitemap" type="application/xml" href="/sitemap.xml">
@@ -75,110 +75,61 @@
 <main id="main">
 <section class="page-head">
 <div class="wrap">
-<h1>Making Power BI and Microsoft Fabric easier to use.</h1>
-<p class="lead">Keep the tools you know. Get the engineering around them without building it yourself.</p>
+<h1>Data engineering for Microsoft Fabric.</h1>
+<p class="lead">Manage Lakehouses, Warehouses, semantic models and Reports in one project. Keep your Python, SQL and native Power BI files.</p>
 </div>
 </section>
 <div class="wrap">
-<div class="actions">
-<a class="button blue" href="https://docs.weaverstack.dev/basics/power-bi/deploy-pbip/">Use an existing Power BI project</a>
-<a class="button ghost" href="https://docs.weaverstack.dev/getting-started/first-project/">Build a small Fabric project</a>
+<div class="actions"><a class="button blue" href="https://docs.weaverstack.dev/getting-started/first-project/">Get started with Fabric</a><a class="button ghost" href="/features/">Explore features</a>
 </div>
 </div>
 <section class="section">
 <div class="wrap">
-<h2>The work stays familiar</h2>
-<div class="cards two">
-<a class="card" href="/lakehouse/">
+<h2>One project, from source data to Reports</h2>
+<div class="cards two"><a class="card" href="/lakehouse/">
 <h3>Lakehouse</h3>
-<p>Manage files and Delta tables, borrow existing data for development, and keep incremental progress with each consumer.</p>
-<ul>
-<li>Files and Delta tables in one project</li>
-<li>Borrow existing data for development</li>
-</ul>
-<span class="go">Explore Lakehouse →</span>
-</a>
-<a class="card" href="/warehouse/">
+<p>Load files and Delta tables with Python or Spark SQL. Track dependencies and incremental progress without maintaining a separate pipeline for each table.</p><span class="go">Lakehouse →</span></a><a class="card" href="/warehouse/">
 <h3>Warehouse</h3>
-<p>Author the query rather than a load procedure for every table. Inspect changes, row movement and work that is stale or blocked.</p>
-<ul>
-<li>Native SQL and generated load procedures</li>
-<li>Consumer bookmarks and recorded row changes</li>
-</ul>
-<span class="go">Explore Warehouse →</span>
-</a>
-<a class="card" href="/semantic-models/">
+<p>Write T-SQL queries. Weaver creates the load procedures, applies row changes and records the result.</p><span class="go">Warehouse →</span></a><a class="card" href="/semantic-models/">
 <h3>Semantic Models</h3>
-<p>Deploy native PBIP/TMDL, apply shared conventions and validate the numbers. Fabric integration and model variants are optional.</p>
-<ul>
-<li>Deploy the model you already have</li>
-<li>Share standards and test DAX results</li>
-</ul>
-<span class="go">Explore Semantic Models →</span>
-</a>
-<a class="card" href="/reports/">
+<p>Deploy native TMDL models, share modelling conventions and compare DAX results with source data.</p><span class="go">Semantic models →</span></a><a class="card" href="/reports/">
 <h3>Reports</h3>
-<p>Keep one native project in source control. Resolve development and production names and the linked model at deployment.</p>
-<ul>
-<li>One source project across environments</li>
-<li>Verify the linked model after deployment</li>
-</ul>
-<span class="go">Explore Reports →</span>
-</a>
+<p>Keep one native Report project across environments. Deployment resolves its workspace, name and linked model.</p><span class="go">Reports →</span></a>
 </div>
-<p>
-<a href="/features/">See all four feature introductions</a>
+</div>
+</section>
+<section class="section">
+<div class="wrap">
+<h2>Build, load, test and inspect the estate</h2>
+<p>Build deploys definitions. Load runs data work and refreshes semantic models in dependency order. Test checks SQL, Python and DAX results. Health brings the recorded state together in one report.</p>
+<p>The catalogue keeps definitions, dependencies, progress and outcomes in a Fabric Warehouse. You can inspect that state without assembling it from separate pipelines and log files.</p>
+<p><a class="text-link" href="/how-it-works/">How Weaver works →</a>
 </p>
 </div>
 </section>
 <section class="section">
 <div class="wrap">
-<h2>Familiar development, additional capabilities</h2>
-<p>Keep ordinary Python, SQL, native TMDL and Power BI projects. Weaver adds a small amount of organisation and configuration, then handles the repeated work around them.</p>
-<div class="cards three">
-<div class="card">
-<h3>One project across environments</h3>
-<p>Choose destination workspaces and item names through configuration rather than maintaining publishing copies.</p>
-</div>
-<div class="card">
-<h3>Native deployed objects</h3>
-<p>Tables, views, semantic models and Reports stay native platform objects. Executing Weaver’s generated Python or annotations can still need Weaver.</p>
-</div>
-<div class="card">
-<h3>Add only what helps</h3>
-<p>Start with ordinary deployment or loading. Shared rules, validation, selective recovery and composition are available when the problem calls for them.</p>
-</div>
-</div>
-<p>
-<strong>Works with Power BI alone. Integrates with Fabric when needed.</strong> The standalone route still needs an appropriate service licence, access and permissions; free Desktop alone is not the deployment service.</p>
-</div>
-</section>
-<section class="section">
-<div class="wrap">
-<h2>Start small, stay organised</h2>
-<p>Two spreadsheets and a table over them are a project worth keeping in source control. Give their definitions a home, choose a target, and make the result repeatable. A team of one is a valid audience.</p>
-<p>Source files can remain external to Weaver’s ownership. You do not have to hand lifecycle control to Weaver for data it cannot reconstruct.</p>
-<p>
-<a class="text-link" href="https://docs.weaverstack.dev/getting-started/first-project/">Try the small Fabric route →</a>
+<h2>The same source in development and production</h2>
+<p>Workspace configuration maps your project’s logical names to the right Fabric items. Change the configuration to deploy to another environment; keep the authored files in source control.</p>
+<p>Mirror lets development use existing data through views and OneLake shortcuts. Only the work you change needs a local copy.</p>
+<p><a class="text-link" href="https://docs.weaverstack.dev/basics/development-cycle/">Develop a project →</a>
 </p>
 </div>
 </section>
 <section class="section">
 <div class="wrap">
-<h2>Built for scale</h2>
-<p>From 3 objects to 3,000, keep the same way of working. A historical synthetic F64 run built 3,000 declared data objects from empty in 13m 48s; its first Load took 61m 20s. Those are source-estate results, not model or Report benchmarks.</p>
-<p>
-<a class="text-link" href="/scale/">See all seven measurements and their limits →</a>
+<h2>From a few objects to thousands</h2>
+<p>The same project structure works for a few source files or a large estate. On F64, a 3,000-object test estate loaded in about an hour, with later incremental loads under 15 minutes.</p>
+<p><a class="text-link" href="/scale/">Built for scale →</a>
 </p>
 </div>
 </section>
 <section class="section">
 <div class="wrap">
-<h2>Choose your first useful result</h2>
-<div class="actions">
-<a class="button blue" href="https://docs.weaverstack.dev/basics/power-bi/deploy-pbip/">Use an existing Power BI project</a>
-<a class="button ghost" href="https://docs.weaverstack.dev/getting-started/first-project/">Build a small Fabric project</a>
-</div>
+<h2>Start with a small project</h2>
+<p>Build one Table, load its data, add a Test and inspect Health. Add more items as the project grows.</p>
+<p><a class="text-link" href="https://docs.weaverstack.dev/getting-started/first-project/">Build your first Fabric project →</a>
+</p>
 </div>
 </section>
 </main>
@@ -196,8 +147,8 @@
 <i>
 </i>
 </span>Weaver</span>
-<p>Keep the tools you know. Get the engineering around them without building it yourself.</p>
-<p>Free and open source under the <a href="https://github.com/matthias-wong-dev/weaverstack/blob/main/LICENSE">Mozilla Public License 2.0</a>. Platform licences and compute still apply.</p>
+<p>Build, load, test and inspect your Microsoft Fabric estate.</p>
+<p>Free and open source under the <a href="https://github.com/matthias-wong-dev/weaverstack/blob/main/LICENSE">Mozilla Public License 2.0</a>.</p>
 </div>
 <div class="footer-links">
 <ul>

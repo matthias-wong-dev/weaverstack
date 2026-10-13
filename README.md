@@ -1,9 +1,8 @@
 # Weaverstack
 
-Keep the tools you know. Get the engineering around them without building it
-yourself. Weaver works with ordinary Python, SQL and native Power BI projects.
-Power BI-only use does not require a Weaver catalogue; Fabric integration adds
-managed dependencies, consumer bookmarks and persistent operational state.
+Weaver builds and operates Microsoft Fabric estates: Lakehouses, Warehouses,
+semantic models and Reports. Keep Python, SQL and native Power BI definitions
+in one project, with environment mappings and operational state in the catalogue.
 
 [Product features](https://weaverstack.dev/features/) explain the four item types.
 [Developer documentation](https://docs.weaverstack.dev) owns task guides and

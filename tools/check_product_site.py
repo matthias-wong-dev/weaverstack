@@ -195,27 +195,29 @@ def run(root: Path, developer_site: Path | None):
         == data["counts"]["declared_objects"]
         == 3000
     )
-    rows = {
-        n.attrs["data-benchmark"]: n
-        for n in documents["/scale/"].descendants("tr")
-        if "data-benchmark" in n.attrs
-    }
-    assert set(rows) == {x["id"] for x in data["operations"]}
     for fact in data["operations"]:
-        row = rows[fact["id"]]
-        assert row.attrs["data-seconds"] == str(fact["seconds"])
         assert (
             fact["display"] == f"{fact['seconds'] // 60}m {fact['seconds'] % 60:02d}s"
         )
-        cells = [n.content() for n in row.children if n.tag in {"td", "th"}]
-        assert cells == [fact["label"], fact["display"], fact["context"]], (fact, cells)
+    scale = one(list(documents["/scale/"].descendants("main")), "scale main")
+    results = {
+        n.attrs["data-scale-result"]: n.content()
+        for n in scale.descendants()
+        if "data-scale-result" in n.attrs
+    }
+    assert set(results) == {"first-load", "incremental"}
+    assert "About an hour" in results["first-load"]
+    assert "Under 15 minutes" in results["incremental"]
+    assert not any("/pull/" in n.attrs.get("href", "") for n in scale.descendants("a"))
+    assert "61m" not in scale.content() and "61.4" not in scale.content()
     print(
         json.dumps(
             {
                 "product_routes_checked": len(documents),
                 "shared_navigation_and_footer": "pass",
                 "local_links_fragments_and_metadata": "pass",
-                "benchmark_operations_checked": len(rows),
+                "benchmark_operations_checked": len(data["operations"]),
+                "rounded_public_scale_results": "pass",
                 "developer_destinations": sorted(docs_links),
                 "developer_link_state": "staged files checked"
                 if developer_site

@@ -104,6 +104,24 @@ shortest direct statement. Delete comments that only narrate the code. Public
 product behaviour belongs at `docs.weaverstack.dev`; implementation invariants
 belong in `AGENTS.md`, source or tests.
 
+## Product website
+
+Lead with Microsoft Fabric. Present items in this order: Lakehouse, Warehouse,
+semantic models, Reports. When naming the platforms, use Fabric before Power BI.
+Catalogue-free Power BI operation is a setup detail, not the product proposition.
+
+Use the same senior engineering voice on the website. Explain the work Weaver
+removes and how it fits a project; do not substitute slogans or reassurance for
+that explanation. Feature cards can be a little more inviting without becoming
+sales copy. Read the heading and first paragraph as someone meeting Weaver for
+the first time: do not introduce catalogue exceptions before the reader knows
+what the product does.
+
+Keep benchmark evidence in the maintainer record. Public scale copy uses rounded
+results and the workload/capacity context, not PR numbers, second-level timing,
+tuning diaries or a catalogue of caveats. Round without changing the measured
+claim, and describe observed results rather than universal performance promises.
+
 ## Review
 
 For every comment, docstring, error or help string, ask:

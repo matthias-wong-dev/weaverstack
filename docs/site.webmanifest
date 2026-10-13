@@ -1,7 +1,7 @@
 {
-  "name": "Weaver: Power BI and Microsoft Fabric, made easier.",
+  "name": "Weaver: data engineering for Microsoft Fabric",
   "short_name": "Weaver",
-  "description": "Keep Python, SQL and native Power BI projects. Get the engineering around them without building it yourself.",
+  "description": "Manage Fabric Lakehouses, Warehouses, semantic models and Reports in one project using Python, SQL and native Power BI files.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
