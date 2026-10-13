@@ -52,6 +52,8 @@ Fresh `gh pr view 193 --repo matthias-wong-dev/weaverstack --json title,body,hea
 
 ## Remaining publication gates
 
-The final independent reader batch remains a separate gate until its findings are accepted or corrected. Service deployment/refresh, Report viewing/binding, DAX/SQL execution, deployed rule/variant inspection and licensing acceptance are not run. Matching package availability and explicit publication permission remain required.
+The independent product reviewer accepted the local reader-experience gates with no blocking defect: 55 responsive checks, 20 Features/item/documentation-request journeys and five scale journeys. Documentation handoffs were intercepted and checked against staged pages, not the live host. The developer reviewer found one incorrect catalogue name; the coordinated guide/fixture was corrected and rechecked, recorded in the docs repository's `acceptance/docs-refresh-2026-10/independent-acceptance.md`.
+
+Service deployment/refresh, Report viewing/binding, DAX/SQL execution, deployed rule/variant inspection and licensing acceptance are not run. Matching package availability and explicit publication permission remain required.
 
 Private paired static previews are prepared separately from canonical files. Their links remain within the pair; local targets return HTTP 200, HTTPS proxy mappings were read back, existing Serve routes were preserved and no public Funnel was enabled. A separate tailnet peer has not been observed loading them; local userspace self-hairpin timed out. Preview addresses are handed over privately, not stored in the public site.
