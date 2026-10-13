@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en-AU">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#f7f7f6">
+<title>Weaver for Fabric Warehouses</title>
+<meta name="description" content="Write ordinary T-SQL while Weaver handles native structures, generated loading, incremental progress and recorded outcomes.">
+<meta name="robots" content="index, follow, max-image-preview:large">
+<link rel="canonical" href="https://weaverstack.dev/warehouse/">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://weaverstack.dev/warehouse/">
+<meta property="og:site_name" content="Weaver">
+<meta property="og:title" content="Weaver for Fabric Warehouses">
+<meta property="og:description" content="Write ordinary T-SQL while Weaver handles native structures, generated loading, incremental progress and recorded outcomes.">
+<meta property="og:image" content="https://weaverstack.dev/og.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Weaver for Fabric Warehouses">
+<meta name="twitter:description" content="Write ordinary T-SQL while Weaver handles native structures, generated loading, incremental progress and recorded outcomes.">
+<link rel="icon" type="image/png" href="/favicon.png">
+<link rel="manifest" href="/site.webmanifest">
+<link rel="sitemap" type="application/xml" href="/sitemap.xml">
+<link rel="stylesheet" href="/assets/site.css">
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="site-header">
+<nav class="nav wrap" aria-label="Primary">
+<a class="brand" href="/" aria-label="Weaver home">
+<span class="weave-mark" aria-hidden="true">
+<i>
+</i>
+<i>
+</i>
+<i>
+</i>
+<i>
+</i>
+</span>Weaver</a>
+<button class="nav-toggle" type="button" aria-expanded="false" aria-controls="nav-links" hidden>Menu</button>
+<div class="nav-links" id="nav-links">
+<a href="/get-started/">Get started</a>
+<div class="features-nav">
+<a href="/features/">Features</a>
+<details>
+<summary aria-label="Show feature pages">
+<span aria-hidden="true">⌄</span>
+</summary>
+<ul>
+<li>
+<a href="/lakehouse/">Lakehouse</a>
+</li>
+<li>
+<a href="/warehouse/" aria-current="page">Warehouse</a>
+</li>
+<li>
+<a href="/semantic-models/">Semantic Models</a>
+</li>
+<li>
+<a href="/reports/">Reports</a>
+</li>
+</ul>
+</details>
+</div>
+<a href="/problem/">The problem</a>
+<a href="/how-it-works/">How it works</a>
+<a href="/scale/">Built for scale</a>
+<a href="/vs-dbt/">Weaver vs dbt</a>
+<a href="https://docs.weaverstack.dev/">Documentation</a>
+<a class="button small" href="https://github.com/matthias-wong-dev/weaverstack">GitHub <span class="arrow" aria-hidden="true">↗</span>
+</a>
+</div>
+</nav>
+</header>
+<main id="main">
+<section class="page-head">
+<div class="wrap">
+<h1>Your SQL, with the repetitive engineering already done.</h1>
+<p class="lead">Keep the query recognisable. Let Weaver handle the surrounding work of installing, loading and inspecting it.</p>
+</div>
+</section>
+<section class="section">
+<div class="wrap">
+<h2>Keep ordinary T-SQL</h2>
+<p>The transformation stays a query. Native comments hold its identity, keys and schema; there is no new macro language to learn.</p>
+<div class="code">
+<div class="code-bar">
+<span>Warehouse/Operations/Parcel.Depot.sql</span>
+</div><pre>/*
+Table ID: Parcel.Depot
+Description: Delivery depots.
+Lineage: A small reference list authored in the project.
+Primary key: Depot ID
+Schema:
+  Depot ID: int
+  Depot: varchar(30)
+*/
+select DepotID as [Depot ID], Depot
+from (values (1, &#x27;North&#x27;), (2, &#x27;South&#x27;)) v(DepotID, Depot);</pre></div>
+<p>Build creates the table and its generated load procedure. Load runs the query and applies the data. You do not hand-maintain a procedure for each table.</p>
+<p>
+<a class="text-link" href="https://docs.weaverstack.dev/basics/warehouse-pipeline/">Build a small Warehouse pipeline →</a>
+</p>
+</div>
+</section>
+<section class="section">
+<div class="wrap">
+<h2>Develop against existing data</h2>
+<p>Mirror uses views to borrow unchanged Warehouse data. Materialise selected changed work in development without copying the whole Warehouse first. Borrowed data remains at its live source, not in a frozen development snapshot.</p>
+</div>
+</section>
+<section class="section">
+<div class="wrap">
+<h2>Install changes without blindly rerunning data</h2>
+<p>Build and Load are separate. Inspect a Build preview, install a definition change, then catch up affected data. Independent work can remain untouched.</p>
+<p>Some changes replace physical structures; Build is not an in-place schema migration for every change. Protection and reconstruction have their own boundaries.</p>
+<p>
+<a class="text-link" href="https://docs.weaverstack.dev/basics/development-cycle/">Make a change and inspect its result →</a>
+</p>
+</div>
+</section>
+<section class="section">
+<div class="wrap">
+<h2>Know what is current</h2>
+<p>A green run yesterday does not establish freshness after upstream data changes. Consumer bookmarks, installed definitions, failed and blocked state, row movement and validation results are recorded in the catalogue.</p>
+<p>Use that evidence to decide what to rerun instead of maintaining another set of status files.</p>
+<p>
+<a class="text-link" href="https://docs.weaverstack.dev/advanced/row-auditing-and-operational-history/">Inspect row changes and operational history →</a>
+</p>
+<p>
+<a class="text-link" href="https://docs.weaverstack.dev/advanced/run-part-of-an-estate/">Run the part you are working on →</a>
+</p>
+</div>
+</section>
+<section class="section">
+<div class="wrap">
+<h2>Cross the Lakehouse boundary without hand-built waiting steps</h2>
+<p>When supported Warehouse work reads through a Lakehouse SQL endpoint, Weaver puts the relevant upstream work and endpoint-readiness waits in the run. You maintain the query rather than another waiting pipeline.</p>
+<p>
+<a href="/features/">All Weaver features</a>
+</p>
+</div>
+</section>
+</main>
+<footer class="site-footer">
+<div class="wrap footer-grid">
+<div class="footer-note">
+<span class="brand">
+<span class="weave-mark" aria-hidden="true">
+<i>
+</i>
+<i>
+</i>
+<i>
+</i>
+<i>
+</i>
+</span>Weaver</span>
+<p>Keep the tools you know. Get the engineering around them without building it yourself.</p>
+<p>Free and open source under the <a href="https://github.com/matthias-wong-dev/weaverstack/blob/main/LICENSE">Mozilla Public License 2.0</a>. Platform licences and compute still apply.</p>
+</div>
+<div class="footer-links">
+<ul>
+<li>
+<strong>Site</strong>
+</li>
+<li>
+<a href="/get-started/">Get started</a>
+</li>
+<li>
+<a href="/features/">Features</a>
+</li>
+<li>
+<a href="/problem/">The problem</a>
+</li>
+<li>
+<a href="/how-it-works/">How it works</a>
+</li>
+<li>
+<a href="/scale/">Built for scale</a>
+</li>
+<li>
+<a href="/vs-dbt/">Weaver vs dbt</a>
+</li>
+</ul>
+<ul>
+<li>
+<strong>Features</strong>
+</li>
+<li>
+<a href="/lakehouse/">Lakehouse</a>
+</li>
+<li>
+<a href="/warehouse/">Warehouse</a>
+</li>
+<li>
+<a href="/semantic-models/">Semantic Models</a>
+</li>
+<li>
+<a href="/reports/">Reports</a>
+</li>
+</ul>
+<ul>
+<li>
+<strong>Project</strong>
+</li>
+<li>
+<a href="https://docs.weaverstack.dev/">Technical documentation</a>
+</li>
+<li>
+<a href="https://github.com/matthias-wong-dev/weaverstack">Source on GitHub</a>
+</li>
+<li>
+<a href="https://github.com/matthias-wong-dev/weaverstack/issues">Issues</a>
+</li>
+<li>
+<a href="https://pypi.org/project/weaverstack/">weaverstack on PyPI</a>
+</li>
+</ul>
+</div>
+</div>
+</footer><script src="/assets/site.js" defer></script></body>
+</html>

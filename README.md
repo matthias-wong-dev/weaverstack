@@ -1,16 +1,21 @@
 # Weaverstack
 
-Weaver is a data-engineering framework for Microsoft Fabric. It coordinates
-Lakehouses, Warehouses, OneLake, Spark and T-SQL from one project, with a shared
-dependency graph and persistent operational state.
+Keep the tools you know. Get the engineering around them without building it
+yourself. Weaver works with ordinary Python, SQL and native Power BI projects.
+Power BI-only use does not require a Weaver catalogue; Fabric integration adds
+managed dependencies, consumer bookmarks and persistent operational state.
+
+[Product features](https://weaverstack.dev/features/) explain the four item types.
+[Developer documentation](https://docs.weaverstack.dev) owns task guides and
+complete interface reference.
 
 ## Installation
 
 Weaver requires Python 3.11 or later and is tested on Python 3.11 and 3.13.
 
-```bash
-python -m pip install weaverstack
-```
+Use the [installation guide](https://docs.weaverstack.dev/getting-started/installation/)
+for the package target matching the documented interfaces. The repository can
+contain capabilities not present in the last PyPI release.
 
 ## Minimal example
 

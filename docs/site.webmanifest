@@ -1,11 +1,17 @@
 {
-  "name": "Weaver: Microsoft Fabric, made easier.",
+  "name": "Weaver: Power BI and Microsoft Fabric, made easier.",
   "short_name": "Weaver",
-  "description": "Build and operate data pipelines across Microsoft Fabric from one project.",
+  "description": "Keep Python, SQL and native Power BI projects. Get the engineering around them without building it yourself.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "background_color": "#f7f7f6",
   "theme_color": "#f7f7f6",
-  "icons": [{ "src": "/favicon.png", "sizes": "128x128", "type": "image/png" }]
+  "icons": [
+    {
+      "src": "/favicon.png",
+      "sizes": "128x128",
+      "type": "image/png"
+    }
+  ]
 }

@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en-AU">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#f7f7f6">
+<title>Weaver for Fabric Lakehouses</title>
+<meta name="description" content="Keep Python and manage files, Delta tables, incremental progress and development data with Weaver.">
+<meta name="robots" content="index, follow, max-image-preview:large">
+<link rel="canonical" href="https://weaverstack.dev/lakehouse/">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://weaverstack.dev/lakehouse/">
+<meta property="og:site_name" content="Weaver">
+<meta property="og:title" content="Weaver for Fabric Lakehouses">
+<meta property="og:description" content="Keep Python and manage files, Delta tables, incremental progress and development data with Weaver.">
+<meta property="og:image" content="https://weaverstack.dev/og.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Weaver for Fabric Lakehouses">
+<meta name="twitter:description" content="Keep Python and manage files, Delta tables, incremental progress and development data with Weaver.">
+<link rel="icon" type="image/png" href="/favicon.png">
+<link rel="manifest" href="/site.webmanifest">
+<link rel="sitemap" type="application/xml" href="/sitemap.xml">
+<link rel="stylesheet" href="/assets/site.css">
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="site-header">
+<nav class="nav wrap" aria-label="Primary">
+<a class="brand" href="/" aria-label="Weaver home">
+<span class="weave-mark" aria-hidden="true">
+<i>
+</i>
+<i>
+</i>
+<i>
+</i>
+<i>
+</i>
+</span>Weaver</a>
+<button class="nav-toggle" type="button" aria-expanded="false" aria-controls="nav-links" hidden>Menu</button>
+<div class="nav-links" id="nav-links">
+<a href="/get-started/">Get started</a>
+<div class="features-nav">
+<a href="/features/">Features</a>
+<details>
+<summary aria-label="Show feature pages">
+<span aria-hidden="true">⌄</span>
+</summary>
+<ul>
+<li>
+<a href="/lakehouse/" aria-current="page">Lakehouse</a>
+</li>
+<li>
+<a href="/warehouse/">Warehouse</a>
+</li>
+<li>
+<a href="/semantic-models/">Semantic Models</a>
+</li>
+<li>
+<a href="/reports/">Reports</a>
+</li>
+</ul>
+</details>
+</div>
+<a href="/problem/">The problem</a>
+<a href="/how-it-works/">How it works</a>
+<a href="/scale/">Built for scale</a>
+<a href="/vs-dbt/">Weaver vs dbt</a>
+<a href="https://docs.weaverstack.dev/">Documentation</a>
+<a class="button small" href="https://github.com/matthias-wong-dev/weaverstack">GitHub <span class="arrow" aria-hidden="true">↗</span>
+</a>
+</div>
+</nav>
+</header>
+<main id="main">
+<section class="page-head">
+<div class="wrap">
+<h1>Keep your Python. Get the engineering around it.</h1>
+<p class="lead">A little project structure puts familiar Python and Spark SQL into a managed Lakehouse project.</p>
+</div>
+</section>
+<section class="section">
+<div class="wrap">
+<h2>Start where the data starts</h2>
+<p>A couple of spreadsheets, an API feed or a growing set of Delta tables should not need a second project just to organise the first. Put each file or table definition under its Lakehouse, add its metadata, and keep writing ordinary Python.</p>
+<p>Folders participate alongside tables. A Python table can import its upstream Folder; Weaver uses that import to put the file work first. You still write the extraction and transformation.</p>
+<div class="code">
+<div class="code-bar">
+<span>Inside a Python Table: read the upstream Folder</span>
+</div><pre>from Files.Parcel__Events import Parcel__Events
+from weaver import Table
+
+class Parcel__Event(Table):
+    def read(self):
+        source = Parcel__Events(self).spark_path()
+        return self.spark.read.option(&quot;header&quot;, True).csv(source)</pre></div>
+<p>This is the Python body, not a complete project: the Table and Folder also need their metadata. The tutorial supplies both complete files.</p>
+<p>
+<a class="text-link" href="https://docs.weaverstack.dev/basics/lakehouse-python/">Build a small Python Lakehouse project →</a>
+</p>
+</div>
+</section>
+<section class="section">
+<div class="wrap">
+<h2>Develop without making a second full copy</h2>
+<p>Mirror lets a development estate borrow unchanged Lakehouse data through OneLake shortcuts. Build the selected work that needs to diverge and materialise it locally, leaving other data at its source.</p>
+<p>Borrowed data remains live at the source. Mirror is not a point-in-time backup.</p>
+<p>
+<a class="text-link" href="https://docs.weaverstack.dev/advanced/mirror-and-materialisation-strategies/">Use Mirror in development →</a>
+</p>
+</div>
+</section>
+<section class="section">
+<div class="wrap">
+<h2>Incremental work with a memory</h2>
+<p>Each consumer keeps its own successful-processing bookmark. Weaver stages incoming data, applies supported upserts and explicit deletions, and records row changes and progress. File-change helpers support incremental file work.</p>
+<p>You decide how to identify source changes and deletions. A missing row in staging is not automatically a deletion, and Weaver does not invent change-data capture for an arbitrary source.</p>
+<p>
+<a class="text-link" href="https://docs.weaverstack.dev/advanced/incremental-data-processing/">Write an incremental load →</a>
+</p>
+</div>
+</section>
+<section class="section">
+<div class="wrap">
+<h2>A failure need not stop unrelated work</h2>
+<p>Choose fault-tolerant loading to continue independent branches when another fails. Recorded failed, blocked and stale state makes the next run inspectable. There is no promise of a universal automatic retry or whole-run rollback.</p>
+<p>
+<a class="text-link" href="https://docs.weaverstack.dev/basics/run-and-inspect-estate/">Inspect what ran and what needs attention →</a>
+</p>
+</div>
+</section>
+<section class="section">
+<div class="wrap">
+<h2>Fabric details do not become another pipeline</h2>
+<p>Weaver coordinates supported cross-item dependencies and SQL endpoint-readiness waits, and schedules independent work concurrently. Work from a local project or a Fabric notebook without a separate always-on Weaver service.</p>
+<p>Python Load work still needs Weaver available in its Fabric runtime. Spark SQL Tables and Views use explicit dependency declarations; do not assume every SQL reference is inferred.</p>
+<p>
+<a href="/features/">All Weaver features</a>
+</p>
+</div>
+</section>
+</main>
+<footer class="site-footer">
+<div class="wrap footer-grid">
+<div class="footer-note">
+<span class="brand">
+<span class="weave-mark" aria-hidden="true">
+<i>
+</i>
+<i>
+</i>
+<i>
+</i>
+<i>
+</i>
+</span>Weaver</span>
+<p>Keep the tools you know. Get the engineering around them without building it yourself.</p>
+<p>Free and open source under the <a href="https://github.com/matthias-wong-dev/weaverstack/blob/main/LICENSE">Mozilla Public License 2.0</a>. Platform licences and compute still apply.</p>
+</div>
+<div class="footer-links">
+<ul>
+<li>
+<strong>Site</strong>
+</li>
+<li>
+<a href="/get-started/">Get started</a>
+</li>
+<li>
+<a href="/features/">Features</a>
+</li>
+<li>
+<a href="/problem/">The problem</a>
+</li>
+<li>
+<a href="/how-it-works/">How it works</a>
+</li>
+<li>
+<a href="/scale/">Built for scale</a>
+</li>
+<li>
+<a href="/vs-dbt/">Weaver vs dbt</a>
+</li>
+</ul>
+<ul>
+<li>
+<strong>Features</strong>
+</li>
+<li>
+<a href="/lakehouse/">Lakehouse</a>
+</li>
+<li>
+<a href="/warehouse/">Warehouse</a>
+</li>
+<li>
+<a href="/semantic-models/">Semantic Models</a>
+</li>
+<li>
+<a href="/reports/">Reports</a>
+</li>
+</ul>
+<ul>
+<li>
+<strong>Project</strong>
+</li>
+<li>
+<a href="https://docs.weaverstack.dev/">Technical documentation</a>
+</li>
+<li>
+<a href="https://github.com/matthias-wong-dev/weaverstack">Source on GitHub</a>
+</li>
+<li>
+<a href="https://github.com/matthias-wong-dev/weaverstack/issues">Issues</a>
+</li>
+<li>
+<a href="https://pypi.org/project/weaverstack/">weaverstack on PyPI</a>
+</li>
+</ul>
+</div>
+</div>
+</footer><script src="/assets/site.js" defer></script></body>
+</html>

@@ -87,6 +87,28 @@ img, svg { max-width: 100%; }
   color: var(--ink); font-size: 14px; font-weight: 650; cursor: pointer;
 }
 
+/* Native disclosure gives the label a route and the children their own control. */
+.features-nav { display: flex; align-items: center; gap: 2px; position: relative; }
+.features-nav details { position: relative; }
+.features-nav summary { display: grid; place-items: center; min-width: 44px; min-height: 44px; cursor: pointer; list-style: none; color: var(--ink); }
+.features-nav summary::-webkit-details-marker { display: none; }
+.features-nav details[open] summary span { transform: rotate(180deg); }
+.features-nav ul { position: absolute; top: 100%; left: -80px; min-width: 220px; margin: 0; padding: 8px; list-style: none; background: var(--paper); border: 1px solid var(--line-strong); border-radius: 9px; box-shadow: var(--shadow); }
+.features-nav ul a { display: block; padding: 10px 12px; white-space: nowrap; }
+.actions { display: flex; flex-wrap: wrap; gap: 12px; margin: 26px 0; }
+.card .item-title { font-size: 24px; margin-bottom: 18px; }
+.card .code { max-width: 100%; }
+.scale-stages { list-style: none; padding: 0 !important; }
+.scale-stages li { display: flex; gap: 28px; max-width: none; padding: 26px 0; border-top: 1px solid var(--line); }
+.scale-stages h3 { margin-top: 0; }
+.scale-count { color: var(--blue); font: 700 clamp(28px, 4vw, 48px)/1.2 var(--mono); min-width: 4.7ch; }
+table.benchmark caption { padding: 14px 16px; text-align: left; font-weight: 650; }
+table.benchmark td:nth-child(2) { white-space: nowrap; }
+table.benchmark td:last-child { width: auto; }
+@media (max-width: 480px) {
+  .scale-stages li { flex-direction: column; gap: 14px; }
+}
+
 /* --- buttons ------------------------------------------------------------ */
 
 .button {
@@ -329,18 +351,35 @@ table.matrix thead th { background: var(--ink); color: var(--white); font-size: 
 
 /* --- responsive --------------------------------------------------------- */
 
+@media (max-width: 1240px) {
+  .nav { flex-wrap: wrap; }
+  .nav-toggle { display: block; }
+  .nav-links {
+    display: flex; flex-basis: 100%;
+    flex-direction: column; align-items: stretch; gap: 0; padding: 8px 0 18px;
+    background: var(--paper);
+  }
+  .nav-enhanced .nav-links {
+    display: none; position: absolute; left: 0; right: 0; top: 100%;
+    padding: 8px 22px 18px; max-height: calc(100dvh - 66px); overflow-y: auto;
+    border-bottom: 1px solid var(--line);
+  }
+  .nav-enhanced .nav-links.open { display: flex; }
+  .nav-links > a, .features-nav > a { padding: 11px 0; font-size: 16px; border-bottom: 1px solid var(--line); }
+  .nav-links a.button { margin-top: 12px; border-bottom: 1px solid var(--blue); justify-content: center; }
+  .features-nav { flex-wrap: wrap; }
+  .features-nav > a { flex: 1; }
+  .features-nav details { position: static; }
+  .features-nav details[open] { flex-basis: 100%; }
+  .features-nav details[open] summary { position: absolute; right: 22px; transform: translateY(-49px); }
+  .features-nav details ul { position: static; box-shadow: none; border: 0; padding: 0 0 0 16px; }
+  .features-nav details ul a { padding: 10px 0; }
+  html:not(.nav-enhanced) .site-header { position: static; }
+}
+
 @media (max-width: 900px) {
   .cards.four { grid-template-columns: repeat(2, 1fr); }
   .cards.three { grid-template-columns: 1fr; }
-  .nav-toggle { display: block; }
-  .nav-links {
-    display: none; position: absolute; left: 0; right: 0; top: 100%;
-    flex-direction: column; align-items: stretch; gap: 0; padding: 8px 22px 18px;
-    border-bottom: 1px solid var(--line); background: var(--paper);
-  }
-  .nav-links.open { display: flex; }
-  .nav-links a { padding: 11px 0; font-size: 16px; border-bottom: 1px solid var(--line); }
-  .nav-links a.button { margin-top: 12px; border-bottom: 1px solid var(--blue); justify-content: center; }
 }
 
 @media (max-width: 720px) {
