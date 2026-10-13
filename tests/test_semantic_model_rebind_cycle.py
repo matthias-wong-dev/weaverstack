@@ -20,7 +20,9 @@ from weaver.build_bundle.targets import (
     effective_item_bindings,
     parse_build_item,
 )
+from weaver.errors import BuildError
 from weaver.fabric.resolution import FabricResolver
+from weaver.fabric.resources import ItemNotFoundError
 from weaver.semantic_models.definition import encode_definition
 from weaver.sessions import TestSession
 from weaver.store import FilesystemStore
@@ -28,7 +30,7 @@ from weaver.store import FilesystemStore
 
 @weaver_test()
 @pytest.mark.parametrize("changed", ["name", "item_id", "workspace_id", "missing_ids"])
-def test_rebinding_unchanged_source_deploys_before_recertifying(tmp_path, changed):
+def test_installation_identity_controls_recertification(tmp_path, changed):
     root, repository, bindings, old_session, _ = prepared(tmp_path)
     with old_session:
         deployed = engine_model(repository)
@@ -80,6 +82,26 @@ def test_rebinding_unchanged_source_deploys_before_recertifying(tmp_path, change
         answer_built_inventory(session, bindings)
         answer_catalogue(session, installed.catalogue, bindings)
         session.calls.clear()
+        if changed != "missing_ids":
+            error, message = {
+                "name": (
+                    ItemNotFoundError,
+                    "SemanticModel 'Reporting_Dev' was not found in workspace 'Demo'",
+                ),
+                "item_id": (BuildError, "Target item GUID .* does not match .*repair"),
+                "workspace_id": (
+                    BuildError,
+                    "Workspace GUID .* does not match .*installed workspace",
+                ),
+            }[changed]
+            with pytest.raises(error, match=message):
+                weaver.build(root, items=selector, session=session)
+            assert model.calls == []
+            assert all(
+                statement.lstrip().startswith("SELECT") for statement in session.tsql
+            )
+            assert not session.python and not session.spark_sql
+            return
         result = weaver.build(root, items=selector, session=session)
         assert result.succeeded, result.errors
         assert result.selection.selected_for_build == (ROOT,)
