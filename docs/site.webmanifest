@@ -1,5 +1,5 @@
 {
-  "name": "Weaver: data engineering for Microsoft Fabric",
+  "name": "Weaver: making Fabric easier to use",
   "short_name": "Weaver",
   "description": "Manage Fabric Lakehouses, Warehouses, semantic models and Reports in one project using Python, SQL and native Power BI files.",
   "start_url": "/",

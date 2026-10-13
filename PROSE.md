@@ -106,6 +106,9 @@ belong in `AGENTS.md`, source or tests.
 
 ## Product website
 
+Preserve the accepted tagline **Making Fabric easier to use**. Editing adjacent
+copy for tone is not permission to replace it or invent another proposition.
+
 Lead with Microsoft Fabric. Present items in this order: Lakehouse, Warehouse,
 semantic models, Reports. When naming the platforms, use Fabric before Power BI.
 Catalogue-free Power BI operation is a setup detail, not the product proposition.
