@@ -63,18 +63,18 @@
 <section class="page-head">
 <div class="wrap">
 <h1>From 3 objects to 3,000.</h1>
-<p class="lead">The same definitions and operations, with more of the engineering taken care of as the estate grows.</p>
+<p class="lead">Larger estates change the demands on dependency ordering, incremental state, scheduling and recovery.</p>
 </div>
 </section>
 <section class="section">
 <div class="wrap">
-<h2>Useful before it is large</h2>
+<h2>What changes at each scale</h2>
 <ol class="scale-stages">
 <li>
 <span class="scale-count">3</span>
 <div>
 <h3>Two spreadsheets and a Table.</h3>
-<p>Code-managed definitions, repeatable deployment and a Test are useful already. Weaver starts with ordinary files and code; you do not need to assemble an orchestration system to get those advantages.</p>
+<p>Even a small project needs code-managed definitions, repeatable deployment and a Test. Ordinary files and code can define that work without a separate orchestration system.</p>
 </div>
 </li>
 <li>
@@ -87,7 +87,7 @@
 <li>
 <span class="scale-count">300</span>
 <div>
-<h3>Choose the framework before the estate becomes unmanageable.</h3>
+<h3>State has to outlast a run.</h3>
 <p>Incremental loads, bookmarks, fault tolerance, orchestration, SQL endpoint readiness, logging, validation and environment consistency are now recurring engineering work, not occasional fixes.</p>
 </div>
 </li>
@@ -103,7 +103,7 @@
 </section>
 <section class="section">
 <div class="wrap">
-<h2>Run the work that matters, in the order it matters</h2>
+<h2>Scheduling, readiness and recovery</h2>
 <p>Independent Spark and Warehouse work can run in parallel. Critical-path-aware scheduling gives priority to work that unlocks the rest of the graph; an invocation cap and per-resource limits keep that parallelism within the budget you choose.</p>
 <p>SQL endpoints synchronise where selected consumers need them, rather than after every unrelated object. Per-consumer bookmarks keep incremental boundaries with the work that succeeded. Recorded failures and blocked dependants make recovery deliberate, while unchanged definitions and data avoid needless processing.</p>
 <p>For development, Mirror starts with Views and OneLake shortcuts to existing data. Materialise changed work instead of copying the estate before the first edit.</p>
@@ -141,8 +141,8 @@
 </section>
 <section class="section">
 <div class="wrap">
-<h2>Start small; keep the same working model</h2>
-<p>Build the definitions, Load the data, Test the result and inspect Health. Add selection, concurrency and development controls when they solve the next real problem.</p>
+<h2>Operating the estate</h2>
+<p>Build, Load, Test and Health define the operating cycle; selection, concurrency and development controls change how that cycle is applied.</p>
 <p>
 <a class="text-link" href="/get-started/">Choose a first task →</a>
 </p>
