@@ -4,19 +4,19 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#f7f7f6">
-<title>Get started with Weaver for Microsoft Fabric</title>
-<meta name="description" content="Build a small Fabric project, then add Lakehouses, Warehouses, semantic models and Reports.">
+<title>Get started with Weaver for Microsoft Fabric and Power BI</title>
+<meta name="description" content="Install Weaver with pip. Work from desktop Python, Fabric Notebooks or both, using your existing sign-in and Fabric or Power BI access.">
 <meta name="robots" content="index, follow, max-image-preview:large">
 <link rel="canonical" href="https://weaverstack.dev/get-started/">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://weaverstack.dev/get-started/">
 <meta property="og:site_name" content="Weaver">
-<meta property="og:title" content="Get started with Weaver for Microsoft Fabric">
-<meta property="og:description" content="Build a small Fabric project, then add Lakehouses, Warehouses, semantic models and Reports.">
+<meta property="og:title" content="Get started with Weaver for Microsoft Fabric and Power BI">
+<meta property="og:description" content="Install Weaver with pip. Work from desktop Python, Fabric Notebooks or both, using your existing sign-in and Fabric or Power BI access.">
 <meta property="og:image" content="https://weaverstack.dev/og.png">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="Get started with Weaver for Microsoft Fabric">
-<meta name="twitter:description" content="Build a small Fabric project, then add Lakehouses, Warehouses, semantic models and Reports.">
+<meta name="twitter:title" content="Get started with Weaver for Microsoft Fabric and Power BI">
+<meta name="twitter:description" content="Install Weaver with pip. Work from desktop Python, Fabric Notebooks or both, using your existing sign-in and Fabric or Power BI access.">
 <link rel="icon" type="image/png" href="/favicon.png">
 <link rel="manifest" href="/site.webmanifest">
 <link rel="sitemap" type="application/xml" href="/sitemap.xml">
@@ -28,6 +28,20 @@
 <meta name="twitter:image:alt" content="Weaver: Microsoft Fabric data engineering.">
 <meta property="og:locale" content="en_AU">
 <meta name="twitter:image" content="https://weaverstack.dev/og.png">
+<style>
+.get-started .page-head .lead + .lead { margin-top: 16px; }
+.get-started #where-to-work h2 { max-width: 34ch; }
+.get-started .work-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 28px; margin: 26px 0 22px; }
+.get-started .work-options > div { min-width: 0; border-top: 1px solid var(--line-strong); padding-top: 16px; }
+.get-started .work-options h3 { margin: 0 0 12px; }
+.get-started .work-options .code { max-width: 100%; margin: 12px 0; }
+.get-started .auth-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px 28px; max-width: var(--measure); margin: 24px 0; }
+.get-started .auth-options dt { font-weight: 650; }
+.get-started .auth-options dd { margin: 4px 0 0; color: var(--ink-soft); }
+@media (max-width: 760px) {
+  .get-started .work-options, .get-started .auth-options { grid-template-columns: 1fr; }
+}
+</style>
 </head>
 <body>
 <a class="skip-link" href="#main">Skip to content</a>
@@ -79,46 +93,84 @@
 </div>
 </nav>
 </header>
-<main id="main">
+<main id="main" class="get-started">
 <section class="page-head">
 <div class="wrap">
-<h1>Build your first Fabric project.</h1>
-<p class="lead">Start with the Fabric item you are working on. Add the next item to the same project when you need it.</p>
+<h1>Get started with Weaver</h1>
+<p class="lead">Already working with Microsoft Fabric or Power BI?</p>
+<p class="lead">Weaver works natively in Fabric. No additional platform, orchestration runtime or Weaver licence. Just install it with pip.</p>
 </div>
 </section>
 <section class="section">
 <div class="wrap">
-<h2>Install Weaver</h2>
-<p>Use Python 3.11 or later.</p>
-<div class="code"><div class="code-bar"><span>Install Weaver</span></div><pre>python -m pip install --upgrade weaverstack
-weaver --version</pre></div>
-<p>Each task explains the workspace access, capacity and runtime it needs.</p>
-<p><a class="text-link" href="https://docs.weaverstack.dev/getting-started/installation/">Installation and workspace setup →</a>
-</p>
+<h2>Install in minutes</h2>
+<p>Weaver supports <strong>Python 3.13</strong>, as well as Python 3.11 and 3.12.</p>
+<div class="code"><div class="code-bar"><span>Install Weaver</span></div><pre><code>python -m pip install --upgrade weaverstack
+weaver --version</code></pre></div>
+<p>That's the Weaver installation. No additional server or orchestration service to set up.</p>
+<p class="small">Existing Fabric compute and workspace permissions still apply.</p>
+<p><a class="text-link" href="https://docs.weaverstack.dev/getting-started/installation/">Installation details →</a></p>
+</div>
+</section>
+<section class="section" id="where-to-work">
+<div class="wrap">
+<h2>Work from your computer, Fabric Notebooks, or both</h2>
+<div class="work-options">
+<div>
+<h3>Desktop Python</h3>
+<p>Use your terminal, VS Code or any Python environment. Write locally and run Build, Load, Test and Health against Microsoft Fabric.</p>
+</div>
+<div>
+<h3>Fabric Notebook</h3>
+<p>Install the same Python package:</p>
+<div class="code"><div class="code-bar"><span>Notebook cell</span></div><pre><code>%pip install weaverstack</code></pre></div>
+<p>Then:</p>
+<div class="code"><div class="code-bar"><span>Python</span></div><pre><code>import weaver</code></pre></div>
+<p>Weaver can use the Notebook's existing workspace, Spark session and identity. No desktop installation is required.</p>
+<p class="small">For repeatable jobs, add Weaver to the attached Fabric Environment rather than relying on a session-scoped installation.</p>
+</div>
+<div>
+<h3>Both</h3>
+<p>Develop locally, run in Fabric, or move between the two. Your Weaver project doesn't need to be rewritten for a different execution environment.</p>
+</div>
+</div>
+<p><a class="text-link" href="https://docs.weaverstack.dev/advanced/portable-execution-between-desktop-and-fabric/">Working between desktop and Fabric →</a></p>
 </div>
 </section>
 <section class="section">
 <div class="wrap">
-<h2>Choose your first item</h2>
-<p>Each route starts with familiar code and a result you can inspect. Choose the item you need; the other routes are independent.</p>
+<h2>Sign in the way your organisation works</h2>
+<dl class="auth-options">
+<div><dt>Browser sign-in</dt><dd>For interactive development.</dd></div>
+<div><dt>Azure CLI</dt><dd>When you're already authenticated with Azure.</dd></div>
+<div><dt>Service principals</dt><dd>For unattended jobs and automation.</dd></div>
+<div><dt>Fabric Notebook identity</dt><dd>When running inside your workspace.</dd></div>
+</dl>
+<p>No separate Weaver account or authentication service is required. Existing Fabric and Power BI permissions still apply.</p>
+</div>
+</section>
+<section class="section">
+<div class="wrap">
+<h2>Choose what you want to build</h2>
+<p>Start with what you already know. Each tutorial produces a working result. Add other Fabric items when you need them.</p>
 <div class="cards two">
 <a class="card" href="https://docs.weaverstack.dev/lakehouse/python/">
-<h3>Lakehouse</h3><p>Read a CSV file into a Delta Table with Python.</p><span class="go">Build a Lakehouse pipeline →</span></a>
+<h3>Lakehouse</h3><p>Use Python or Spark SQL to turn files into managed Delta Tables.</p><span class="go">Build your first Lakehouse pipeline →</span></a>
 <a class="card" href="https://docs.weaverstack.dev/warehouse/first-project/">
-<h3>Warehouse</h3><p>Write a Table and a dependent View in T-SQL.</p><span class="go">Build a Warehouse pipeline →</span></a>
+<h3>Warehouse</h3><p>Write ordinary T-SQL. Let Weaver create the Table and its loading machinery.</p><span class="go">Build your first Warehouse pipeline →</span></a>
 <a class="card" href="https://docs.weaverstack.dev/semantic-models/native-tmdl/">
-<h3>Semantic models</h3><p>Deploy native TMDL and add a modelling convention.</p><span class="go">Deploy a native model →</span></a>
+<h3>Semantic Models</h3><p>Deploy native TMDL, apply modelling conventions and validate calculations.</p><span class="go">Deploy your first Semantic Model →</span></a>
 <a class="card" href="https://docs.weaverstack.dev/reports/deploy/">
-<h3>Reports</h3><p>Deploy a native Report linked to its semantic model.</p><span class="go">Deploy a native Report →</span></a>
+<h3>Reports</h3><p>Deploy the same native Power BI Report project to different environments, with the correct Semantic Model binding.</p><span class="go">Deploy a Power BI Report →</span></a>
 </div>
 </div>
 </section>
-<section class="section">
+<section class="section" style="background: var(--paper-deep);">
 <div class="wrap">
-<h2>Using an existing Power BI project</h2>
-<p>You can deploy a native model and Report without setting up a Weaver catalogue. Use an existing service workspace and the model’s required licence and permissions.</p>
-<p><a class="text-link" href="https://docs.weaverstack.dev/semantic-models/native-tmdl/">Deploy an existing PBIP →</a>
-</p>
+<h2>Only have Power BI licences? That's enough.</h2>
+<p>With an existing Power BI service workspace and the appropriate licence and permissions, you can deploy native Semantic Models and Reports, apply modelling conventions and validate DAX calculations. No Fabric Lakehouse or Warehouse workloads required.</p>
+<p>Start with Power BI. Adopt the other Fabric capabilities whenever you're ready.</p>
+<p><a class="text-link" href="https://docs.weaverstack.dev/semantic-models/native-tmdl/">Get started with your existing Power BI project →</a></p>
 </div>
 </section>
 </main>
