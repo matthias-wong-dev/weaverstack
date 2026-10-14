@@ -115,6 +115,7 @@ class TargetInventory:
     runtime_references: tuple[str, ...] = ()
     workspace_id: str | None = None
     item_id: str | None = None
+    workspace_name: str | None = None
 
     def to_mapping(self) -> dict[str, object]:
         return {
@@ -131,6 +132,7 @@ class TargetInventory:
             "procedures": list(self.procedures),
             "runtime_references": list(self.runtime_references),
             "workspace_id": self.workspace_id,
+            "workspace_name": self.workspace_name,
             "item_id": self.item_id,
         }
 
@@ -154,6 +156,7 @@ class TargetInventory:
             procedures=tuple(mapping.get("procedures", ())),
             runtime_references=tuple(mapping.get("runtime_references", ())),
             workspace_id=mapping.get("workspace_id"),
+            workspace_name=mapping.get("workspace_name"),
             item_id=mapping.get("item_id"),
         )
 
@@ -269,7 +272,7 @@ def read_lakehouse_inventory(
     ``schema.name`` views Weaver recorded installing here.
     """
 
-    lakehouse = ItemRef(target.item_id)
+    lakehouse = ItemRef(target.name)
     tables_root = resolver.tables_root(lakehouse)
     files_root = resolver.files_root(lakehouse)
     enumerate_shortcuts = getattr(resolver, "onelake_shortcuts", None)

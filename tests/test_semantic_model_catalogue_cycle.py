@@ -52,13 +52,17 @@ def test_semantic_key_upgrade_delivers_warehouse_compatible_transactions(tmp_pat
 
 
 @weaver_test()
-def test_old_catalogue_identity_columns_are_added_before_publication(tmp_path):
+def test_old_catalogue_identity_is_replaced_before_publication(tmp_path):
     _, repository, bindings, session, state = prepared(tmp_path)
-    shape_sql = "SELECT TABLE_NAME, COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = N'_'"
+    shape_sql = "SELECT TABLE_NAME, COLUMN_NAME, IS_NULLABLE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = N'_'"
     session.answer_tsql(
         shape_sql,
         [
-            {"TABLE_NAME": table.name, "COLUMN_NAME": table.public_name_of(column.name)}
+            {
+                "TABLE_NAME": table.name,
+                "COLUMN_NAME": table.public_name_of(column.name),
+                "IS_NULLABLE": "NO" if column.not_null else "YES",
+            }
             for table in CHECKED_TABLES
             for column in table.columns
             if not (
@@ -68,6 +72,9 @@ def test_old_catalogue_identity_columns_are_added_before_publication(tmp_path):
     )
     catalogue = read_catalogue_state(catalogue_connection(session), (ITEM,))
     catalogue = Catalogue.from_mapping(catalogue.to_mapping())
+    from weaver.catalogue.installation import resolve_installations
+
+    resolve_installations(catalogue, (), resolver=session.resolver())
     bundle = bundle_for(
         tmp_path,
         repository,
@@ -83,12 +90,13 @@ def test_old_catalogue_identity_columns_are_added_before_publication(tmp_path):
     upgrades = [
         payload
         for payload in payloads
-        if b"ALTER TABLE [_].[Installation] ADD" in payload
+        if b"CREATE TABLE [_].[Installation_identity_stage]" in payload
     ]
     assert len(upgrades) == 1
-    assert b"[Workspace ID] varchar(128)" in upgrades[0]
-    assert b"[Item ID] varchar(128)" in upgrades[0]
-    assert not any(b"DROP TABLE [_].[Installation]" in payload for payload in payloads)
+    assert b"[Workspace GUID] varchar(128) NOT NULL" in upgrades[0]
+    assert b"[Target item GUID] varchar(128) NOT NULL" in upgrades[0]
+    assert b"DROP TABLE [_].[Installation]" in upgrades[0]
+    assert b"sp_rename" in upgrades[0]
     from weaver.graph import Graph
 
     actions = [a for _, _, a in bundle.plan.actions()]
@@ -110,15 +118,19 @@ def test_semantic_key_upgrade_preserves_all_installations_in_place(tmp_path):
     from weaver.graph import Graph
 
     _, repository, bindings, session, state = prepared(tmp_path)
-    shape_sql = "SELECT TABLE_NAME, COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = N'_'"
+    shape_sql = "SELECT TABLE_NAME, COLUMN_NAME, IS_NULLABLE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = N'_'"
     old_shape = [
-        {"TABLE_NAME": table.name, "COLUMN_NAME": table.public_name_of(column.name)}
+        {
+            "TABLE_NAME": table.name,
+            "COLUMN_NAME": table.public_name_of(column.name),
+            "IS_NULLABLE": "NO" if column.not_null else "YES",
+        }
         for table in CHECKED_TABLES
         for column in table.columns
         if column.name != "table_ordinal"
     ]
     old_shape.extend(
-        {"TABLE_NAME": table.name, "COLUMN_NAME": column}
+        {"TABLE_NAME": table.name, "COLUMN_NAME": column, "IS_NULLABLE": "YES"}
         for table in SEMANTIC_TABLES
         for column in ("Schema name", "Object name")
     )

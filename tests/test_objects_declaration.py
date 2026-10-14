@@ -897,9 +897,11 @@ def test_a_detached_lakehouse_is_reached_exactly_like_an_attached_one(
 
     import weaver.lakehouse as module
 
+    points = []
+
     class FakeFs:
         def mount(self, source, point, options=None):
-            pass
+            points.append(point)
 
         def getMountPath(self, point):
             return f"/synfs/notebook/session-1{point}"
@@ -914,9 +916,10 @@ def test_a_detached_lakehouse_is_reached_exactly_like_an_attached_one(
     )
 
     assert export.spark_path() == "abfss://ws@host/other/Files/Sales/OrderExport"
-    assert export.path() == Path(
-        "/synfs/notebook/session-1/weaver/other/Files/Sales/OrderExport"
-    )
+    path = export.path()
+    assert len(points) == 1
+    assert points[0].startswith("/weaver/other/")
+    assert path == Path(f"/synfs/notebook/session-1{points[0]}/Files/Sales/OrderExport")
 
 
 # --- the surface is only what is documented ---------------------------------

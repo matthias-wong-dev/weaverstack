@@ -2,6 +2,7 @@
 
 import json
 
+import pytest
 from support.weaver_test import weaver_test
 from test_semantic_model_boundary import scratch_model as scratch_model
 
@@ -9,6 +10,7 @@ import weaver
 
 
 @weaver_test(remote=True, resources={"rest"})
+@pytest.mark.dax
 def test_build_and_load_without_a_catalogue(
     scratch_model, semantic_model_session, scratch_semantic_model_name, tmp_path
 ):

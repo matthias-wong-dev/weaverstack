@@ -197,7 +197,23 @@ def check_mirror(plan: MirrorPlan, *, session=None) -> ResolvedMirror:
         catalogue = (
             catalogue_for(opened, _source_workspace(plan)) if plan.items else None
         )
-        return resolve_mirror(plan, catalogue, borrowed=borrowed)
+        resolved = resolve_mirror(plan, catalogue, borrowed=borrowed)
+        _verify_source_identities(resolved, session=opened)
+        return resolved
+
+
+def _verify_source_identities(resolved: "ResolvedMirror", *, session) -> None:
+    """Refuse a selected item whose source installation names a replaced item.
+
+    Runs before anything is emptied. Installations of unselected items are not
+    read.
+    """
+
+    from ..catalogue.installation import verify_installations
+
+    rows = tuple(resolved.installations.values())
+    if rows:
+        verify_installations(rows, resolver=session.resolver(resolved.workspace))
 
 
 def resolve_mirror(

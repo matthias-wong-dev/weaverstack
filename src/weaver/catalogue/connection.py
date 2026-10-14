@@ -22,6 +22,7 @@ class CatalogueConnection:
         self._execute = execute
         self._query_sets = query_sets
         self._shape: dict[str, dict[str, str]] | None = None
+        self._nullability: dict[str, dict[str, str]] = {}
 
     # --- the shape of `_` ----------------------------------------------------
 
@@ -31,7 +32,7 @@ class CatalogueConnection:
         if self._shape is None:
             found: dict[str, dict[str, str]] = {}
             rows = self._query(
-                "SELECT TABLE_NAME, COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS "
+                "SELECT TABLE_NAME, COLUMN_NAME, IS_NULLABLE FROM INFORMATION_SCHEMA.COLUMNS "
                 f"WHERE TABLE_SCHEMA = {literal(CATALOGUE_SCHEMA)}"
             )
             for row in rows:
@@ -39,6 +40,12 @@ class CatalogueConnection:
                 table = str(values["TABLE_NAME"])
                 column = str(values["COLUMN_NAME"])
                 found.setdefault(table.casefold(), {})[column.casefold()] = column
+                nullable = values.get("IS_NULLABLE")
+                if nullable not in {"YES", "NO"}:
+                    raise CommandError(
+                        f"Catalogue nullability is missing for {table}.{column}"
+                    )
+                self._nullability.setdefault(table.casefold(), {})[column] = nullable
             self._shape = found
         return self._shape
 
@@ -47,10 +54,15 @@ class CatalogueConnection:
 
         return self.shape().get(table.name.casefold())
 
+    def nullability_of(self, table) -> dict[str, str]:
+        self.shape()
+        return self._nullability.get(table.name.casefold(), {})
+
     def forget_shape(self) -> None:
         """Read the schema again, after a build created or altered a table."""
 
         self._shape = None
+        self._nullability = {}
 
     # --- reading -------------------------------------------------------------
 

@@ -140,14 +140,27 @@ ITEM = WeaverItemId(*PROCEDURE_ITEM)
 
 
 def _install(
-    executor, object_name: str, catalogue: str, *, static: bool, strict: bool = False
+    executor,
+    object_name: str,
+    catalogue: str,
+    *,
+    physical_item,
+    workspace_name,
+    static: bool,
+    strict: bool = False,
 ) -> Estate:
     document = read_source_document(
         f"{SCHEMA}.{object_name}.sql",
         _source(object_name, static=static, strict=strict).encode("utf-8"),
         WAREHOUSE,
     )
-    prepare_hand_installed(executor, SCHEMA, catalogue)
+    prepare_hand_installed(
+        executor,
+        SCHEMA,
+        catalogue,
+        physical_item=physical_item,
+        workspace_name=workspace_name,
+    )
     estate = Estate(executor, object_name)
     _drop(estate)
     executor.execute_script(
@@ -169,7 +182,12 @@ def _module_estate(
 
     initialise_catalogue()
     built = install(
-        warehouse.executor, object_name, workspace.catalogue_item.name, **options
+        warehouse.executor,
+        object_name,
+        workspace.catalogue_item.name,
+        physical_item=warehouse.item,
+        workspace_name=workspace.workspace,
+        **options,
     )
     yield built
     drop(built)
@@ -958,14 +976,26 @@ class WideEstate(Estate):
 
 
 def _install_wide(
-    executor, object_name: str, catalogue: str, *, incremental: bool
+    executor,
+    object_name: str,
+    catalogue: str,
+    *,
+    physical_item,
+    workspace_name,
+    incremental: bool,
 ) -> WideEstate:
     document = read_source_document(
         f"{SCHEMA}.{object_name}.sql",
         _wide_source(object_name, incremental=incremental).encode("utf-8"),
         WAREHOUSE,
     )
-    prepare_hand_installed(executor, SCHEMA, catalogue)
+    prepare_hand_installed(
+        executor,
+        SCHEMA,
+        catalogue,
+        physical_item=physical_item,
+        workspace_name=workspace_name,
+    )
     estate = WideEstate(executor, object_name, retires=incremental)
     _drop_wide(estate)
     executor.execute_script(f"create table [{SCHEMA}].[{estate.raw}] ({WIDE_RAW_DDL});")
@@ -1471,8 +1501,16 @@ def _reload_document(object_name: str, body: str):
     )
 
 
-def _install_reload(executor, object_name: str, catalogue: str) -> Estate:
-    prepare_hand_installed(executor, SCHEMA, catalogue)
+def _install_reload(
+    executor, object_name: str, catalogue: str, *, physical_item, workspace_name
+) -> Estate:
+    prepare_hand_installed(
+        executor,
+        SCHEMA,
+        catalogue,
+        physical_item=physical_item,
+        workspace_name=workspace_name,
+    )
     estate = Estate(executor, object_name)
     _drop(estate)
     executor.execute_script(

@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 from support.weaver_test import weaver_test
+from support.workspaces import _identifier
 from test_semantic_model_build_cycle import session_for
 from test_semantic_model_rest_boundary import Client, response
 
@@ -18,8 +19,9 @@ from weaver.fabric.semantic_model import SemanticModelClient
 
 ITEM = WeaverItemId.parse("SemanticModel/Reporting")
 ROOT = WeaverDocumentId.model_root(ITEM)
-WORKSPACE_ID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-MODEL_ID = "11111111-2222-3333-4444-555555555555"
+# The identities the Demo workspace's inventory gives these names.
+WORKSPACE_ID = _identifier("workspace", "Demo")
+MODEL_ID = _identifier("SemanticModel", "Reporting_Dev")
 REQUEST_ID = "99999999-8888-7777-6666-555555555555"
 COMPLETED = {
     "status": "Completed",
@@ -69,9 +71,13 @@ def installed_rows():
 
 def answer_installed(session, rows):
     session.answer_tsql(
-        "SELECT TABLE_NAME, COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = N'_'",
+        "SELECT TABLE_NAME, COLUMN_NAME, IS_NULLABLE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = N'_'",
         [
-            {"TABLE_NAME": table.name, "COLUMN_NAME": column.public_name}
+            {
+                "TABLE_NAME": table.name,
+                "COLUMN_NAME": column.public_name,
+                "IS_NULLABLE": "NO" if column.not_null else "YES",
+            }
             for table in CATALOGUE_TABLES
             for column in table.columns
         ],
@@ -202,7 +208,7 @@ def test_public_load_refuses_missing_or_malformed_frozen_ids(monkeypatch, field,
 
 
 @weaver_test()
-def test_public_load_uses_frozen_typed_ids_without_name_resolution(monkeypatch):
+def test_public_load_resolves_renamed_workspace_but_uses_frozen_item_ids(monkeypatch):
     import requests
 
     from weaver.fabric.auth import FABRIC_SCOPE, TokenProvider
@@ -224,7 +230,25 @@ def test_public_load_uses_frozen_typed_ids_without_name_resolution(monkeypatch):
         answer = requests.Response()
         answer.status_code = 202 if method == "POST" else 200
         answer.headers = {"x-ms-request-id": REQUEST_ID}
-        answer._content = json.dumps({} if method == "POST" else COMPLETED).encode()
+        fabric = "https://api.fabric.microsoft.com/v1/workspaces"
+        body = (
+            {"value": [{"id": WORKSPACE_ID, "displayName": "RenamedWorkspace"}]}
+            if url == fabric
+            else {
+                "value": [
+                    {
+                        "id": MODEL_ID,
+                        "displayName": "Reporting_Dev",
+                        "type": "SemanticModel",
+                    }
+                ]
+            }
+            if url.startswith(f"{fabric}/{WORKSPACE_ID}/items")
+            else {}
+            if method == "POST"
+            else COMPLETED
+        )
+        answer._content = json.dumps(body).encode()
         return answer
 
     class BoundarySession(TestSession):
@@ -240,11 +264,19 @@ def test_public_load_uses_frozen_typed_ids_without_name_resolution(monkeypatch):
         assert report.succeeded
         base = f"https://api.powerbi.com/v1.0/myorg/groups/{WORKSPACE_ID}/datasets/{MODEL_ID}/refreshes"
         assert [(method, url) for method, url, _ in sent] == [
+            ("GET", "https://api.fabric.microsoft.com/v1/workspaces"),
+            (
+                "GET",
+                f"https://api.fabric.microsoft.com/v1/workspaces/{WORKSPACE_ID}/items?type=SemanticModel",
+            ),
             ("GET", base.replace("/refreshes", "/datasources")),
             ("POST", base),
             ("GET", f"{base}/{REQUEST_ID}"),
         ]
-        assert set(scopes) == {"https://analysis.windows.net/powerbi/api/.default"}
+        assert set(scopes) == {
+            FABRIC_SCOPE,
+            "https://analysis.windows.net/powerbi/api/.default",
+        }
         assert not session.python and not session.spark_sql
 
 

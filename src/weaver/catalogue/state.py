@@ -85,6 +85,7 @@ class Catalogue:
         owns_session: bool = False,
         schema_additions=(),
         schema_removals=(),
+        installation_upgrade=None,
     ) -> None:
         self.rows = MappingProxyType(dict(rows))
         self.registered = (
@@ -100,6 +101,7 @@ class Catalogue:
         )
         self.schema_additions = tuple(tuple(pair) for pair in schema_additions)
         self.schema_removals = tuple(tuple(pair) for pair in schema_removals)
+        self.installation_upgrade = installation_upgrade
         self._load_history = load_history
         self._writer = writer
         self._session = session
@@ -347,6 +349,7 @@ class Catalogue:
                 )
             ],
             "materialised": sorted(self.materialised),
+            "installation_upgrade": self.installation_upgrade,
             **(
                 {"schema_removals": list(self.schema_removals)}
                 if self.schema_removals
@@ -385,6 +388,7 @@ class Catalogue:
             materialised=frozenset(mapping.get("materialised", ())),
             schema_additions=mapping.get("schema_additions", ()),
             schema_removals=mapping.get("schema_removals", ()),
+            installation_upgrade=mapping.get("installation_upgrade"),
             writer=writer,
             session=session,
         )
@@ -755,7 +759,9 @@ def _installed_mirrors(
     return MappingProxyType(mirrors)
 
 
-def read_target_occupancy(catalogue: Any) -> dict[tuple[str, str], frozenset]:
+def read_target_occupancy(
+    catalogue: Any, *, rows=None
+) -> dict[tuple[str, str], frozenset]:
     """Read whole-estate target occupancy from ``_.Installation``.
 
     Keys are casefolded ``(kind, name)`` pairs. This read is deliberately
@@ -763,7 +769,9 @@ def read_target_occupancy(catalogue: Any) -> dict[tuple[str, str], frozenset]:
     """
 
     occupied: dict[tuple[str, str], set] = {}
-    for item, target in _installed_targets(read_table(catalogue, INSTALLATION)):
+    for item, target in _installed_targets(
+        read_table(catalogue, INSTALLATION) if rows is None else rows
+    ):
         occupied.setdefault(target, set()).add(item)
     return {target: frozenset(items) for target, items in occupied.items()}
 
@@ -793,6 +801,7 @@ def read_catalogue_state(catalogue: Any, items) -> Catalogue:
 
     additions = []
     removals = []
+    installation_upgrade = None
     for table in CHECKED_TABLES:
         columns = catalogue.columns_of(table)
         if columns is None:
@@ -812,7 +821,7 @@ def read_catalogue_state(catalogue: Any, items) -> Catalogue:
             if folded_name not in folded
         )
         introduced = (
-            {"Workspace ID", "Item ID"}
+            {"Workspace name", "Workspace GUID", "Target item GUID"}
             if table == INSTALLATION
             else {"Table ordinal"}
             if table == SEMANTIC_MODEL_TABLE
@@ -824,9 +833,16 @@ def read_catalogue_state(catalogue: Any, items) -> Catalogue:
                 for column in ("Schema name", "Object name")
                 if column.casefold() in folded
             )
-        additions.extend(
-            (table.name, column) for column in absent_columns if column in introduced
-        )
+        if table == INSTALLATION:
+            from .installation import installation_schema_upgrade
+
+            installation_upgrade = installation_schema_upgrade(catalogue)
+        else:
+            additions.extend(
+                (table.name, column)
+                for column in absent_columns
+                if column in introduced
+            )
         absent_columns = [
             column for column in absent_columns if column not in introduced
         ]
@@ -891,6 +907,7 @@ def read_catalogue_state(catalogue: Any, items) -> Catalogue:
         ),
         schema_additions=additions,
         schema_removals=removals,
+        installation_upgrade=installation_upgrade,
     )
 
 
@@ -1041,6 +1058,7 @@ def reconcile_catalogue_state(
             materialised=state.materialised,
             schema_additions=state.schema_additions,
             schema_removals=state.schema_removals,
+            installation_upgrade=state.installation_upgrade,
         ),
         stale_claims=tuple(dict.fromkeys(stale_claims)),
         stale_objects=tuple(sorted(stale_labels)),

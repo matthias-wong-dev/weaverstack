@@ -76,6 +76,7 @@ NOT_INSTALLED = "not_installed"
 CERTIFIED_MISSING = "certified_missing"
 DEPENDENCY_UNRESOLVED = "dependency_unresolved"
 AMBIGUOUS_INSTALLATION = "ambiguous_installation"
+INSTALLATION_INCONSISTENT = "installation_inconsistent"
 
 #: Default age of a settled load before it is stale.
 DEFAULT_AGE_HOURS = 24
@@ -847,6 +848,7 @@ def assess(
     items: Sequence[WeaverItemId] | None = None,
     inventories: Mapping[PhysicalTargetRef, object] | None = None,
     source: Catalogue | None = None,
+    installation_faults: Mapping[WeaverItemId, str] | None = None,
 ) -> HealthReport:
     """One catalogue's operational state, as a report.
 
@@ -868,6 +870,9 @@ def assess(
 
     ``source`` is the catalogue this estate mirrors, where one is mirrored. It
     supplies Load state for the mirrored identities and nothing else.
+
+    ``installation_faults`` maps an item to the reason its installation no longer
+    names its Fabric item. Each is reported on the Build section.
     """
 
     dag = catalogue.dag()
@@ -881,6 +886,7 @@ def assess(
         selected=selected,
         inventories=dict(inventories or {}),
         effective=effective,
+        installation_faults=installation_faults,
     )
     return HealthReport(
         generated_at=generated_at,
@@ -906,12 +912,14 @@ class _Assessment:
         selected,
         inventories,
         effective=None,
+        installation_faults=None,
     ) -> None:
         self.dag = dag
         self.catalogue = catalogue
         self.as_of = as_of
         self.selected = selected
         self.inventories = inventories
+        self.installation_faults = installation_faults or {}
         self.test_status = test_statuses(catalogue)
         # The one Load implementation, over the effective statuses. Validation
         # freshness asks it the same question, so there is one answer to "when
@@ -1044,6 +1052,7 @@ class _Assessment:
         findings.extend(self._declared_but_not_installed())
         findings.extend(self._unresolved_reads())
         findings.extend(self._ambiguous_addresses())
+        findings.extend(self._inconsistent_installations())
         findings.extend(self._absent_from_inventory())
         return HealthSection(
             area=BUILD,
@@ -1107,6 +1116,21 @@ class _Assessment:
                 severity=RED,
                 message=found[0],
                 target=str(target),
+            )
+
+    def _inconsistent_installations(self):
+        for item, message in sorted(
+            self.installation_faults.items(), key=lambda pair: str(pair[0])
+        ):
+            target = self.dag.installations.get(item)
+            if self.selected is not None and target not in self.selected:
+                continue
+            yield HealthFinding(
+                area=BUILD,
+                code=INSTALLATION_INCONSISTENT,
+                severity=RED,
+                message=message,
+                target=None if target is None else str(target),
             )
 
     def _absent_from_inventory(self):
@@ -1215,6 +1239,7 @@ def _text(value: object) -> str | None:
 __all__ = [
     "AMBER",
     "AMBIGUOUS_INSTALLATION",
+    "INSTALLATION_INCONSISTENT",
     "AREAS",
     "BUILD",
     "CERTIFIED_MISSING",

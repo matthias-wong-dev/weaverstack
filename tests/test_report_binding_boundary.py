@@ -55,7 +55,7 @@ def test_report_only_preflight_refuses_installed_model_physical_drift(
     from weaver.errors import BuildError
     from weaver.workspaces import Workspace
 
-    root, session, *_ = prepared_project(tmp_path)
+    root, session, events, model_client, report_client = prepared_project(tmp_path)
     repository = parse_item_repository(Location(root.as_posix()))
     model = WeaverItemId("SemanticModel", "Reporting")
     model_rows = dict(Catalogue.from_repository(repository).rows[model])
@@ -85,4 +85,8 @@ def test_report_only_preflight_refuses_installed_model_physical_drift(
             session=session,
             workspace=Workspace(workspace="Demo", catalogue="Warehouse/Catalogue"),
         )
-    assert not session.tsql and not session.spark_sql
+    assert session.tsql == (
+        "SELECT TABLE_NAME, COLUMN_NAME, IS_NULLABLE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = N'_'",
+    )
+    assert not session.spark_sql and not session.python
+    assert not model_client.calls and not report_client.calls and not events

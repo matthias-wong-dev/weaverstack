@@ -276,10 +276,28 @@ def read_build_state(
 
     # Check occupancy before the slower per-target inventory and Spark reads.
     occupancy = {}
+    connection = None
+    installation_rows = None
     if catalogued:
+        from ..catalogue.builtin import BUILTIN_ITEM
+        from ..catalogue.connection import catalogue_connection
+        from ..catalogue.installation import installation_schema_upgrade
+        from ..catalogue.reader import read_table
+        from ..catalogue.tables import INSTALLATION
+
+        connection = catalogue_connection(session, workspace)
+        if (
+            any(b.item != BUILTIN_ITEM for b in bindings.entries)
+            or installation_schema_upgrade(connection) is not None
+        ):
+            installation_rows = read_table(connection, INSTALLATION)
         with session.step("Check target occupancy"):
             occupancy = _refuse_occupied_targets(
-                bindings, session=session, workspace=workspace
+                bindings,
+                session=session,
+                workspace=workspace,
+                connection=connection,
+                rows=installation_rows,
             )
     semantic_expressions = {}
     required = set(required_catalogue_items)
@@ -313,7 +331,25 @@ def read_build_state(
                 session=session,
                 workspace=workspace,
                 required=tuple(sorted(required, key=str)),
+                connection=connection,
             )
+            from ..catalogue.installation import resolve_installations
+
+            if installation_rows is None:
+                installation_rows = tuple(catalogue.table_rows(INSTALLATION))
+            resolved_rows = resolve_installations(
+                catalogue,
+                installation_rows,
+                resolver=session.resolver(workspace),
+                items=required,
+            )
+            resolved_by_item = {
+                WeaverItemId(row["item_type"], row["item_name"]): row
+                for row in resolved_rows
+            }
+            for item, tables in catalogue.rows.items():
+                if item in resolved_by_item and tables.get(INSTALLATION.name):
+                    tables[INSTALLATION.name][0].update(resolved_by_item[item])
     if repository is not None:
         from ..catalogue.tables import INSTALLATION
 
@@ -400,7 +436,9 @@ def read_build_state(
     )
 
 
-def _refuse_occupied_targets(bindings: ItemBindings, *, session, workspace):
+def _refuse_occupied_targets(
+    bindings: ItemBindings, *, session, workspace, connection=None, rows=None
+):
     """Refuse a target already installed to by an item outside this build.
 
     Occupancy is read unscoped, because a build's own catalogue read is scoped to
@@ -419,7 +457,9 @@ def _refuse_occupied_targets(bindings: ItemBindings, *, session, workspace):
     ordinary = [binding for binding in bindings.entries if binding.item != BUILTIN_ITEM]
     if not ordinary:
         return {}
-    occupancy = read_target_occupancy(catalogue_connection(session, workspace))
+    occupancy = read_target_occupancy(
+        connection or catalogue_connection(session, workspace), rows=rows
+    )
     for binding in ordinary:
         kind, name = binding.target.physical_kind, binding.target.item.name
         others = sorted(
@@ -439,12 +479,14 @@ def _refuse_occupied_targets(bindings: ItemBindings, *, session, workspace):
     return occupancy
 
 
-def _read_catalogue(*, session, workspace, required):
+def _read_catalogue(*, session, workspace, required, connection=None):
     """Read the Warehouse catalogue over TDS without starting Spark."""
 
     from ..catalogue.connection import catalogue_connection
 
-    return read_catalogue_state(catalogue_connection(session, workspace), required)
+    return read_catalogue_state(
+        connection or catalogue_connection(session, workspace), required
+    )
 
 
 def session_catalogue(session, workspace, item: ItemRef):
@@ -820,11 +862,20 @@ def read_target_inventories(
     supplied_sql = sql_by_item or {}
     workspace = workspace if workspace is not None else session.workspace
     inventories = {}
+    resolved_items = {}
     delta = []
+    if len(bindings.entries) > 1:
+        # One listing answers every target's lookup below.
+        discover_once = getattr(session.resolver(workspace), "discover_once", None)
+        if discover_once is not None:
+            discover_once()
 
     # Warehouse inventories are separate TDS reads; Lakehouses share one substep.
     for binding in bindings.entries:
         target = binding.to_bound_target()
+        resolved_items[binding.item] = session.resolve_item(
+            target.name, item_type=binding.item.item_type, workspace=workspace
+        )
         if target.kind == WAREHOUSE_TARGET:
             with session.substep(f"Read {target.display} inventory"):
                 sql = supplied_sql.get(binding.item)
@@ -837,16 +888,12 @@ def read_target_inventories(
                     from ..targets import WarehouseTarget
 
                     sql = session.sql_executor(
-                        WarehouseTarget.parse(target.item_id), workspace=workspace
+                        WarehouseTarget.parse(target.name), workspace=workspace
                     )
                 inventories[binding.item] = read_warehouse_inventory(target, sql=sql)
         elif target.kind in {SEMANTIC_MODEL_TARGET, "report"}:
             with session.substep(f"Resolve {target.display}"):
-                resolved = session.resolve_item(
-                    target.name,
-                    item_type="Report" if target.kind == "report" else "SemanticModel",
-                    workspace=workspace,
-                )
+                resolved = resolved_items[binding.item]
                 inventories[binding.item] = TargetInventory(
                     target.id,
                     target.kind,
@@ -873,6 +920,18 @@ def read_target_inventories(
             )
         for item, target in delta:
             inventories[item] = observed[target.id]
+    from dataclasses import replace
+
+    physical_workspace = session.resolver(workspace).workspace
+    for binding in bindings.entries:
+        resolved = resolved_items[binding.item]
+        inventories[binding.item] = replace(
+            inventories[binding.item],
+            workspace_id=resolved.workspace_id,
+            item_id=resolved.id,
+            target_name=resolved.name,
+            workspace_name=physical_workspace.name,
+        )
     return inventories
 
 
@@ -886,7 +945,7 @@ def _lakehouse_inventories(targets, *, session, workspace, known_views) -> dict:
             target,
             resolver=resolver,
             store=store,
-            catalogue=session_catalogue(session, workspace, ItemRef(target.item_id)),
+            catalogue=session_catalogue(session, workspace, ItemRef(target.name)),
             known_views=known_views[target.id],
         )
         for target in targets

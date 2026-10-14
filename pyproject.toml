@@ -88,6 +88,7 @@ markers = [
     "slow: an opt-in test whose live operation is too expensive for the ordinary selection",
     # Requires --performance: times the representative 1,000-object estates.
     "performance: a Fabric wall-clock qualification of Build, Wipe and Mirror",
+    "dax: test claim executes Power BI DAX queries",
     # Place. Every test that needs a real workspace carries it, so `-m fabric`
     # is the whole set rather than a subset that quietly excludes the expensive
     # half — which is what `fabric` meaning *both* place and precondition cost.

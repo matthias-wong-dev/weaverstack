@@ -299,6 +299,12 @@ class _FakeCatalogue:
             return None
         return {}
 
+    def nullability_of(self, table):
+        return {
+            table.public_name_of(name): "NO"
+            for name in self._columns.get(table.name, ())
+        }
+
     def rows(self, *_a, **_k):
         raise AssertionError("no rows should be read")
 

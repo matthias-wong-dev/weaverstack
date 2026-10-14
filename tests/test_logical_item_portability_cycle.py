@@ -321,12 +321,13 @@ def _occupancy(installed: dict[str, str]):
 
     session = given_session(workspace=given_workspace(catalogue="Warehouse/Weaver"))
     session.answer_tsql(
-        "SELECT TABLE_NAME, COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS "
+        "SELECT TABLE_NAME, COLUMN_NAME, IS_NULLABLE FROM INFORMATION_SCHEMA.COLUMNS "
         "WHERE TABLE_SCHEMA = N'_'",
         [
             {
                 "TABLE_NAME": INSTALLATION.name,
                 "COLUMN_NAME": INSTALLATION.public_name_of(name),
+                "IS_NULLABLE": "NO",
             }
             for name in INSTALLATION.column_names
         ],

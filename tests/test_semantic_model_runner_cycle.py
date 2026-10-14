@@ -5,6 +5,7 @@ from dataclasses import replace
 import pytest
 from support.catalogues import Recording
 from support.weaver_test import weaver_test
+from support.workspaces import _identifier
 from test_semantic_model_load_cycle import (
     COMPLETED,
     ITEM,
@@ -37,14 +38,14 @@ def test_semantic_nodes_keep_known_graph_order_and_runner_failure_policy(
     rows = installed_rows()
     child = WeaverItemId.parse("SemanticModel/Summary")
     independent = WeaverItemId.parse("SemanticModel/Unrelated")
-    for index, item in enumerate((child, independent), 1):
+    for item in (child, independent):
         rows[item] = {
             table: tuple({**row, "item_name": item.item_name} for row in values)
             for table, values in rows[ITEM].items()
         }
         rows[item]["Installation"][0].update(
             target_name=item.item_name,
-            item_id=f"11111111-2222-3333-4444-{index:012d}",
+            item_id=_identifier("SemanticModel", item.item_name),
         )
     writer = Recording()
     catalogue = Catalogue(rows, writer=writer)
@@ -65,6 +66,9 @@ def test_semantic_nodes_keep_known_graph_order_and_runner_failure_policy(
 
     polls = ({"status": "Failed"} if failure else COMPLETED,)
     session, client, _ = refresh_session(monkeypatch, *polls, rows=rows)
+    session.resolver().client.items.extend(
+        ("SemanticModel", item.item_name) for item in (child, independent)
+    )
     with session:
         for item in (child, independent):
             model_id = rows[item]["Installation"][0]["item_id"]

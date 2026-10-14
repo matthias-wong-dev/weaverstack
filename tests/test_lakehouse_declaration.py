@@ -117,12 +117,13 @@ def test_a_folder_in_onelake_is_addressed_through_a_mount(monkeypatch):
     assert lakehouse.folder_spark_path("Sales", "Export") == (
         "abfss://ws@host/lh/Files/Sales/Export"
     )
-    assert lakehouse.folder_path("Sales", "Export") == Path(
-        "/synfs/notebook/session-1/weaver/lh/Files/Sales/Export"
-    )
+    path = lakehouse.folder_path("Sales", "Export")
+    point = next(iter(mounted))
+    assert point.startswith("/weaver/lh/")
+    assert path == Path(f"/synfs/notebook/session-1{point}/Files/Sales/Export")
     # Mounted by item id, so a second Lakehouse in the same session cannot
     # silently address the first.
-    assert mounted == {"/weaver/lh": ("abfss://ws@host/lh", MOUNT_OPTIONS)}
+    assert mounted == {point: ("abfss://ws@host/lh", MOUNT_OPTIONS)}
 
 
 @weaver_test()
@@ -182,7 +183,8 @@ def test_the_mount_is_made_once_per_session(monkeypatch):
     lakehouse.folder_path("Sales", "Export")
     lakehouse.folder_path("Sales", "Other")
 
-    assert calls == ["/weaver/lh"]
+    assert len(calls) == 1
+    assert calls[0].startswith("/weaver/lh/")
 
 
 @weaver_test()
@@ -493,7 +495,9 @@ def test_the_mount_happens_inside_the_quiet_context(monkeypatch):
 
     lakehouse = Lakehouse(name="Sales_LH", spark_root="abfss://ws@host/lh")
 
-    assert lakehouse.files_root() == "/synfs/notebook/session-1/weaver/lh/Files"
+    root = lakehouse.files_root()
+    assert root.startswith("/synfs/notebook/session-1/weaver/lh/")
+    assert root.endswith("/Files")
     assert quiet == ["open", "closed"]
 
 
@@ -591,5 +595,6 @@ def test_loads_reaching_one_lakehouse_at_once_mount_it_once(monkeypatch):
     for thread in threads:
         thread.join()
 
-    assert mounts == ["/weaver/lh"]
-    assert paths == ["/synfs/notebook/session-1/weaver/lh"] * 4
+    assert len(mounts) == 1
+    assert mounts[0].startswith("/weaver/lh/")
+    assert paths == [f"/synfs/notebook/session-1{mounts[0]}"] * 4

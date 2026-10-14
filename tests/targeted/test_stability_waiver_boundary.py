@@ -231,7 +231,7 @@ def _deployed(tmp_path, kind: str, object: str):
     from support.workspaces import given_resolver
 
     from weaver.etl import LOAD_ROOT
-    from weaver.lakehouse import _MOUNTS, lakehouse_for
+    from weaver.lakehouse import _MOUNTS, _Mount, lakehouse_for
     from weaver.run.runtime_boundary import DirectRunScope
     from weaver.runtime.python_context import RuntimeScope
     from weaver.targets import ItemRef
@@ -239,7 +239,9 @@ def _deployed(tmp_path, kind: str, object: str):
 
     workspace = Workspace(workspace="Demo", catalogue="Warehouse/Weaver")
     resolver = given_resolver(workspace=workspace, lakehouses=("Sales_LH",))
-    _MOUNTS[lakehouse_for(resolver, ItemRef("Sales_LH")).spark_root] = str(tmp_path)
+    _MOUNTS[lakehouse_for(resolver, ItemRef("Sales_LH")).spark_root] = _Mount(
+        point="/weaver/Sales_LH/test", local=str(tmp_path)
+    )
 
     session = SimpleNamespace(
         resolver=lambda ws=None: resolver, spark=lambda ws=None: None

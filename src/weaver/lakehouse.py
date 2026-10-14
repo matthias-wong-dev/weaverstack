@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import threading
+import uuid
 from contextlib import contextmanager, redirect_stdout
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -196,17 +197,19 @@ def default_lakehouse(spark: Any) -> Lakehouse:
 
 # --- the files root ---------------------------------------------------------
 
-#: Mount points already established in this session, by ``abfss://`` root. A
-#: session is one process, so this is process state: a second load of the same
-#: Lakehouse reuses the mount rather than asking Fabric to make another, which
-#: it refuses.
-_MOUNTS: dict[str, str] = {}
+
+@dataclass(frozen=True)
+class _Mount:
+    point: str
+    local: str
+
+
+#: Active mounts by resolved OneLake root.
+_MOUNTS: dict[str, _Mount] = {}
 _MOUNTING = threading.Lock()
 
-#: Where Weaver mounts a Lakehouse. Keyed by item id rather than fixed, because
-#: an estate spans several Lakehouses and one session may load from more than
-#: one, and a single fixed point would let the second address the first.
-_MOUNT_POINT = "/weaver/{item}"
+#: Reusing a released path can retain stale filesystem metadata in Fabric.
+_MOUNT_POINT = "/weaver/{item}/{generation}"
 
 #: Mount configuration. ``fileCacheTimeout=0`` because Weaver reaches the same
 #: Files area two ways, ``abfss://`` for storage work and this mount for authored
@@ -244,7 +247,7 @@ def _mounted(name: str, spark_root: str) -> str:
     with _MOUNTING:
         cached = _MOUNTS.get(spark_root)
         if cached:
-            return cached
+            return cached.local
         return _mount(name, spark_root)
 
 
@@ -254,23 +257,35 @@ def _mount(name: str, spark_root: str) -> str:
     if utils is None:
         raise LoadError(_outside_fabric(name))
 
-    point = _MOUNT_POINT.format(item=_item_of(spark_root))
+    point = _MOUNT_POINT.format(item=_item_of(spark_root), generation=uuid.uuid4().hex)
     try:
         with _quiet_mount():
             utils.fs.mount(spark_root, point, MOUNT_OPTIONS)
-    except Exception:
-        # The host may already hold the mount even when this cache does not.
-        pass
-    try:
-        local = utils.fs.getMountPath(point)
     except Exception as exc:
         raise LoadError(
             f"Lakehouse {name!r} Files could not be mounted: {exc}"
         ) from exc
-    if not local:
+    # The mount exists from here, so a failure below must not leave it behind
+    # unregistered, where nothing would release it.
+    try:
+        local = utils.fs.getMountPath(point)
+    except Exception as exc:
+        _unmount(utils, point)
+        raise LoadError(
+            f"Lakehouse {name!r} Files could not be mounted: {exc}"
+        ) from exc
+    if not isinstance(local, str) or not local.strip():
+        _unmount(utils, point)
         raise LoadError(f"Lakehouse {name!r} mount returned no filesystem path")
-    _MOUNTS[spark_root] = local
+    _MOUNTS[spark_root] = _Mount(point=point, local=local)
     return local
+
+
+def _unmount(utils: Any, point: str) -> None:
+    try:
+        utils.fs.unmount(point)
+    except Exception:  # noqa: BLE001 - replacement uses a fresh path
+        pass
 
 
 def _outside_fabric(name: str) -> str:
@@ -301,10 +316,7 @@ def release_mounts() -> None:
     with _MOUNTING:
         for spark_root in list(_MOUNTS):
             if utils is not None:
-                try:
-                    utils.fs.unmount(_MOUNT_POINT.format(item=_item_of(spark_root)))
-                except Exception:  # noqa: BLE001 - the next mount reports a failure
-                    pass
+                _unmount(utils, _MOUNTS[spark_root].point)
             del _MOUNTS[spark_root]
 
 

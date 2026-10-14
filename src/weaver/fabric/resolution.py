@@ -36,6 +36,10 @@ from .resources import (
 
 
 class FabricResolver:
+    #: A class default, because a subclass that supplies its own workspace and
+    #: items does not run ``__init__``.
+    _listed = False
+
     def __init__(
         self,
         workspace: Workspace,
@@ -55,13 +59,29 @@ class FabricResolver:
         """List workspace items and retain their typed identities for resolution."""
 
         rest = client if client is not None else self.client
-        physical = find_workspace(
-            self.configuration.workspace, client=rest, workspaces=workspaces
+        physical = (
+            self._workspace
+            if workspaces is None and self._workspace is not None
+            else find_workspace(
+                self.configuration.workspace, client=rest, workspaces=workspaces
+            )
         )
         items = list_items(physical, client=rest)
         self._workspace = physical
         self._items.update({f"{item.name}:{item.type}": item for item in items})
+        self._listed = True
         return items
+
+    def discover_once(self) -> None:
+        """List the workspace's items unless an earlier listing already did.
+
+        Resolving several items from a cold resolver then costs one listing
+        instead of one per item. An item created after the listing is still
+        found, by the typed lookup ``resolve`` falls back to.
+        """
+
+        if not self._listed:
+            self.discover()
 
     @property
     def workspace(self) -> Workspace:
