@@ -420,6 +420,69 @@ def test_mirror_refuses_a_missing_source_item(monkeypatch):
         module.check_mirror(plan, session=session)
 
 
+# --- Wipe and Unbind ----------------------------------------------------------
+
+
+@weaver_test()
+def test_unbind_allows_build_to_register_a_recreated_items_identity(
+    tmp_path, monkeypatch
+):
+    from factories import single_document_repository, warehouse_table
+    from test_unbind_cycle import _Catalogue
+
+    import weaver
+    from weaver.build_bundle.catalogue_actions import desired_catalogue
+    from weaver.build_bundle.targets import (
+        ItemBinding,
+        WarehouseBinding,
+        bind_inventory_target,
+    )
+    from weaver.catalogue.tables import INSTALLATION
+    from weaver.declaration.model import WeaverItemId
+    from weaver.mutation.executor import MutationReport, MutationResult
+    from weaver.sessions import TestSession
+
+    resolver = given_resolver(warehouses=["Weaver", "Sales"])
+    stale = row(resolver, "Warehouse", "Orders", "Sales", item_id=OTHER)
+    catalogue = _Catalogue((stale,))
+    monkeypatch.setattr(
+        "weaver.catalogue.connection.catalogue_connection",
+        lambda *_a, **_k: catalogue,
+    )
+    session = TestSession(workspace=resolver.configuration, resolver=resolver)
+    plan = weaver.plan_unbind("Warehouse/Sales", session=session)
+    actions = []
+
+    def execute(mutation, _payloads):
+        selected = [action for _s, _b, action in mutation.actions()]
+        actions.extend(action.kind for action in selected)
+        return MutationReport(
+            mutation.bundle_id,
+            tuple(MutationResult(action.id, "succeeded") for action in selected),
+        )
+
+    monkeypatch.setattr(session, "execute_mutation", execute)
+    result = weaver.unbind(plan=plan, session=session)
+
+    assert result.logical_items == ("Warehouse/Orders",)
+    assert actions == ["unbind_catalogue_claims"]
+
+    state = build_state(monkeypatch, resolver, (), selected=[("Orders", "Sales")])
+    item = WeaverItemId.parse("Warehouse/Orders")
+    inventory = state.target_inventories[item]
+    binding = ItemBinding(item, WarehouseBinding(ItemRef("Sales")))
+    bound = bind_inventory_target(binding.to_bound_target(), inventory)
+    repository = single_document_repository(
+        tmp_path,
+        item=str(item),
+        documents={"DWG.Customer.sql": warehouse_table("DWG.Customer")},
+    )
+    desired = desired_catalogue(repository, repository.source_documents, {item: bound})
+    (registered,) = desired.rows[item][INSTALLATION.name]
+    assert registered["item_id"] == _identifier("Warehouse", "Sales")
+    assert registered["item_id"] != stale["item_id"]
+
+
 # --- Load and Test ------------------------------------------------------------
 
 
