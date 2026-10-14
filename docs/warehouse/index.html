@@ -75,14 +75,14 @@
 <main id="main">
 <section class="page-head">
 <div class="wrap">
-<h1>Warehouse engineering in T-SQL.</h1>
-<p class="lead">Write the query and declare the table. Weaver creates the load procedure, applies changes and records progress.</p>
+<h1>Write the SQL. Weaver builds the load machinery.</h1>
+<p class="lead">A query and a declaration are enough to maintain a Warehouse Table. Weaver creates the structure, applies changes according to your load policy and records the result.</p>
 </div>
 </section>
 <section class="section">
 <div class="wrap">
-<h2>Keep the transformation as a query</h2>
-<p>A native SQL comment holds the Table’s identity, keys and schema. Build creates the table and load procedure; Load runs the query and applies the result.</p>
+<h2>Keep the transformation as a SELECT</h2>
+<p>You should not have to write staging, key matching and row-change procedures again for each reference Table. Declare the identity, key and schema alongside ordinary T-SQL:</p>
 <div class="code">
 <div class="code-bar">
 <span>Warehouse/Operations/Parcel.Depot.sql</span>
@@ -97,32 +97,30 @@ Schema:
 */
 select DepotID as [Depot ID], Depot
 from (values (1, &#x27;North&#x27;), (2, &#x27;South&#x27;)) v(DepotID, Depot);</pre></div>
-<p><a class="text-link" href="https://docs.weaverstack.dev/warehouse/first-project/">Build a Warehouse pipeline →</a>
+<p>Build creates the physical Table and its loading procedure. Load stages the query result, reconciles the declared rows and records inserts, updates, deletions and rejects. Supported SQL references supply the dependencies; the query stays readable SQL.</p>
+<p>
+<a class="text-link" href="https://docs.weaverstack.dev/warehouse/first-project/">Build your first Warehouse Table and View →</a>
 </p>
 </div>
 </section>
 <section class="section">
 <div class="wrap">
-<h2>Change definitions separately from loading data</h2>
-<p>Preview a Build, deploy a definition change, then load the affected work. You can review structural changes without starting every data load.</p>
-<p><a class="text-link" href="https://docs.weaverstack.dev/estate/development-cycle/">Make a change →</a>
+<h2>Make the number testable</h2>
+<p>Put an independent expected result beside the transformation. A Test compares it with the actual rows; an Assumption finds rows that break a condition. Their results belong to the same operational state as the load.</p>
+<p>
+<a class="text-link" href="https://docs.weaverstack.dev/warehouse/tests/">Test the Warehouse result →</a>
 </p>
 </div>
 </section>
 <section class="section">
 <div class="wrap">
-<h2>Use existing data in development</h2>
-<p>Mirror exposes unchanged Warehouse data through views. Materialise the work you change instead of copying the entire Warehouse first.</p>
-<p><a class="text-link" href="https://docs.weaverstack.dev/estate/mirror/">Develop with Mirror →</a>
+<h2>Change the source once, not the machinery around it</h2>
+<p>Build a definition change separately from loading data. Add incremental updates and explicit deletes when the feed grows, or use Mirror Views to develop against existing data without copying the whole Warehouse.</p>
+<p>
+<a class="text-link" href="https://docs.weaverstack.dev/warehouse/incremental/">Load a changing feed →</a>
 </p>
-</div>
-</section>
-<section class="section">
-<div class="wrap">
-<h2>Follow the data into the model</h2>
-<p>Warehouse Tables and Views can feed semantic models in the same project. Source dependencies order the loads and model refreshes; SQL and DAX Tests can compare their results.</p>
-<p>The catalogue records row changes, bookmarks, validation outcomes and stale work. One Health report brings the managed estate’s state together.</p>
-<p><a class="text-link" href="https://docs.weaverstack.dev/semantic-models/managed-sources/">Connect a semantic model to Warehouse data →</a>
+<p>
+<a class="text-link" href="https://docs.weaverstack.dev/semantic-models/managed-sources/">Use the Warehouse in a semantic model →</a>
 </p>
 </div>
 </section>

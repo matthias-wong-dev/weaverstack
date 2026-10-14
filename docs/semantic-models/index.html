@@ -75,63 +75,55 @@
 <main id="main">
 <section class="page-head">
 <div class="wrap">
-<h1>Semantic models in the same Fabric project.</h1>
-<p class="lead">Deploy native TMDL models alongside the Lakehouse and Warehouse data they use. Share conventions and validate the results.</p>
+<h1>Keep native TMDL. Add the engineering around it.</h1>
+<p class="lead">Deploy the model you already author, apply consistent conventions and check DAX results against independent source calculations.</p>
 </div>
 </section>
 <section class="section">
 <div class="wrap">
-<h2>Keep your native model</h2>
-<p>Build deploys the model and its linked Report from a PBIP project. Workspace configuration chooses the physical targets; your authored files stay in source control.</p>
-<p><a class="text-link" href="https://docs.weaverstack.dev/semantic-models/native-tmdl/">Deploy a model and Report →</a>
+<h2>Start with the model, not an estate</h2>
+<p>An existing Power BI project can be deployed to its service workspace without first creating a Weaver catalogue or Warehouse. Choose the model’s destination, Build it and inspect the deployed result. The native source stays unchanged.</p>
+<p>
+<a class="text-link" href="https://docs.weaverstack.dev/semantic-models/native-tmdl/">Deploy a native semantic model →</a>
 </p>
 </div>
 </section>
 <section class="section">
 <div class="wrap">
-<h2>Connect refresh to source data</h2>
-<p>Managed source dependencies connect the model to its Lakehouse or Warehouse Tables. Load refreshes it after selected source work, and Health includes its refresh and validation state in the estate report.</p>
-<p><a class="text-link" href="https://docs.weaverstack.dev/semantic-models/managed-sources/">Connect the model to its source →</a>
-</p>
-</div>
-</section>
-<section class="section">
-<div class="wrap">
-<h2>Apply modelling conventions once</h2>
-<p>Use a native TMDL overlay to hide many-side relationship keys:</p>
+<h2>One rule instead of another manual modelling pass</h2>
+<p>Hide the many-side relationship keys with a same-name TMDL overlay:</p>
 <div class="code">
 <div class="code-bar">
 <span>PowerBI/Parcel/Parcel.tmdl</span>
 </div><pre>model Model
     annotation &#x27;Weaver.AutoHideForeignKeys&#x27; = true</pre></div>
-<p>Share formatting and calculation structures through policy. A custom Python annotation can apply a project-specific rule when native declarations are not enough.</p>
-<p><a class="text-link" href="https://docs.weaverstack.dev/semantic-models/native-tmdl/#hide-relationship-foreign-keys">Apply a modelling rule →</a>
+<p>Weaver applies the rule to the definition it deploys, preserving the native relationship and partitions. Shared policy carries a convention across models; custom Python annotations and composition handle project-specific transformations and variants.</p>
+<p>
+<a class="text-link" href="https://docs.weaverstack.dev/semantic-models/shared-policy/">Share modelling standards →</a>
 </p>
-<p><a class="text-link" href="https://docs.weaverstack.dev/semantic-models/shared-policy/">Share model standards →</a>
-</p>
-</div>
-</section>
-<section class="section">
-<div class="wrap">
-<h2>Test the model’s numbers</h2>
-<p>DAX Assumptions report violating rows. DAX-to-SQL Tests compare a measure with an independent calculation over its Lakehouse or Warehouse source.</p>
-<p><a class="text-link" href="https://docs.weaverstack.dev/semantic-models/validation/">Validate a semantic model →</a>
+<p>
+<a class="text-link" href="https://docs.weaverstack.dev/semantic-models/composition/">Compose model variants →</a>
 </p>
 </div>
 </section>
 <section class="section">
 <div class="wrap">
-<h2>Reuse a model foundation</h2>
-<p>Compose named variants from a shared base, then add measures, exclude tables or override formats for each output. Each variant has its own Report and validations.</p>
-<p><a class="text-link" href="https://docs.weaverstack.dev/semantic-models/composition/">Compose model variants →</a>
+<h2>A refreshed measure still needs a check</h2>
+<p>A DAX Assumption can find an invalid result immediately. When the model reads managed Fabric data, a DAX-to-SQL Test compares its number with an independent source calculation, rather than reproducing the same expression in another measure.</p>
+<p>
+<a class="text-link" href="https://docs.weaverstack.dev/semantic-models/validation/">Validate the model’s result →</a>
 </p>
 </div>
 </section>
 <section class="section">
 <div class="wrap">
-<h2>Deploy an existing model on its own</h2>
-<p>Model and Report deployment can also run without a Weaver catalogue. The deployment guide gives the setup for an existing Power BI service workspace.</p>
-<p><a class="text-link" href="https://docs.weaverstack.dev/semantic-models/native-tmdl/">Use an existing PBIP project →</a>
+<h2>Bring source ordering in when you need it</h2>
+<p>Connect the model to its Lakehouse or Warehouse sources, order selected loads before refresh and inspect their recorded state together. Then deploy its linked Report using the same source project and environment mappings.</p>
+<p>
+<a class="text-link" href="https://docs.weaverstack.dev/semantic-models/managed-sources/">Connect a managed Fabric source →</a>
+</p>
+<p>
+<a class="text-link" href="https://docs.weaverstack.dev/reports/deploy/">Deploy the linked Report →</a>
 </p>
 </div>
 </section>

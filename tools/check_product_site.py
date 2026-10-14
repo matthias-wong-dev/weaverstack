@@ -206,10 +206,17 @@ def run(root: Path, developer_site: Path | None):
         if "data-scale-result" in n.attrs
     }
     assert set(results) == {"first-load", "incremental"}
-    assert "About an hour" in results["first-load"]
-    assert "Under 15 minutes" in results["incremental"]
+    operations = {entry["id"]: entry for entry in data["operations"]}
+    measured = [n for n in scale.descendants() if "data-benchmark-operation" in n.attrs]
+    covered = set()
+    for node in measured:
+        ids = node.attrs["data-benchmark-operation"].split()
+        seconds = [int(value) for value in node.attrs["data-benchmark-seconds"].split()]
+        assert seconds == [operations[key]["seconds"] for key in ids]
+        covered.update(ids)
+    assert {"first-load", "day-1", "day-2", "day-3"} <= covered
+    assert "F64" in scale.content() and "synthetic" in scale.content().lower()
     assert not any("/pull/" in n.attrs.get("href", "") for n in scale.descendants("a"))
-    assert "61m" not in scale.content() and "61.4" not in scale.content()
     print(
         json.dumps(
             {

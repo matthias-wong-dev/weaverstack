@@ -75,14 +75,14 @@
 <main id="main">
 <section class="page-head">
 <div class="wrap">
-<h1>Reports deployed with their semantic models.</h1>
-<p class="lead">Keep one native Report project. Workspace configuration chooses the destination and its linked model in each environment.</p>
+<h1>One Report project, correctly bound in each environment.</h1>
+<p class="lead">Keep the native Report in source control. Weaver resolves its destination and verifies its link to the intended deployed semantic model.</p>
 </div>
 </section>
 <section class="section">
 <div class="wrap">
-<h2>One source, different destinations</h2>
-<p>Development and production can use different workspace and item names. Keep those mappings in configuration rather than maintaining publishing copies of the Report.</p>
+<h2>A different workspace should not mean a different Report</h2>
+<p>Publishing copies for development and production leaves another connection to check by hand. Keep the native <code>definition.pbir</code> association and select the destination through configuration:</p>
 <div class="cards two">
 <div class="card">
 <h3>Development</h3>
@@ -105,24 +105,27 @@ targets:
   Report/Parcel: Parcel_Report</pre></div>
 </div>
 </div>
-<p><a class="text-link" href="https://docs.weaverstack.dev/reports/environments/">Choose environment targets →</a>
+<p>Build deploys and verifies the selected model first, then the Report and its actual binding. The service IDs belong in the deployed payload, not edits to your local project.</p>
+<p>
+<a class="text-link" href="https://docs.weaverstack.dev/reports/deploy/">Deploy a native Report →</a>
 </p>
 </div>
 </section>
 <section class="section">
 <div class="wrap">
-<h2>Deploy the model before the Report</h2>
-<p>Build deploys and verifies the selected semantic model first, then binds its linked Report to the resolved model target. The deployment payload changes; the authored project files do not.</p>
-<p>Load refreshes the semantic model. The Report uses that data without a separate data-load step.</p>
-<p><a class="text-link" href="https://docs.weaverstack.dev/reports/deploy/">Deploy models and Reports →</a>
+<h2>Verify the destination, not just the item name</h2>
+<p>The Report in development must point to the development model; the production Report must point to the production model and workspace. Use the same native files for both Builds, then check those bindings and open the resulting Report.</p>
+<p>
+<a class="text-link" href="https://docs.weaverstack.dev/reports/environments/">Deploy the same source to development and production →</a>
 </p>
 </div>
 </section>
 <section class="section">
 <div class="wrap">
-<h2>Update a Report without rebuilding its sources</h2>
-<p>With a registered model, a Report-only Build can update the Report while retaining its model and data. The shared catalogue keeps the installation and binding with the rest of the estate.</p>
-<p><a class="text-link" href="https://docs.weaverstack.dev/reference/power-bi/requirements-and-compatibility/#report-binding">Report deployment reference →</a>
+<h2>Keep refresh with the model</h2>
+<p>The Report displays its semantic model’s data. Refresh and validate that model; there is no separate Report data Load or Test. In a catalogue-backed estate, an already certified model can also support a Report-only update.</p>
+<p>
+<a class="text-link" href="https://docs.weaverstack.dev/reference/power-bi/requirements-and-compatibility/#report-binding">Look up exact binding requirements →</a>
 </p>
 </div>
 </section>

@@ -76,70 +76,88 @@
 <section class="page-head">
 <div class="wrap">
 <h1>From 3 objects to 3,000.</h1>
-<p class="lead">Keep the same project structure and operations as your Fabric estate grows.</p>
+<p class="lead">The same definitions and operations, with more of the engineering taken care of as the estate grows.</p>
 </div>
 </section>
 <section class="section">
 <div class="wrap">
-<h2>Start with the data you have</h2>
+<h2>Useful before it is large</h2>
 <ol class="scale-stages">
-<li><span class="scale-count">3</span>
+<li>
+<span class="scale-count">3</span>
 <div>
-<h3>A few files and a Table.</h3>
-<p>Put definitions in source control and make the load repeatable. A small project does not need its own framework.</p>
+<h3>Two spreadsheets and a Table.</h3>
+<p>Code-managed definitions, repeatable deployment and a Test are useful already. Weaver starts with ordinary files and code; you do not need to assemble an orchestration system to get those advantages.</p>
 </div>
 </li>
-<li><span class="scale-count">30</span>
+<li>
+<span class="scale-count">30</span>
 <div>
-<h3>Dependencies become worth recording.</h3>
-<p>Keep the order with the code rather than reproducing it in pipelines and local conventions.</p>
+<h3>The order stops fitting in your head.</h3>
+<p>Dependencies, load order and the impact of a change become difficult to keep correct through informal conventions. Keep them with the definitions instead of rebuilding them in schedules.</p>
 </div>
 </li>
-<li><span class="scale-count">300</span>
+<li>
+<span class="scale-count">300</span>
 <div>
-<h3>Operate the estate together.</h3>
-<p>Incremental progress, validation, failure recovery and environment mappings need to work across items, not just within individual scripts.</p>
+<h3>Choose the framework before the estate becomes unmanageable.</h3>
+<p>Incremental loads, bookmarks, fault tolerance, orchestration, SQL endpoint readiness, logging, validation and environment consistency are now recurring engineering work, not occasional fixes.</p>
 </div>
 </li>
-<li><span class="scale-count">3,000</span>
+<li>
+<span class="scale-count">3,000</span>
 <div>
-<h3>Repeated overhead matters.</h3>
-<p>Weaver schedules independent work together and coordinates the dependencies between Lakehouses, Warehouses and semantic models.</p>
+<h3>Scheduling and recovery are fundamental.</h3>
+<p>Independent work must run together; critical paths must move first. Unchanged runs should avoid unnecessary work, and a failure must leave enough recorded state to recover without starting the estate again.</p>
 </div>
 </li>
 </ol>
 </div>
 </section>
-<section class="section" id="measured-results">
-<div class="wrap">
-<h2>An hour for the first load</h2>
-<p>A 3,000-object test estate on F64 loaded in about an hour. Later incremental loads completed in under 15 minutes.</p>
-<p>The estate contained a Lakehouse and two Warehouses, with billions of row insertions across its layers. </p>
-<div class="cards two">
-<div class="card" data-scale-result="first-load">
-<h3>First load</h3>
-<p>About an hour</p>
-</div>
-<div class="card" data-scale-result="incremental">
-<h3>Later incremental loads</h3>
-<p>Under 15 minutes</p>
-</div>
-</div>
-</div>
-</section>
 <section class="section">
 <div class="wrap">
-<h2>Spend time on the data work</h2>
-<p>Independent loads run concurrently. Each consumer keeps its own progress, and endpoint waits follow the Tables that are actually needed. Small setup costs are shared rather than repeated for every object.</p>
-<p><a class="text-link" href="https://docs.weaverstack.dev/estate/performance/">Investigate a slow run →</a>
+<h2>Run the work that matters, in the order it matters</h2>
+<p>Independent Spark and Warehouse work can run in parallel. Critical-path-aware scheduling gives priority to work that unlocks the rest of the graph; an invocation cap and per-resource limits keep that parallelism within the budget you choose.</p>
+<p>SQL endpoints synchronise where selected consumers need them, rather than after every unrelated object. Per-consumer bookmarks keep incremental boundaries with the work that succeeded. Recorded failures and blocked dependants make recovery deliberate, while unchanged definitions and data avoid needless processing.</p>
+<p>For development, Mirror starts with Views and OneLake shortcuts to existing data. Materialise changed work instead of copying the estate before the first edit.</p>
+<p>
+<a class="text-link" href="https://docs.weaverstack.dev/estate/performance/">Explore the scheduling and performance controls →</a>
+</p>
+</div>
+</section>
+<section class="section" id="measured-results">
+<div class="wrap">
+<h2>What that looked like on F64</h2>
+<p>A synthetic estate contained <strong>3,000 objects</strong>: 2,144 Tables, 816 Views and 40 Folders across one Lakehouse and two Warehouses.</p>
+<div class="cards two">
+<div class="card" data-scale-result="first-load" data-benchmark-operation="first-load" data-benchmark-seconds="3680">
+<h3>First Load</h3>
+<p>
+<strong>About an hour</strong>
+</p>
+<p>Approximately 4.05 billion row insertions across the processing layers.</p>
+</div>
+<div class="card" data-scale-result="incremental" data-benchmark-operation="day-2 day-3" data-benchmark-seconds="785 776">
+<h3>Later measured incremental loads</h3>
+<p>
+<strong>About 13 minutes</strong>
+</p>
+<p>
+<span data-benchmark-operation="day-1" data-benchmark-seconds="1165">The first incremental day took about 19 minutes;</span> the later two were around 13.</p>
+</div>
+</div>
+<p>Those insertions count work across layers, not distinct source records. These are observed timings for this workload and capacity, not an SLA for an arbitrary estate.</p>
+<p>
+<a class="text-link" href="https://docs.weaverstack.dev/estate/performance/">Inspect the workload and tuning approach →</a>
 </p>
 </div>
 </section>
 <section class="section">
 <div class="wrap">
-<h2>Use the same operations as the project grows</h2>
-<p>Build definitions, Load data, Test results and inspect Health. Start with a small project; add selective runs and concurrency controls when you need them.</p>
-<p><a class="text-link" href="/get-started/">Get started →</a>
+<h2>Start small; keep the same working model</h2>
+<p>Build the definitions, Load the data, Test the result and inspect Health. Add selection, concurrency and development controls when they solve the next real problem.</p>
+<p>
+<a class="text-link" href="/get-started/">Choose a first task →</a>
 </p>
 </div>
 </section>

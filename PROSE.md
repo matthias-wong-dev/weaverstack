@@ -125,6 +125,14 @@ results and the workload/capacity context, not PR numbers, second-level timing,
 tuning diaries or a catalogue of caveats. Round without changing the measured
 claim, and describe observed results rather than universal performance promises.
 
+## First success and progressive depth
+
+Keep the current architecture. Lead with familiar Python, SQL or native Power BI work, give one working result, then explain the engineering handled around it and the next useful capability. A senior voice is approachable and precise, not dry or exhaustive. Keep full contracts in Reference rather than making them an admission requirement.
+
+State the project, required files and active configuration. Leave checkpoint maps, fixture variants, testing oracles and why examples are different in maintenance evidence; name a real source change plainly when the next task needs it. Keep actual permissions, trusted-code warnings and destructive scope at the action that depends on them.
+
+Make passing validation the ordinary path. Put deliberate failures, diagnostic selectors and restoration exercises behind clearly optional exploration; retain safe restoration and operation-specific failure boundaries. Judge flow through complete rendered reader routes, not sentence/page counts or exact-sentence assertions.
+
 ## Review
 
 For every comment, docstring, error or help string, ask:
