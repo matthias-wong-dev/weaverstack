@@ -31,30 +31,14 @@
     });
   }
 
-  // Native details remains keyboard- and touch-operable without JavaScript.
-  var features = document.querySelector(".features-nav details");
-  if (features) {
-    var summary = features.querySelector("summary");
-    summary.setAttribute("aria-expanded", features.open ? "true" : "false");
-    features.addEventListener("toggle", function () {
-      summary.setAttribute("aria-expanded", features.open ? "true" : "false");
-    });
-    document.addEventListener("keydown", function (event) {
-      if (event.key !== "Escape") return;
-      if (features.open) {
-        var inside = features.contains(document.activeElement);
-        features.open = false;
-        if (inside) summary.focus();
-      } else if (links && links.classList.contains("open")) {
-        links.classList.remove("open");
-        toggle.setAttribute("aria-expanded", "false");
-        toggle.focus();
-      }
-    });
-    document.addEventListener("click", function (event) {
-      if (!event.target.closest(".features-nav")) features.open = false;
-    });
-  }
+  document.addEventListener("keydown", function (event) {
+    if (event.key !== "Escape" || !toggle || !links) return;
+    if (links.classList.contains("open")) {
+      links.classList.remove("open");
+      toggle.setAttribute("aria-expanded", "false");
+      toggle.focus();
+    }
+  });
 
   // --- copy buttons --------------------------------------------------------
 

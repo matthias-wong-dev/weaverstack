@@ -88,14 +88,6 @@ img, svg { max-width: 100%; }
   color: var(--ink); font-size: 14px; font-weight: 650; cursor: pointer;
 }
 
-/* Native disclosure gives the label a route and the children their own control. */
-.features-nav { display: flex; align-items: center; gap: 2px; position: relative; }
-.features-nav details { position: relative; }
-.features-nav summary { display: grid; place-items: center; min-width: 44px; min-height: 44px; cursor: pointer; list-style: none; color: var(--ink); }
-.features-nav summary::-webkit-details-marker { display: none; }
-.features-nav details[open] summary span { transform: rotate(180deg); }
-.features-nav ul { position: absolute; top: 100%; left: -80px; min-width: 220px; margin: 0; padding: 8px; list-style: none; background: var(--paper); border: 1px solid var(--line-strong); border-radius: 9px; box-shadow: var(--shadow); }
-.features-nav ul a { display: block; padding: 10px 12px; white-space: nowrap; }
 .actions { display: flex; flex-wrap: wrap; gap: 12px; margin: 26px 0; }
 .card .item-title { font-size: 24px; margin-bottom: 18px; }
 .card .code { max-width: 100%; }
@@ -367,15 +359,8 @@ table.matrix thead th { background: var(--ink); color: var(--white); font-size: 
     border-bottom: 1px solid var(--line);
   }
   .nav-enhanced .nav-links.open { display: flex; }
-  .nav-links > a, .features-nav > a { padding: 11px 0; font-size: 16px; border-bottom: 1px solid var(--line); }
+  .nav-links > a { padding: 11px 0; font-size: 16px; border-bottom: 1px solid var(--line); }
   .nav-links a.button { margin-top: 12px; border-bottom: 1px solid var(--blue); justify-content: center; }
-  .features-nav { flex-wrap: wrap; }
-  .features-nav > a { flex: 1; }
-  .features-nav details { position: static; }
-  .features-nav details[open] { flex-basis: 100%; }
-  .features-nav details[open] summary { position: absolute; right: 22px; transform: translateY(-49px); }
-  .features-nav details ul { position: static; box-shadow: none; border: 0; padding: 0 0 0 16px; }
-  .features-nav details ul a { padding: 10px 0; }
   html:not(.nav-enhanced) .site-header { position: static; }
 }
 
@@ -440,3 +425,86 @@ table.matrix .note code { padding: 1px 4px; font-size: 12px; }
   position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
   overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
 }
+
+/* Unified product Features: native type, four engineering spotlights. */
+.features-showcase .feature-jumps { display: flex; flex-wrap: wrap; gap: 10px 24px; margin: 26px 0 8px; font-size: 15px; }
+.features-showcase .feature-jumps a { text-decoration: none; }
+.features-showcase .feature-group { scroll-margin-top: 90px; }
+.features-showcase .feature-group h2 { max-width: 32ch; }
+.features-showcase .feature-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px 40px; margin: 28px 0; }
+.features-showcase .feature-row { min-width: 0; border-top: 1px solid var(--line); padding-top: 14px; }
+.features-showcase .feature-row h3 { margin: 0 0 7px; font-size: 19px; line-height: 1.3; }
+.features-showcase .feature-row h3 a { color: var(--ink); text-decoration: none; }
+.features-showcase .feature-row h3 a:hover { color: var(--blue-dark); text-decoration: underline; }
+.features-showcase .feature-row p { margin: 0; font-size: 15.5px; line-height: 1.6; }
+.features-showcase [data-feature-group="1"] .feature-list { grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 24px 30px; }
+.features-showcase [data-feature-group="1"] .feature-row { grid-column: span 2; padding-top: 18px; }
+.features-showcase [data-feature-group="1"] .feature-row:nth-child(n+4) { grid-column: span 3; }
+.features-showcase [data-feature-group="1"] .feature-row h3 { font-size: 22px; }
+.features-showcase [data-feature-group="4"] .feature-list { gap: 16px 34px; }
+.features-showcase [data-feature-group="4"] .feature-row h3 { font-size: 18px; }
+.features-showcase [data-feature-group="5"] .feature-list { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 22px 28px; }
+.features-showcase [data-feature-group="5"] .feature-row h3 { font-size: 18px; }
+.features-showcase .scope-note { font-size: 15px; margin: 16px 0; }
+.features-showcase .group-docs, .features-showcase .spotlight-docs { font-size: 15px; margin: 20px 0 0; }
+.features-showcase .feature-spotlight { margin: 28px 0 34px; }
+.features-showcase .feature-spotlight > h3 { max-width: 36ch; margin: 0 0 24px; font-size: clamp(24px, 2.7vw, 30px); line-height: 1.2; }
+.features-showcase .feature-spotlight figcaption { max-width: var(--measure); color: var(--ink-soft); font-size: 15.5px; line-height: 1.6; margin-top: 20px; }
+.features-showcase .fabric-dag { display: grid; grid-template-columns: minmax(0, 3fr) 90px minmax(0, 1.05fr) 72px minmax(0, 1.15fr); gap: 12px; align-items: center; }
+.features-showcase .dag-engine { min-width: 0; align-self: stretch; border-top: 2px solid var(--blue); padding-top: 16px; }
+.features-showcase .dag-engine h4 { margin: 0 0 16px; font-size: 17px; color: var(--blue-dark); }
+.features-showcase .dag-engine ol { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; list-style: none; margin: 0; padding: 0; }
+.features-showcase .dag-engine li { position: relative; margin: 0; max-width: none; }
+.features-showcase .dag-engine li:not(:last-child)::after { content: '→'; position: absolute; right: -17px; top: 4px; color: var(--blue-dark); }
+.features-showcase .dag-engine strong { display: block; font-size: 16px; line-height: 1.35; }
+.features-showcase .dag-engine span { display: block; font-size: 14px; margin-top: 8px; color: var(--ink-soft); }
+.features-showcase .dag-connection { text-align: center; min-width: 0; }
+.features-showcase .dag-connection > span { display: block; color: var(--blue-dark); font-size: 27px; }
+.features-showcase .dag-connection small { display: block; font-size: 14px; line-height: 1.35; color: var(--ink-soft); margin-top: 6px; }
+.features-showcase .warehouse-spotlight { background: var(--paper-deep); padding: 26px 28px; }
+.features-showcase .select-engineering { display: grid; grid-template-columns: minmax(0, 1fr) 60px minmax(0, 1.6fr); gap: 16px; align-items: center; }
+.features-showcase .select-engineering h4 { margin: 0 0 14px; font-size: 16px; }
+.features-showcase .authored-query strong { display: block; font-family: var(--mono); font-size: 22px; color: var(--blue-dark); }
+.features-showcase .authored-query > span { display: block; margin-top: 8px; font-size: 15px; color: var(--ink-soft); }
+.features-showcase .engineering-arrow { font-size: 30px; text-align: center; color: var(--blue-dark); }
+.features-showcase .generated-work ul { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 20px; list-style: none; padding: 0; margin: 0; }
+.features-showcase .generated-work li { margin: 0; font-size: 16px; }
+.features-showcase .model-foundation { max-width: 760px; border-top: 2px solid var(--blue); padding: 16px 0; }
+.features-showcase .model-foundation strong { font-size: 18px; }
+.features-showcase .model-foundation > span { margin-left: 12px; font-size: 15px; color: var(--ink-soft); }
+.features-showcase .model-variants { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); max-width: 760px; gap: 32px; }
+.features-showcase .model-variants > div { border-left: 2px solid var(--line-strong); padding: 4px 0 4px 18px; }
+.features-showcase .model-variants h4 { margin: 0 0 8px; font-size: 18px; }
+.features-showcase .model-variants p { font-size: 15px; margin: 0; }
+.features-showcase .model-variants > div > strong, .features-showcase .model-variants > div > span { display: block; }
+.features-showcase .model-variants > div > span { font-size: 14px; color: var(--ink-soft); margin-top: 6px; }
+.features-showcase .model-variants > div > .variant-arrow { color: var(--blue-dark); font-size: 26px; margin: 8px 0; }
+.features-showcase .mirror-flow { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 30px; list-style: none; padding: 0; margin: 0; }
+.features-showcase .mirror-flow li { position: relative; max-width: none; margin: 0; border-top: 2px solid var(--line-strong); padding-top: 16px; }
+.features-showcase .mirror-flow li:not(:last-child)::after { content: '→'; position: absolute; top: 16px; right: -24px; color: var(--blue-dark); font-size: 24px; }
+.features-showcase .mirror-flow strong { display: block; font-size: 18px; line-height: 1.35; }
+.features-showcase .mirror-flow span { display: block; font-size: 15px; color: var(--ink-soft); margin-top: 10px; }
+.features-showcase .feature-scale { background: var(--paper-deep); }
+@media (max-width: 1000px) {
+ .features-showcase [data-feature-group="5"] .feature-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+ .features-showcase .fabric-dag { display: flex; flex-direction: column; align-items: stretch; gap: 16px; }
+ .features-showcase .dag-engine ol { max-width: 650px; }
+ .features-showcase .dag-connection > span { font-size: 0; }
+ .features-showcase .dag-connection > span::after { content: '↓'; font-size: 27px; }
+ .features-showcase .dag-connection small { margin-top: 0; }
+}
+@media (max-width: 600px) {
+ .features-showcase .feature-list, .features-showcase [data-feature-group="1"] .feature-list, .features-showcase [data-feature-group="5"] .feature-list { grid-template-columns: 1fr; gap: 20px; }
+ .features-showcase [data-feature-group="1"] .feature-row, .features-showcase [data-feature-group="1"] .feature-row:nth-child(n+4) { grid-column: auto; }
+ .features-showcase .feature-row h3 { font-size: 19px; }
+ .features-showcase .dag-engine ol { grid-template-columns: 1fr; gap: 24px; }
+ .features-showcase .dag-engine li:not(:last-child)::after { content: '↓'; right: auto; top: auto; bottom: -24px; }
+ .features-showcase .warehouse-spotlight { padding: 22px 18px; }
+ .features-showcase .select-engineering, .features-showcase .model-variants, .features-showcase .mirror-flow { grid-template-columns: 1fr; }
+ .features-showcase .generated-work ul { grid-template-columns: 1fr; }
+ .features-showcase .engineering-arrow { font-size: 0; }
+ .features-showcase .engineering-arrow::after { content: '↓'; font-size: 30px; }
+ .features-showcase .mirror-flow li:not(:last-child)::after { content: '↓'; top: auto; bottom: -30px; right: auto; }
+}
+
+.forwarding-page main { padding-top: 80px; padding-bottom: 80px; }

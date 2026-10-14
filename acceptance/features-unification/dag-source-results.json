@@ -1,0 +1,22 @@
+{
+  "implementation_import": "/opt/data/scratch/Fors/weaver-docs-refresh/product/src/weaver/__init__.py",
+  "order": [
+    "Lakehouse/Landing/Files/Parcel.Events",
+    "Lakehouse/Landing/Tables/Parcel.Event",
+    "Lakehouse/Landing/Tables/Parcel.CurrentStatus",
+    "Warehouse/Dispatch/Parcel.Delivery",
+    "SemanticModel/Parcel"
+  ],
+  "physical_dispatch_kinds": [
+    "python_folder",
+    "python_table",
+    "python_table",
+    "endpoint_refresh",
+    "warehouse_procedure",
+    "semantic_refresh"
+  ],
+  "endpoint_readiness_before_warehouse": true,
+  "authored_files_unchanged": true,
+  "network": "refused",
+  "boundary": "Production parser/compiler/Catalogue projection/LoadDag; explicit offline installed-shape boundary. No service or wheel acceptance."
+}
