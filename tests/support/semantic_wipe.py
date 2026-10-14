@@ -10,6 +10,7 @@ def catalogue_answers(rows):
         {
             "TABLE_NAME": INSTALLATION.name,
             "COLUMN_NAME": INSTALLATION.public_name_of(name),
+            "IS_NULLABLE": "NO",
         }
         for name in INSTALLATION.physical_columns
     ]

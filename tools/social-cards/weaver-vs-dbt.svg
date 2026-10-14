@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <rect width="1200" height="630" fill="#f7f7f6"/>
+  <g transform="translate(76 72)" fill="none" stroke-linecap="round" stroke-width="10">
+    <path d="M0 0 L13 38" stroke="#0c1520"/>
+    <path d="M19 0 L6 38" stroke="#1d44d4"/>
+    <path d="M29 0 L42 38" stroke="#0c1520"/>
+    <path d="M48 0 L35 38" stroke="#1d44d4"/>
+  </g>
+  <text x="144" y="103" fill="#0c1520" font-family="Inter, Arial, sans-serif" font-size="28" font-weight="700">Weaver</text>
+  <text x="76" y="296" fill="#0c1520" font-family="Inter, Arial, sans-serif" font-size="78" font-weight="750" letter-spacing="-2">Weaver vs dbt</text>
+  <text x="80" y="383" fill="#1d44d4" font-family="Inter, Arial, sans-serif" font-size="34" font-weight="650">A dbt alternative for Microsoft Fabric</text>
+  <text x="80" y="447" fill="#4b5661" font-family="Inter, Arial, sans-serif" font-size="25">SQL, Python, Lakehouses and Warehouses in one project.</text>
+  <g transform="translate(919 126) scale(4.3)" fill="none" stroke-linecap="round" stroke-width="10" opacity="0.96">
+    <path d="M0 0 L13 78" stroke="#0c1520"/>
+    <path d="M25 0 L12 78" stroke="#1d44d4"/>
+    <path d="M48 0 L61 78" stroke="#0c1520"/>
+    <path d="M73 0 L60 78" stroke="#1d44d4"/>
+  </g>
+  <rect x="76" y="548" width="1048" height="2" fill="#0c1520" opacity="0.17"/>
+  <text x="76" y="589" fill="#4b5661" font-family="Inter, Arial, sans-serif" font-size="20">weaverstack.dev/vs-dbt/</text>
+</svg>

@@ -102,6 +102,9 @@ def table_query(
 
 def _projected_column(table: CatalogueTable, column, present: dict[str, str]) -> str:
     actual = present.get(column.public_name.casefold())
+    if actual is None and table.name == "Installation":
+        legacy = {"workspace_id": "workspace id", "item_id": "item id"}.get(column.name)
+        actual = present.get(legacy) if legacy else None
     alias = identifier(column.name)
     if actual is None:
         # Older catalogues expose newly expected columns as typed nulls.

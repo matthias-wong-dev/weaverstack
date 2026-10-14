@@ -13,10 +13,11 @@ from __future__ import annotations
 
 import pytest
 from support.weaver_test import weaver_test
+from support.workspaces import _identifier, given_resolver
 
 from weaver import plan_wipe
 from weaver import wipe as public_wipe
-from weaver.errors import CommandError
+from weaver.errors import CommandError, InstallationIdentityError
 from weaver.locations import Location
 from weaver.operations.wipe import (
     LEAVE,
@@ -77,14 +78,16 @@ class _Installations:
     def rows(self, statement):
         self.statements.append(statement)
         return [
-            {
-                "item_type": item_type,
-                "item_name": item_name,
-                "target_name": target,
+            dict(declared)
+            if isinstance(declared, dict)
+            else {
+                "item_type": declared[0],
+                "item_name": declared[1],
+                "target_name": declared[2],
                 "weaver_version": "0.9.0",
-                "declaration_signature": "signature",
+                "signature": "signature",
             }
-            for item_type, item_name, target in self.declared
+            for declared in self.declared
         ]
 
     def execute(self, statement):
@@ -99,6 +102,21 @@ def _plan(*targets, catalogue="Warehouse/Weaver", workspace="Analytics", **rest)
 
 def _names(plan) -> list[str]:
     return [str(target) for target in plan.targets]
+
+
+def _identity_row(kind, item, target, **changes):
+    values = {
+        "item_type": kind,
+        "item_name": item,
+        "workspace_name": "Demo",
+        "workspace_id": _identifier("workspace", "Demo"),
+        "target_name": target,
+        "item_id": _identifier(kind, target),
+        "weaver_version": "0.9.0",
+        "signature": "signature",
+    }
+    values.update(changes)
+    return values
 
 
 # --- selecting targets --------------------------------------------------------
@@ -673,6 +691,71 @@ def _unbinding(monkeypatch, asked):
         )
 
     monkeypatch.setattr(_operations(), "_plan_unbind", plan_unbind)
+
+
+@weaver_test()
+def test_a_catalogue_driven_wipe_refuses_a_replaced_target_before_dispatch(
+    monkeypatch,
+):
+    from weaver.catalogue import connection
+
+    resolver = given_resolver(warehouses=("Weaver", "Sales"))
+    catalogue = _Installations(
+        [
+            _identity_row(
+                "Report",
+                "Executive",
+                "A",
+                item_id="11111111-1111-1111-1111-111111111111",
+            ),
+            _identity_row(
+                "Warehouse",
+                "Orders",
+                "Sales",
+                item_id="11111111-1111-1111-1111-111111111111",
+            ),
+            _identity_row("Warehouse", "_weaver", "Weaver"),
+        ]
+    )
+    monkeypatch.setattr(connection, "catalogue_connection", lambda *_a, **_k: catalogue)
+    session = TestSession(
+        workspace=resolver.configuration, resolver=resolver, store=object()
+    )
+    _operations_module, reached = _emptied(monkeypatch)
+    plan = plan_wipe(session=session)
+
+    with pytest.raises(InstallationIdentityError, match="Warehouse/Orders"):
+        public_wipe(plan=plan, session=session)
+
+    assert reached == []
+
+
+@weaver_test()
+def test_an_explicit_wipe_does_not_validate_a_catalogue_installation(monkeypatch):
+    from weaver.catalogue import connection
+
+    resolver = given_resolver(warehouses=("Weaver", "Sales"))
+    catalogue = _Installations(
+        [
+            _identity_row(
+                "Warehouse",
+                "Orders",
+                "Sales",
+                item_id="11111111-1111-1111-1111-111111111111",
+            ),
+            _identity_row("Warehouse", "_weaver", "Weaver"),
+        ]
+    )
+    monkeypatch.setattr(connection, "catalogue_connection", lambda *_a, **_k: catalogue)
+    session = TestSession(
+        workspace=resolver.configuration, resolver=resolver, store=object()
+    )
+    _operations_module, reached = _emptied(monkeypatch)
+
+    public_wipe("Warehouse/Sales", session=session)
+
+    assert reached == ["Warehouse/Sales", "Warehouse/Weaver"]
+    assert catalogue.statements == []
 
 
 @weaver_test()

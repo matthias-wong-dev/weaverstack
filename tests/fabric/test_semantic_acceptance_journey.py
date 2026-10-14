@@ -9,6 +9,7 @@ and real T-SQL against the catalogue.
 
 import json
 
+import pytest
 from support.semantic_projects import ITEM, SCOPE, SOURCE_TEXT
 from support.weaver_test import weaver_test
 from test_semantic_model_public_cycle import (
@@ -204,6 +205,7 @@ def _findings(report):
 
 
 @weaver_test(remote=True, resources={"rest", "tds"})
+@pytest.mark.dax
 def test_semantic_model_build_load_test_health_lifecycle(
     semantic_build_context, tmp_path
 ):

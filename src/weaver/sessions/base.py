@@ -1059,6 +1059,10 @@ class WorkspaceScope:
         from ..fabric.resources import Item
         from ..fabric.semantic_model import SemanticModelClient
 
+        if isinstance(item, Item) and item.workspace_id != self.resolve_workspace().id:
+            raise CommandError(
+                f"{item.name} is installed in a different workspace; use the installed workspace"
+            )
         key = (item.workspace_id, item.id) if isinstance(item, Item) else item.name
         with self._lock:
             if key not in self._semantic_models:
@@ -1080,6 +1084,10 @@ class WorkspaceScope:
         from ..fabric.report import ReportClient
         from ..fabric.resources import Item
 
+        if isinstance(item, Item) and item.workspace_id != self.resolve_workspace().id:
+            raise CommandError(
+                f"{item.name} is installed in a different workspace; use the installed workspace"
+            )
         key = (item.workspace_id, item.id) if isinstance(item, Item) else item.name
         with self._lock:
             if key not in self._reports:

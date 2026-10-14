@@ -726,6 +726,17 @@ Enforceable as the corresponding code lands:
   `DeltaTarget` is a Lakehouse and a `WarehouseTarget` a Warehouse, and core never
   asks the workspace what a bare name is. A destructive operation must not depend
   on name inference.
+- **Names locate; GUIDs identify.** `_.Installation` records the workspace and
+  target item GUIDs beside their names. Each operation verifies, through
+  `verify_installation`, only the installations it depends on: Build its selected
+  items and required producers, Mirror its selected sources before the destination
+  is touched, Load and Test the targets their nodes use (a failing node is
+  `invalid` and blocks its dependants), Health the selected items (reported, never
+  raised). An installation nothing uses cannot fail an operation. Only a legacy
+  `_.Installation` schema upgrade resolves the whole estate. A workspace
+  renamed under an unchanged GUID is drift that Build reconciles; the configured
+  name must still find the workspace. An item replaced after preflight is out of
+  scope.
 - **Delta protocol minima are creation policy.** Lakehouse Table declarations
   accept `Delta minReaderVersion` and `Delta minWriterVersion`. Authored values
   participate in declaration signatures. Omitted values resolve to Weaver's

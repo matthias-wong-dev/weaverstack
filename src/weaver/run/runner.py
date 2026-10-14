@@ -272,6 +272,8 @@ class Runner:
         self._events: list[dict] = []
         self._runtime_scope = None
         self._publication = None
+        #: Node id to the error naming an installation Fabric no longer matches.
+        self._identity: dict = {}
 
     @property
     def graph(self) -> RunGraph:
@@ -290,9 +292,15 @@ class Runner:
 
     def resolve(self, node):
 
+        from dataclasses import replace
+
         from .resolution import resolve
 
-        return resolve(node, can_refresh=self.can_refresh)
+        resolved = resolve(node, can_refresh=self.can_refresh)
+        refused = self._identity.get(node.node_id)
+        if refused:
+            return replace(resolved, messages=(*resolved.messages, *refused))
+        return resolved
 
     def runtime_scope(self, session=None):
         """Open the deployed-module scope only when a node imports from it."""
@@ -357,6 +365,17 @@ class Runner:
 
         if self.request.dry_run:
             return self._result(self._dry_run(ordered), started=started)
+
+        # With no catalogue each installation was just resolved from Fabric.
+        if session is not None and getattr(self.workspace, "catalogue", None):
+            from .identity import identity_messages
+
+            self._identity = identity_messages(
+                self.state.catalogue,
+                ordered,
+                session=session,
+                workspace=self.workspace,
+            )
 
         if dispatch is None:
             from .dispatch import dispatch_primitive

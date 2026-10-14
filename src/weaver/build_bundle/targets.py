@@ -6,7 +6,7 @@ or host information. The installer's Session supplies where execution runs.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Mapping
 
 from ..declaration.model import (
@@ -26,6 +26,19 @@ from ..targets import (
     physical_item,
     physical_kind,
 )
+
+
+def bind_inventory_target(target, inventory):
+    if inventory is None:
+        return target
+    return replace(
+        target,
+        workspace_id=inventory.workspace_id or target.workspace_id,
+        workspace_name=inventory.workspace_name or target.workspace_name,
+        item_name=inventory.target_name,
+        item_id=inventory.item_id or target.item_id,
+    )
+
 
 # Planner inputs, converted to flat BoundTarget values before serialisation.
 

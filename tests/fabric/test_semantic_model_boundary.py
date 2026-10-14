@@ -38,6 +38,7 @@ def scratch_model(scratch_semantic_model):
 
 
 @weaver_test(remote=True, resources={"rest"})
+@pytest.mark.dax
 def test_focused_doctor_uses_only_rest(
     semantic_model_session, scratch_semantic_model_name
 ):
@@ -60,6 +61,7 @@ def test_focused_doctor_uses_only_rest(
 
 
 @weaver_test(remote=True, resources={"rest"})
+@pytest.mark.dax
 def test_dax_engine_error_is_not_a_successful_empty_result(scratch_semantic_model):
     assert scratch_semantic_model.query_dax('EVALUATE ROW("Value", 1)') == [
         {"[Value]": 1}

@@ -234,10 +234,10 @@ def mounted_lakehouse(
     OneLake address, and Spark paths are composed from it as they always are.
     """
 
-    from weaver.lakehouse import _MOUNTS, Lakehouse
+    from weaver.lakehouse import _MOUNTS, Lakehouse, _Mount
 
     root = f"abfss://ws@onelake.dfs.fabric.microsoft.com/{name}"
-    _MOUNTS[root] = str(directory)
+    _MOUNTS[root] = _Mount(point=f"/weaver/{name}/test", local=str(directory))
     return Lakehouse(
         name=name,
         spark_root=root,

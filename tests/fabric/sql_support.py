@@ -61,7 +61,9 @@ def install_runtime_references(executor: SqlExecutor, catalogue: str) -> None:
         )
 
 
-def record_installation(executor: SqlExecutor) -> None:
+def record_installation(
+    executor: SqlExecutor, *, physical_item, workspace_name: str
+) -> None:
     """Make this Warehouse the target of exactly one logical item.
 
     A build writes one Installation row per bound item, and a hand-installed
@@ -75,31 +77,31 @@ def record_installation(executor: SqlExecutor) -> None:
     the standalone lookup ambiguous.
     """
 
+    from weaver.catalogue.installation import _guid
+    from weaver.catalogue.render import InstallationScope, render_merge
+    from weaver.catalogue.tables import INSTALLATION
+
     item_type, item_name = PROCEDURE_ITEM
+    row = {
+        "item_type": item_type,
+        "item_name": item_name,
+        "workspace_name": workspace_name,
+        "workspace_id": _guid(
+            physical_item.workspace_id, item=physical_item.name, column="Workspace GUID"
+        ),
+        "target_name": physical_item.name,
+        "item_id": _guid(
+            physical_item.id, item=physical_item.name, column="Target item GUID"
+        ),
+        "weaver_version": "test",
+        "signature": "",
+    }
     forget_installations(executor)
     # A MERGE rather than an INSERT: Fabric refuses a plain INSERT through the
     # cross-database view these tables are in every Warehouse but the
     # catalogue's, and accepts a MERGE's.
     executor.execute_script(
-        "merge [_].[Installation] as target\n"
-        "using (select"
-        f" N'{item_type}' as [Item type]"
-        f", N'{item_name}' as [Item name]"
-        ", db_name() as [Target name]"
-        ", cast(N'test' as varchar(128)) as [Weaver version]"
-        ", cast(N'' as varchar(128)) as [Signature]"
-        ") as source\n"
-        "   on target.[Item type] = source.[Item type]"
-        "  and target.[Item name] = source.[Item name]\n"
-        "when matched then update set"
-        " target.[Target name] = source.[Target name]\n"
-        "when not matched then insert ("
-        " [Item type], [Item name], [Target name], [Weaver version], [Signature]"
-        ", [Row insert datetime], [Row update datetime], [Row delete datetime])"
-        " values (source.[Item type], source.[Item name], source.[Target name]"
-        ", source.[Weaver version], source.[Signature]"
-        ", sysutcdatetime(), sysutcdatetime()"
-        ", convert(datetime2(6), '9999-12-31 23:59:59.999999'));\n"
+        render_merge(INSTALLATION, [row], scope=InstallationScope(item_type, item_name))
     )
 
 
@@ -116,7 +118,13 @@ def forget_installations(executor: SqlExecutor) -> None:
 
 
 def prepare_hand_installed(
-    executor: SqlExecutor, schema: str, catalogue: str, *, record: bool = True
+    executor: SqlExecutor,
+    schema: str,
+    catalogue: str,
+    *,
+    physical_item,
+    workspace_name: str,
+    record: bool = True,
 ) -> None:
     """Give this Warehouse what a build would before objects are installed by hand.
 
@@ -128,7 +136,9 @@ def prepare_hand_installed(
     )
     install_runtime_references(executor, catalogue)
     if record:
-        record_installation(executor)
+        record_installation(
+            executor, physical_item=physical_item, workspace_name=workspace_name
+        )
 
 
 #: The working tables a Warehouse load creates beside its target.
