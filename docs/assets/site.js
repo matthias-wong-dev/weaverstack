@@ -4,6 +4,20 @@
 (function () {
   "use strict";
 
+  // Privacy-friendly analytics by Plausible. This shared asset is loaded by
+  // every page in the static site.
+  var plausibleScript = document.createElement("script");
+  plausibleScript.async = true;
+  plausibleScript.src = "https://plausible.io/js/pa-bPlUSh6aQE0FF8b9FruQj.js";
+  document.head.appendChild(plausibleScript);
+  window.plausible = window.plausible || function () {
+    (window.plausible.q = window.plausible.q || []).push(arguments);
+  };
+  window.plausible.init = window.plausible.init || function (options) {
+    window.plausible.o = options || {};
+  };
+  window.plausible.init();
+
   // --- mobile navigation ---------------------------------------------------
 
   var toggle = document.querySelector(".nav-toggle");
