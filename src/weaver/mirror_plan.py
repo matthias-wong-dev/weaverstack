@@ -203,6 +203,10 @@ def mirror_mutation_plan(resolved, *, session) -> tuple[MutationPlan, dict, dict
     from .declaration.model import LAKEHOUSE
 
     workspace = resolved.workspace
+    # The destination catalogue and each item's destination resolve from one listing.
+    discover_once = getattr(session.resolver(workspace), "discover_once", None)
+    if discover_once is not None:
+        discover_once()
     compiling = _Compiling(str(workspace.workspace))
     catalogue = compiling.target("warehouse", resolved.destination.name)
 

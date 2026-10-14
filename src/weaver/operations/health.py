@@ -73,8 +73,10 @@ def health(
     before the operation started. It must include a timezone.
 
     ``inventories`` reads each selected target's physical state, so a certified
-    object that is not there is reported. Turning it off leaves Build health to
-    what the catalogue contradicts about itself.
+    object that is not there is reported. It also checks that each selected
+    installation still names its Fabric item, and an inconsistent one is
+    reported without stopping the other checks. Turning it off leaves Build
+    health to what the catalogue contradicts about itself.
     """
 
     started = datetime.now(timezone.utc)
@@ -146,9 +148,26 @@ def run_health(
         )
     )
     read = {}
+    faults = {}
     if inventories:
+        with session.step("Check installed items"):
+            faults = _installation_faults(
+                session,
+                workspace=workspace,
+                catalogue=catalogue,
+                dag=dag,
+                items=tuple(items),
+                targets=selected,
+            )
         with session.step("Read installed objects"):
-            read = _inventories(session, workspace=workspace, targets=selected, dag=dag)
+            # A target whose item was replaced is reported, not read by name.
+            broken = {dag.installations[item] for item in faults}
+            read = _inventories(
+                session,
+                workspace=workspace,
+                targets=tuple(target for target in selected if target not in broken),
+                dag=dag,
+            )
 
     return assess(
         catalogue,
@@ -158,7 +177,27 @@ def run_health(
         items=tuple(items) or None,
         inventories=read,
         source=source,
+        installation_faults=faults,
     )
+
+
+def _installation_faults(session, *, workspace, catalogue, dag, items, targets):
+    """Why each selected installation no longer names its Fabric item, by item."""
+
+    from ..catalogue.installation import check_installations, recorded_installation
+
+    chosen = set(items) if items else set(dag.installations)
+    rows = {
+        (item.item_type, item.item_name): row
+        for item, target in dag.installations.items()
+        if item in chosen
+        and target in targets
+        and (row := recorded_installation(catalogue, item)) is not None
+    }
+    if not rows:
+        return {}
+    _, faults = check_installations(rows.values(), resolver=session.resolver(workspace))
+    return {WeaverItemId(*key): str(fault) for key, fault in faults.items()}
 
 
 def _inventories(session, *, workspace, targets, dag):

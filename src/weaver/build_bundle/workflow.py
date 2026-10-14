@@ -864,6 +864,11 @@ def read_target_inventories(
     inventories = {}
     resolved_items = {}
     delta = []
+    if len(bindings.entries) > 1:
+        # One listing answers every target's lookup below.
+        discover_once = getattr(session.resolver(workspace), "discover_once", None)
+        if discover_once is not None:
+            discover_once()
 
     # Warehouse inventories are separate TDS reads; Lakehouses share one substep.
     for binding in bindings.entries:

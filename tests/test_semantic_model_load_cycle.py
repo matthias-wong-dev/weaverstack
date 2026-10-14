@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 from support.weaver_test import weaver_test
+from support.workspaces import _identifier
 from test_semantic_model_build_cycle import session_for
 from test_semantic_model_rest_boundary import Client, response
 
@@ -18,8 +19,9 @@ from weaver.fabric.semantic_model import SemanticModelClient
 
 ITEM = WeaverItemId.parse("SemanticModel/Reporting")
 ROOT = WeaverDocumentId.model_root(ITEM)
-WORKSPACE_ID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-MODEL_ID = "11111111-2222-3333-4444-555555555555"
+# The identities the Demo workspace's inventory gives these names.
+WORKSPACE_ID = _identifier("workspace", "Demo")
+MODEL_ID = _identifier("SemanticModel", "Reporting_Dev")
 REQUEST_ID = "99999999-8888-7777-6666-555555555555"
 COMPLETED = {
     "status": "Completed",
@@ -228,9 +230,20 @@ def test_public_load_resolves_renamed_workspace_but_uses_frozen_item_ids(monkeyp
         answer = requests.Response()
         answer.status_code = 202 if method == "POST" else 200
         answer.headers = {"x-ms-request-id": REQUEST_ID}
+        fabric = "https://api.fabric.microsoft.com/v1/workspaces"
         body = (
             {"value": [{"id": WORKSPACE_ID, "displayName": "RenamedWorkspace"}]}
-            if url == "https://api.fabric.microsoft.com/v1/workspaces"
+            if url == fabric
+            else {
+                "value": [
+                    {
+                        "id": MODEL_ID,
+                        "displayName": "Reporting_Dev",
+                        "type": "SemanticModel",
+                    }
+                ]
+            }
+            if url.startswith(f"{fabric}/{WORKSPACE_ID}/items")
             else {}
             if method == "POST"
             else COMPLETED
@@ -252,6 +265,10 @@ def test_public_load_resolves_renamed_workspace_but_uses_frozen_item_ids(monkeyp
         base = f"https://api.powerbi.com/v1.0/myorg/groups/{WORKSPACE_ID}/datasets/{MODEL_ID}/refreshes"
         assert [(method, url) for method, url, _ in sent] == [
             ("GET", "https://api.fabric.microsoft.com/v1/workspaces"),
+            (
+                "GET",
+                f"https://api.fabric.microsoft.com/v1/workspaces/{WORKSPACE_ID}/items?type=SemanticModel",
+            ),
             ("GET", base.replace("/refreshes", "/datasources")),
             ("POST", base),
             ("GET", f"{base}/{REQUEST_ID}"),

@@ -2,7 +2,7 @@
 
 from uuid import UUID
 
-from ..errors import BuildError
+from ..errors import BuildError, InstallationIdentityError
 from ..targets import ItemRef
 from .tables import INSTALLATION
 
@@ -29,72 +29,155 @@ def _guid(value, *, item, column):
         ):
             raise ValueError
     except ValueError:
-        raise BuildError(
+        raise InstallationIdentityError(
             f"{item}: invalid {column} {value!r}; repair the installation record"
         ) from None
     return value.casefold()
 
 
+def verify_installation(row, *, resolver, backfillable=False):
+    """The Fabric item an installation records, once its identity is confirmed.
+
+    Names locate the workspace and item; the recorded GUIDs establish that they
+    are still the ones the catalogue installed to. A renamed workspace with the
+    same GUID is not a replacement, and only the configured name finds it. A
+    legacy ``Item ID`` holding the target name is skipped when ``backfillable``.
+    """
+
+    from ..errors import CommandError
+    from ..fabric.resources import ItemNotFoundError
+
+    item = f"{row['item_type']}/{row['item_name']}"
+    try:
+        workspace = resolver.workspace
+    except CommandError as exc:
+        raise InstallationIdentityError(
+            f"{item}: {exc} If it was renamed, update the workspace name in "
+            "workspace configuration."
+        ) from exc
+    recorded = row.get("workspace_id")
+    if (
+        recorded is not None
+        and _guid(recorded, item=item, column="Workspace GUID")
+        != workspace.id.casefold()
+    ):
+        raise InstallationIdentityError(
+            f"{item}: Workspace GUID {recorded} does not match {workspace.id}; use the installed workspace"
+        )
+    try:
+        target = resolver.resolve(
+            ItemRef(row["target_name"]), item_type=row["item_type"]
+        )
+    except ItemNotFoundError as exc:
+        raise InstallationIdentityError(
+            f"{item}: {exc} Restore it, or unbind {item}."
+        ) from exc
+    recorded = row.get("item_id")
+    if (
+        recorded is not None
+        and not (backfillable and recorded == row["target_name"])
+        and _guid(recorded, item=item, column="Target item GUID")
+        != target.id.casefold()
+    ):
+        raise InstallationIdentityError(
+            f"{item}: {row['item_type']} {target.name!r} has Target item GUID "
+            f"{target.id}, but the catalogue installed to {recorded}. The item "
+            f"was replaced; unbind {item} and build it again"
+        )
+    return target
+
+
+def recorded_installation(catalogue, item):
+    """The item's installation row, if it recorded Fabric GUIDs to compare.
+
+    A row that predates the identity columns has none.
+    """
+
+    row = next(iter(catalogue.rows.get(item, {}).get(INSTALLATION.name, ())), None)
+    return row if row and (row.get("workspace_id") or row.get("item_id")) else None
+
+
+def check_installations(rows, *, resolver):
+    """Verify each installation, returning ``(resolved, faults)`` by item key.
+
+    A failing installation is a fault and does not stop the others. The
+    workspace's items are listed once for the whole batch.
+    """
+
+    rows = tuple(rows)
+    if len(rows) > 1 and hasattr(resolver, "discover_once"):
+        resolver.discover_once()
+    resolved = {}
+    faults = {}
+    for row in rows:
+        key = (row["item_type"], row["item_name"])
+        try:
+            resolved[key] = verify_installation(row, resolver=resolver)
+        except InstallationIdentityError as exc:
+            faults[key] = exc
+    return resolved, faults
+
+
+def verify_installations(rows, *, resolver):
+    """Resolved items by item key; the first inconsistent installation raises."""
+
+    resolved, faults = check_installations(rows, resolver=resolver)
+    if faults:
+        raise next(iter(faults.values()))
+    return resolved
+
+
 def resolve_installations(catalogue, rows, *, resolver, items=()):
+    """Verify the installations ``items`` need, or every one while upgrading.
+
+    Only the legacy-schema upgrade replaces the whole table, so only it resolves
+    every record. Otherwise an inconsistent installation nothing selected uses
+    changes nothing.
+    """
+
     upgrade = catalogue.installation_upgrade
     columns = {name.casefold() for name in upgrade["columns"]} if upgrade else set()
-    physical_workspace = resolver.workspace
     selected = {str(item) for item in items}
-    resolved_rows = []
-    publication_rows = []
+    observed = [dict(row) for row in rows]
+    rows = tuple(dict(row) for row in observed)
     seen = set()
-    for original in rows:
-        row = dict(original)
-        item = f"{row['item_type']}/{row['item_name']}"
+    for row in rows:
         key = (row["item_type"], row["item_name"])
         if key in seen:
-            raise BuildError(
-                f"{item}: duplicate installation records; repair the catalogue"
+            raise InstallationIdentityError(
+                f"{row['item_type']}/{row['item_name']}: duplicate installation records; repair the catalogue"
             )
         seen.add(key)
-        workspace_id = row.get("workspace_id")
-        if workspace_id is not None:
-            if (
-                _guid(workspace_id, item=item, column="Workspace GUID")
-                != physical_workspace.id.casefold()
-            ):
-                raise BuildError(
-                    f"{item}: Workspace GUID {workspace_id} does not match {physical_workspace.id}; use the installed workspace"
-                )
-        if upgrade or item in selected:
-            target = resolver.resolve(
-                ItemRef(row["target_name"]), item_type=row["item_type"]
+    wanted = [
+        row
+        for row in rows
+        if upgrade or f"{row['item_type']}/{row['item_name']}" in selected
+    ]
+    if len(wanted) > 1 and hasattr(resolver, "discover_once"):
+        resolver.discover_once()
+    publication_rows = []
+    for row in wanted:
+        # Old Warehouse/Lakehouse publication wrote the recorded target name
+        # into Item ID. Only that exact old-column fallback is backfillable.
+        target = verify_installation(
+            row,
+            resolver=resolver,
+            backfillable=upgrade is not None
+            and "item id" in columns
+            and "target item guid" not in columns,
+        )
+        if upgrade:
+            row.update(workspace_id=target.workspace_id, item_id=target.id)
+            publication_rows.append(
+                {
+                    **row,
+                    "workspace_name": resolver.workspace.name,
+                    "target_name": target.name,
+                }
             )
-            item_id = row.get("item_id")
-            # Old Warehouse/Lakehouse publication wrote the recorded target name
-            # into Item ID. Only that exact old-column fallback is backfillable.
-            name_fallback = (
-                upgrade is not None
-                and "item id" in columns
-                and "target item guid" not in columns
-                and item_id == row["target_name"]
-            )
-            if item_id is not None and not name_fallback:
-                if (
-                    _guid(item_id, item=item, column="Target item GUID")
-                    != target.id.casefold()
-                ):
-                    raise BuildError(
-                        f"{item}: Target item GUID {item_id} does not match {target.id}; repair the installation record"
-                    )
-            if upgrade:
-                row.update(workspace_id=target.workspace_id, item_id=target.id)
-                publication_rows.append(
-                    {
-                        **row,
-                        "workspace_name": physical_workspace.name,
-                        "target_name": target.name,
-                    }
-                )
-        resolved_rows.append(row)
     if upgrade is not None:
-        upgrade.update(rows=[dict(row) for row in rows], resolved=publication_rows)
-    return tuple(resolved_rows)
+        upgrade.update(rows=observed, resolved=publication_rows)
+    return rows
 
 
 def render_installation_upgrade(upgrade):

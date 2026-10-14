@@ -128,9 +128,11 @@ def test_legacy_upgrade_resolves_every_record_without_rebinding_or_refreshing_na
     )
     assert [row["signature"] for row in resolved] == [row["signature"] for row in rows]
     assert resolve_installations(catalogue, rows, resolver=resolver) == resolved
-    assert (
-        len(resolver.client.requested) == 4
-    )  # workspace and one typed lookup per recorded target
+    # The workspace, then one item listing for every recorded target.
+    assert resolver.client.requested == [
+        "workspaces",
+        f"workspaces/{resolver.workspace.id}/items",
+    ]
 
 
 @weaver_test()

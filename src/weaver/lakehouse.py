@@ -261,15 +261,31 @@ def _mount(name: str, spark_root: str) -> str:
     try:
         with _quiet_mount():
             utils.fs.mount(spark_root, point, MOUNT_OPTIONS)
-        local = utils.fs.getMountPath(point)
     except Exception as exc:
         raise LoadError(
             f"Lakehouse {name!r} Files could not be mounted: {exc}"
         ) from exc
-    if not local:
+    # The mount exists from here, so a failure below must not leave it behind
+    # unregistered, where nothing would release it.
+    try:
+        local = utils.fs.getMountPath(point)
+    except Exception as exc:
+        _unmount(utils, point)
+        raise LoadError(
+            f"Lakehouse {name!r} Files could not be mounted: {exc}"
+        ) from exc
+    if not isinstance(local, str) or not local.strip():
+        _unmount(utils, point)
         raise LoadError(f"Lakehouse {name!r} mount returned no filesystem path")
     _MOUNTS[spark_root] = _Mount(point=point, local=local)
     return local
+
+
+def _unmount(utils: Any, point: str) -> None:
+    try:
+        utils.fs.unmount(point)
+    except Exception:  # noqa: BLE001 - replacement uses a fresh path
+        pass
 
 
 def _outside_fabric(name: str) -> str:
@@ -300,10 +316,7 @@ def release_mounts() -> None:
     with _MOUNTING:
         for spark_root in list(_MOUNTS):
             if utils is not None:
-                try:
-                    utils.fs.unmount(_MOUNTS[spark_root].point)
-                except Exception:  # noqa: BLE001 - replacement uses a fresh path
-                    pass
+                _unmount(utils, _MOUNTS[spark_root].point)
             del _MOUNTS[spark_root]
 
 

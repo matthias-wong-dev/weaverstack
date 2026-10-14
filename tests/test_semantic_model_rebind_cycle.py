@@ -20,9 +20,8 @@ from weaver.build_bundle.targets import (
     effective_item_bindings,
     parse_build_item,
 )
-from weaver.errors import BuildError
+from weaver.errors import InstallationIdentityError
 from weaver.fabric.resolution import FabricResolver
-from weaver.fabric.resources import ItemNotFoundError
 from weaver.semantic_models.definition import encode_definition
 from weaver.sessions import TestSession
 from weaver.store import FilesystemStore
@@ -85,12 +84,15 @@ def test_installation_identity_controls_recertification(tmp_path, changed):
         if changed != "missing_ids":
             error, message = {
                 "name": (
-                    ItemNotFoundError,
+                    InstallationIdentityError,
                     "SemanticModel 'Reporting_Dev' was not found in workspace 'Demo'",
                 ),
-                "item_id": (BuildError, "Target item GUID .* does not match .*repair"),
+                "item_id": (
+                    InstallationIdentityError,
+                    "Target item GUID .* but the catalogue installed to",
+                ),
                 "workspace_id": (
-                    BuildError,
+                    InstallationIdentityError,
                     "Workspace GUID .* does not match .*installed workspace",
                 ),
             }[changed]
