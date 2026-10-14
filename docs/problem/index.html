@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#f7f7f6">
     <title>Microsoft Fabric complexity and technical debt | Weaver</title>
-    <meta name="description" content="Fabric gives teams freedom. Keeping notebooks, SQL, models, Reports and environments working together takes engineering. Weaver handles the repeated work.">
+    <meta name="description" content="Fabric gives teams freedom. Keeping Notebooks, SQL, Semantic Models, Reports and environments working together takes engineering. Weaver handles the repeated work.">
     <meta name="robots" content="index, follow, max-image-preview:large">
     <link rel="canonical" href="https://weaverstack.dev/problem/">
     <meta property="og:type" content="article">
@@ -13,7 +13,7 @@
     <meta property="og:site_name" content="Weaver">
     <meta property="og:locale" content="en_AU">
     <meta property="og:title" content="Microsoft Fabric complexity and technical debt | Weaver">
-    <meta property="og:description" content="Fabric gives teams freedom. Keeping notebooks, SQL, models, Reports and environments working together takes engineering. Weaver handles the repeated work.">
+    <meta property="og:description" content="Fabric gives teams freedom. Keeping Notebooks, SQL, Semantic Models, Reports and environments working together takes engineering. Weaver handles the repeated work.">
     <meta property="og:image" content="https://weaverstack.dev/og.png">
     <meta property="og:image:type" content="image/png">
     <meta property="og:image:width" content="1200">
@@ -21,7 +21,7 @@
     <meta property="og:image:alt" content="Weaver: Microsoft Fabric data engineering.">
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="Microsoft Fabric complexity and technical debt | Weaver">
-    <meta name="twitter:description" content="Fabric gives teams freedom. Keeping notebooks, SQL, models, Reports and environments working together takes engineering. Weaver handles the repeated work.">
+    <meta name="twitter:description" content="Fabric gives teams freedom. Keeping Notebooks, SQL, Semantic Models, Reports and environments working together takes engineering. Weaver handles the repeated work.">
     <meta name="twitter:image" content="https://weaverstack.dev/og.png">
     <meta name="twitter:image:alt" content="Weaver: Microsoft Fabric data engineering.">
     <link rel="icon" type="image/png" sizes="128x128" href="../favicon.png">
@@ -85,77 +85,45 @@
 <div class="wrap">
 <p class="eyebrow">The problem</p>
 <h1>Fabric is powerful. It's also remarkably easy to build a mess.</h1>
-<p class="lead">Fabric gives you enormous freedom. A notebook here, a Warehouse query there, a semantic model and a few Reports.</p>
-<p style="max-width: var(--measure);">You can deliver something useful very quickly.</p>
-<p style="max-width: var(--measure);">The trouble starts when those pieces need to work together. And then keep working as the data changes, the project grows and people begin depending on it.</p>
+<p class="lead">Fabric gives you enormous freedom. A Notebook here, a Warehouse query there, a Semantic Model and a few Reports.</p>
 </div>
 </section>
 <section class="section">
 <div class="wrap">
 <h2>Everything works. Until it needs to work together.</h2>
-<p>A Python script loads some files. A Spark SQL transformation produces a Delta Table. A Warehouse query consumes it. A semantic model needs refreshing. A Report depends on that model.</p>
-<p>None of these is particularly difficult on its own.</p>
-<p>But now you need to worry about dependencies, execution order, data availability and what happens when something fails halfway through.</p>
-<p>Before long, the engineering around your code becomes more complicated than the code itself.</p>
-<p>And that's just one data pipeline.</p>
+<p>Your Notebook, Delta Table, Warehouse query, Semantic Model and Report all work. Now someone has to keep their dependencies, execution order and partial failures under control.</p>
 </div>
 </section>
 <section class="section">
 <div class="wrap">
 <h2>Power BI brings its own problems</h2>
-<p>Your first semantic model is straightforward.</p>
-<p>Then you build another.</p>
-<p>The naming conventions differ. Measures are formatted differently. Relationships and hidden columns aren't consistent. A business rule changes, and now you have to remember everywhere it was implemented.</p>
-<p>What if you want several variations of the same model, with shared foundations but different measures or audiences?</p>
-<p>Without a systematic approach, every variation becomes another model to maintain.</p>
-<p>And a successful refresh doesn't tell you whether the calculations are right.</p>
-<p>Reports introduce another layer of uncertainty.</p>
-<p>Publish a Report to another workspace. Which semantic model is it connected to? Does its name match? Did you remember to change the connection? Did you select the right model?</p>
-<p>It's surprisingly easy to deploy something that appears successful but points to the wrong place.</p>
-<p>And the more models and Reports you have, the harder it becomes to keep them consistent.</p>
+<p>Conventions drift. Business rules get copied. Semantic Model variants become separate things to maintain. And a successful refresh still doesn’t prove the numbers are right.</p>
+<p>A Report can publish successfully but point to the wrong Semantic Model. Another workspace means another destination to check.</p>
 </div>
 </section>
 <section class="section">
 <div class="wrap">
 <h2>Now try moving everything between environments</h2>
-<p>Development works. Now you need test and production.</p>
-<p>Different workspaces. Different Lakehouse and Warehouse names. Different semantic-model targets, Reports and source connections.</p>
-<p>Suddenly your code is full of variables, substitutions and environment-specific exceptions.</p>
-<p>Or you're maintaining copies of things that should have remained identical.</p>
-<p>Every deployment becomes another opportunity to miss a reference, overwrite something or connect a Report to the wrong model.</p>
-<p><strong>The project hasn't changed. Why should deploying it somewhere else be so difficult?</strong></p>
+<p>The project hasn’t changed, but every destination brings different item names, Semantic Model bindings and source connections. Variables, substitutions and copied files multiply.</p>
 </div>
 </section>
 <section class="section">
 <div class="wrap">
 <h2>And someone still has to do the serious engineering</h2>
-<p>Even when all the pieces are connected, you haven't finished.</p>
-<p>A production data estate needs incremental processing, bookmarks, change detection, deletes, logging, statistics, dependency scheduling, concurrency, fault tolerance and reliable recovery.</p>
-<p>You need to know what succeeded, what failed, what was skipped and what needs to run again.</p>
-<p>You need tests that establish whether the data is actually correct, not merely whether the pipeline completed.</p>
-<p>And you need all of this to continue working as the estate grows.</p>
-<p>These are substantial engineering problems. Getting them right takes time and experience.</p>
-<p><strong>But your team was hired to deliver data products, not reinvent a data engineering framework for Fabric.</strong></p>
+<p>Someone has to handle changes and deletes, order the work, test the data and record enough state to recover. That becomes a framework your team has to maintain.</p>
 </div>
 </section>
 <section class="section">
 <div class="wrap">
 <h2>The bigger problem is what happens when you succeed</h2>
-<p>A small solution becomes useful. More people depend on it. More sources are added. More models and Reports appear.</p>
-<p>What started as a few perfectly reasonable notebooks and queries becomes an increasingly complicated collection of dependencies, scripts and deployment procedures.</p>
-<p>Eventually, making a small change feels risky.</p>
-<p>And instead of delivering new capabilities, your team is spending its time maintaining the engineering it built along the way.</p>
+<p>More users bring more sources, Semantic Models and Reports. Soon a small change feels risky, and maintaining yesterday’s engineering crowds out tomorrow’s work.</p>
 </div>
 </section>
 <section class="section" style="background: var(--paper-deep);">
 <div class="wrap">
 <h2>Keep building what matters. Weaver handles the engineering around it.</h2>
-<p>Weaver brings Lakehouse, Warehouse, semantic-model and Report development into one framework.</p>
-<p>Keep writing the Python, SQL and native Power BI files your team already knows.</p>
-<p>Weaver handles the dependencies, generated load procedures, incremental state, validations, deployment mappings and operational machinery that would otherwise have to be designed and maintained separately.</p>
-<p>Start with one Table. Add another. Connect a Warehouse. Deploy a semantic model. Publish Reports to different environments.</p>
-<p>The same engineering framework grows with you.</p>
-<p><strong>You get Fabric's freedom without having to build and maintain all the machinery needed to keep it under control.</strong></p>
+<p>Keep writing Python, SQL and native Power BI files. Weaver handles the dependencies, generated load procedures, validations, deployment mappings and operational state around them.</p>
+<p>Start with one Table. Keep the same framework as the estate grows.</p>
 <div class="actions">
 <a class="button blue" href="/how-it-works/">How Weaver works →</a>
 <a class="button ghost" href="/get-started/">Get started →</a>
