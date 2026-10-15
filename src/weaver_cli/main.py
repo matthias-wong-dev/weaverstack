@@ -1148,14 +1148,11 @@ def _add_initialise_args(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--catalogue",
-        help="Catalogue Warehouse. Defaults to Catalogue.",
+        help="Catalogue Warehouse. Defaults to Catalogue for data projects; omitted for native-only projects.",
     )
     parser.add_argument(
         "--environment",
-        help=(
-            "Fabric Environment for the project. It may already exist. Defaults "
-            "to Weaver."
-        ),
+        help="Fabric Environment for Python work. Defaults to Weaver for data projects; omitted for native-only projects.",
     )
     parser.add_argument("--lakehouse", help="Lakehouse for Delta tables and files.")
     parser.add_argument("--warehouse", help="Warehouse for SQL tables and views.")

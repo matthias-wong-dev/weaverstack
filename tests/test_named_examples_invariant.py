@@ -495,3 +495,106 @@ def test_named_example_option_requires_a_known_name():
     for name in (True, False, "Unknown"):
         with pytest.raises(CommandError, match="Parcel.*Sales"):
             request(name, ("warehouse",))
+
+
+@pytest.mark.parametrize("example", ["Parcel", "Sales"])
+@weaver_test()
+def test_native_only_initialise_requires_no_fabric_data_resources(
+    tmp_path, fabric, example
+):
+    import yaml
+
+    import weaver
+
+    root = tmp_path / "native"
+    report = weaver.initialise(
+        root,
+        workspace="Analytics",
+        semantic_model="Model",
+        example=example,
+        session=fabric.session,
+    )
+    assert report.succeeded and report.resources == ()
+    assert fabric.created == []
+    assert "weaver health" not in report.next_commands
+    assert "weaver test" not in report.next_commands
+    config = yaml.safe_load((root / "workspace-config.yml").read_text())
+    assert not config.get("catalogue") and not config.get("environment")
+    assert not (root / "Environment").exists()
+    assert "Environment/None" not in (root / "README.md").read_text()
+    original = {p: b for p, b in snapshot(root).items() if p.startswith("PowerBI/")}
+    weaver.initialise(
+        root,
+        workspace="Analytics",
+        warehouse="Operations",
+        example=example,
+        session=fabric.session,
+    )
+    config = yaml.safe_load((root / "workspace-config.yml").read_text())
+    assert config["catalogue"] == "Warehouse/Catalogue"
+    assert config["environment"] == "Weaver"
+    assert all(snapshot(root).get(p) == b for p, b in original.items())
+
+
+@weaver_test()
+def test_native_interactive_setup_does_not_request_data_infrastructure(
+    tmp_path, capsys
+):
+    from io import StringIO
+
+    from weaver_cli.initialise import collect
+
+    args = build_parser().parse_args(
+        [
+            "initialise",
+            "--workspace",
+            "Demo",
+            "--project-folder",
+            str(tmp_path),
+            "--semantic-model",
+            "Model",
+            "--example",
+            "Parcel",
+            "--interactive",
+        ]
+    )
+    collect(args, stdin=StringIO("1\n"))
+    assert args.catalogue is None and args.environment is None
+    text = capsys.readouterr().out
+    assert "Catalogue name" not in text and "Environment name" not in text
+    assert "Publish the Environment" not in text
+
+
+@weaver_test()
+def test_native_extension_preserves_edited_readme_and_explicit_support(
+    tmp_path, fabric
+):
+    import yaml
+
+    import weaver
+
+    root = tmp_path / "native"
+    weaver.initialise(
+        root,
+        workspace="Analytics",
+        semantic_model="Model",
+        example="Parcel",
+        catalogue="History",
+        session=fabric.session,
+    )
+    assert not (root / "Environment").exists()
+    readme = root / "README.md"
+    readme.write_text(readme.read_text() + "\nUser guidance.\n")
+    before = readme.read_bytes()
+    weaver.initialise(
+        root,
+        workspace="Analytics",
+        warehouse="Operations",
+        example="Parcel",
+        session=fabric.session,
+    )
+    assert readme.read_bytes() == before
+    assert (
+        yaml.safe_load((root / "workspace-config.yml").read_text())["catalogue"]
+        == "Warehouse/History"
+    )

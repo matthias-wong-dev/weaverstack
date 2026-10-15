@@ -68,7 +68,10 @@ def extend_files(destination, files, request, configured, state):
     for path in files:
         existing = destination / path
         if path in known and existing.is_file():
-            if path == WORKFLOW_FILE and _digest(existing.read_bytes()) == known[path]:
+            if (
+                path in {WORKFLOW_FILE, "README.md"}
+                and _digest(existing.read_bytes()) == known[path]
+            ):
                 continue
             files[path] = existing.read_bytes()
     if configured is not None:
@@ -77,6 +80,10 @@ def extend_files(destination, files, request, configured, state):
         generated = yaml.safe_load(original[WORKSPACE_CONFIG_FILE])
         targets = current.setdefault("targets", {})
         changed = False
+        for field in ("catalogue", "environment"):
+            if not current.get(field) and generated.get(field):
+                current[field] = generated[field]
+                changed = True
         for item, binding in generated.get("targets", {}).items():
             if item not in targets:
                 targets[item] = binding
@@ -89,7 +96,7 @@ def extend_files(destination, files, request, configured, state):
     hashes = dict(known)
     for path, content in files.items():
         if path not in known or (
-            path == WORKFLOW_FILE and files[path] == original[path]
+            path in {WORKFLOW_FILE, "README.md"} and files[path] == original[path]
         ):
             hashes[path] = _digest(content)
     record = {

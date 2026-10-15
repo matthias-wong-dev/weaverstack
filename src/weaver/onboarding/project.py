@@ -29,8 +29,8 @@ KEEP_FILE = ".gitkeep"
 @dataclass(frozen=True)
 class ProjectRequest:
     workspace: str
-    catalogue: str
-    environment: str
+    catalogue: str | None
+    environment: str | None
     lakehouse: str | None = None
     warehouse: str | None = None
     example: str | None = None
@@ -46,12 +46,12 @@ class ProjectRequest:
                 "Unknown example. Choose Parcel or Sales, or omit --example."
             )
         for field in ("workspace", "catalogue", "environment"):
-            object.__setattr__(
-                self, field, validate_name(getattr(self, field), what=field)
-            )
+            value = getattr(self, field)
+            if field == "workspace" or value is not None:
+                object.__setattr__(self, field, validate_name(value, what=field))
         for field in ("lakehouse", "warehouse", "semantic_model"):
             value = getattr(self, field)
-            if value is not None:
+            if field == "workspace" or value is not None:
                 object.__setattr__(self, field, validate_name(value, what=field))
         for kind, value in (
             ("Lakehouse", self.lakehouse),
@@ -73,8 +73,8 @@ class ProjectRequest:
             )
 
     @property
-    def catalogue_reference(self) -> str:
-        return f"{WAREHOUSE}/{self.catalogue}"
+    def catalogue_reference(self) -> str | None:
+        return f"{WAREHOUSE}/{self.catalogue}" if self.catalogue else None
 
     @property
     def example_model(self) -> str | None:
@@ -123,7 +123,9 @@ def build_commands(request: ProjectRequest) -> tuple[str, ...]:
 def project_files(request: ProjectRequest) -> dict[str, str]:
     files = {
         WORKSPACE_CONFIG_FILE: _workspace_config(request),
-        WORKFLOW_FILE: _workflow(build_commands(request)),
+        WORKFLOW_FILE: _workflow(
+            build_commands(request), catalogue=bool(request.catalogue)
+        ),
         "README.md": _readme(request),
     }
     if request.lakehouse and not request.example:
@@ -157,30 +159,26 @@ def semantic_extension():
 
 
 def _workspace_config(request: ProjectRequest) -> str:
-    lines = [
-        f"workspace: {_scalar(request.workspace)}",
-        f"environment: {_scalar(request.environment)}",
-        f"catalogue: {_scalar(request.catalogue_reference)}",
-        "",
-        "targets:",
-    ]
+    lines = [f"workspace: {_scalar(request.workspace)}"]
+    if request.environment:
+        lines.append(f"environment: {_scalar(request.environment)}")
+    if request.catalogue:
+        lines.append(f"catalogue: {_scalar(request.catalogue_reference)}")
+    lines.extend(["", "targets:"])
     for item in request.items:
         lines.append(f"  {item}: {_scalar(item.partition('/')[2])}")
     return "\n".join(lines) + "\n"
 
 
-def _workflow(builds) -> str:
+def _workflow(builds, *, catalogue=True) -> str:
     steps = "".join(f"    - {build}\n" for build in builds)
+    recorded = "    - test\n    - health\n" if catalogue else ""
     return f"""workflows:
   full:
 {steps}    - load
-    - test
-    - health
-  load-only:
+{recorded}  load-only:
     - load
-    - test
-    - health
-  build-only:
+{recorded}  build-only:
 {steps}  wipe-all:
     - wipe
 """
@@ -188,85 +186,67 @@ def _workflow(builds) -> str:
 
 def _readme(request: ProjectRequest) -> str:
     builds = "\n".join(f"weaver {build}" for build in build_commands(request))
-    return f"""# Weaver project
-
-This project describes data objects in the Microsoft Fabric workspace
-`{request.workspace}`.
-
-## Project files
-
-`workspace-config.yml` names the workspace, catalogue Warehouse, Environment
-and the physical target for each project item.
-
-`Environment/{request.environment}.Environment` defines the Python runtime. Add
-packages to its `Libraries/PublicLibraries/environment.yml`. Fabric compute
-settings and custom libraries are kept in the same Environment definition.
-
-`PowerBI/<project>/` holds Power BI Desktop projects. Build creates their
-semantic models and Reports in Fabric.
-
-`workflow.yml` defines repeatable workflows: `full`, `load-only`, `build-only`
-and `wipe-all`. Wipe removes all user objects from the configured targets and
-asks for confirmation.
-
-## The basic workflow
-
-```bash
-{builds}
-weaver load
-weaver test
-weaver health
-```
-
-Or run the sequence in one session:
-
-```bash
-weaver workflow full
-```
-
-Build makes Fabric structures match the project. Load runs the data work.
-
-## The Weaver catalogue
+    recorded = "\nweaver test\nweaver health" if request.catalogue else ""
+    supporting = ""
+    if request.catalogue:
+        supporting += f"""## The Weaver catalogue
 
 Warehouse/{request.catalogue} holds Weaver's build, load and test state. The
 first build creates those catalogue tables.
 
-## The Environment
+"""
+    if request.environment:
+        supporting += f"""## The Environment
 
-Publish before building a Lakehouse or running Python work, and after changing
-packages:
+`Environment/{request.environment}.Environment` defines the Python runtime.
+Add packages to `Libraries/PublicLibraries/environment.yml`. Publish before
+building a Lakehouse or running Python work, and after changing packages:
 
 ```bash
 weaver fabric environment publish --path Environment/{request.environment}.Environment
 ```
 
-Publishing can take several minutes. Lakehouse builds and Python work run in
-Fabric Spark with this Environment.
+Publication can take several minutes.
 
-## Working interactively
+"""
+    return f"""# Weaver project
 
-```bash
-weaver session
-```
+This project describes items in the Microsoft Fabric workspace
+`{request.workspace}`.
 
-Commands inside the session reuse Fabric connections and the Spark session.
+`workspace-config.yml` names the workspace and physical targets. Data projects
+also bind a catalogue Warehouse and Fabric Environment. `PowerBI/<project>/`
+holds native model and Report sources; Build creates those items in the service.
 
-## Try the example
-
-Use `--example Parcel` or `--example Sales` to add source files for the items
-you select. Add `--semantic-model NAME` for a native inline model and linked
-Report. Re-run Initialise against this folder to add an item: existing sources,
-including edits, and physical bindings remain in place. Managed-source models
-are additional definitions, not replacements for the inline sample model.
-
-## Check connectivity
+## Run the project
 
 ```bash
-weaver doctor --workspace "{request.workspace}"
+weaver check
+{builds}
+weaver load{recorded}
 ```
 
-Doctor checks authentication, REST, OneLake, TDS and Spark in the workspace.
-`weaver health` reports the installed project's state.
+Or run `weaver workflow full`. Build installs definitions; Load runs data work
+and refreshes models. Reports have no separate Load or Test.
+
+{supporting}## Work interactively
+
+Run `weaver session` to reuse connections across commands.
+
+## Extend the project
+
+Use `--example Parcel` or `--example Sales` with the items you select. Add
+`--semantic-model NAME` for an inline model and linked Report. Re-run Initialise
+against this folder to add an item: existing sources, including edits, and
+physical bindings remain in place. Managed-source models are additional
+definitions, not replacements for the inline sample model.
+
+Native models and Reports can start without a Lakehouse or Warehouse pipeline.
+When a data item is added, Initialise adds its supporting configuration.
+
+`workflow.yml` also includes `build-only`, `load-only` and `wipe-all`.
+Wipe is destructive: it removes user objects in selected managed data targets
+and asks for confirmation. Keep irreplaceable sources outside managed targets.
 """
 
 

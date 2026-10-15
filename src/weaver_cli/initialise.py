@@ -62,14 +62,16 @@ def collect(
     suggested_folder = False
     if not args.project_folder:
         args.project_folder, suggested_folder = _project_folder(stream, args.workspace)
-    if not args.catalogue:
-        print(
-            "\nCatalogue\nThe Weaver catalogue is a Warehouse that stores build, load and test state."
-        )
-        args.catalogue = _item_answer(
-            stream, "Catalogue name", "Warehouse", default=DEFAULT_CATALOGUE
-        )
-    _collect_workspace_items(args, stream, environments=environments, items=items)
+    native_only = _native_only(args)
+    if not native_only:
+        if not args.catalogue:
+            print(
+                "\nCatalogue\nThe Weaver catalogue is a Warehouse that stores build, load and test state."
+            )
+            args.catalogue = _item_answer(
+                stream, "Catalogue name", "Warehouse", default=DEFAULT_CATALOGUE
+            )
+        _collect_workspace_items(args, stream, environments=environments, items=items)
     if args.example is None:
         args.example = _example(stream)
     fields = (
@@ -80,6 +82,7 @@ def collect(
         ("lakehouse", "Lakehouse"),
         ("warehouse", "Warehouse"),
         ("example", "Example"),
+        ("semantic_model", "Semantic Model"),
     )
     while True:
         print("\nProject\n")
@@ -103,10 +106,25 @@ def collect(
         field, label = fields[_numbered(stream, "Change", len(fields)) - 1]
         if field == "example":
             value = _example(stream)
-        elif field in ("catalogue", "environment", "lakehouse", "warehouse"):
-            kind = "Warehouse" if field == "catalogue" else label
+        elif field in (
+            "catalogue",
+            "environment",
+            "lakehouse",
+            "warehouse",
+            "semantic_model",
+        ):
+            kind = (
+                "Warehouse"
+                if field == "catalogue"
+                else "SemanticModel"
+                if field == "semantic_model"
+                else label
+            )
             value = _item_answer(
-                stream, label, kind, skippable=field in ("lakehouse", "warehouse")
+                stream,
+                label,
+                kind,
+                skippable=field in ("lakehouse", "warehouse", "semantic_model"),
             )
         else:
             value = _answer(stream, label)
@@ -120,13 +138,36 @@ def collect(
                     stream, args.workspace
                 )
             args.environment = args.lakehouse = args.warehouse = None
-            _collect_workspace_items(
-                args, stream, environments=environments, items=items
-            )
-    if not args.dry_run and not getattr(args, "publish_environment", False):
+            if not _native_only(args):
+                _collect_workspace_items(
+                    args, stream, environments=environments, items=items
+                )
+    if (
+        args.environment
+        and not args.dry_run
+        and not getattr(args, "publish_environment", False)
+    ):
         print(INSTALL_WARNING)
         args.publish_environment = _yes(stream, "Publish the Environment now?")
     return True
+
+
+def _native_only(args):
+    if args.lakehouse or args.warehouse or not getattr(args, "semantic_model", None):
+        return False
+    from pathlib import Path
+
+    from weaver.onboarding.extension import read_project, selections
+
+    configured, record = read_project(Path(args.project_folder))
+    selected = selections(
+        configured,
+        record,
+        lakehouse=None,
+        warehouse=None,
+        semantic_model=args.semantic_model,
+    )
+    return not selected["lakehouse"] and not selected["warehouse"]
 
 
 def _collect_workspace_items(args, stream, *, environments, items):

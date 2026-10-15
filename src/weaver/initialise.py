@@ -76,6 +76,7 @@ class InitialiseReport:
     environment_publication: str = "deferred"
     environment_definition: str = "written"
     builds: tuple[str, ...] = ("build",)
+    catalogue_configured: bool = True
 
     @property
     def created(self) -> tuple[str, ...]:
@@ -95,8 +96,7 @@ class InitialiseReport:
             "weaver workflow full",
             *(f"weaver {build}" for build in self.builds),
             "weaver load",
-            "weaver test",
-            "weaver health",
+            *(("weaver test", "weaver health") if self.catalogue_configured else ()),
         )
 
     def to_mapping(self) -> dict[str, Any]:
@@ -133,8 +133,10 @@ def initialise(
     """Validate and create a project and its requested Fabric items.
 
     ``semantic_model`` adds ``PowerBI/<name>/<name>.tmdl`` for Build to create.
-    ``example`` adds source files. ``publish_environment`` publishes the
-    Environment after writing the project.
+    ``example`` selects Parcel or Sales source files. Native-only projects do
+    not provision a catalogue or Environment unless explicitly requested.
+    Adding a data item supplies those defaults. ``publish_environment``
+    publishes the Environment after writing the project.
     """
 
     if project_folder is None:
@@ -159,19 +161,19 @@ def initialise(
             (
                 "catalogue",
                 catalogue,
-                configured.catalogue_item.name
-                if configured.catalogue
-                else DEFAULT_CATALOGUE,
+                configured.catalogue_item.name if configured.catalogue else None,
             ),
             (
                 "environment",
                 environment,
-                configured.environment.name
-                if configured.environment
-                else DEFAULT_ENVIRONMENT,
+                configured.environment.name if configured.environment else None,
             ),
         ):
-            if supplied is not None and str(supplied) != str(existing):
+            if (
+                supplied is not None
+                and existing is not None
+                and str(supplied) != str(existing)
+            ):
                 raise InitialiseError(
                     f"workspace-config.yml already binds {field} to {existing!r}; cannot retarget it to {supplied!r}."
                 )
@@ -193,6 +195,9 @@ def initialise(
             )
         )
         adopted.update(item.identity for item in repository.items)
+    has_data = bool(
+        effective["lakehouse"] or effective["warehouse"] or _sources(adopted)
+    )
     request = ProjectRequest(
         workspace=_workspace_name(workspace, session=session),
         catalogue=catalogue
@@ -200,12 +205,16 @@ def initialise(
             configured.catalogue_item.name
             if configured is not None and configured.catalogue
             else DEFAULT_CATALOGUE
+            if has_data
+            else None
         ),
         environment=environment
         or (
             configured.environment.name
             if configured is not None and configured.environment
             else DEFAULT_ENVIRONMENT
+            if has_data or publish_environment
+            else None
         ),
         **effective,
         example=example,
@@ -246,11 +255,26 @@ def initialise(
                     existing_powerbi=source_items,
                 )
 
-            with opened.step("Reading the Environment", request.environment):
+            with opened.step(
+                "Reading the Environment"
+                if request.environment
+                else "Reading the native project",
+                request.environment or request.workspace,
+            ):
                 files = _generated_files(request)
-                definition_status = "written"
-                directory = environment_directory(request.environment)
-                if state != MISSING and not (destination / directory).exists():
+                definition_status = (
+                    "written" if request.environment else "not applicable"
+                )
+                directory = (
+                    environment_directory(request.environment)
+                    if request.environment
+                    else None
+                )
+                if (
+                    directory is not None
+                    and state != MISSING
+                    and not (destination / directory).exists()
+                ):
                     definition_status = "imported"
                     from .fabric.environment import overlay_weaver, read_definition
 
@@ -265,7 +289,7 @@ def initialise(
                             for path, content in definition.parts.items()
                         }
                     )
-                elif (destination / directory).is_dir():
+                elif directory is not None and (destination / directory).is_dir():
                     # Reruns preserve adopted packages and binary custom libraries.
                     for path in (destination / directory).rglob("*"):
                         if path.is_file():
@@ -280,8 +304,11 @@ def initialise(
                 metadata = {RECORD}
                 if configured is not None:
                     metadata.add(WORKSPACE_CONFIG_FILE)
-                if "workflow.yml" in state_record.get("files", {}):
-                    metadata.add("workflow.yml")
+                metadata.update(
+                    p
+                    for p in ("workflow.yml", "README.md")
+                    if p in state_record.get("files", {})
+                )
                 _refuse_overwrites(
                     destination, {p: c for p, c in files.items() if p not in metadata}
                 )
@@ -300,8 +327,12 @@ def initialise(
                         generated=request.example is not None, name=request.example
                     ),
                     dry_run=True,
+                    environment_publication="deferred"
+                    if request.environment
+                    else "not applicable",
                     environment_definition=definition_status,
                     builds=build_commands(request),
+                    catalogue_configured=bool(request.catalogue),
                 )
 
             resources.extend(
@@ -316,7 +347,7 @@ def initialise(
             )
             with opened.step("Writing the project files", str(destination)):
                 _write(destination, files)
-            if state == MISSING:
+            if request.environment and state == MISSING:
                 from .fabric.environment import create_with_definition
                 from .fabric.environment_definition import read_environment_definition
 
@@ -335,14 +366,15 @@ def initialise(
                         raise _creation_error(
                             ENVIRONMENT_ROLE, request.environment, exc
                         ) from exc
-            resources.append(
-                FabricItemOutcome(
-                    ENVIRONMENT_ROLE,
-                    request.environment,
-                    CREATED if state == MISSING else EXISTING,
+            if request.environment:
+                resources.append(
+                    FabricItemOutcome(
+                        ENVIRONMENT_ROLE,
+                        request.environment,
+                        CREATED if state == MISSING else EXISTING,
+                    )
                 )
-            )
-            publication = "deferred"
+            publication = "deferred" if request.environment else "not applicable"
             if publish_environment:
                 from .fabric import publish_environment as publish
 
@@ -370,6 +402,7 @@ def initialise(
         environment_definition=definition_status,
         dry_run=False,
         builds=build_commands(request),
+        catalogue_configured=bool(request.catalogue),
     )
 
 
@@ -450,7 +483,8 @@ def _workspace_name(workspace: str | None, *, session) -> str:
 
 def _generated_files(request: ProjectRequest) -> dict[str, str]:
     files = dict(project_files(request))
-    files.update(environment_definition_files(request.environment))
+    if request.environment:
+        files.update(environment_definition_files(request.environment))
     if request.example:
         files.update(example_files(request))
     return files
@@ -463,7 +497,9 @@ def _parse_generated(files, request: ProjectRequest, *, destination=None):
     from .fabric.environment_definition import read_environment_definition
     from .operations.check import check
 
-    directory = environment_directory(request.environment)
+    directory = (
+        environment_directory(request.environment) if request.environment else None
+    )
     with tempfile.TemporaryDirectory(prefix="weaver-initialise-") as temporary:
         root = Path(temporary)
         if destination is not None and destination.exists():
@@ -487,7 +523,7 @@ def _parse_generated(files, request: ProjectRequest, *, destination=None):
         _write(root, files)
         try:
             configured = load_workspace(root / WORKSPACE_CONFIG_FILE)
-            if (root / directory).is_dir():
+            if directory is not None and (root / directory).is_dir():
                 read_environment_definition(root / directory)
             check(root)
         except WeaverError as exc:
@@ -554,12 +590,17 @@ def _requested(request: ProjectRequest) -> tuple[_Requested, ...]:
     from .fabric.resources import LAKEHOUSE as LAKEHOUSE_ITEM
     from .fabric.resources import WAREHOUSE as WAREHOUSE_ITEM
 
-    wanted = [_Requested(CATALOGUE_ROLE, request.catalogue, WAREHOUSE_ITEM)]
+    wanted = (
+        [_Requested(CATALOGUE_ROLE, request.catalogue, WAREHOUSE_ITEM)]
+        if request.catalogue
+        else []
+    )
     if request.lakehouse:
         wanted.append(_Requested(LAKEHOUSE, request.lakehouse, LAKEHOUSE_ITEM))
     if request.warehouse:
         wanted.append(_Requested(WAREHOUSE, request.warehouse, WAREHOUSE_ITEM))
-    wanted.append(_Requested(ENVIRONMENT_ROLE, request.environment, ENVIRONMENT))
+    if request.environment:
+        wanted.append(_Requested(ENVIRONMENT_ROLE, request.environment, ENVIRONMENT))
     return tuple(wanted)
 
 
