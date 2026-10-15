@@ -133,6 +133,15 @@ weaver --version</code></pre></div>
 <div class="wrap">
 <h2>Choose what you want to build</h2>
 <p>Each route below produces a working result for one Fabric item or native Power BI project.</p>
+<details><summary>Try the bundled Sales example</summary>
+<p>Use an existing disposable workspace in place of Analytics.</p>
+<div class="code"><div class="code-bar"><span>Terminal</span></div><pre><code>weaver initialise --workspace Analytics --project-folder ./sales \
+  --lakehouse Landing --warehouse Curated --semantic-model Sales \
+  --example Sales --non-interactive
+cd sales
+weaver fabric environment publish --path Environment/Weaver.Environment
+weaver workflow full</code></pre></div>
+</details>
 <div class="cards two">
 <a class="card" href="https://docs.weaverstack.dev/lakehouse/python/">
 <h3>Lakehouse</h3><p>Use Python or Spark SQL to turn files into managed Delta Tables.</p><span class="go">Build your first Lakehouse pipeline →</span></a>

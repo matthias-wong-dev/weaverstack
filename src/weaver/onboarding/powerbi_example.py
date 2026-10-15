@@ -1,10 +1,4 @@
-"""Generate the example's Power BI project: a Direct Lake model and a Report.
-
-The model is ordinary Power BI Desktop output. Its one shared expression is
-named after the logical item it reads, so Build binds it to the physical target
-in ``workspace-config.yml`` and records the table it reads for Load ordering.
-The Report's page describes the example's chain from source to page.
-"""
+"""Generate a fixed inline Sales model and its linked native Report."""
 
 from __future__ import annotations
 
@@ -40,16 +34,7 @@ def _platform(kind: str, name: str) -> str:
     )
 
 
-def _source(request: ProjectRequest) -> tuple[str, str, str]:
-    """The logical item, Sales object and region column the model reads."""
-
-    if request.warehouse:
-        return f"{WAREHOUSE}/{request.warehouse}", "CustomerByRegion", "Region name"
-    return f"{LAKEHOUSE}/{request.lakehouse}", "Customer", "Region code"
-
-
 def _model_files(request: ProjectRequest, name: str) -> dict[str, str]:
-    item, entity, region = _source(request)
     folder = f"PowerBI/{name}/{name}.SemanticModel"
     return {
         f"{folder}/.platform": _platform("SemanticModel", name),
@@ -69,12 +54,7 @@ def _model_files(request: ProjectRequest, name: str) -> dict[str, str]:
             "\n"
             "ref table Customer\n"
         ),
-        # Build replaces the empty server and database with the SQL endpoint of
-        # the item this expression is named after.
-        f"{folder}/definition/expressions.tmdl": (
-            f'expression \'{item}\' = Sql.Database("", "")\n'
-        ),
-        f"{folder}/definition/tables/Customer.tmdl": f"""\
+        f"{folder}/definition/tables/Customer.tmdl": """\
 /// One row per customer, with the region it belongs to.
 table Customer
 
@@ -94,15 +74,13 @@ table Customer
 
 \tcolumn Region
 \t\tdataType: string
-\t\tsourceColumn: {region}
+\t\tsourceColumn: Region code
 \t\tsummarizeBy: none
 
-\tpartition Customer = entity
-\t\tmode: directLake
-\t\tsource
-\t\t\tentityName: {entity}
-\t\t\tschemaName: Sales
-\t\t\texpressionSource: '{item}'
+\tpartition Customer = m
+\t\tmode: import
+\t\tsource =
+\t\t\t#table(type table [#"Customer id" = text, #"Customer name" = text, #"Region code" = text], {{"C001", "Harbour Freight Pty Ltd", "NSW"}, {"C002", "Riverside Grocers", "VIC"}, {"C003", "Tablelands Coffee Roasters", "QLD"}, {"C004", "Coastal Marine Supplies", "NSW"}})
 """,
     }
 
@@ -117,75 +95,16 @@ def _run(text: str, **style) -> dict:
 def _story(request: ProjectRequest, name: str) -> list[dict]:
     """The page's paragraphs, one per step of the example's chain."""
 
-    item, entity, _ = _source(request)
-    origin = "a sales export" if request.lakehouse else "reference data"
-    steps = []
-    if request.lakehouse:
-        steps.append(
-            (
-                f"{LAKEHOUSE}/{request.lakehouse}",
-                "The Sales.Customers Folder writes the export to Files, and the "
-                "Sales.Customer Table reads it into Delta.",
-            )
-        )
-    if request.warehouse and request.lakehouse:
-        steps.append(
-            (
-                f"{WAREHOUSE}/{request.warehouse}",
-                "Sales.CustomerByRegion joins those customers to Sales.Region in "
-                "T-SQL. It reads the Lakehouse table through a logical shortcut.",
-            )
-        )
-    elif request.warehouse:
-        steps.append(
-            (
-                f"{WAREHOUSE}/{request.warehouse}",
-                "Sales.Customer and Sales.Region are T-SQL Tables, and "
-                "Sales.CustomerByRegion joins them.",
-            )
-        )
-    steps.append(
-        (
-            f"SemanticModel/{name}",
-            f"A Direct Lake model over Sales.{entity}. Its source expression is "
-            f"named {item}, and workspace-config.yml binds that to a Fabric item.",
-        )
-    )
-    steps.append((f"Report/{name}", "This page."))
-    paragraphs = [
-        {"textRuns": [_run("Hello from Weaver", fontWeight="bold", fontSize="20pt")]},
+    return [
+        {"textRuns": [_run("Sales", fontWeight="bold", fontSize="20pt")]},
         {
             "textRuns": [
                 _run(
-                    f"This example traces four customers from {origin} to this "
-                    "page. Each step is a file in the project folder."
+                    "Four customers in a native inline model. Initialise can add independent Lakehouse and Warehouse pipelines, and separate managed-source models, without replacing this model's sample data."
                 )
             ]
         },
     ]
-    for number, (step, text) in enumerate(steps, start=1):
-        paragraphs.append(
-            {
-                "textRuns": [
-                    _run(f"{number}. {step}", fontWeight="bold"),
-                    _run(f"  {text}"),
-                ]
-            }
-        )
-    paragraphs.append(
-        {
-            "textRuns": [
-                _run(
-                    "weaver build creates the tables, the model and this Report. "
-                    "weaver load runs each step after the ones it reads, and "
-                    "refreshes the model once its table has loaded. weaver test "
-                    "checks the example's Assumptions, and weaver health reports "
-                    "what is current."
-                )
-            ]
-        }
-    )
-    return paragraphs
 
 
 def _field(kind: str, name: str) -> dict:
@@ -325,3 +244,27 @@ def powerbi_example_files(request: ProjectRequest) -> dict[str, str]:
         **_model_files(request, name),
         **_report_files(request, name),
     }
+
+
+def managed_model_files(request: ProjectRequest) -> dict[str, str]:
+    """Additional models connect each managed source without changing the native model."""
+    if not request.example_model:
+        return {}
+    result = {}
+    for kind, selected in (
+        (LAKEHOUSE, request.lakehouse),
+        (WAREHOUSE, request.warehouse),
+    ):
+        if not selected:
+            continue
+        model = f"{request.example_model}{kind}"
+        entity = "CurrentStatus" if request.example == "Parcel" else "Customer"
+        area = "Tables/" if kind == LAKEHOUSE else ""
+        table = entity if request.example == "Parcel" else "ManagedCustomer"
+        result[f"PowerBI/{request.example_model}/{model}.tmdl"] = (
+            "model Model\n\tculture: en-US\n\tdefaultMode: import\n"
+            f"\tannotation 'Weaver.BaseSemanticModels' = {request.example_model}\n\n"
+            f"table {table}\n"
+            f"\tannotation 'Weaver.Source' = {kind}/{selected}/{area}{request.example}.{entity}\n"
+        )
+    return result

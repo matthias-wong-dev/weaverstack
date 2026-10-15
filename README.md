@@ -26,9 +26,10 @@ weaver initialise \
   --workspace Analytics \
   --project-folder ./analytics \
   --lakehouse Landing \
-  --example \
+  --example Sales \
   --non-interactive
 cd analytics
+weaver fabric environment publish --path Environment/Weaver.Environment
 weaver build
 ```
 

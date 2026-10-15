@@ -71,7 +71,7 @@ def collect(
         )
     _collect_workspace_items(args, stream, environments=environments, items=items)
     if args.example is None:
-        args.example = _yes(stream, "Add the Sales example to this project?")
+        args.example = _example(stream)
     fields = (
         ("project_folder", "Project folder"),
         ("workspace", "Workspace"),
@@ -79,14 +79,12 @@ def collect(
         ("environment", "Environment"),
         ("lakehouse", "Lakehouse"),
         ("warehouse", "Warehouse"),
-        ("example", "Sales example"),
+        ("example", "Example"),
     )
     while True:
         print("\nProject\n")
         for field, label in fields:
             value = getattr(args, field)
-            if field == "example":
-                value = "Yes" if value else "No"
             print(f"  {label:16}{value or 'None'}")
         print("\n1. Continue\n2. Change an answer\n3. Cancel")
         choice = _numbered(stream, "Choose", 3)
@@ -104,7 +102,7 @@ def collect(
             print(f"{number}. {label}")
         field, label = fields[_numbered(stream, "Change", len(fields)) - 1]
         if field == "example":
-            value = _yes(stream, "Add the Sales example to this project?")
+            value = _example(stream)
         elif field in ("catalogue", "environment", "lakehouse", "warehouse"):
             kind = "Warehouse" if field == "catalogue" else label
             value = _item_answer(
@@ -191,14 +189,24 @@ def _validate(args):
                     set(repository.semantic_models) | set(repository.reports)
                 )
             )
+    from pathlib import Path
+
+    from weaver.onboarding.extension import read_project, selections
+
+    configured, record = read_project(Path(args.project_folder))
+    effective = selections(
+        configured,
+        record,
+        lakehouse=args.lakehouse,
+        warehouse=args.warehouse,
+        semantic_model=getattr(args, "semantic_model", None),
+    )
     ProjectRequest(
         workspace=args.workspace,
         catalogue=args.catalogue or DEFAULT_CATALOGUE,
         environment=args.environment or DEFAULT_ENVIRONMENT,
-        lakehouse=args.lakehouse,
-        warehouse=args.warehouse,
-        semantic_model=getattr(args, "semantic_model", None),
-        example=bool(args.example),
+        **effective,
+        example=args.example,
         source_items=source_items,
     )
 
@@ -241,6 +249,11 @@ def _numbered(stream, label, count):
         print(f"Answer with a number from 1 to {count}.")
 
 
+def _example(stream):
+    print("1. None\n2. Parcel\n3. Sales")
+    return (None, "Parcel", "Sales")[_numbered(stream, "Example", 3) - 1]
+
+
 def _yes(stream, question):
     while True:
         typed = _read(stream, f"{question} [y/N]: ").lower()
@@ -269,7 +282,7 @@ def equivalent_command(args):
     if getattr(args, "semantic_model", None):
         parts.extend(["--semantic-model", args.semantic_model])
     if args.example:
-        parts.append("--example")
+        parts.extend(["--example", args.example])
     if getattr(args, "publish_environment", False):
         parts.append("--publish-environment")
     parts.append("--non-interactive")
@@ -325,5 +338,5 @@ def render_dry_run(report):
         + "."
     )
     if report.example.generated:
-        print("Sales example source will be added.")
+        print(f"{report.example.name} example source will be added.")
     print("No changes were made.")

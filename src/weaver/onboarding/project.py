@@ -25,9 +25,6 @@ WORKFLOW_NAME = "full"
 
 KEEP_FILE = ".gitkeep"
 
-#: The example's Power BI project when no SemanticModel name is given.
-EXAMPLE_MODEL = "Sales"
-
 
 @dataclass(frozen=True)
 class ProjectRequest:
@@ -36,7 +33,7 @@ class ProjectRequest:
     environment: str
     lakehouse: str | None = None
     warehouse: str | None = None
-    example: bool = False
+    example: str | None = None
     semantic_model: str | None = None
     #: Power BI items found in the project folder.
     source_items: tuple[str, ...] = ()
@@ -44,6 +41,10 @@ class ProjectRequest:
     adopted_items: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
+        if self.example is not None and self.example not in ("Parcel", "Sales"):
+            raise CommandError(
+                "Unknown example. Choose Parcel or Sales, or omit --example."
+            )
         for field in ("workspace", "catalogue", "environment"):
             object.__setattr__(
                 self, field, validate_name(getattr(self, field), what=field)
@@ -77,11 +78,9 @@ class ProjectRequest:
 
     @property
     def example_model(self) -> str | None:
-        """The example's Power BI project, which needs a source item to read."""
+        """The native example project selected explicitly with --semantic-model."""
 
-        if not self.example or not (self.lakehouse or self.warehouse):
-            return None
-        return self.semantic_model or EXAMPLE_MODEL
+        return self.semantic_model if self.example else None
 
     @property
     def items(self) -> tuple[str, ...]:
@@ -97,6 +96,12 @@ class ProjectRequest:
         if self.example_model:
             chosen.append(f"{SEMANTIC_MODEL}/{self.example_model}")
             chosen.append(f"{REPORT}/{self.example_model}")
+            for kind, selected in (
+                (LAKEHOUSE, self.lakehouse),
+                (WAREHOUSE, self.warehouse),
+            ):
+                if selected:
+                    chosen.append(f"{SEMANTIC_MODEL}/{self.example_model}{kind}")
         return tuple(dict.fromkeys(chosen + list(self.source_items)))
 
 
@@ -129,7 +134,10 @@ def project_files(request: ProjectRequest) -> dict[str, str]:
     if request.example_model:
         # The example writes its own Power BI project.
         return files
-    if request.semantic_model:
+    if (
+        request.semantic_model
+        and f"SemanticModel/{request.semantic_model}" not in request.source_items
+    ):
         files[f"PowerBI/{request.semantic_model}/{request.semantic_model}.tmdl"] = (
             semantic_extension()
         )
@@ -245,10 +253,11 @@ Commands inside the session reuse Fabric connections and the Spark session.
 
 ## Try the example
 
-Choose the Sales example during initialisation to include its source files and
-a Power BI project that reads them. Its Report describes how the example works.
-Run build, load and test together with `weaver workflow full`. To try the
-example later, initialise a new project folder with the example.
+Use `--example Parcel` or `--example Sales` to add source files for the items
+you select. Add `--semantic-model NAME` for a native inline model and linked
+Report. Re-run Initialise against this folder to add an item: existing sources,
+including edits, and physical bindings remain in place. Managed-source models
+are additional definitions, not replacements for the inline sample model.
 
 ## Check connectivity
 

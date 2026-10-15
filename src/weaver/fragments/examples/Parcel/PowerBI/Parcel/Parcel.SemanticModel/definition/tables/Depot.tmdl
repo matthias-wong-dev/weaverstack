@@ -1,0 +1,17 @@
+/// Two parcel depots.
+table Depot
+	column DepotId
+		dataType: int64
+		sourceColumn: DepotId
+		summarizeBy: none
+	column DepotName
+		dataType: string
+		sourceColumn: DepotName
+		summarizeBy: none
+	partition Depot = m
+		mode: import
+		source =
+			let
+			    Source = #table(type table [DepotId = Int64.Type, DepotName = text], {{10, "Central"}, {20, "North"}})
+			in
+			    Source

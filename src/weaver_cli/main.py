@@ -66,7 +66,7 @@ Set up a Weaver project and its Fabric items.
 Choose a catalogue Warehouse, Environment, Lakehouse and/or Warehouse.
 Missing items are created.
 
-Optionally add the Sales example, with a Power BI model and Report.\
+Optionally add the Parcel or Sales example for the selected items.\
 """
 
 WIPE_DESCRIPTION = """\
@@ -1167,16 +1167,9 @@ def _add_initialise_args(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--example",
-        dest="example",
-        action="store_true",
-        default=None,
-        help="Add the Sales example: source files and a Power BI project that reads them.",
-    )
-    parser.add_argument(
-        "--no-example",
-        dest="example",
-        action="store_false",
-        help="Do not add example source files.",
+        choices=("Parcel", "Sales"),
+        metavar="NAME",
+        help="Add the Parcel or Sales example for the selected items.",
     )
     parser.add_argument(
         "--interactive",
@@ -2272,7 +2265,7 @@ def _initialise_once(args: argparse.Namespace, *, session):
         lakehouse=args.lakehouse,
         warehouse=args.warehouse,
         semantic_model=getattr(args, "semantic_model", None),
-        example=bool(args.example),
+        example=args.example,
         publish_environment=args.publish_environment,
         dry_run=args.dry_run,
         session=session,

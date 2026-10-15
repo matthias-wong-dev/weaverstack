@@ -50,10 +50,10 @@ def test_project_folder_is_optional_for_wizard_and_explicit_for_unattended_setup
 @weaver_test()
 def test_wizard_explains_choices_and_defaults_to_source_only_and_deferred(capsys):
     args = parse("--project-folder", "project", "--workspace", "Analytics")
-    collect(args, stdin=Typed("\n\nLanding\n\n\n1\n\n"))
+    collect(args, stdin=Typed("\n\nLanding\n\n1\n1\n\n"))
     assert args.catalogue == "Catalogue" and args.environment == "Weaver"
     assert args.lakehouse == "Landing" and args.warehouse is None
-    assert args.example is False and args.publish_environment is False
+    assert args.example is None and args.publish_environment is False
     text = capsys.readouterr().out
     for phrase in (
         "Warehouse that stores",
@@ -81,9 +81,8 @@ def test_wizard_can_edit_a_typo_before_continue():
         "Ladning",
         "--warehouse",
         "Curated",
-        "--no-example",
     )
-    collect(args, stdin=Typed("2\n5\nLanding\n1\n\n"))
+    collect(args, stdin=Typed("1\n2\n5\nLanding\n1\n\n"))
     assert args.lakehouse == "Landing"
     assert not getattr(args, "cancelled", False)
 
@@ -103,9 +102,8 @@ def test_cancel_returns_without_publication():
         "Landing",
         "--warehouse",
         "Curated",
-        "--no-example",
     )
-    collect(args, stdin=Typed("3\n"))
+    collect(args, stdin=Typed("1\n3\n"))
     assert args.cancelled and not args.publish_environment
 
 
@@ -114,7 +112,7 @@ def test_existing_item_hints_and_environment_selection(capsys):
     args = parse("--project-folder", "project", "--workspace", "Analytics")
     collect(
         args,
-        stdin=Typed("\n1\n1\nLanding\nCurated\ny\n1\nn\n"),
+        stdin=Typed("\n1\n1\nLanding\nCurated\n3\n1\nn\n"),
         environments=lambda workspace: ("Runtime",),
         items=lambda workspace, kind: (
             ("Landing",) if kind == "Lakehouse" else ("Curated",)
@@ -127,7 +125,7 @@ def test_existing_item_hints_and_environment_selection(capsys):
 @weaver_test()
 def test_invalid_lakehouse_answer_is_retried(capsys):
     args = parse("--project-folder", "project", "--workspace", "Analytics")
-    collect(args, stdin=Typed("\n\n1\nLanding\n\n\n1\n\n"))
+    collect(args, stdin=Typed("\n\n1\nLanding\n\n1\n1\n\n"))
     assert args.lakehouse == "Landing"
     assert "not a valid Fabric Lakehouse name" in capsys.readouterr().out
 
@@ -168,6 +166,7 @@ def test_equivalent_command_includes_publication_and_is_parseable():
         "Curated",
         "--publish-environment",
         "--example",
+        "Sales",
     )
     replay = build_parser().parse_args(shlex.split(equivalent_command(args))[1:])
     assert (
@@ -253,6 +252,7 @@ def test_json_initialise_is_machine_mode_without_prompts(monkeypatch, tmp_path, 
         "--warehouse",
         "Curated",
         "--example",
+        "Sales",
         "--json",
     )
     assert cli.handle_initialise(args) == 0
@@ -284,10 +284,9 @@ def test_cancel_in_handler_never_calls_initialise(monkeypatch, capsys):
         "Landing",
         "--warehouse",
         "Curated",
-        "--no-example",
     )
     monkeypatch.setattr(cli, "_prefer_desktop_credential", lambda *_args: None)
-    monkeypatch.setattr(cli.sys, "stdin", Typed("3\n"))
+    monkeypatch.setattr(cli.sys, "stdin", Typed("1\n3\n"))
     monkeypatch.setattr(
         cli,
         "_running_session",
@@ -325,7 +324,7 @@ def test_workspace_review_change_rediscovers_and_recollects_targets(
         cli.sys,
         "stdin",
         Typed(
-            f"UAT\n{folder_answer}\n\n1\n1\nUatLanding\nUatReporting\nn\n"
+            f"UAT\n{folder_answer}\n\n1\n1\nUatLanding\nUatReporting\n1\n"
             "2\n2\nProduction\n"
             + ("\n" if not folder_answer else "")
             + "1\n1\nProdLanding\nProdReporting\n1\nn\n"
@@ -392,7 +391,7 @@ def test_add_example_is_not_a_public_command():
 @weaver_test()
 def test_workspace_option_starts_at_project_folder(capsys):
     args = parse("--workspace", "Analytics")
-    collect(args, stdin=Typed("\n\n\nLanding\n\n\n1\n\n"))
+    collect(args, stdin=Typed("\n\n\nLanding\n\n1\n1\n\n"))
     assert args.project_folder == "Analytics"
     text = capsys.readouterr().out
     assert text.count("Set up a Weaver project.") == 1

@@ -59,9 +59,10 @@ class FabricItemOutcome:
 @dataclass(frozen=True)
 class ExampleOutcome:
     generated: bool = False
+    name: str | None = None
 
     def to_mapping(self) -> dict[str, Any]:
-        return {"generated": self.generated}
+        return {"generated": self.generated, "name": self.name}
 
 
 @dataclass(frozen=True)
@@ -122,7 +123,7 @@ def initialise(
     lakehouse: str | None = None,
     warehouse: str | None = None,
     semantic_model: str | None = None,
-    example: bool = False,
+    example: str | None = None,
     publish_environment: bool = False,
     install_weaver: bool | None = None,
     dry_run: bool = False,
@@ -149,9 +150,41 @@ def initialise(
         publish_environment = publish_environment or install_weaver
     destination = Path(project_folder).resolve()
     source_items = ()
-    configured = None
-    adopted = set()
-    repository = None if semantic_model else powerbi_repository(destination)
+    from .onboarding.extension import RECORD, extend_files, read_project, selections
+
+    configured, state_record = read_project(destination)
+    if configured is not None:
+        for field, supplied, existing in (
+            ("workspace", workspace, configured.workspace),
+            (
+                "catalogue",
+                catalogue,
+                configured.catalogue_item.name
+                if configured.catalogue
+                else DEFAULT_CATALOGUE,
+            ),
+            (
+                "environment",
+                environment,
+                configured.environment.name
+                if configured.environment
+                else DEFAULT_ENVIRONMENT,
+            ),
+        ):
+            if supplied is not None and str(supplied) != str(existing):
+                raise InitialiseError(
+                    f"workspace-config.yml already binds {field} to {existing!r}; cannot retarget it to {supplied!r}."
+                )
+        workspace = configured.workspace
+    effective = selections(
+        configured,
+        state_record,
+        lakehouse=lakehouse,
+        warehouse=warehouse,
+        semantic_model=semantic_model,
+    )
+    adopted = set(configured.configured_items) if configured is not None else set()
+    repository = powerbi_repository(destination)
     if repository is not None:
         source_items = tuple(
             str(item)
@@ -160,11 +193,6 @@ def initialise(
             )
         )
         adopted.update(item.identity for item in repository.items)
-        if (destination / WORKSPACE_CONFIG_FILE).is_file():
-            from .config import load_workspace
-
-            configured = load_workspace(destination / WORKSPACE_CONFIG_FILE)
-            adopted.update(configured.configured_items)
     request = ProjectRequest(
         workspace=_workspace_name(workspace, session=session),
         catalogue=catalogue
@@ -179,14 +207,27 @@ def initialise(
             if configured is not None and configured.environment
             else DEFAULT_ENVIRONMENT
         ),
-        lakehouse=lakehouse,
-        warehouse=warehouse,
-        semantic_model=semantic_model,
+        **effective,
         example=example,
         source_items=source_items,
         adopted_items=_sources(adopted),
     )
     wanted_items = _requested(request)
+    if configured is not None:
+        from dataclasses import replace
+
+        from .declaration.model import WeaverItemId
+
+        wanted_items = tuple(
+            replace(
+                item,
+                name=configured.targets[WeaverItemId(item.role, item.name)].physical,
+            )
+            if item.role in {LAKEHOUSE, WAREHOUSE}
+            and WeaverItemId(item.role, item.name) in configured.targets
+            else item
+            for item in wanted_items
+        )
 
     from .sessions.host import use_or_create_session
 
@@ -202,10 +243,7 @@ def initialise(
                     request,
                     client=rest,
                     wanted_items=wanted_items,
-                    example_written=(
-                        request.example_model is not None
-                        and (destination / "PowerBI" / request.example_model).exists()
-                    ),
+                    existing_powerbi=source_items,
                 )
 
             with opened.step("Reading the Environment", request.environment):
@@ -235,15 +273,18 @@ def initialise(
                                 path.read_bytes()
                             )
             with opened.step("Checking the project files", str(destination)):
-                if source_items:
-                    # Adopt existing authored project files, not fresh scaffolding.
-                    files = {
-                        path: (destination / path).read_bytes()
-                        if (destination / path).is_file()
-                        else content
-                        for path, content in files.items()
-                    }
-                _refuse_overwrites(destination, files)
+                _check_destination_paths(destination, files)
+                files = extend_files(
+                    destination, files, request, configured, state_record
+                )
+                metadata = {RECORD}
+                if configured is not None:
+                    metadata.add(WORKSPACE_CONFIG_FILE)
+                if "workflow.yml" in state_record.get("files", {}):
+                    metadata.add("workflow.yml")
+                _refuse_overwrites(
+                    destination, {p: c for p, c in files.items() if p not in metadata}
+                )
                 if source_items:
                     files = _with_source_targets(files, source_items)
                 _check_destination_paths(destination, files)
@@ -255,7 +296,9 @@ def initialise(
                     workspace=request.workspace,
                     resources=_planned(request, found, wanted_items=wanted_items),
                     files=tuple(sorted(files)),
-                    example=ExampleOutcome(generated=request.example),
+                    example=ExampleOutcome(
+                        generated=request.example is not None, name=request.example
+                    ),
                     dry_run=True,
                     environment_definition=definition_status,
                     builds=build_commands(request),
@@ -313,7 +356,9 @@ def initialise(
                 publication = (
                     "already published" if result.action == UNCHANGED else "published"
                 )
-            outcome = ExampleOutcome(generated=request.example)
+            outcome = ExampleOutcome(
+                generated=request.example is not None, name=request.example
+            )
 
     return InitialiseReport(
         project_folder=str(destination),
@@ -468,7 +513,11 @@ def _refuse_overwrites(destination: Path, files: dict[str, str]) -> None:
 
 
 def _write(destination: Path, files: dict[str, str]) -> None:
-    for relative, text in sorted(files.items()):
+    # Record ownership only after the generated files have reached disk.
+    for relative, text in sorted(
+        files.items(),
+        key=lambda entry: (entry[0] == ".weaver-initialise.json", entry[0]),
+    ):
         path = destination / relative
         if path.resolve() != destination.resolve() / relative or path.is_symlink():
             raise InitialiseError(f"Generated path escapes the project: {relative}")
@@ -515,7 +564,7 @@ def _requested(request: ProjectRequest) -> tuple[_Requested, ...]:
 
 
 def _read_the_workspace(
-    request: ProjectRequest, *, client, wanted_items=None, example_written=False
+    request: ProjectRequest, *, client, wanted_items=None, existing_powerbi=()
 ):
     """Read all requested item identities from one workspace listing.
 
@@ -550,14 +599,18 @@ def _read_the_workspace(
                 f"{wanted.role}, or use an existing {wanted.item_type}."
             )
         found[wanted.role] = bool(types)
-    name = request.example_model
-    if name is not None and not example_written:
-        if taken := sorted(by_name.get(name, set()) & {SEMANTIC_MODEL, REPORT}):
-            raise InitialiseError(
-                f"'{request.workspace}' already has a {' and a '.join(taken)} "
-                f"named '{name}'. Name the example's Power BI project with "
-                "--semantic-model."
-            )
+    if request.example_model:
+        for identity in request.items:
+            kind, _, name = identity.partition("/")
+            if (
+                kind in {SEMANTIC_MODEL, REPORT}
+                and identity not in existing_powerbi
+                and kind in by_name.get(name, set())
+            ):
+                raise InitialiseError(
+                    f"'{request.workspace}' already has a {kind} named '{name}'. "
+                    "Choose another --semantic-model name."
+                )
 
     environment = next(
         (

@@ -139,20 +139,31 @@ def test_interrupted_publication_can_be_retried(tmp_path, fabric, monkeypatch):
 
 @weaver_test()
 def test_dry_run_writes_and_creates_nothing(tmp_path, fabric):
-    report = setup(tmp_path, fabric, dry_run=True, example=True)
+    report = setup(tmp_path, fabric, dry_run=True, example="Sales")
     assert report.dry_run and report.example.generated
     assert not fabric.created and not fabric.published and not list(tmp_path.iterdir())
 
 
-@pytest.mark.parametrize("path", ["workspace-config.yml", "workflow.yml", "README.md"])
+@pytest.mark.parametrize("path", ["workflow.yml", "README.md"])
 @weaver_test()
-def test_existing_project_files_are_not_overwritten(tmp_path, fabric, path):
+def test_edited_project_helpers_are_preserved(tmp_path, fabric, path):
     setup(tmp_path, fabric)
-    (tmp_path / path).write_text("user content")
+    existing = tmp_path / path
+    content = existing.read_text() + "\n# User addition\n"
+    existing.write_text(content)
     fabric.created.clear()
-    with pytest.raises(InitialiseError, match="Choose another project folder"):
+    setup(tmp_path, fabric)
+    assert not fabric.created and existing.read_text() == content
+
+
+@weaver_test()
+def test_invalid_existing_configuration_is_refused_before_mutation(tmp_path, fabric):
+    setup(tmp_path, fabric)
+    (tmp_path / "workspace-config.yml").write_text("user content")
+    fabric.created.clear()
+    with pytest.raises(weaver.errors.WeaverError):
         setup(tmp_path, fabric)
-    assert not fabric.created and (tmp_path / path).read_text() == "user content"
+    assert not fabric.created
 
 
 @weaver_test()
@@ -196,7 +207,7 @@ def test_example_only_generates_source(tmp_path, fabric, monkeypatch):
 
     for name in ("build", "load", "test"):
         monkeypatch.setattr(f"weaver.operations.{name}.{name}", refuse)
-    report = setup(tmp_path, fabric, example=True)
+    report = setup(tmp_path, fabric, example="Sales")
     assert report.example.generated and report.succeeded
     assert (tmp_path / "Lakehouse/Landing/Tables/Sales__Customer.py").is_file()
 
@@ -207,16 +218,16 @@ def test_the_example_refuses_a_power_bi_name_the_workspace_has(tmp_path, fabric)
 
     fabric.held.append(resources.Item("id", "Sales", "SemanticModel", "ws"))
     with pytest.raises(InitialiseError, match="--semantic-model"):
-        setup(tmp_path, fabric, example=True)
+        setup(tmp_path, fabric, example="Sales", semantic_model="Sales")
     assert not fabric.created and not (tmp_path / "PowerBI").exists()
 
-    setup(tmp_path, fabric, example=True, semantic_model="Orders")
+    setup(tmp_path, fabric, example="Sales", semantic_model="Orders")
     assert (tmp_path / "PowerBI/Orders/Orders.pbip").is_file()
 
 
 @weaver_test()
 def test_an_example_rerun_after_build_converges(tmp_path, fabric):
-    setup(tmp_path, fabric, example=True)
+    setup(tmp_path, fabric, example="Sales")
     before = {
         p.relative_to(tmp_path): p.read_bytes()
         for p in tmp_path.rglob("*")
@@ -227,7 +238,7 @@ def test_an_example_rerun_after_build_converges(tmp_path, fabric):
         for kind in ("SemanticModel", "Report")
     )
 
-    setup(tmp_path, fabric, example=True)
+    setup(tmp_path, fabric, example="Sales")
 
     assert before == {
         p.relative_to(tmp_path): p.read_bytes()

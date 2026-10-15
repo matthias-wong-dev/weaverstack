@@ -1,0 +1,8 @@
+model Model
+	culture: en-US
+	defaultMode: import
+	defaultPowerBIDataSourceVersion: powerBI_V3
+	sourceQueryCulture: en-US
+
+ref table Delivery
+ref table Depot

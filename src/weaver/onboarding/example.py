@@ -1,19 +1,9 @@
-"""Generate a Sales example for the project's chosen items.
-
-A Lakehouse receives an export folder, a Delta table and an Assumption. A
-Warehouse receives reference regions, a joined customer table and an
-Assumption. With both, the Warehouse reads the Lakehouse's customers through a
-logical shortcut and does not seed another copy. A Power BI project reads the
-last of them; see ``powerbi_example``.
-
-`Sales` is the business schema and is implied by the objects themselves, so no
-schema document is written. The Fabric item names are the ones the user chose.
-"""
+"""Small independent pipelines, with additional cross-item declarations."""
 
 from __future__ import annotations
 
 from ..declaration.model import LAKEHOUSE, WAREHOUSE
-from .powerbi_example import powerbi_example_files
+from .powerbi_example import managed_model_files, powerbi_example_files
 from .project import ProjectRequest
 
 SCHEMA = "Sales"
@@ -221,15 +211,10 @@ select [Customer id]
  where [Region name] is null;
 """
 
-_SHORTCUTS = """\
-# A Warehouse reads a Lakehouse table through its SQL endpoint, not its Delta
-# files. The logical shortcut keeps physical Fabric item names out of the query.
-logical:
-  {warehouse_item}/{schema}.Customer: {lakehouse_item}/Tables/{schema}.Customer
-"""
-
 
 def example_files(request: ProjectRequest) -> dict[str, str]:
+    if request.example == "Parcel":
+        return parcel_files(request)
     files: dict[str, str] = {}
     if request.lakehouse:
         item = f"{LAKEHOUSE}/{request.lakehouse}"
@@ -243,14 +228,74 @@ def example_files(request: ProjectRequest) -> dict[str, str]:
         files[f"{item}/assumptions/Sales.CustomerByRegionValid.sql"] = (
             _WAREHOUSE_ASSUMPTION
         )
+        files[f"{item}/Sales.Customer.sql"] = _WAREHOUSE_CUSTOMER
         if request.lakehouse:
-            # The shortcut replaces a second seeded copy of the customers.
-            files[f"{item}/shortcuts.yml"] = _SHORTCUTS.format(
-                warehouse_item=item,
-                lakehouse_item=f"{LAKEHOUSE}/{request.lakehouse}",
-                schema=SCHEMA,
+            files[f"{item}/shortcuts.yml"] = (
+                "logical:\n"
+                f"  {item}/Sales.LakehouseCustomer: Lakehouse/{request.lakehouse}/Tables/Sales.Customer\n"
             )
-        else:
-            files[f"{item}/Sales.Customer.sql"] = _WAREHOUSE_CUSTOMER
+            files[f"{item}/Sales.LakehouseCustomerByRegion.sql"] = (
+                _WAREHOUSE_JOIN.replace(
+                    "Sales.CustomerByRegion", "Sales.LakehouseCustomerByRegion"
+                )
+                .replace("[Sales].[Customer] c", "[Sales].[LakehouseCustomer] c")
+                .replace(
+                    "Lineage: $Sales.Customer", "Lineage: $Sales.LakehouseCustomer"
+                )
+                .replace(
+                    "load after Customer and Region",
+                    "load after the Lakehouse customers and Region",
+                )
+            )
     files.update(powerbi_example_files(request))
+    files.update(managed_model_files(request))
     return files
+
+
+def parcel_files(request: ProjectRequest) -> dict[str, str]:
+    from importlib.resources import files as resources
+
+    root = resources("weaver").joinpath("fragments/examples/Parcel")
+    result = {}
+
+    def read_tree(folder, prefix):
+        for entry in sorted(folder.iterdir(), key=lambda p: p.name):
+            path = f"{prefix}/{entry.name}"
+            if entry.is_dir():
+                read_tree(entry, path)
+            else:
+                result[path] = entry.read_text(encoding="utf-8")
+
+    for kind, original, selected in (
+        (LAKEHOUSE, "Landing", request.lakehouse),
+        (WAREHOUSE, "Operations", request.warehouse),
+        ("PowerBI", "Parcel", request.example_model),
+    ):
+        if selected:
+            read_tree(root.joinpath(kind, original), f"{kind}/{selected}")
+    if request.example_model and request.example_model != "Parcel":
+        result = {
+            (
+                p.replace("/Parcel.", f"/{request.example_model}.")
+                if p.startswith("PowerBI/")
+                else p
+            ): v.replace(
+                "Parcel.SemanticModel", f"{request.example_model}.SemanticModel"
+            ).replace("Parcel.Report", f"{request.example_model}.Report")
+            for p, v in result.items()
+        }
+    if request.lakehouse and request.warehouse:
+        item = f"Warehouse/{request.warehouse}"
+        result[f"{item}/shortcuts.yml"] = (
+            "logical:\n"
+            f"  {item}/Parcel.LakehouseEvent: Lakehouse/{request.lakehouse}/Tables/Parcel.Event\n"
+        )
+        view = root.joinpath("Warehouse/Operations/Parcel.CurrentStatus.sql").read_text(
+            encoding="utf-8"
+        )
+        result[f"{item}/Parcel.LakehouseCurrentStatus.sql"] = view.replace(
+            "View ID: Parcel.CurrentStatus",
+            "Table ID: Parcel.LakehouseCurrentStatus\n\nPrimary key: Parcel ID\n\nSchema:\n  Parcel ID: varchar(20)\n  Status: varchar(30)\n  Depot: varchar(50)",
+        ).replace("[Parcel].[StatusEvent]", "[Parcel].[LakehouseEvent]")
+    result.update(managed_model_files(request))
+    return result

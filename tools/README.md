@@ -9,7 +9,7 @@ Preview the site through a server.
 
 ## The Sales example code
 
-The site shows the project `weaver initialise --example` writes. Retyping it
+The site shows the project `weaver initialise --example Sales` writes. Retyping it
 would let the two drift, so each code block carries a marker naming the file it
 shows, and the generator fills it from `weaver.onboarding`:
 
