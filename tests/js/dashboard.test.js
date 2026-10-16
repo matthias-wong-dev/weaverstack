@@ -251,16 +251,25 @@ const SEMANTIC = table("models", ["item", "description"], [["SemanticModel/Sales
   table("smsources", ["item", "table", "reference", "sourceitem", "sourceschema", "sourceobject"], [
     ["SemanticModel/Sales", "Sales", "Warehouse/Curated/Sales.ByRegion", "Warehouse/Curated", "Sales", "ByRegion"]]);
 
-test("the bus matrix puts many sides against one sides and lists every other relationship", () => {
+test("the bus matrix puts many sides against one sides and writes each relationship's direction", () => {
   const m = model(estate({ extra: SEMANTIC }));
   const mo = D.metadata(m).models.get("SemanticModel/Sales");
   const bus = D.busMatrix(mo);
   assert.deepEqual(Array.from(bus.facts.keys()).sort(), ["Customer", "Sales"]);
-  assert.deepEqual(Array.from(bus.dims.keys()).sort(), ["Customer", "Date"]);
+  assert.deepEqual(Array.from(bus.dims.keys()).sort(), ["Bridge", "Customer", "Date"]);
+  const cell = (fact, dim) => bus.cells.get(fact + "\u0001" + dim);
   // Two relationships to Date, one of them inactive: a role-playing pair.
-  assert.deepEqual(bus.cells.get("Sales\u0001Date"), { active: 1, inactive: 1, relationships: bus.cells.get("Sales\u0001Date").relationships });
+  assert.equal(cell("Sales", "Date").active, 1);
+  assert.equal(cell("Sales", "Date").inactive, 1);
+  const note = (fact, dim, factsAreRows) => bus.notation(cell(fact, dim).relationships[0], factsAreRows);
+  assert.equal(note("Sales", "Date", true), "* ← 1");
+  assert.equal(note("Sales", "Date", false), "1 → *");
+  // Authored from the one side, it still filters towards the many side.
+  assert.equal(note("Customer", "Date", true), "* ← 1");
+  // A many-to-many relationship takes the sides its tables already have.
+  assert.equal(note("Customer", "Bridge", true), "* ↔ *");
   assert.deepEqual(bus.mixed, ["Customer"]);
-  assert.deepEqual(bus.other.map((r) => r.name), ["r5"]);
+  assert.deepEqual(bus.other, []);
   assert.deepEqual(bus.isolated, ["Notes"]);
   assert.equal(D.metadata(m).models.get("SemanticModel/Sales").tables.get("Sales").sources[0].node.key, "b");
 });

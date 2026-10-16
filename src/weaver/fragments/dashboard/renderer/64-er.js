@@ -2,7 +2,7 @@
 // relationships, around a focus table. Relationship graphs may contain cycles;
 // every walk keeps a visited set.
 
-var ER = { NODES: 60, BOX: 220, HEAD: 34, ROW: 18, GAP_X: 110, GAP_Y: 22, COLUMNS: 8 };
+var ER = { NODES: 60, BOX: 220, HEAD: 34, ROW: 18, GAP_X: 36, GAP_ROW: 84, COLUMNS: 8 };
 
 /* The relations and relationships of one scope, as an undirected graph whose
    edges keep their foreign and primary ends. */
@@ -39,7 +39,7 @@ function erGraph(m, scope) {
 }
 
 /* Up to ER.NODES tables around the focus, nearest first; a signed distance
-   puts the tables it references to the right and those referencing it left. */
+   puts the tables it references above and those referencing it below. */
 function erWindow(g, focus, depth) {
   if (!g.nodes.has(focus)) return null;
   var dist = new Map([[focus, 0]]), frontier = [focus], limit = depth < 0 ? Infinity : depth;
@@ -124,38 +124,56 @@ function erPage(body, m) {
     host.textContent = "";
     var win = erWindow(g, s.focus, s.depth);
     if (!win) { host.appendChild(empty("Search for a table.")); return; }
-    line.textContent = win.kept.size + " of " + fmt(g.nodes.size) + " tables" + (win.truncated ? " · cut to the " + ER.NODES + " nearest of " + win.reach + "; lower the depth or follow a +N marker" : "");
-    var columns = new Map();
-    win.kept.forEach(function (d, id) { addTo(columns, d, id); });
-    var order = Array.from(columns.keys()).sort(function (a, b) { return a - b; }), boxes = new Map(), top = Infinity, bottom = -Infinity;
+    line.textContent = win.kept.size + " of " + fmt(g.nodes.size) + " tables" + (win.truncated ? " · cut to the " + ER.NODES + " nearest of " + win.reach + "; lower the depth, or select a table with a +N marker to move there" : "");
+    // Top to bottom: the tables others reference sit above the tables that
+    // reference them, one row per distance from the focus.
+    var levels = new Map();
+    win.kept.forEach(function (d, id) { addTo(levels, d, id); });
+    var order = Array.from(levels.keys()).sort(function (a, b) { return b - a; }), boxes = new Map(), placedX = new Map();
+    var y = 0, left = Infinity, right = -Infinity;
     order.forEach(function (d) {
-      var ids = columns.get(d).sort(function (a, b) { return compare(g.nodes.get(a).label, g.nodes.get(b).label); });
-      var heights = ids.map(function (id) { var r = erRows(g.nodes.get(id), win.edges); return ER.HEAD + Math.max(1, r.rows.length + (r.hidden ? 1 : 0)) * ER.ROW + 8; });
-      var total = heights.reduce(function (a, b) { return a + b + ER.GAP_Y; }, -ER.GAP_Y), y = -total / 2;
+      var ids = levels.get(d);
+      // Under the tables each relates to in the row above, where it has any.
+      var bary = new Map(ids.map(function (id) {
+        var n = g.nodes.get(id), near = n.refs.map(function (e) { return e.to; }).concat(n.back.map(function (e) { return e.from; }))
+          .filter(function (k) { return placedX.has(k); }).map(function (k) { return placedX.get(k); });
+        return [id, near.length ? near.reduce(function (a, b) { return a + b; }, 0) / near.length : 0];
+      }));
+      ids.sort(function (a, b) { return bary.get(a) - bary.get(b) || compare(g.nodes.get(a).label, g.nodes.get(b).label); });
+      var rows = ids.map(function (id) { return erRows(g.nodes.get(id), win.edges); });
+      var height = Math.max.apply(null, rows.map(function (r) { return ER.HEAD + Math.max(1, r.rows.length + (r.hidden ? 1 : 0)) * ER.ROW + 8; }));
+      var width = ids.length * ER.BOX + (ids.length - 1) * ER.GAP_X, x = -width / 2;
       ids.forEach(function (id, i) {
-        var r = erRows(g.nodes.get(id), win.edges);
-        boxes.set(id, { x: d * (ER.BOX + ER.GAP_X), y: y, h: heights[i], rows: r.rows, hidden: r.hidden });
-        top = Math.min(top, y); bottom = Math.max(bottom, y + heights[i]);
-        y += heights[i] + ER.GAP_Y;
+        var r = rows[i], h = ER.HEAD + Math.max(1, r.rows.length + (r.hidden ? 1 : 0)) * ER.ROW + 8;
+        boxes.set(id, { x: x, y: y, h: h, rows: r.rows, hidden: r.hidden });
+        placedX.set(id, x + ER.BOX / 2);
+        left = Math.min(left, x); right = Math.max(right, x + ER.BOX);
+        x += ER.BOX + ER.GAP_X;
       });
+      y += height + ER.GAP_ROW;
     });
-    var x0 = order[0] * (ER.BOX + ER.GAP_X) - 80, x1 = order[order.length - 1] * (ER.BOX + ER.GAP_X) + ER.BOX + 80;
+    var x0 = left - 80, x1 = right + 80, top = -40, bottom = y - ER.GAP_ROW + 40;
     var svg = sv("svg", { "class": "wd-er-svg", role: "img", "aria-label": "Relationship diagram" }), stage = sv("g");
     svg.appendChild(stage);
-    function rowY(box, column) {
-      for (var i = 0; i < box.rows.length; i++) if (box.rows[i].name === column) return box.y + ER.HEAD + i * ER.ROW + ER.ROW / 2;
-      return box.y + ER.HEAD / 2;
-    }
     win.edges.forEach(function (e) {
-      var a = boxes.get(e.from), b = boxes.get(e.to);
-      var ax = a.x <= b.x ? a.x + ER.BOX : a.x, bx = a.x <= b.x ? b.x : b.x + ER.BOX;
-      if (a.x === b.x) { ax = a.x + ER.BOX; bx = b.x + ER.BOX; }
-      var ay = rowY(a, e.fromColumns[0]), by = rowY(b, e.toColumns[0]), c = a.x === b.x ? 60 : Math.max(40, Math.abs(bx - ax) / 2);
-      var dir = a.x === b.x ? 1 : (bx > ax ? 1 : -1);
-      var path = "M" + ax + " " + ay + "C" + (ax + dir * c) + " " + ay + " " + (bx - (a.x === b.x ? -c : dir * c)) + " " + by + " " + bx + " " + by;
+      var a = boxes.get(e.from), b = boxes.get(e.to), path, ax, ay, bx, by;
+      if (a.y === b.y) {
+        // Same row: arc over the boxes between them.
+        ax = a.x + ER.BOX / 2; bx = b.x + ER.BOX / 2; ay = a.y; by = b.y;
+        var lift = Math.min(90, 30 + Math.abs(bx - ax) / 6);
+        path = "M" + ax + " " + ay + "C" + ax + " " + (ay - lift) + " " + bx + " " + (by - lift) + " " + bx + " " + by;
+      } else {
+        var down = a.y < b.y;
+        ax = a.x + ER.BOX / 2; bx = b.x + ER.BOX / 2;
+        ay = down ? a.y + a.h : a.y; by = down ? b.y : b.y + b.h;
+        var c = Math.max(30, Math.abs(by - ay) / 2) * (down ? 1 : -1);
+        path = "M" + ax + " " + ay + "C" + ax + " " + (ay + c) + " " + bx + " " + (by - c) + " " + bx + " " + by;
+      }
       stage.appendChild(sv("path", { "class": "wd-er-edge" + (e.active ? "" : " wd-er-inactive") + (e.from === s.focus || e.to === s.focus ? " wd-er-focus" : ""), d: path },
         [sv("title", {}, [(e.label ? e.label + ": " : "") + g.nodes.get(e.from).label + " (" + e.fromColumns.join(", ") + ") → " + g.nodes.get(e.to).label + " (" + e.toColumns.join(", ") + ")" + (e.active ? "" : " · inactive")])]));
-      stage.appendChild(sv("circle", { "class": "wd-er-many", cx: ax, cy: ay, r: 3 }));
+      var dy = a.y === b.y ? -8 : ay < by ? 12 : -5, ey = a.y === b.y ? -8 : ay < by ? -5 : 12;
+      stage.appendChild(sv("text", { "class": "wd-er-card", x: ax + 6, y: ay + dy }, [e.many === false ? "1" : "*"]));
+      stage.appendChild(sv("text", { "class": "wd-er-card", x: bx + 6, y: by + ey }, [e.one === false ? "*" : "1"]));
     });
     boxes.forEach(function (box, id) {
       var n = g.nodes.get(id), focus = id === s.focus;

@@ -54,10 +54,8 @@ function semanticTableDetail(panel, m, tb, openNode) {
 }
 
 function relationshipLine(r) {
-  var card = (r.fromCardinality === "many" ? "*" : "1") + ":" + (r.toCardinality === "many" ? "*" : "1");
   return el("li", { "class": r.active ? null : "wd-inactive" }, [
-    r.from + "[" + (r.fromColumn || "") + "] → " + r.to + "[" + (r.toColumn || "") + "]  " + card +
-    (r.crossFilter && /both/i.test(r.crossFilter) ? "  both directions" : "") + (r.active ? "" : "  inactive")
+    r.from + "[" + (r.fromColumn || "") + "]  " + notation({ r: r, factIsFrom: true }, true) + "  " + r.to + "[" + (r.toColumn || "") + "]" + (r.active ? "" : "  inactive")
   ]);
 }
 
@@ -133,31 +131,54 @@ function semanticsPage(body, m) {
 /* ---- bus matrix -------------------------------------------------------------- */
 
 /* Fact-side tables against dimension-side tables, from a model's direct
-   relationships. A many-to-one relationship supplies one of each; one-to-one
-   and many-to-many relationships are listed as such, never given a role. */
+   relationships. The one side of a one-to-many relationship is a dimension and
+   its many side a fact. A one-to-one or many-to-many relationship takes the
+   roles its tables already have, or its from and to tables when they have none;
+   it is listed apart only when both its tables are on the same side. */
 function busMatrix(mo) {
-  var facts = new Map(), dims = new Map(), cells = new Map(), other = [];
-  mo.relationships.forEach(function (r) {
-    var fact, dim;
-    if (r.fromCardinality === "many" && r.toCardinality === "one") { fact = r.from; dim = r.to; }
-    else if (r.fromCardinality === "one" && r.toCardinality === "many") { fact = r.to; dim = r.from; }
-    else { other.push(r); return; }
+  var facts = new Map(), dims = new Map(), cells = new Map(), other = [], later = [];
+  function place(fact, dim, r) {
     facts.set(fact, true); dims.set(dim, true);
     var key = fact + "\u0001" + dim, cell = cells.get(key);
     if (!cell) cells.set(key, cell = { active: 0, inactive: 0, relationships: [] });
     cell[r.active ? "active" : "inactive"] += 1;
-    cell.relationships.push(r);
+    cell.relationships.push({ r: r, factIsFrom: r.from === fact });
+  }
+  mo.relationships.forEach(function (r) {
+    if (r.fromCardinality === "many" && r.toCardinality === "one") place(r.from, r.to, r);
+    else if (r.fromCardinality === "one" && r.toCardinality === "many") place(r.to, r.from, r);
+    else later.push(r);
+  });
+  function canBeFact(name) { return facts.has(name) || !dims.has(name); }
+  function canBeDim(name) { return dims.has(name) || !facts.has(name); }
+  later.forEach(function (r) {
+    if (canBeFact(r.from) && canBeDim(r.to)) place(r.from, r.to, r);
+    else if (canBeFact(r.to) && canBeDim(r.from)) place(r.to, r.from, r);
+    else other.push(r);
   });
   var related = new Set();
   mo.relationships.forEach(function (r) { related.add(r.from); related.add(r.to); });
   var isolated = Array.from(mo.tables.keys()).filter(function (name) { return !related.has(name); });
-  return { facts: facts, dims: dims, cells: cells, other: other, isolated: isolated,
+  return { facts: facts, dims: dims, cells: cells, other: other, isolated: isolated, notation: notation,
     mixed: Array.from(facts.keys()).filter(function (name) { return dims.has(name); }) };
+}
+
+/* A relationship as the matrix writes it, read from the row table to the
+   column table: each side's cardinality, and the arrow the filter travels. */
+function notation(entry, rowIsFact) {
+  var r = entry.r, rowIsFrom = entry.factIsFrom === rowIsFact, row = rowIsFrom ? r.from : r.to;
+  var card = function (c) { return c === "many" ? "*" : "1"; };
+  var left = card(rowIsFrom ? r.fromCardinality : r.toCardinality), right = card(rowIsFrom ? r.toCardinality : r.fromCardinality);
+  // One way, a filter runs from the one side to the many side; between two
+  // tables of equal cardinality, from the to table to the from table.
+  var filtered = r.fromCardinality !== r.toCardinality ? (r.fromCardinality === "many" ? r.from : r.to) : r.from;
+  var arrow = /both/i.test(r.crossFilter || "") ? "↔" : filtered === row ? "←" : "→";
+  return left + " " + arrow + " " + right;
 }
 
 function busPage(body, m) {
   var s = pageState("bus"), models = modelList(m);
-  s.order = s.order || "authored"; s.tab = s.tab || "matrix";
+  s.order = s.order || "authored"; s.tab = s.tab || "matrix"; s.dims = s.dims || "columns";
   if (!models.length) { body.appendChild(empty("No semantic model is recorded in the catalogue.")); return; }
   if (!s.model || !models.some(function (mo) { return mo.item === s.model; })) s.model = models[0].item;
   var host = el("div");
@@ -166,41 +187,46 @@ function busPage(body, m) {
   body.appendChild(el("div", { "class": "wd-toolbar" }, [
     picker,
     segmented("View", ["matrix", "reuse"], s.tab, function (v) { s.tab = v; render(); saveState(); }, function (v) { return v === "matrix" ? "Fact × dimension" : "Source reuse"; }),
+    segmented("Dimensions", ["columns", "rows"], s.dims, function (v) { s.dims = v; render(); saveState(); }, function (v) { return v === "columns" ? "Columns" : "Rows"; }),
     segmented("Order", ["authored", "alphabetical"], s.order, function (v) { s.order = v; render(); saveState(); }, function (v) { return v === "authored" ? "Authored" : "A–Z"; })
   ]));
   body.appendChild(host);
   function render() {
     host.textContent = "";
-    if (s.tab === "reuse") { host.appendChild(sourceReuse(m, models)); return; }
+    if (s.tab === "reuse") { host.appendChild(sourceReuse(m, models, s.dims === "rows")); return; }
     var mo = metadata(m).models.get(s.model), bus = busMatrix(mo), order = modelTables(mo, s.order).map(function (tb) { return tb.name; });
     function sorted(map) { return order.filter(function (n) { return map.has(n); }).concat(Array.from(map.keys()).filter(function (n) { return order.indexOf(n) < 0; }).sort(compare)); }
-    var facts = sorted(bus.facts), dims = sorted(bus.dims);
-    if (!facts.length) { host.appendChild(empty("This model has no many-to-one relationships, so no table takes a fact or dimension side.")); }
+    var factsAreRows = s.dims === "columns";
+    var rows = sorted(factsAreRows ? bus.facts : bus.dims), cols = sorted(factsAreRows ? bus.dims : bus.facts);
+    if (!rows.length) { host.appendChild(empty("This model records no relationship.")); }
     else {
+      var mixedMark = function (name) { return bus.mixed.indexOf(name) >= 0 ? el("i", { "class": "wd-bus-mixed", title: "On the fact side of one relationship and the dimension side of another", text: " ◐" }) : null; };
       var table = el("table", { "class": "wd-bus" }, [
-        el("thead", {}, [el("tr", {}, [el("th", { "class": "wd-bus-corner", text: "Fact side ↓   Dimension side →" })].concat(dims.map(function (d) {
-          return el("th", { scope: "col", "class": "wd-bus-dim" }, [el("span", { text: d }), bus.mixed.indexOf(d) >= 0 ? el("i", { "class": "wd-bus-mixed", title: "Also on the fact side of another relationship", text: "◐" }) : null]);
+        el("thead", {}, [el("tr", {}, [el("th", { "class": "wd-bus-corner", text: factsAreRows ? "Fact ↓   Dimension →" : "Dimension ↓   Fact →" })].concat(cols.map(function (c) {
+          return el("th", { scope: "col", "class": "wd-bus-dim" }, [el("span", {}, [c, mixedMark(c)])]);
         })))]),
-        el("tbody", {}, facts.map(function (f) {
-          return el("tr", {}, [el("th", { scope: "row" }, [f, bus.mixed.indexOf(f) >= 0 ? el("i", { "class": "wd-bus-mixed", title: "Also on the dimension side of another relationship", text: " ◐" }) : null])].concat(dims.map(function (d) {
-            var cell = bus.cells.get(f + "\u0001" + d);
+        el("tbody", {}, rows.map(function (row) {
+          return el("tr", {}, [el("th", { scope: "row" }, [row, mixedMark(row)])].concat(cols.map(function (col) {
+            var cell = bus.cells.get(factsAreRows ? row + "\u0001" + col : col + "\u0001" + row);
             if (!cell) return el("td", { "class": "wd-bus-empty" });
-            var text = cell.active ? "●" : "○", count = cell.active + cell.inactive;
+            var shown = cell.relationships.filter(function (e) { return e.r.active; })[0] || cell.relationships[0];
+            var count = cell.relationships.length;
             return el("td", { "class": "wd-bus-cell" + (cell.active ? "" : " wd-bus-inactive"),
-              title: cell.relationships.map(function (r) { return r.from + "[" + r.fromColumn + "] → " + r.to + "[" + r.toColumn + "]" + (r.active ? "" : " (inactive)"); }).join("\n") },
-              [text, count > 1 ? el("sup", { text: String(count) }) : null]);
+              title: cell.relationships.map(function (e) { return notation(e, factsAreRows) + "  " + e.r.from + "[" + e.r.fromColumn + "] → " + e.r.to + "[" + e.r.toColumn + "]" + (e.r.active ? "" : " (inactive)"); }).join("\n") },
+              [notation(shown, factsAreRows), count > 1 ? el("sup", { text: String(count) }) : null]);
           })));
         }))
       ]);
       host.appendChild(el("div", { "class": "wd-table-wrap wd-bus-wrap" }, [table]));
       host.appendChild(el("div", { "class": "wd-legend" }, [
-        el("span", { "class": "wd-key", text: "● active relationship" }), el("span", { "class": "wd-key", text: "○ inactive only" }),
-        el("span", { "class": "wd-key", text: "² relationships between the pair" }), el("span", { "class": "wd-key", text: "◐ on both sides" }),
-        el("span", { "class": "wd-key", text: "Cells show direct relationships, not filter propagation; an empty cell records none." })
+        el("span", { "class": "wd-key", text: "* ← 1  many to one" }), el("span", { "class": "wd-key", text: "* ← *  many to many" }),
+        el("span", { "class": "wd-key", text: "↔  filters both ways" }), el("span", { "class": "wd-key wd-muted", text: "grey: inactive only" }),
+        el("span", { "class": "wd-key", text: "²  relationships between the pair" }), el("span", { "class": "wd-key", text: "◐ on both sides" }),
+        el("span", { "class": "wd-key", text: "Read from the row table to the column table. Cells show direct relationships, not filter propagation; an empty cell records none." })
       ]));
     }
     if (bus.other.length) {
-      host.appendChild(el("h3", { "class": "wd-h3", text: "One-to-one and many-to-many · " + bus.other.length }));
+      host.appendChild(el("h3", { "class": "wd-h3", text: "Between two tables on the same side · " + bus.other.length }));
       host.appendChild(el("ul", { "class": "wd-list wd-mono" }, bus.other.map(relationshipLine)));
     }
     if (bus.isolated.length) {
@@ -212,7 +238,7 @@ function busPage(body, m) {
 }
 
 /* Logical sources against the models whose tables read them. */
-function sourceReuse(m, models) {
+function sourceReuse(m, models, modelsAsRows) {
   var sources = new Map();
   models.forEach(function (mo) {
     mo.tables.forEach(function (tb) {
@@ -225,12 +251,17 @@ function sourceReuse(m, models) {
   });
   if (!sources.size) return empty("No semantic table records a managed source.");
   var list = Array.from(sources.values()).sort(function (a, b) { return compare(a.item, b.item) || compare(a.label, b.label); });
+  var rows = modelsAsRows ? models : list, cols = modelsAsRows ? list : models;
+  function name(x) { return x.name !== undefined ? [x.name] : [x.label, el("span", { "class": "wd-muted", text: " " + itemName(x.item) })]; }
+  function tables(row, col) { var src = modelsAsRows ? col : row, mo = modelsAsRows ? row : col; return src.by.get(mo.item); }
   return el("div", { "class": "wd-table-wrap wd-bus-wrap" }, [el("table", { "class": "wd-bus" }, [
-    el("thead", {}, [el("tr", {}, [el("th", { "class": "wd-bus-corner", text: "Source ↓   Model →" })].concat(models.map(function (mo) { return el("th", { scope: "col", "class": "wd-bus-dim" }, [el("span", { text: mo.name })]); })))]),
-    el("tbody", {}, list.map(function (src) {
-      return el("tr", {}, [el("th", { scope: "row" }, [src.label, el("span", { "class": "wd-muted", text: " " + itemName(src.item) })])].concat(models.map(function (mo) {
-        var tables = src.by.get(mo.item);
-        return tables ? el("td", { "class": "wd-bus-cell", title: tables.join(", ") }, ["●", tables.length > 1 ? el("sup", { text: String(tables.length) }) : null]) : el("td", { "class": "wd-bus-empty" });
+    el("thead", {}, [el("tr", {}, [el("th", { "class": "wd-bus-corner", text: modelsAsRows ? "Model ↓   Source →" : "Source ↓   Model →" })].concat(cols.map(function (c) {
+      return el("th", { scope: "col", "class": "wd-bus-dim" }, [el("span", {}, name(c))]);
+    })))]),
+    el("tbody", {}, rows.map(function (row) {
+      return el("tr", {}, [el("th", { scope: "row" }, name(row))].concat(cols.map(function (col) {
+        var found = tables(row, col);
+        return found ? el("td", { "class": "wd-bus-cell", title: found.join(", ") }, [found.length > 1 ? String(found.length) : "✓"]) : el("td", { "class": "wd-bus-empty" });
       })));
     }))
   ])]);

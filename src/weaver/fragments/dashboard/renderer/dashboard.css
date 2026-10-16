@@ -270,10 +270,11 @@ body:has(.wd[data-theme="dark"]) { background: #0b121b; }
 .wd-bus th, .wd-bus td { border: 1px solid var(--line); }
 .wd-bus tbody th { padding: 5px 12px; text-align: left; white-space: nowrap; font-weight: 620; background: var(--surface); position: sticky; left: 0; }
 .wd-bus-corner { padding: 6px 10px; color: var(--muted); font: 700 9.5px var(--mono); letter-spacing: .07em; text-transform: uppercase; text-align: left; vertical-align: bottom; background: var(--paper-deep); }
-.wd-bus-dim { height: 150px; min-width: 30px; padding: 6px 0; vertical-align: bottom; background: var(--paper-deep); font-weight: 620; }
+.wd-bus-dim { height: 150px; min-width: 58px; padding: 6px 0; vertical-align: bottom; background: var(--paper-deep); font-weight: 620; }
 .wd-bus-dim span { display: inline-block; writing-mode: vertical-rl; transform: rotate(180deg); white-space: nowrap; }
-.wd-bus-cell { width: 30px; text-align: center; color: var(--blue); font-size: 13px; background: color-mix(in srgb, var(--blue-soft) 60%, transparent); }
-.wd-bus-inactive { color: var(--muted); background: var(--paper); }
+.wd-bus-cell { min-width: 58px; padding: 4px 8px; text-align: center; white-space: nowrap; color: var(--blue-dark); font: 600 11.5px var(--mono); background: color-mix(in srgb, var(--blue-soft) 60%, transparent); }
+.wd[data-theme="dark"] .wd-bus-cell { color: var(--blue); }
+.wd-bus-cell.wd-bus-inactive { color: var(--faint); background: var(--paper); }
 .wd-bus-cell sup { font-size: 8.5px; }
 .wd-bus-mixed { color: var(--amber); font-style: normal; }
 
@@ -295,7 +296,7 @@ body:has(.wd[data-theme="dark"]) { background: #0b121b; }
 .wd-er-edge { fill: none; stroke: var(--line-strong); stroke-width: 1.3; }
 .wd-er-edge.wd-er-focus { stroke: var(--up); stroke-width: 1.8; }
 .wd-er-inactive { stroke-dasharray: 5 4; }
-.wd-er-many { fill: var(--muted); }
+.wd-er-card { fill: var(--muted); font: 700 11px var(--mono); }
 .wd-er-more rect { fill: var(--paper-deep); stroke: var(--line-strong); }
 .wd-er-more text { fill: var(--muted); font: 600 9.5px var(--mono); text-anchor: middle; }
 .wd-gantt { position: relative; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
