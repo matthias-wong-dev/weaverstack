@@ -62,6 +62,7 @@ def collect(
     suggested_folder = False
     if not args.project_folder:
         args.project_folder, suggested_folder = _project_folder(stream, args.workspace)
+    _adopt_project(args)
     native_only = _native_only(args)
     if not native_only:
         if not args.catalogue:
@@ -150,6 +151,31 @@ def collect(
         print(INSTALL_WARNING)
         args.publish_environment = _yes(stream, "Publish the Environment now?")
     return True
+
+
+def _adopt_project(args):
+    """Answer from an existing project's bindings instead of asking again."""
+    from pathlib import Path
+
+    from weaver.onboarding.extension import read_project, selections
+
+    configured, record = read_project(Path(args.project_folder))
+    if configured is None:
+        return
+    if not args.catalogue and configured.catalogue:
+        args.catalogue = configured.catalogue_item.name
+    if not args.environment and configured.environment:
+        args.environment = configured.environment.name
+    chosen = selections(
+        configured,
+        record,
+        lakehouse=args.lakehouse,
+        warehouse=args.warehouse,
+        semantic_model=getattr(args, "semantic_model", None),
+    )
+    for field in ("lakehouse", "warehouse"):
+        if not getattr(args, field) and chosen[field]:
+            setattr(args, field, chosen[field])
 
 
 def _native_only(args):

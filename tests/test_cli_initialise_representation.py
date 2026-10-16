@@ -67,6 +67,32 @@ def test_wizard_explains_choices_and_defaults_to_source_only_and_deferred(capsys
 
 
 @weaver_test()
+def test_wizard_extends_a_project_without_asking_for_its_bindings(tmp_path, capsys):
+    (tmp_path / "workspace-config.yml").write_text(
+        "workspace: Analytics\n"
+        "catalogue: Warehouse/Records\n"
+        "environment: Runtime\n"
+        "targets:\n"
+        "  Warehouse/Operations: Operations\n"
+    )
+    args = parse(
+        "--project-folder",
+        str(tmp_path),
+        "--workspace",
+        "Analytics",
+        "--lakehouse",
+        "Landing",
+        "--example",
+        "Parcel",
+    )
+    collect(args, stdin=Typed("1\n\n"))
+    assert (args.catalogue, args.environment) == ("Records", "Runtime")
+    assert (args.lakehouse, args.warehouse) == ("Landing", "Operations")
+    text = capsys.readouterr().out
+    assert "Catalogue name" not in text and "Use an existing Environment" not in text
+
+
+@weaver_test()
 def test_wizard_can_edit_a_typo_before_continue():
     args = parse(
         "--project-folder",
