@@ -66,10 +66,10 @@ img, svg { max-width: 100%; }
 }
 .nav { display: flex; align-items: center; gap: 26px; min-height: 66px; }
 .brand {
-  display: inline-flex; align-items: center; gap: 10px;
+  display: inline-flex; align-items: center; gap: 6px;
   color: var(--ink); text-decoration: none; font-size: 19px; font-weight: 750; letter-spacing: -.03em;
 }
-.weaver-mark { display: block; width: 36px; max-width: 36px; height: auto; flex: 0 0 auto; }
+.weaver-mark { display: block; width: 30px; max-width: 30px; height: auto; flex: 0 0 auto; }
 
 .nav-links { display: flex; align-items: center; gap: 22px; margin-left: auto; }
 .nav-links a { color: var(--muted); text-decoration: none; font-size: 14.5px; font-weight: 620; }

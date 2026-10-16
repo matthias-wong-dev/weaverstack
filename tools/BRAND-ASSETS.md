@@ -4,7 +4,7 @@ Use the PNG-derived assets approved in review, not the rejected SVG kit. The sou
 
 `docs/assets/brand/` retains the native transparent full logos and compact W marks for light and dark backgrounds. Transparency was extracted from the raster reference; it is not native vector artwork. The `*-134.png` marks are 134 × 77 web derivatives of the approved 670 × 385 crops, downsampled with Pillow LANCZOS at unchanged aspect ratio.
 
-Headers and footers display the compact mark at **36 CSS pixels wide**, with proportional height and an explicit maximum width. The dark comparison heading uses a 28-pixel dark variant. Do not place the large stacked logo in the navigation or let intrinsic image width determine header size. Material's desktop header/mobile drawer retain its normal responsive visibility and use the actual selected light/dark theme.
+Headers and footers display the compact mark at **30 CSS pixels wide**, with proportional height, a 6-pixel gap to the name, and an explicit maximum width. The dark comparison heading uses a 28-pixel dark variant. Do not place the large stacked logo in the navigation or let intrinsic image width determine header size. Material's header keeps the mark and title together in one link; its mobile drawer uses the same selected-theme artwork.
 
 The default `og.png` and comparison `og-dbt.png` are exact copies of the approved light 1200 × 630 card, without rerendering, new wording or changed spacing. The approved dark card is retained under `assets/brand/`. Developer docs use the same approved light card, including the retained topic-specific OG URL. Each page's existing social title/description is preserved; image alt text describes the actual logo card.
 
