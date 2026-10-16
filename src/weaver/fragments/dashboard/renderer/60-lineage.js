@@ -3,26 +3,33 @@
 var DEPTHS = [0, 1, 2, -1];
 
 /* One graph with its toolbar, status line and details. With nothing selected it
-   shows the estate. A selection filters it to the selected objects and their
-   lineage to the chosen depths, laid out on their own; a marker on a shown
-   object expands the neighbours left out. Nodes are coloured by kind, or by
-   last outcome with derived readiness ringed. */
+   shows the estate, or one item. A selection filters it to the selected objects
+   and their lineage to the chosen depths, laid out on their own; a marker on a
+   shown object expands the neighbours left out. Nodes can be dragged, and the
+   graph can fill the page. Nodes are coloured by kind, or by last outcome with
+   derived readiness ringed. */
 function graphWorkspace(body, m, options) {
-  var s = pageState(options.page), lay = layoutEstate(m);
+  var s = pageState(options.page), estate = layoutEstate(m);
   var handed = takeHandOff();
-  if (handed && m.nodes.has(handed)) { s.selection = [handed]; s.expanded = []; s.refit = true; }
+  if (handed && m.nodes.has(handed)) { s.selection = [handed]; s.expanded = []; s.moved = {}; s.item = null; s.refit = true; }
   s.selection = (s.selection || (s.focus ? [s.focus] : [])).filter(function (k) { return m.nodes.has(k); });
   if (!s.focus || s.selection.indexOf(s.focus) < 0) s.focus = s.selection[s.selection.length - 1] || null;
   if (s.up === undefined) s.up = 1;
   if (s.down === undefined) s.down = 1;
+  if (s.item && !m.items.has(s.item)) s.item = null;
   s.expanded = (s.expanded || []).filter(function (k) { return m.nodes.has(k); });
+  s.moved = s.moved || {};
   var health = options.health ? assessHealth(m) : null;
   s.mode = s.mode || options.mode;
   var above = options.above || null, legendHost = el("div");
 
   var host = el("div", { "class": "wd-graph" }), side = el("aside", { "class": "wd-side" }), line = el("div", { "class": "wd-status-line" });
   var chips = el("div", { "class": "wd-chips", "aria-label": "Selected objects" });
+  var frame = el("div", { "class": "wd-workspace" });
   var view;
+  function within() {
+    return s.item ? new Set(m.items.get(s.item).nodes.map(function (n) { return n.key; })) : null;
+  }
   /* A plain choice replaces the selection; Shift, Ctrl or ⌘ adds or removes. */
   function select(key, adding) {
     if (!key) s.selection = [];
@@ -30,8 +37,9 @@ function graphWorkspace(body, m, options) {
       var at = s.selection.indexOf(key);
       if (at >= 0) s.selection.splice(at, 1); else s.selection.push(key);
     } else s.selection = [key];
+    if (key && s.item && m.nodes.get(key).item !== s.item) { s.item = null; itemPicker.value = ""; }
     s.focus = key && s.selection.indexOf(key) >= 0 ? key : s.selection[s.selection.length - 1] || null;
-    s.expanded = [];
+    s.expanded = []; s.moved = {};
     apply(true);
   }
   /* A marker expands the neighbours it counts, leaving its object where it is. */
@@ -41,14 +49,18 @@ function graphWorkspace(body, m, options) {
     apply(false);
     view.pin(marker.key, screen);
   }
+  function moved(key, p) { s.moved[key] = { x: p.x, y: p.y }; saveState(); }
   function apply(refit) {
-    var win = s.selection.length ? focusWindow(m, s.selection, s.up, s.down, s.expanded) : null;
-    view.setWindow(win, win ? layoutEstate(subModel(m, win.shown), WINDOW_GEOMETRY) : lay);
+    var only = within();
+    var win = s.selection.length || only ? focusWindow(m, s.selection, s.up, s.down, s.expanded, only) : null;
+    var lay = win ? layoutEstate(subModel(m, win.shown), WINDOW_GEOMETRY) : layoutEstate(m);
+    Object.keys(s.moved).forEach(function (k) { var p = lay.pos.get(k); if (p) { p.x = s.moved[k].x; p.y = s.moved[k].y; } });
+    view.setWindow(win, lay);
     status(win);
     renderChips();
     details(side, m, s.focus, { onOpen: select, health: health, emptyText: options.empty });
     if (refit) { if (win) view.fitWindow(true); else view.fitAll(true); }
-    remember();
+    saveState();
   }
   function renderChips() {
     chips.textContent = "";
@@ -66,7 +78,7 @@ function graphWorkspace(body, m, options) {
   function status(win) {
     line.textContent = "";
     if (!win) {
-      line.appendChild(document.createTextNode(fmt(m.nodes.size) + " objects in " + fmt(lay.bands.length) + " items. Search or select an object to follow its lineage."));
+      line.appendChild(document.createTextNode(fmt(m.nodes.size) + " objects in " + fmt(estate.bands.length) + " items. Search or select an object to follow its lineage."));
       return;
     }
     var parts = [fmt(win.shown.size) + " of " + fmt(m.nodes.size) + " objects shown" + (win.seeds.size > 1 ? " · " + win.seeds.size + " selected" : "")];
@@ -76,39 +88,59 @@ function graphWorkspace(body, m, options) {
     if (win.edgesDropped) parts.push(el("b", { "class": "wd-warn-text", text: win.edgesDropped + " edges not drawn" }));
     parts.forEach(function (p, i) { if (i) line.appendChild(document.createTextNode(" · ")); line.appendChild(typeof p === "string" ? document.createTextNode(p) : p); });
   }
+  var itemPicker = el("select", { "class": "wd-select", "aria-label": "Item", onchange: function () {
+    s.item = this.value || null; s.expanded = []; s.moved = {};
+    if (s.item) s.selection = s.selection.filter(function (k) { return m.nodes.get(k).item === s.item; });
+    s.focus = s.selection[s.selection.length - 1] || null;
+    apply(true);
+  } }, [el("option", { value: "", text: "Every item" })].concat(estate.bands.map(function (b) {
+    return el("option", { value: b.item.label, selected: b.item.label === s.item ? "selected" : null, text: b.item.label });
+  })));
   var bar = el("div", { "class": "wd-toolbar" }, [
     nodeSearch(m, select),
-    segmented("Up", DEPTHS, s.up, function (d) { s.up = d; s.expanded = []; apply(true); }, depthLabel),
-    segmented("Down", DEPTHS, s.down, function (d) { s.down = d; s.expanded = []; apply(true); }, depthLabel),
+    itemPicker,
+    segmented("Up", DEPTHS, s.up, function (d) { s.up = d; s.expanded = []; s.moved = {}; apply(true); }, depthLabel),
+    segmented("Down", DEPTHS, s.down, function (d) { s.down = d; s.expanded = []; s.moved = {}; apply(true); }, depthLabel),
     segmented("Colour", ["load", "kind"], s.mode, function (v) {
       s.mode = v; view.o.mode = v; view.draw(); legendHost.textContent = ""; legendHost.appendChild(legend(v)); saveState();
     }, function (v) { return v === "load" ? "Outcome" : "Kind"; }),
     el("span", { "class": "wd-grow" }),
-    above ? el("button", { "class": "wd-text-btn", type: "button", "aria-expanded": String(!s.compact), onclick: function () {
-      s.compact = !s.compact; above.hidden = s.compact; this.setAttribute("aria-expanded", String(!s.compact));
-      this.textContent = s.compact ? "Show summary" : "Hide summary"; view.resize(); saveState();
-    } }, [s.compact ? "Show summary" : "Hide summary"]) : null,
     el("div", { "class": "wd-zoom" }, [
       el("button", { "class": "wd-icon", type: "button", title: "Zoom out", "aria-label": "Zoom out", onclick: function () { view.zoomAt(0.8, view.width / 2, view.height / 2); } }, ["−"]),
       el("button", { "class": "wd-icon", type: "button", title: "Zoom in", "aria-label": "Zoom in", onclick: function () { view.zoomAt(1.25, view.width / 2, view.height / 2); } }, ["+"]),
       el("button", { "class": "wd-text-btn", type: "button", title: "Fit what is shown", onclick: function () { view.fitWindow(true); } }, ["Fit"]),
-      el("button", { "class": "wd-text-btn", type: "button", title: "Show the whole estate", onclick: function () { select(null); } }, ["Estate"])
+      el("button", { "class": "wd-text-btn", type: "button", title: "Show the whole estate", onclick: function () {
+        s.item = null; itemPicker.value = ""; select(null);
+      } }, ["Estate"])
     ])
   ]);
-  body.appendChild(bar);
-  if (above) { above.hidden = !!s.compact; body.appendChild(above); }
-  body.appendChild(chips);
-  body.appendChild(line);
+  var maximise = el("button", { "class": "wd-icon wd-maximise", type: "button" });
+  function setMaximised(on) {
+    s.maximised = on;
+    frame.classList.toggle("wd-maximised", on);
+    maximise.textContent = on ? "⤡" : "⤢";
+    maximise.title = on ? "Restore (Esc)" : "Fill the page";
+    maximise.setAttribute("aria-label", maximise.title);
+    if (view) view.resize();
+    saveState();
+  }
+  maximise.addEventListener("click", function () { setMaximised(!s.maximised); });
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape" && s.maximised && frame.isConnected) setMaximised(false); });
+  host.appendChild(maximise);
+  if (above) body.appendChild(above);
+  frame.appendChild(bar);
+  frame.appendChild(chips);
+  frame.appendChild(line);
   legendHost.appendChild(legend(s.mode));
-  var split = el("div", { "class": "wd-split" }, [el("div", { "class": "wd-graph-col" }, [host, legendHost]), side]);
-  body.appendChild(split);
+  frame.appendChild(el("div", { "class": "wd-split" }, [el("div", { "class": "wd-graph-col" }, [host, legendHost]), side]));
+  body.appendChild(frame);
+  setMaximised(!!s.maximised);
   if (!m.nodes.size) { host.appendChild(empty("The catalogue records no installed objects yet. Build a project to see its graph.")); return; }
   var fresh = !s.view;
-  view = new GraphView(host, m, lay, { state: s, mode: s.mode, onSelect: select, onReveal: expand, label: options.label });
+  view = new GraphView(host, m, estate, { state: s, mode: s.mode, onSelect: select, onReveal: expand, onMove: moved, label: options.label });
   apply(false);
   // A remembered viewport is kept unless it no longer shows the focus or the estate.
-  if (fresh || s.refit || !view.showing(s.focus)) { s.refit = false; if (s.selection.length) view.fitWindow(false); else view.fitAll(false); }
-  function remember() { saveState(); }
+  if (fresh || s.refit || !view.showing(s.focus)) { s.refit = false; if (s.selection.length || s.item) view.fitWindow(false); else view.fitAll(false); }
   return { select: select };
 }
 

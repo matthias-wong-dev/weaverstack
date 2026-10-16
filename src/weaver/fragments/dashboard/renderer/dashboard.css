@@ -142,6 +142,13 @@ body { background: #f7f7f6; }
   position: relative; height: clamp(420px, calc(100vh - 230px), 980px); border: 1px solid var(--line); border-radius: 12px; overflow: hidden;
   background-color: var(--paper); background-image: radial-gradient(var(--line) .8px, transparent .8px); background-size: 16px 16px;
 }
+.wd-maximise { position: absolute; top: 10px; right: 10px; z-index: 5; padding: 0; font-size: 17px; line-height: 1; }
+.wd-workspace { display: flex; flex-direction: column; gap: 10px; }
+.wd-workspace.wd-maximised { position: fixed; inset: 0; z-index: 40; padding: 12px 14px; background: var(--paper); overflow: hidden; }
+.wd-maximised .wd-split { flex: 1; min-height: 0; align-items: stretch; }
+.wd-maximised .wd-graph-col { min-height: 0; }
+.wd-maximised .wd-graph { flex: 1; height: auto; min-height: 0; }
+.wd-maximised .wd-side { position: static; max-height: none; min-height: 0; }
 .wd-graph-canvas { display: block; touch-action: pan-y; cursor: grab; outline: none; }
 .wd-graph-canvas.wd-dragging { cursor: grabbing; }
 .wd-side, .wd-drawer {

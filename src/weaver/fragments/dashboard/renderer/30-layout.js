@@ -192,18 +192,20 @@ function subModel(m, keys) {
 
 /* The selected nodes and their lineage to the requested depths, nearest first
    up to the budget, plus whatever the reader has expanded. Every neighbour left
-   out is counted on the shown node it hangs from, as a marker that expands it. */
-function focusWindow(m, selection, upDepth, downDepth, expanded) {
-  var seeds = (Array.isArray(selection) ? selection : [selection]).filter(function (k) { return m.nodes.has(k); });
-  if (!seeds.length) return null;
-  var focus = seeds[seeds.length - 1], dist = new Map();
+   out is counted on the shown node it hangs from, as a marker that expands it.
+   Given within, the lineage stays inside it, and with nothing selected the
+   window is all of it. */
+function focusWindow(m, selection, upDepth, downDepth, expanded, within) {
+  var seeds = (Array.isArray(selection) ? selection : [selection]).filter(function (k) { return m.nodes.has(k) && (!within || within.has(k)); });
+  if (!seeds.length && !within) return null;
+  var focus = seeds.length ? seeds[seeds.length - 1] : null, dist = new Map();
   seeds.forEach(function (k) { dist.set(k, 0); });
   function walk(next, sign, depth) {
     var limit = depth < 0 ? Infinity : depth, frontier = seeds.slice();
     for (var step = 1; step <= limit && frontier.length; step++) {
       var found = [];
       frontier.forEach(function (k) {
-        next(m.nodes.get(k)).forEach(function (j) { if (!dist.has(j)) { dist.set(j, sign * step); found.push(j); } });
+        next(m.nodes.get(k)).forEach(function (j) { if (!dist.has(j) && (!within || within.has(j))) { dist.set(j, sign * step); found.push(j); } });
       });
       frontier = found;
     }
@@ -216,7 +218,8 @@ function focusWindow(m, selection, upDepth, downDepth, expanded) {
       compare(m.nodes.get(a.key).label, m.nodes.get(b.key).label) || compare(a.key, b.key);
   });
   var lineage = new Map();
-  ranked.slice(0, BUDGET.NODES).forEach(function (r) { lineage.set(r.key, r.dist); });
+  if (seeds.length) ranked.slice(0, BUDGET.NODES).forEach(function (r) { lineage.set(r.key, r.dist); });
+  else within.forEach(function (k) { if (m.nodes.has(k)) lineage.set(k, 0); });
   var shown = new Set(lineage.keys()), added = new Set();
   (expanded || []).forEach(function (k) {
     if (m.nodes.has(k) && !shown.has(k) && added.size < BUDGET.EXPANDED) { shown.add(k); added.add(k); }
@@ -240,7 +243,7 @@ function focusWindow(m, selection, upDepth, downDepth, expanded) {
     if (up.length || down.length) more.set(k, { up: up, down: down });
   });
   return { focus: focus, seeds: new Set(seeds), lineage: lineage, expanded: added, shown: shown, edges: edges, more: more,
-    hidden: hidden.size, reach: dist.size, truncated: dist.size > lineage.size, edgesDropped: edgeTotal - edges.length };
+    hidden: hidden.size, reach: dist.size, truncated: seeds.length > 0 && dist.size > lineage.size, edgesDropped: edgeTotal - edges.length };
 }
 
 /* The neighbours a marker expands, nearest names first. */

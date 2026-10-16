@@ -1,6 +1,7 @@
 // The graph view, drawn on a canvas so the whole estate stays responsive. A
 // single-finger vertical swipe scrolls the page; one-finger horizontal drags,
-// mouse drags and two-finger gestures move the graph.
+// mouse drags and two-finger gestures move the graph. A mouse or pen drag that
+// starts on a node moves the node instead.
 
 var CELL = 64;
 
@@ -336,7 +337,7 @@ GraphView.prototype.fitKeys = function (keys, animate) {
     x0 = Math.min(x0, p.x - 60); y0 = Math.min(y0, p.y - 20); x1 = Math.max(x1, p.x + 190); y1 = Math.max(y1, p.y + 20);
   });
   var rect = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 }, k = Math.min(1.15, Math.min(this.width / (rect.w + 160), this.height / (rect.h + 120)));
-  if (k < 0.2 && this.win) {
+  if (k < 0.2 && this.win && this.win.focus) {
     // Too spread to read at once: keep the focus legible and in the middle.
     var p = lay.pos.get(this.win.focus);
     return this.go({ k: 0.75, x: this.width / 2 - (p.x + 60) * 0.75, y: this.height / 2 - p.y * 0.75 }, animate);
@@ -401,7 +402,11 @@ GraphView.prototype.bind = function () {
   c.addEventListener("pointerdown", function (e) {
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (e.pointerType === "mouse") c.setPointerCapture(e.pointerId);
-    if (pointers.size === 1) drag = { x: e.clientX, y: e.clientY, view: self.s.view, moved: false, touch: e.pointerType === "touch" };
+    if (pointers.size === 1) {
+      var h = e.pointerType !== "touch" ? self.hit(e.clientX, e.clientY) : null, p = h && h.node ? self.lay.pos.get(h.node) : null;
+      drag = { x: e.clientX, y: e.clientY, view: self.s.view, moved: false, touch: e.pointerType === "touch",
+        node: p ? h.node : null, from: p ? { x: p.x, y: p.y } : null };
+    }
     else if (pointers.size === 2) {
       var pts = Array.from(pointers.values());
       pinch = { d: Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y), cx: (pts[0].x + pts[1].x) / 2, cy: (pts[0].y + pts[1].y) / 2, view: self.s.view };
@@ -424,6 +429,13 @@ GraphView.prototype.bind = function () {
       if (!drag.moved && Math.hypot(dx, dy) < 4) return;
       drag.moved = true;
       self.hideTip();
+      if (drag.node) {
+        var at = self.lay.pos.get(drag.node), k = self.s.view.k;
+        at.x = drag.from.x + dx / k; at.y = drag.from.y + dy / k;
+        c.classList.add("wd-dragging");
+        self.draw();
+        return;
+      }
       // A touch moves the graph sideways; the page owns vertical swipes.
       self.s.view = { k: drag.view.k, x: drag.view.x + dx, y: drag.view.y + (drag.touch ? 0 : dy) };
       c.classList.add("wd-dragging");
@@ -438,6 +450,10 @@ GraphView.prototype.bind = function () {
     c.classList.remove("wd-dragging");
     if (pointers.size < 2) pinch = null;
     if (wasClick && e.type === "pointerup") self.click(e.clientX, e.clientY, e.shiftKey || e.metaKey || e.ctrlKey);
+    if (drag && drag.node && drag.moved) {
+      self.index(self.lay);
+      if (self.o.onMove) self.o.onMove(drag.node, self.lay.pos.get(drag.node));
+    }
     if (!pointers.size) drag = null;
   }
   c.addEventListener("pointerup", end);
@@ -464,7 +480,7 @@ GraphView.prototype.bind = function () {
     else if (e.key === "+" || e.key === "=") self.zoomAt(1.25, self.width / 2, self.height / 2);
     else if (e.key === "-") self.zoomAt(0.8, self.width / 2, self.height / 2);
     else if (e.key === "0") self.fitWindow(true);
-    else if (e.key === "Escape" && self.o.onSelect) self.o.onSelect(null);
+    else if (e.key === "Escape" && self.o.onSelect && !self.host.closest(".wd-maximised")) self.o.onSelect(null);
     else handled = false;
     if (handled) e.preventDefault();
   });

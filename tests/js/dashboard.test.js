@@ -174,6 +174,19 @@ test("depth 0 shows only the selection, with its neighbours as markers to expand
   assert.ok(!grown.more.get("b").up.length);
 });
 
+test("an item on its own shows all of it, and lineage stays inside it", () => {
+  const m = model(estate());
+  const curated = new Set(m.items.get("Warehouse/Curated").nodes.map((n) => n.key));
+  const whole = D.focusWindow(m, [], 1, 1, [], curated);
+  assert.deepEqual(Array.from(whole.shown).sort(), Array.from(curated).sort());
+  assert.equal(whole.focus, null);
+  assert.ok(!whole.truncated);
+  assert.deepEqual(whole.more.get("s").up, ["c"]);
+  const walked = D.focusWindow(m, ["b"], -1, -1, [], curated);
+  assert.ok(!walked.shown.has("c") && !walked.shown.has("m"));
+  assert.ok(walked.shown.has("s") && walked.shown.has("v"));
+});
+
 test("a selection is laid out over its own objects, and each item keeps its full size", () => {
   const m = model(estate());
   const win = D.focusWindow(m, "b", 1, 0, []);
