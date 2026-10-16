@@ -136,6 +136,8 @@ function buildModel(tables, problems) {
   m.workflows = t("workflows").map(function (r) {
     return { id: r.workflow, started: num(r.started), completed: num(r.completed), records: num(r.records) || 0, failed: num(r.failed) || 0, tasks: r.tasks ? r.tasks.split(",") : [] };
   });
+  // Newest first: CONCATENATEX keeps no order unless asked for one.
+  m.workflows.sort(function (a, b) { return (b.completed || 0) - (a.completed || 0) || compare(a.id, b.id); });
   m.workflowCount = num((t("workflowcount")[0] || {}).count);
   return m;
 }

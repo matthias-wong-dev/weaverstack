@@ -96,6 +96,16 @@ test("the model names the catalogue and keeps the Dashboard's own items out", ()
   assert.equal(m.items.get("Lakehouse/Landing").internal, false);
 });
 
+test("workflows are newest first whatever order the measure returns them in", () => {
+  const W = ["workflow", "started", "completed", "records", "failed", "tasks"];
+  const m = model(estate({ extra: table("workflows", W, [
+    ["a", AT - 9 * H, AT - 8 * H, 2185, 0, "Load"],
+    ["c", AT - 2 * H, AT - H, 2185, 0, "Load"],
+    ["b", AT - 5 * H, AT - 4 * H, 9, 0, "Test"],
+  ]) }));
+  assert.deepEqual(m.workflows.map((w) => w.id), ["c", "b", "a"]);
+});
+
 test("a read through a shortcut is drawn from the shortcut and walked from the source", () => {
   const m = model(estate());
   const b = m.nodes.get("b");

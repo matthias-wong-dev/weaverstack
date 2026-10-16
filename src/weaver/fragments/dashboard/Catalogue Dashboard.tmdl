@@ -291,7 +291,9 @@ table 'Dashboard measures'
                     & _f & [@records]
                     & _f & [@failed]
                     & _f & [@tasks],
-                ""
+                "",
+                [@end], DESC,
+                'Log'[Workflow ID], ASC
             )
         ```
         displayFolder: Data
