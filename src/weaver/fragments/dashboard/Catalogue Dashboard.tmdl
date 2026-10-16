@@ -633,7 +633,7 @@ table 'Dashboard measures'
                 FILTER('Dependency', 'Dependency'[Item type] = "SemanticModel"),
                 _r & 'Dependency'[Item type] & "/" & 'Dependency'[Item name]
                     & _f & 'Dependency'[Referencing object name]
-                    & _f & 'Dependency'['Dependency' reference]
+                    & _f & 'Dependency'[Dependency reference]
                     & _f & IF(NOT ISBLANK('Dependency'[Referenced item type]), 'Dependency'[Referenced item type] & "/" & 'Dependency'[Referenced item name])
                     & _f & 'Dependency'[Referenced schema name]
                     & _f & 'Dependency'[Referenced object name],

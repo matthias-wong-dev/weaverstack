@@ -200,6 +200,8 @@ def test_the_measures_quote_every_table_and_avoid_reserved_names(tmp_path):
         for table in tables:
             unquoted = re.search(rf"(?<!['\w]){re.escape(table)}\[", expression)
             assert unquoted is None, f"{name} reads {table} unquoted"
+        # No column name holds a quote, so a quoted table name never lands in one.
+        assert not re.search(r"\[[^\]\"]*'[^\]\"]*\]", expression), name
 
 
 @weaver_test()
