@@ -120,7 +120,10 @@ def test_new_file_collision_refuses_without_partial_extension(tmp_path, fabric):
         session=fabric.session,
     )
     conflict = tmp_path / "Warehouse/Operations/shortcuts.yml"
-    conflict.write_text("logical: {}\n")
+    conflict.write_text(
+        "logical:\n"
+        "  Warehouse/Operations/Parcel.LakehouseEvent: Lakehouse/Other/Tables/Parcel.Event\n"
+    )
     before = snapshot(tmp_path)
     created = list(fabric.created)
     with pytest.raises(InitialiseError, match="shortcuts.yml"):
@@ -132,6 +135,47 @@ def test_new_file_collision_refuses_without_partial_extension(tmp_path, fabric):
             session=fabric.session,
         )
     assert snapshot(tmp_path) == before and fabric.created == created
+
+
+@weaver_test()
+def test_extension_adds_generated_shortcuts_to_authored_mappings(tmp_path, fabric):
+    import yaml
+
+    import weaver
+
+    weaver.initialise(
+        tmp_path,
+        workspace="Analytics",
+        warehouse="Operations",
+        example="Parcel",
+        session=fabric.session,
+    )
+    authored = tmp_path / "Warehouse/Operations/shortcuts.yml"
+    authored.write_text(
+        "physical:\n"
+        '  "Warehouse/Operations/Source.Parcel": "Warehouse/ParcelSource/Source.Parcel"\n'
+    )
+    weaver.initialise(
+        tmp_path,
+        workspace="Analytics",
+        lakehouse="Landing",
+        example="Parcel",
+        session=fabric.session,
+    )
+    assert yaml.safe_load(authored.read_text()) == {
+        "physical": {
+            "Warehouse/Operations/Source.Parcel": "Warehouse/ParcelSource/Source.Parcel"
+        },
+        "logical": {
+            "Warehouse/Operations/Parcel.LakehouseEvent": "Lakehouse/Landing/Tables/Parcel.Event"
+        },
+    }
+    check(tmp_path)
+    merged = authored.read_bytes()
+    weaver.initialise(
+        tmp_path, workspace="Analytics", example="Parcel", session=fabric.session
+    )
+    assert authored.read_bytes() == merged
 
 
 @pytest.mark.parametrize(

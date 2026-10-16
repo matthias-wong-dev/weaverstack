@@ -298,10 +298,11 @@ def initialise(
                             )
             with opened.step("Checking the project files", str(destination)):
                 _check_destination_paths(destination, files)
+                merged = set()
                 files = extend_files(
-                    destination, files, request, configured, state_record
+                    destination, files, request, configured, state_record, merged
                 )
-                metadata = {RECORD}
+                metadata = {RECORD, *merged}
                 if configured is not None:
                     metadata.add(WORKSPACE_CONFIG_FILE)
                 metadata.update(

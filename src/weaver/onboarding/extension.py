@@ -55,7 +55,30 @@ def _digest(content):
     ).hexdigest()
 
 
-def extend_files(destination, files, request, configured, state):
+def _merge_shortcuts(authored, generated):
+    """Add generated Shortcut mappings to an authored file, or None on conflict."""
+    try:
+        current = yaml.safe_load(authored) or {}
+        added = yaml.safe_load(generated) or {}
+    except yaml.YAMLError:
+        return None
+    if not isinstance(current, dict) or not isinstance(added, dict):
+        return None
+    changed = False
+    for section, mappings in added.items():
+        existing = current.setdefault(section, {})
+        if not isinstance(existing, dict) or not isinstance(mappings, dict):
+            return None
+        for destination, source in mappings.items():
+            if destination not in existing:
+                existing[destination] = source
+                changed = True
+            elif existing[destination] != source:
+                return None
+    return yaml.safe_dump(current, sort_keys=False) if changed else authored
+
+
+def extend_files(destination, files, request, configured, state, merged=None):
     from ..initialise import InitialiseError
 
     old_example = state.get("example")
@@ -74,6 +97,14 @@ def extend_files(destination, files, request, configured, state):
             ):
                 continue
             files[path] = existing.read_bytes()
+        elif (
+            path not in known and existing.is_file() and path.endswith("/shortcuts.yml")
+        ):
+            combined = _merge_shortcuts(existing.read_bytes(), files[path])
+            if combined is not None:
+                files[path] = combined
+                if merged is not None:
+                    merged.add(path)
     if configured is not None:
         path = destination / WORKSPACE_CONFIG_FILE
         current = yaml.safe_load(path.read_bytes())
