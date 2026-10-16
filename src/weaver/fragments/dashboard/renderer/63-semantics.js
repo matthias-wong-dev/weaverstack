@@ -59,75 +59,6 @@ function relationshipLine(r) {
   ]);
 }
 
-function semanticsPage(body, m) {
-  var s = pageState("semantics"), models = modelList(m);
-  s.order = s.order || "authored";
-  if (!models.length) { body.appendChild(empty("No semantic model is recorded in the catalogue.")); return; }
-  if (!s.model || !models.some(function (mo) { return mo.item === s.model; })) s.model = models[0].item;
-  var nav = el("nav", { "class": "wd-model-nav", "aria-label": "Semantic models" }), main = el("div", { "class": "wd-model-main" });
-  function renderNav() {
-    nav.textContent = "";
-    models.forEach(function (mo) {
-      var st = mo.node ? effectiveLoad(mo.node) : null;
-      nav.appendChild(el("button", { type: "button", "class": "wd-model-link", "aria-current": mo.item === s.model ? "true" : null,
-        onclick: function () { s.model = mo.item; s.table = null; renderNav(); render(); saveState(); } }, [
-        kindMark(KIND.MODEL), el("span", { "class": "wd-grow", text: mo.name }), st ? el("i", { "class": "wd-dot wd-" + tone(st.result), title: st.result }) : null
-      ]));
-    });
-  }
-  function render() {
-    main.textContent = "";
-    var mo = metadata(m).models.get(s.model), refresh = mo.node ? effectiveLoad(mo.node) : null;
-    main.appendChild(el("div", { "class": "wd-eyebrow", text: "Semantic model" }));
-    main.appendChild(el("h2", { "class": "wd-detail-title", text: mo.name }));
-    main.appendChild(el("p", { "class": mo.description ? "wd-desc" : "wd-desc wd-muted", text: mo.description || "No description." }));
-    var facts = el("dl", { "class": "wd-facts" });
-    function fact(label, value) { facts.appendChild(el("dt", { text: label })); facts.appendChild(el("dd", {}, [value])); }
-    fact("Last refresh", refresh ? el("span", {}, [chip(refresh.result), " " + stamp(refresh.completed)]) : el("span", { "class": "wd-muted", text: "Nothing has settled since it was built" }));
-    if (mo.node && mo.node.built) fact("Built", stamp(mo.node.built));
-    var it = m.items.get(mo.item);
-    if (it && it.target) fact("Fabric item", it.target);
-    main.appendChild(facts);
-    var validations = mo.node ? m.items.get(mo.item).nodes.filter(isValidation) : [];
-    if (validations.length) {
-      main.appendChild(el("h3", { "class": "wd-h3", text: "Tests and Assumptions · " + validations.length }));
-      main.appendChild(el("ul", { "class": "wd-list" }, validations.map(function (v) {
-        return el("li", {}, [kindMark(v.kind), v.label, el("span", { "class": "wd-grow" }), chip(v.test ? v.test.result : null, v.test ? null : "Not run"),
-          v.test && v.test.failures ? el("span", { "class": "wd-muted", text: " " + fmt(v.test.failures) + " rows" }) : null]);
-      })));
-    }
-    main.appendChild(el("div", { "class": "wd-toolbar" }, [
-      el("h3", { "class": "wd-h3 wd-inline", text: "Tables · " + mo.tables.size }),
-      el("span", { "class": "wd-grow" }),
-      segmented("Order", ["authored", "alphabetical"], s.order, function (v) { s.order = v; render(); saveState(); }, function (v) { return v === "authored" ? "Authored" : "A–Z"; })
-    ]));
-    var tables = modelTables(mo, s.order);
-    if (s.order === "authored" && tables.some(function (tb) { return tb.ordinal === null; })) {
-      main.appendChild(el("p", { "class": "wd-note", text: "This model was read back without an authored table order, so its tables are listed alphabetically. Build it again to record the order." }));
-    }
-    var grid = el("div", { "class": "wd-semantic-grid" }), detail = el("div", { "class": "wd-entry-detail" });
-    grid.appendChild(dataTable([
-      { key: "ordinal", title: "#", value: function (tb) { return tb.ordinal; }, numeric: true, sortable: false },
-      { key: "name", title: "Table", value: function (tb) { return tb.name; }, sortable: false },
-      { key: "mode", title: "Mode", value: function (tb) { return tb.mode || ""; }, sortable: false },
-      { key: "columns", title: "Columns", value: function (tb) { return tb.columns.length; }, numeric: true, sortable: false },
-      { key: "measures", title: "Measures", value: function (tb) { return tb.measures.length; }, numeric: true, sortable: false },
-      { key: "reads", title: "Reads", value: function (tb) { return tb.sources.map(function (src) { return src.node ? src.node.label : src.reference; }).join(", "); }, sortable: false }
-    ], tables, { limit: 500, onRow: function (tb) { s.table = tb.name; showTable(tb); saveState(); } }));
-    grid.appendChild(detail);
-    main.appendChild(grid);
-    function showTable(tb) { detail.textContent = ""; semanticTableDetail(detail, m, tb, null); }
-    var chosen = s.table && mo.tables.get(s.table);
-    if (chosen) showTable(chosen); else detail.appendChild(empty("Select a table to see its columns, measures and relationships."));
-    if (mo.relationships.length) {
-      main.appendChild(el("h3", { "class": "wd-h3", text: "Relationships · " + mo.relationships.length }));
-      main.appendChild(el("ul", { "class": "wd-list wd-mono" }, mo.relationships.slice().sort(function (a, b) { return compare(a.from, b.from) || compare(a.to, b.to); }).map(relationshipLine)));
-    }
-  }
-  body.appendChild(el("div", { "class": "wd-semantics" }, [nav, main]));
-  renderNav(); render();
-}
-
 /* ---- bus matrix -------------------------------------------------------------- */
 
 /* Fact-side tables against dimension-side tables, from a model's direct
@@ -176,69 +107,147 @@ function notation(entry, rowIsFact) {
   return left + " " + arrow + " " + right;
 }
 
-function busPage(body, m) {
-  var s = pageState("bus"), models = modelList(m);
-  s.order = s.order || "authored"; s.tab = s.tab || "matrix"; s.dims = s.dims || "columns";
+/* The fact × dimension matrix of one model, read from row to column. */
+function busMatrixView(mo, s) {
+  var host = el("div"), bus = busMatrix(mo), order = modelTables(mo, s.order).map(function (tb) { return tb.name; });
+  function sorted(map) { return order.filter(function (n) { return map.has(n); }).concat(Array.from(map.keys()).filter(function (n) { return order.indexOf(n) < 0; }).sort(compare)); }
+  var factsAreRows = s.dims === "columns";
+  var rows = sorted(factsAreRows ? bus.facts : bus.dims), cols = sorted(factsAreRows ? bus.dims : bus.facts);
+  if (!rows.length) { host.appendChild(empty("This model records no relationship.")); }
+  else {
+    var mixedMark = function (name) { return bus.mixed.indexOf(name) >= 0 ? el("i", { "class": "wd-bus-mixed", title: "On the fact side of one relationship and the dimension side of another", text: " ◐" }) : null; };
+    host.appendChild(el("div", { "class": "wd-table-wrap wd-bus-wrap" }, [el("table", { "class": "wd-bus" }, [
+      el("thead", {}, [el("tr", {}, [el("th", { "class": "wd-bus-corner", text: factsAreRows ? "Fact ↓   Dimension →" : "Dimension ↓   Fact →" })].concat(cols.map(function (c) {
+        return el("th", { scope: "col", "class": "wd-bus-dim" }, [el("span", {}, [c, mixedMark(c)])]);
+      })))]),
+      el("tbody", {}, rows.map(function (row) {
+        return el("tr", {}, [el("th", { scope: "row" }, [row, mixedMark(row)])].concat(cols.map(function (col) {
+          var cell = bus.cells.get(factsAreRows ? row + "\u0001" + col : col + "\u0001" + row);
+          if (!cell) return el("td", { "class": "wd-bus-empty" });
+          var shown = cell.relationships.filter(function (e) { return e.r.active; })[0] || cell.relationships[0], count = cell.relationships.length;
+          return el("td", { "class": "wd-bus-cell" + (cell.active ? "" : " wd-bus-inactive"),
+            title: cell.relationships.map(function (e) { return notation(e, factsAreRows) + "  " + e.r.from + "[" + e.r.fromColumn + "] → " + e.r.to + "[" + e.r.toColumn + "]" + (e.r.active ? "" : " (inactive)"); }).join("\n") },
+            [notation(shown, factsAreRows), count > 1 ? el("sup", { text: String(count) }) : null]);
+        })));
+      }))
+    ])]));
+    host.appendChild(el("div", { "class": "wd-legend" }, [
+      el("span", { "class": "wd-key", text: "* ← 1  many to one" }), el("span", { "class": "wd-key", text: "* ← *  many to many" }),
+      el("span", { "class": "wd-key", text: "↔  filters both ways" }), el("span", { "class": "wd-key wd-muted", text: "grey: inactive only" }),
+      el("span", { "class": "wd-key", text: "²  relationships between the pair" }), el("span", { "class": "wd-key", text: "◐ on both sides" }),
+      el("span", { "class": "wd-key", text: "Read from the row table to the column table. Cells show direct relationships, not filter propagation; an empty cell records none." })
+    ]));
+  }
+  if (bus.other.length) {
+    host.appendChild(el("h3", { "class": "wd-h3", text: "Between two tables on the same side · " + bus.other.length }));
+    host.appendChild(el("ul", { "class": "wd-list wd-mono" }, bus.other.map(relationshipLine)));
+  }
+  if (bus.isolated.length) {
+    host.appendChild(el("h3", { "class": "wd-h3", text: "Tables with no relationship · " + bus.isolated.length }));
+    host.appendChild(el("p", { "class": "wd-muted", text: order.filter(function (n) { return bus.isolated.indexOf(n) >= 0; }).join(", ") }));
+  }
+  if (mo.relationships.length) {
+    host.appendChild(el("details", { "class": "wd-more-detail" }, [el("summary", { text: "Every relationship · " + mo.relationships.length }),
+      el("ul", { "class": "wd-list wd-mono" }, mo.relationships.slice().sort(function (a, b) { return compare(a.from, b.from) || compare(a.to, b.to); }).map(relationshipLine))]));
+  }
+  return host;
+}
+
+/* One model, chosen at the top: what it is, how its tables relate, its tables,
+   columns and measures, and the managed sources they read. The Entity
+   dictionary page is its counterpart for Lakehouses and Warehouses. */
+function semanticPage(body, m) {
+  var s = pageState("semantic"), models = modelList(m);
+  s.order = s.order || "authored"; s.dims = s.dims || "columns"; s.query = s.query || "";
   if (!models.length) { body.appendChild(empty("No semantic model is recorded in the catalogue.")); return; }
   if (!s.model || !models.some(function (mo) { return mo.item === s.model; })) s.model = models[0].item;
-  var host = el("div");
-  var picker = el("select", { "class": "wd-select", "aria-label": "Semantic model", onchange: function () { s.model = this.value; render(); saveState(); } },
-    models.map(function (mo) { return el("option", { value: mo.item, selected: mo.item === s.model ? "selected" : null, text: mo.name }); }));
-  body.appendChild(el("div", { "class": "wd-toolbar" }, [
-    picker,
-    segmented("View", ["matrix", "reuse"], s.tab, function (v) { s.tab = v; render(); saveState(); }, function (v) { return v === "matrix" ? "Fact × dimension" : "Source reuse"; }),
-    segmented("Dimensions", ["columns", "rows"], s.dims, function (v) { s.dims = v; render(); saveState(); }, function (v) { return v === "columns" ? "Columns" : "Rows"; }),
-    segmented("Order", ["authored", "alphabetical"], s.order, function (v) { s.order = v; render(); saveState(); }, function (v) { return v === "authored" ? "Authored" : "A–Z"; })
+  var mo = metadata(m).models.get(s.model);
+  var picker = el("select", { "class": "wd-select wd-select-strong", "aria-label": "Semantic model", onchange: function () { s.model = this.value; s.table = null; saveState(); redraw(); } },
+    models.map(function (x) { return el("option", { value: x.item, selected: x.item === s.model ? "selected" : null, text: x.name }); }));
+  var input = el("input", { "class": "wd-search", type: "search", value: s.query, placeholder: "Search this model's tables, columns and measures", "aria-label": "Search the model", autocomplete: "off", spellcheck: "false" });
+  body.appendChild(el("div", { "class": "wd-toolbar" }, [picker, el("div", { "class": "wd-searchbox" }, [input])]));
+
+  // What the model is.
+  var refresh = mo.node ? effectiveLoad(mo.node) : null, it = m.items.get(mo.item), measureCount = 0, columnCount = 0;
+  mo.tables.forEach(function (tb) { measureCount += tb.measures.length; columnCount += tb.columns.length; });
+  var facts = el("dl", { "class": "wd-facts wd-facts-wide" });
+  function fact(label, value) { facts.appendChild(el("dt", { text: label })); facts.appendChild(el("dd", {}, [value])); }
+  fact("Last refresh", refresh ? el("span", {}, [chip(refresh.result), " " + stamp(refresh.completed)]) : el("span", { "class": "wd-muted", text: "Nothing has settled since it was built" }));
+  if (mo.node && mo.node.built) fact("Built", stamp(mo.node.built));
+  if (it && it.target) fact("Fabric item", it.target);
+  fact("Contents", fmt(mo.tables.size) + " tables · " + fmt(columnCount) + " columns · " + fmt(measureCount) + " measures · " + fmt(mo.relationships.length) + " relationships");
+  var validations = it ? it.nodes.filter(isValidation) : [];
+  body.appendChild(el("div", { "class": "wd-model-head" }, [
+    el("div", {}, [el("div", { "class": "wd-eyebrow", text: "Semantic model" }), el("h2", { "class": "wd-detail-title", text: mo.name }),
+      el("p", { "class": mo.description ? "wd-desc" : "wd-desc wd-muted", text: mo.description || "No description." }), facts]),
+    validations.length ? el("div", {}, [el("h3", { "class": "wd-h3", text: "Tests and Assumptions · " + validations.length }),
+      el("ul", { "class": "wd-list" }, validations.map(function (v) {
+        return el("li", {}, [kindMark(v.kind), v.label, el("span", { "class": "wd-grow" }), chip(v.test ? v.test.result : null, v.test ? null : "Not run"),
+          v.test && v.test.failures ? el("span", { "class": "wd-muted", text: " " + fmt(v.test.failures) + " rows" }) : null]);
+      }))]) : null
   ]));
-  body.appendChild(host);
-  function render() {
-    host.textContent = "";
-    if (s.tab === "reuse") { host.appendChild(sourceReuse(m, models, s.dims === "rows")); return; }
-    var mo = metadata(m).models.get(s.model), bus = busMatrix(mo), order = modelTables(mo, s.order).map(function (tb) { return tb.name; });
-    function sorted(map) { return order.filter(function (n) { return map.has(n); }).concat(Array.from(map.keys()).filter(function (n) { return order.indexOf(n) < 0; }).sort(compare)); }
-    var factsAreRows = s.dims === "columns";
-    var rows = sorted(factsAreRows ? bus.facts : bus.dims), cols = sorted(factsAreRows ? bus.dims : bus.facts);
-    if (!rows.length) { host.appendChild(empty("This model records no relationship.")); }
-    else {
-      var mixedMark = function (name) { return bus.mixed.indexOf(name) >= 0 ? el("i", { "class": "wd-bus-mixed", title: "On the fact side of one relationship and the dimension side of another", text: " ◐" }) : null; };
-      var table = el("table", { "class": "wd-bus" }, [
-        el("thead", {}, [el("tr", {}, [el("th", { "class": "wd-bus-corner", text: factsAreRows ? "Fact ↓   Dimension →" : "Dimension ↓   Fact →" })].concat(cols.map(function (c) {
-          return el("th", { scope: "col", "class": "wd-bus-dim" }, [el("span", {}, [c, mixedMark(c)])]);
-        })))]),
-        el("tbody", {}, rows.map(function (row) {
-          return el("tr", {}, [el("th", { scope: "row" }, [row, mixedMark(row)])].concat(cols.map(function (col) {
-            var cell = bus.cells.get(factsAreRows ? row + "\u0001" + col : col + "\u0001" + row);
-            if (!cell) return el("td", { "class": "wd-bus-empty" });
-            var shown = cell.relationships.filter(function (e) { return e.r.active; })[0] || cell.relationships[0];
-            var count = cell.relationships.length;
-            return el("td", { "class": "wd-bus-cell" + (cell.active ? "" : " wd-bus-inactive"),
-              title: cell.relationships.map(function (e) { return notation(e, factsAreRows) + "  " + e.r.from + "[" + e.r.fromColumn + "] → " + e.r.to + "[" + e.r.toColumn + "]" + (e.r.active ? "" : " (inactive)"); }).join("\n") },
-              [notation(shown, factsAreRows), count > 1 ? el("sup", { text: String(count) }) : null]);
-          })));
-        }))
-      ]);
-      host.appendChild(el("div", { "class": "wd-table-wrap wd-bus-wrap" }, [table]));
-      host.appendChild(el("div", { "class": "wd-legend" }, [
-        el("span", { "class": "wd-key", text: "* ← 1  many to one" }), el("span", { "class": "wd-key", text: "* ← *  many to many" }),
-        el("span", { "class": "wd-key", text: "↔  filters both ways" }), el("span", { "class": "wd-key wd-muted", text: "grey: inactive only" }),
-        el("span", { "class": "wd-key", text: "²  relationships between the pair" }), el("span", { "class": "wd-key", text: "◐ on both sides" }),
-        el("span", { "class": "wd-key", text: "Read from the row table to the column table. Cells show direct relationships, not filter propagation; an empty cell records none." })
-      ]));
-    }
-    if (bus.other.length) {
-      host.appendChild(el("h3", { "class": "wd-h3", text: "Between two tables on the same side · " + bus.other.length }));
-      host.appendChild(el("ul", { "class": "wd-list wd-mono" }, bus.other.map(relationshipLine)));
-    }
-    if (bus.isolated.length) {
-      host.appendChild(el("h3", { "class": "wd-h3", text: "Tables with no relationship · " + bus.isolated.length }));
-      host.appendChild(el("p", { "class": "wd-muted", text: order.filter(function (n) { return bus.isolated.indexOf(n) >= 0; }).join(", ") }));
-    }
+
+  // How its tables relate.
+  var busHost = el("div");
+  function renderBus() { busHost.textContent = ""; busHost.appendChild(busMatrixView(mo, s)); }
+  body.appendChild(section("Relationships", [el("div", { "class": "wd-toolbar" }, [
+    segmented("Dimensions", ["columns", "rows"], s.dims, function (v) { s.dims = v; renderBus(); saveState(); }, function (v) { return v === "columns" ? "Columns" : "Rows"; }),
+    segmented("Order", ["authored", "alphabetical"], s.order, function (v) { s.order = v; renderBus(); renderTables(); saveState(); }, function (v) { return v === "authored" ? "Authored" : "A–Z"; })
+  ]), busHost]));
+
+  // Its tables and their columns.
+  var tablesHost = el("div"), detail = el("div", { "class": "wd-entry-detail" }), measuresHost = el("div");
+  function matches(text) { var q = s.query.toLowerCase().trim(); return !q || String(text || "").toLowerCase().indexOf(q) >= 0; }
+  function tableMatches(tb) {
+    return matches(tb.name) || matches(tb.description) || tb.columns.some(function (c) { return matches(c.column) || matches(c.description); }) ||
+      tb.measures.some(function (x) { return matches(x.measure) || matches(x.description); });
   }
-  render();
+  function renderTables() {
+    tablesHost.textContent = "";
+    var tables = modelTables(mo, s.order).filter(tableMatches);
+    if (s.order === "authored" && tables.some(function (tb) { return tb.ordinal === null; })) {
+      tablesHost.appendChild(el("p", { "class": "wd-note", text: "This model was read back without an authored table order, so its tables are listed alphabetically. Build it again to record the order." }));
+    }
+    tablesHost.appendChild(dataTable([
+      { key: "ordinal", title: "#", value: function (tb) { return tb.ordinal; }, numeric: true, sortable: false },
+      { key: "name", title: "Table", value: function (tb) { return tb.name; }, sortable: false },
+      { key: "mode", title: "Mode", value: function (tb) { return tb.mode || ""; }, sortable: false },
+      { key: "columns", title: "Columns", value: function (tb) { return tb.columns.length; }, numeric: true, sortable: false },
+      { key: "measures", title: "Measures", value: function (tb) { return tb.measures.length; }, numeric: true, sortable: false },
+      { key: "reads", title: "Reads", value: function (tb) { return tb.sources.map(function (src) { return src.node ? src.node.label : src.reference; }).join(", "); }, sortable: false }
+    ], tables, { limit: 500, onRow: function (tb) { s.table = tb.name; showTable(tb); saveState(); }, emptyText: "No table matches." }));
+  }
+  function showTable(tb) { detail.textContent = ""; semanticTableDetail(detail, m, tb, null); }
+  body.appendChild(section("Tables", [el("div", { "class": "wd-semantic-grid" }, [tablesHost, detail])]));
+  var chosen = s.table && mo.tables.get(s.table);
+  if (chosen) showTable(chosen); else detail.appendChild(empty("Select a table to see its columns, measures and relationships."));
+
+  // Every measure, wherever it lives.
+  function renderMeasures() {
+    measuresHost.textContent = "";
+    var all = [];
+    mo.tables.forEach(function (tb) { tb.measures.forEach(function (x) { if (matches(x.measure) || matches(x.description) || matches(tb.name)) all.push({ table: tb.name, x: x }); }); });
+    if (!all.length) { measuresHost.appendChild(empty(measureCount ? "No measure matches." : "This model has no measures.")); return; }
+    all.sort(function (a, b) { return compare(a.x.measure, b.x.measure); });
+    measuresHost.appendChild(el("div", { "class": "wd-measures" }, all.map(function (e) {
+      return el("details", { "class": "wd-measure" }, [
+        el("summary", {}, [el("b", { text: e.x.measure }), el("span", { "class": "wd-muted", text: " · " + e.table }),
+          e.x.description ? el("span", { "class": "wd-measure-desc", text: e.x.description }) : null]),
+        e.x.expression ? el("pre", { "class": "wd-code", text: e.x.expression }) : null,
+        e.x.format ? el("div", { "class": "wd-muted", text: "Format " + e.x.format }) : null
+      ]);
+    })));
+  }
+  body.appendChild(section("Measures · " + fmt(measureCount), [measuresHost]));
+
+  // The managed sources the model's tables read, and which other models read them.
+  body.appendChild(section("Sources", [sourceReuse(m, models, false, mo.item)]));
+  input.addEventListener("input", function () { s.query = input.value; renderTables(); renderMeasures(); });
+  renderBus(); renderTables(); renderMeasures();
 }
 
 /* Logical sources against the models whose tables read them. */
-function sourceReuse(m, models, modelsAsRows) {
+function sourceReuse(m, models, modelsAsRows, only) {
   var sources = new Map();
   models.forEach(function (mo) {
     mo.tables.forEach(function (tb) {
@@ -250,7 +259,10 @@ function sourceReuse(m, models, modelsAsRows) {
     });
   });
   if (!sources.size) return empty("No semantic table records a managed source.");
-  var list = Array.from(sources.values()).sort(function (a, b) { return compare(a.item, b.item) || compare(a.label, b.label); });
+  // With a model named, only the sources that model reads.
+  var list = Array.from(sources.values()).filter(function (src) { return !only || src.by.has(only); })
+    .sort(function (a, b) { return compare(a.item, b.item) || compare(a.label, b.label); });
+  if (!list.length) return empty("No table of this model records a managed source.");
   var rows = modelsAsRows ? models : list, cols = modelsAsRows ? list : models;
   function name(x) { return x.name !== undefined ? [x.name] : [x.label, el("span", { "class": "wd-muted", text: " " + itemName(x.item) })]; }
   function tables(row, col) { var src = modelsAsRows ? col : row, mo = modelsAsRows ? row : col; return src.by.get(mo.item); }

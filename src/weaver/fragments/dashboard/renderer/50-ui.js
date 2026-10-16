@@ -80,8 +80,8 @@ function takeHandOff() {
 function weaveMark() { return el("span", { "class": "wd-mark", "aria-hidden": "true" }, [el("i"), el("i"), el("i"), el("i")]); }
 
 var PAGE_TITLES = {
-  overview: "Overview", lineage: "Lineage", dictionary: "Dictionary", er: "ER diagram", semantics: "Semantics",
-  bus: "Bus matrix", load: "Load", gantt: "Gantt", health: "Health", performance: "Performance"
+  overview: "Overview", health: "Health", orchestration: "Load orchestration", gantt: "Gantt",
+  performance: "Performance", entities: "Entity dictionary", semantic: "Semantic model"
 };
 
 /* The header every page shares: the catalogue's own name, where it lives, and
@@ -305,8 +305,8 @@ function details(panel, m, key, options) {
     }
   }
   if (options.lineageLink) {
-    panel.appendChild(el("button", { "class": "wd-text-btn wd-handoff", type: "button", onclick: function () { handOff(n.key); this.textContent = "Open the Lineage page to see it"; } },
-      ["Show in Lineage"]));
+    panel.appendChild(el("button", { "class": "wd-text-btn wd-handoff", type: "button", onclick: function () { handOff(n.key); this.textContent = "Open Load orchestration to see it"; } },
+      ["Show in Load orchestration"]));
   }
 }
 

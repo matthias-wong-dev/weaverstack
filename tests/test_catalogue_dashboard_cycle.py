@@ -59,19 +59,16 @@ SOURCES = {
 #: The page measure each Report page shows, in page order.
 PAGES = {
     "overview": "Overview page",
-    "lineage": "Lineage page",
-    "dictionary": "Dictionary page",
-    "er": "ER diagram page",
-    "semantics": "Semantics page",
-    "bus": "Bus matrix page",
-    "load": "Load page",
-    "gantt": "Gantt page",
     "health": "Health page",
+    "orchestration": "Load orchestration page",
+    "gantt": "Gantt page",
     "performance": "Performance page",
+    "entities": "Entity dictionary page",
+    "semantic": "Semantic model page",
 }
 
 #: The pages that refresh themselves, because they show settling work.
-LIVE = {"overview", "load", "gantt", "health"}
+LIVE = {"overview", "health", "orchestration", "gantt"}
 
 #: Every measure, by display folder.
 MEASURES = {

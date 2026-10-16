@@ -141,19 +141,43 @@ var ENTRY_RANK = { "Item": 0, "Semantic table": 2, "Column": 3, "Semantic column
 
 function entryRank(e) { return e.kind in ENTRY_RANK ? ENTRY_RANK[e.kind] : 1; }
 
-var DICTIONARY_KINDS = ["All", "Item", "Table", "View", "Folder", "Shortcut", "Test", "Assumption", "Column", "Semantic model", "Semantic table", "Semantic column", "Measure", "Report"];
+var ENTITY_KINDS = ["All", "Item", "Table", "View", "Folder", "Shortcut", "Test", "Assumption", "Column"];
+var SEMANTIC_TYPES = ["SemanticModel", "Report"];
 
-function dictionaryPage(body, m) {
-  var s = pageState("dictionary"), entries = dictionaryEntries(m), md = metadata(m);
-  s.kind = s.kind || "All"; s.query = s.query || "";
+/* The meaning of the landed and curated data: the declared relationships
+   between Lakehouse and Warehouse objects, and their dictionary. The Semantic
+   model page is its counterpart for models. */
+function entitiesPage(body, m) {
+  var s = pageState("entities"), md = metadata(m);
+  s.item = s.item || "all"; s.kind = s.kind || "All"; s.query = s.query || ""; s.er = s.er || {};
+  var items = visibleItems(m).filter(function (it) { return SEMANTIC_TYPES.indexOf(it.type) < 0 && (it.nodes.length || it.target); })
+    .sort(function (a, b) { return typeRank(a.type) - typeRank(b.type) || compare(a.name, b.name); });
+  if (s.item !== "all" && !items.some(function (it) { return it.label === s.item; })) s.item = "all";
+  var entries = dictionaryEntries(m).filter(function (e) {
+    return ENTITY_KINDS.indexOf(e.kind) > 0 && SEMANTIC_TYPES.indexOf(itemType(e.item)) < 0 && (s.item === "all" || e.item === s.item);
+  });
   var counts = {};
   entries.forEach(function (e) { counts[e.kind] = (counts[e.kind] || 0) + 1; });
-  var input = el("input", { "class": "wd-search wd-search-wide", type: "search", value: s.query, placeholder: "Search " + fmt(entries.length) + " entries: names, descriptions, items", "aria-label": "Search the dictionary", autocomplete: "off", spellcheck: "false" });
+  var picker = el("select", { "class": "wd-select", "aria-label": "Item", onchange: function () { s.item = this.value; s.selected = null; s.er = {}; saveState(); redraw(); } },
+    [el("option", { value: "all", text: "Every Lakehouse and Warehouse" })].concat(items.map(function (it) {
+      return el("option", { value: it.label, selected: it.label === s.item ? "selected" : null, text: it.type + " · " + it.name });
+    })));
+  var input = el("input", { "class": "wd-search wd-search-wide", type: "search", value: s.query, placeholder: "Search " + fmt(entries.length) + " entries: tables, views, folders, columns and descriptions", "aria-label": "Search the dictionary", autocomplete: "off", spellcheck: "false" });
+  body.appendChild(el("div", { "class": "wd-toolbar" }, [picker, input]));
+
+  var erHost = el("div");
+  body.appendChild(section("Relationships", [erHost]));
+  var er = erDiagram(erHost, m, s.er, { item: s.item, onPick: function (id) {
+    var entry = entries.filter(function (e) { return e.ref && e.ref.id === id; })[0];
+    if (entry) choose(entry, false);
+  } });
+
   var facets = el("div", { "class": "wd-facets", role: "radiogroup", "aria-label": "Entry kind" });
   var list = el("div", { "class": "wd-entry-list", role: "listbox" }), detail = el("div", { "class": "wd-entry-detail" }), note = el("div", { "class": "wd-status-line" });
+  body.appendChild(section("Dictionary", [facets, note, el("div", { "class": "wd-dictionary" }, [list, detail])]));
   function renderFacets() {
     facets.textContent = "";
-    DICTIONARY_KINDS.forEach(function (k) {
+    ENTITY_KINDS.forEach(function (k) {
       if (k !== "All" && !counts[k]) return;
       facets.appendChild(el("button", { type: "button", role: "radio", "class": "wd-facet", "aria-checked": String(s.kind === k),
         onclick: function () { s.kind = k; renderFacets(); renderList(); saveState(); } },
@@ -164,10 +188,9 @@ function dictionaryPage(body, m) {
     var found = searchEntries(entries, s.query, s.kind), shown = found.slice(0, 100);
     list.textContent = "";
     note.textContent = found.length > 100 ? "Showing the first 100 of " + fmt(found.length) + " matches. Refine the search to narrow them." : fmt(found.length) + (found.length === 1 ? " match" : " matches");
-    shown.forEach(function (e, i) {
-      var selected = s.selected === entryId(e);
-      list.appendChild(el("button", { type: "button", role: "option", "class": "wd-entry", "aria-selected": String(selected),
-        onclick: function () { s.selected = entryId(e); renderList(); renderDetail(e); saveState(); } }, [
+    shown.forEach(function (e) {
+      list.appendChild(el("button", { type: "button", role: "option", "class": "wd-entry", "aria-selected": String(s.selected === entryId(e)),
+        onclick: function () { choose(e, true); } }, [
         el("span", { "class": "wd-entry-label" }, [kindMark(e.kind), e.label]),
         el("span", { "class": "wd-entry-meta", text: e.meta }),
         e.desc ? el("span", { "class": "wd-entry-desc", text: e.desc }) : null
@@ -175,17 +198,20 @@ function dictionaryPage(body, m) {
     });
     if (!shown.length) list.appendChild(empty("Nothing matches. Try fewer words, or another kind."));
   }
-  function renderDetail(e) { entryDetail(detail, m, md, e, function (other) { s.selected = entryId(other); renderList(); renderDetail(other); }); }
+  /* An entry chosen here shows in the diagram too, when it has relationships. */
+  function choose(e, focusDiagram) {
+    s.selected = entryId(e);
+    renderList();
+    renderDetail(e);
+    if (focusDiagram && e.ref && e.ref.id && er.has && er.has(e.ref.id)) er.focus(e.ref.id);
+    saveState();
+  }
+  function renderDetail(e) { entryDetail(detail, m, md, e, function (other) { choose(other, true); }); }
   input.addEventListener("input", function () { s.query = input.value; renderList(); });
-  body.appendChild(el("div", { "class": "wd-toolbar" }, [input]));
-  body.appendChild(facets);
-  body.appendChild(note);
-  body.appendChild(el("div", { "class": "wd-dictionary" }, [list, detail]));
   renderFacets(); renderList();
   var current = entries.filter(function (e) { return entryId(e) === s.selected; })[0];
   if (current) renderDetail(current);
   else detail.appendChild(empty("Select an entry to see its definition, keys, columns and lineage."));
-  if (!md.hasMetadata) detail.appendChild(el("p", { "class": "wd-note", text: "This page carries no declared metadata." }));
 }
 
 function entryId(e) {

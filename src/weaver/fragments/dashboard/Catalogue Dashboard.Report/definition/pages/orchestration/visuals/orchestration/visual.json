@@ -1,6 +1,6 @@
 {
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.0.0/schema.json",
-  "name": "bus",
+  "name": "orchestration",
   "position": {
     "x": 0,
     "y": 0,
@@ -23,11 +23,11 @@
                       "Entity": "Dashboard measures"
                     }
                   },
-                  "Property": "Bus matrix page"
+                  "Property": "Load orchestration page"
                 }
               },
-              "queryRef": "Dashboard measures.Bus matrix page",
-              "nativeQueryRef": "Bus matrix page"
+              "queryRef": "Dashboard measures.Load orchestration page",
+              "nativeQueryRef": "Load orchestration page"
             }
           ]
         }

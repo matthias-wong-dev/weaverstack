@@ -3,8 +3,8 @@
 // refresh keeps the focus, the depths and the viewport.
 
 var PAGES = {
-  overview: overviewPage, lineage: lineagePage, dictionary: dictionaryPage, er: erPage, semantics: semanticsPage,
-  bus: busPage, load: loadPage, gantt: ganttPage, health: healthPage, performance: performancePage
+  overview: overviewPage, health: healthPage, orchestration: orchestrationPage, gantt: ganttPage,
+  performance: performancePage, entities: entitiesPage, semantic: semanticPage
 };
 var STORE = "weaver-dashboard-state";
 
@@ -49,7 +49,7 @@ var api = {
   parsePayload: parsePayload, buildModel: buildModel, assessHealth: assessHealth, readiness: readiness,
   layoutEstate: layoutEstate, focusWindow: focusWindow, searchNodes: searchNodes, dictionaryEntries: dictionaryEntries,
   searchEntries: searchEntries, metadata: metadata, modelTables: modelTables, busMatrix: busMatrix, erGraph: erGraph,
-  erWindow: erWindow, ganttSummary: ganttSummary, logRows: logRows, perfRows: perfRows, tone: tone, BUDGET: BUDGET,
+  erWindow: erWindow, ganttSummary: ganttSummary, clockTicks: clockTicks, clockLabel: clockLabel, logRows: logRows, perfRows: perfRows, tone: tone, BUDGET: BUDGET,
   FIELD: FIELD, ROW: ROW, TABLE: TABLE, LESS: LESS
 };
 if (typeof module === "object" && module && module.exports) module.exports = api;

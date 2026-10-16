@@ -283,13 +283,24 @@ test("tables keep their authored order, and fall back to alphabetical without on
   assert.deepEqual(D.modelTables(mo, "authored").map((t) => t.name), ["Bridge", "Customer", "Date", "Notes", "Sales"]);
 });
 
-test("the ER window walks a relationship cycle without repeating a table", () => {
-  const m = model(estate({ extra: SEMANTIC }));
-  const g = D.erGraph(m, "SemanticModel/Sales");
-  const win = D.erWindow(g, "Sales", -1);
-  assert.deepEqual(Array.from(win.kept.keys()).sort(), ["Bridge", "Customer", "Date", "Sales"]);
-  assert.equal(win.kept.get("Sales"), 0);
-  assert.ok(!win.more.size);
+test("the ER diagram walks declared foreign keys through a cycle without repeating a table", () => {
+  const FK = ["item", "schema", "object", "columns", "primaryitem", "primaryschema", "primaryobject", "primarycolumns"];
+  const W = "Warehouse/Curated", L = "Lakehouse/Landing";
+  const extra = table("foreignkeys", FK, [
+    [W, "Sales", "ByRegion", "Region ID", W, "Sales", "Region", "Region ID"],
+    [W, "Sales", "Region", "Manager ID", W, "Sales", "Manager", "Manager ID"],
+    [W, "Sales", "Manager", "Home region ID", W, "Sales", "Region", "Region ID"],
+    [L, "Tables/Sales", "Customer", "Region ID", W, "Sales", "Region", "Region ID"]]) +
+    table("tables", ["item", "schema", "object", "type", "description", "lineage", "primarykey", "notnull", "identity", "incremental", "static", "prohibitrebuild"], [
+      [W, "Sales", "Region", "Table", "", "", "Region ID", "", "", "", "", ""]]);
+  const m = model(estate({ extra }));
+  const all = D.erGraph(m, "all");
+  const win = D.erWindow(all, W + "|Sales|Region", -1);
+  assert.deepEqual(Array.from(win.kept.keys()).sort(), [W + "|Sales|ByRegion", W + "|Sales|Manager", W + "|Sales|Region", L + "|Tables/Sales|Customer"].sort());
+  assert.equal(win.kept.get(W + "|Sales|Region"), 0);
+  assert.deepEqual(all.nodes.get(W + "|Sales|Region").keys[0], { type: "Primary key", columns: ["Region ID"] });
+  // Within one item, a relationship belongs when either end is there.
+  assert.equal(D.erGraph(m, L).edges.length, 1);
 });
 
 test("dictionary search ranks names before descriptions and finds columns", () => {
@@ -347,4 +358,14 @@ test("a certified object with no graph node says the graph may be out of date", 
   const text = estate().split(D.TABLE).filter((c) => !c.startsWith("built")).join(D.TABLE) + built;
   const m = model(text);
   assert.deepEqual(Array.from(m.graphGaps), [["Warehouse/Curated", 1]]);
+});
+
+test("the Gantt axis reads clock time, with the date where the day changes", () => {
+  const a = Date.UTC(2026, 9, 16, 23, 58, 10), b = Date.UTC(2026, 9, 17, 0, 4, 0);
+  const ticks = D.clockTicks(a, b, 660);
+  assert.ok(ticks.length >= 2 && ticks.length <= 6);
+  assert.ok(ticks.every((t) => t % 60000 === 0));
+  assert.equal(D.clockLabel(a, null), "2026-10-16 23:58:10");
+  assert.equal(D.clockLabel(Date.UTC(2026, 9, 16, 23, 59), a), "23:59:00");
+  assert.equal(D.clockLabel(Date.UTC(2026, 9, 17, 0, 0), Date.UTC(2026, 9, 16, 23, 59)), "2026-10-17 00:00:00");
 });

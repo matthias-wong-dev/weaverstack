@@ -4,36 +4,26 @@
 
 var ER = { NODES: 60, BOX: 220, HEAD: 34, ROW: 18, GAP_X: 36, GAP_ROW: 84, COLUMNS: 8 };
 
-/* The relations and relationships of one scope, as an undirected graph whose
-   edges keep their foreign and primary ends. */
-function erGraph(m, scope) {
+/* The declared relationships of the Lakehouses and Warehouses, or of one of
+   them: a relationship belongs to an item when either end is in it. Both ends
+   keep their foreign and primary columns. */
+function erGraph(m, item) {
   var md = metadata(m), nodes = new Map(), edges = [];
-  function node(id, label, item, columns, keys, owner) {
-    if (!nodes.has(id)) nodes.set(id, { id: id, label: label, item: item, columns: columns || [], keys: keys || [], owner: owner, refs: [], back: [] });
-    return nodes.get(id);
+  function node(id) {
+    if (nodes.has(id)) return;
+    var parts = id.split("|"), owner = m.byIdentity.get(id) || null, declared = md.tables.get(id);
+    // Primary keys travel with the table; the key table holds the others.
+    var keys = declared && declared.primarykey ? [{ type: "Primary key", columns: splitList(declared.primarykey) }] : [];
+    nodes.set(id, { id: id, label: owner ? owner.label : parts[1] + "." + parts[2], item: parts[0],
+      columns: (md.columns.get(id) || []).map(function (c) { return c.column; }),
+      keys: keys.concat((md.keys.get(id) || []).map(function (k) { return { type: k.type, columns: splitList(k.columns) }; })),
+      owner: owner, refs: [], back: [] });
   }
-  if (scope === "declared") {
-    md.foreignKeys.forEach(function (fk) {
-      [fk.from, fk.to].forEach(function (id) {
-        var parts = id.split("|"), owner = m.byIdentity.get(id);
-        // Primary keys travel with the table; the key table holds the others.
-        var declared = md.tables.get(id), keys = declared && declared.primarykey ? [{ type: "Primary key", columns: splitList(declared.primarykey) }] : [];
-        node(id, owner ? owner.label : parts[1] + "." + parts[2], parts[0], (md.columns.get(id) || []).map(function (c) { return c.column; }),
-          keys.concat((md.keys.get(id) || []).map(function (k) { return { type: k.type, columns: splitList(k.columns) }; })), owner);
-      });
-      edges.push({ from: fk.from, to: fk.to, fromColumns: fk.fromColumns, toColumns: fk.toColumns, label: "", active: true, many: true });
-    });
-  } else {
-    var mo = md.models.get(scope);
-    if (mo) {
-      mo.tables.forEach(function (tb) { node(tb.name, tb.name, mo.item, tb.columns.map(function (c) { return c.column; }), [], null); });
-      mo.relationships.forEach(function (r) {
-        node(r.from, r.from, mo.item, [], [], null); node(r.to, r.to, mo.item, [], [], null);
-        edges.push({ from: r.from, to: r.to, fromColumns: [r.fromColumn], toColumns: [r.toColumn], label: r.name, active: r.active,
-          many: r.fromCardinality === "many", one: r.toCardinality === "one", both: /both/i.test(r.crossFilter || "") });
-      });
-    }
-  }
+  md.foreignKeys.forEach(function (fk) {
+    if (item && item !== "all" && fk.from.split("|")[0] !== item && fk.to.split("|")[0] !== item) return;
+    node(fk.from); node(fk.to);
+    edges.push({ from: fk.from, to: fk.to, fromColumns: fk.fromColumns, toColumns: fk.toColumns, label: "", active: true, many: true });
+  });
   edges.forEach(function (e, i) { e.id = i; nodes.get(e.from).refs.push(e); nodes.get(e.to).back.push(e); });
   return { nodes: nodes, edges: edges };
 }
@@ -83,48 +73,31 @@ function erRows(n, edges) {
   return { rows: rows, hidden: rest.length - Math.min(room, rest.length) };
 }
 
-function erPage(body, m) {
-  var s = pageState("er"), md = metadata(m), scopes = [];
-  if (md.foreignKeys.length) scopes.push({ id: "declared", label: "Declared relationships" });
-  modelList(m).forEach(function (mo) { if (mo.relationships.length) scopes.push({ id: mo.item, label: mo.name + " · semantic model" }); });
-  if (!scopes.length) { body.appendChild(empty("No declared relationship or semantic relationship is recorded.")); return; }
-  if (!s.scope || !scopes.some(function (x) { return x.id === s.scope; })) s.scope = scopes[0].id;
+/* The ER diagram around a focus table, drawn into container. s holds the
+   focus, depth and viewport; onPick hears a table chosen in the diagram. */
+function erDiagram(container, m, s, options) {
   if (s.depth === undefined) s.depth = 1;
-  var g = erGraph(m, s.scope), host = el("div", { "class": "wd-er" }), line = el("div", { "class": "wd-status-line" });
+  var g = erGraph(m, options.item), host = el("div", { "class": "wd-er wd-er-embedded" }), line = el("div", { "class": "wd-status-line" });
+  if (!g.nodes.size) { container.appendChild(empty("No declared relationship is recorded" + (options.item && options.item !== "all" ? " for " + options.item : "") + ".")); return { focus: function () {} }; }
   if (!s.focus || !g.nodes.has(s.focus)) {
     var best = null;
     g.nodes.forEach(function (n) { if (!best || n.refs.length + n.back.length > best.refs.length + best.back.length || (n.refs.length + n.back.length === best.refs.length + best.back.length && compare(n.label, best.label) < 0)) best = n; });
     s.focus = best ? best.id : null;
   }
-  var picker = el("select", { "class": "wd-select", "aria-label": "Relationships", onchange: function () { s.scope = this.value; s.focus = null; s.view = null; rerender(); } },
-    scopes.map(function (x) { return el("option", { value: x.id, selected: x.id === s.scope ? "selected" : null, text: x.label }); }));
-  var search = searchBox({
-    placeholder: "Search " + fmt(g.nodes.size) + " tables",
-    find: function (q) {
-      var terms = q.toLowerCase().split(/\s+/).filter(Boolean);
-      if (!terms.length) return [];
-      return Array.from(g.nodes.values()).filter(function (n) { return terms.every(function (t) { return (n.label + " " + n.item).toLowerCase().indexOf(t) >= 0; }); })
-        .sort(function (a, b) { return a.label.length - b.label.length || compare(a.label, b.label); }).slice(0, 12)
-        .map(function (n) { return { key: n.id, label: n.label, meta: itemName(n.item) + " · " + (n.refs.length + n.back.length) + " relationships" }; });
-    },
-    onPick: function (r) { s.focus = r.key; s.view = null; draw(); saveState(); }
-  });
-  body.appendChild(el("div", { "class": "wd-toolbar" }, [picker, search,
-    segmented("Depth", DEPTHS, s.depth, function (d) { s.depth = d; s.view = null; draw(); saveState(); }, depthLabel)]));
-  body.appendChild(line);
-  body.appendChild(host);
-  body.appendChild(el("div", { "class": "wd-legend" }, [
+  container.appendChild(el("div", { "class": "wd-toolbar" }, [
+    segmented("Depth", DEPTHS, s.depth, function (d) { s.depth = d; s.view = null; draw(); saveState(); }, depthLabel), line]));
+  container.appendChild(host);
+  container.appendChild(el("div", { "class": "wd-legend" }, [
     el("span", { "class": "wd-key", text: "⚿ key column" }), el("span", { "class": "wd-key", text: "↗ foreign key column" }),
-    el("span", { "class": "wd-key" }, [el("i", { "class": "wd-key-line wd-up" }), "relationship, many to one"]),
-    el("span", { "class": "wd-key" }, [el("i", { "class": "wd-key-line wd-dashed" }), "inactive"]),
-    el("span", { "class": "wd-key" }, [el("i", { "class": "wd-key-more", text: "+3" }), "related tables beyond the window"])
+    el("span", { "class": "wd-key", text: "* many · 1 one" }),
+    el("span", { "class": "wd-key" }, [el("i", { "class": "wd-key-more", text: "+3" }), "related tables beyond the window: select one to move there"])
   ]));
-  function rerender() { saveState(); redraw(); }
+  function pick(id) { s.focus = id; s.view = null; draw(); saveState(); if (options.onPick) options.onPick(id); }
   function draw() {
     host.textContent = "";
     var win = erWindow(g, s.focus, s.depth);
     if (!win) { host.appendChild(empty("Search for a table.")); return; }
-    line.textContent = win.kept.size + " of " + fmt(g.nodes.size) + " tables" + (win.truncated ? " · cut to the " + ER.NODES + " nearest of " + win.reach + "; lower the depth, or select a table with a +N marker to move there" : "");
+    line.textContent = win.kept.size + " of " + fmt(g.nodes.size) + " related tables" + (win.truncated ? " · cut to the " + ER.NODES + " nearest of " + win.reach + "; lower the depth, or select a table with a +N marker to move there" : "");
     // Top to bottom: the tables others reference sit above the tables that
     // reference them, one row per distance from the focus.
     var levels = new Map();
@@ -193,14 +166,15 @@ function erPage(body, m) {
           sv("title", {}, [more.length + " related tables beyond the window. Select to focus here."])]);
         group.appendChild(badge);
       }
-      group.addEventListener("click", function () { s.focus = id; s.view = null; draw(); saveState(); });
-      group.addEventListener("keydown", function (ev) { if (ev.key === "Enter") { s.focus = id; s.view = null; draw(); saveState(); } });
+      group.addEventListener("click", function () { pick(id); });
+      group.addEventListener("keydown", function (ev) { if (ev.key === "Enter") pick(id); });
       stage.appendChild(group);
     });
     host.appendChild(svg);
     panZoom(svg, stage, s, { x: x0, y: top - 40, w: x1 - x0, h: bottom - top + 80 });
   }
   draw();
+  return { has: function (id) { return g.nodes.has(id); }, focus: function (id) { if (g.nodes.has(id)) { s.focus = id; s.view = null; draw(); } } };
 }
 
 function clipText(text, n) { text = String(text || ""); return text.length > n ? text.slice(0, n - 1) + "…" : text; }

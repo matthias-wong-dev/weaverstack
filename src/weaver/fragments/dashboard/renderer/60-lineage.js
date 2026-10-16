@@ -1,4 +1,4 @@
-// Lineage and Load: the estate graph, focused on one object at a time.
+// Load orchestration: the estate graph, coloured by kind or by last outcome.
 
 var DEPTHS = [0, 1, 2, -1];
 
@@ -15,6 +15,8 @@ function graphWorkspace(body, m, options) {
   if (s.down === undefined) s.down = 1;
   s.revealed = (s.revealed || []).filter(function (k) { return m.nodes.has(k); });
   var health = options.health ? assessHealth(m) : null;
+  s.mode = s.mode || options.mode;
+  var above = options.above || null, legendHost = el("div");
 
   var host = el("div", { "class": "wd-graph" }), side = el("aside", { "class": "wd-side" }), line = el("div", { "class": "wd-status-line" });
   var chips = el("div", { "class": "wd-chips", "aria-label": "Selected objects" });
@@ -74,7 +76,14 @@ function graphWorkspace(body, m, options) {
     nodeSearch(m, select),
     segmented("Up", DEPTHS, s.up, function (d) { s.up = d; s.revealed = []; apply(true); }, depthLabel),
     segmented("Down", DEPTHS, s.down, function (d) { s.down = d; s.revealed = []; apply(true); }, depthLabel),
+    segmented("Colour", ["load", "kind"], s.mode, function (v) {
+      s.mode = v; view.o.mode = v; view.draw(); legendHost.textContent = ""; legendHost.appendChild(legend(v)); saveState();
+    }, function (v) { return v === "load" ? "Outcome" : "Kind"; }),
     el("span", { "class": "wd-grow" }),
+    above ? el("button", { "class": "wd-text-btn", type: "button", "aria-expanded": String(!s.compact), onclick: function () {
+      s.compact = !s.compact; above.hidden = s.compact; this.setAttribute("aria-expanded", String(!s.compact));
+      this.textContent = s.compact ? "Show summary" : "Hide summary"; view.resize(); saveState();
+    } }, [s.compact ? "Show summary" : "Hide summary"]) : null,
     el("div", { "class": "wd-zoom" }, [
       el("button", { "class": "wd-icon", type: "button", title: "Zoom out", "aria-label": "Zoom out", onclick: function () { view.zoomAt(0.8, view.width / 2, view.height / 2); } }, ["−"]),
       el("button", { "class": "wd-icon", type: "button", title: "Zoom in", "aria-label": "Zoom in", onclick: function () { view.zoomAt(1.25, view.width / 2, view.height / 2); } }, ["+"]),
@@ -83,14 +92,15 @@ function graphWorkspace(body, m, options) {
     ])
   ]);
   body.appendChild(bar);
-  if (options.above) body.appendChild(options.above);
+  if (above) { above.hidden = !!s.compact; body.appendChild(above); }
   body.appendChild(chips);
   body.appendChild(line);
-  var split = el("div", { "class": "wd-split" }, [el("div", { "class": "wd-graph-col" }, [host, legend(options.mode)]), side]);
+  legendHost.appendChild(legend(s.mode));
+  var split = el("div", { "class": "wd-split" }, [el("div", { "class": "wd-graph-col" }, [host, legendHost]), side]);
   body.appendChild(split);
   if (!m.nodes.size) { host.appendChild(empty("The catalogue records no installed objects yet. Build a project to see its graph.")); return; }
   var fresh = !s.view;
-  view = new GraphView(host, m, lay, { state: s, mode: options.mode, onSelect: select, onReveal: reveal, label: options.label });
+  view = new GraphView(host, m, lay, { state: s, mode: s.mode, onSelect: select, onReveal: reveal, label: options.label });
   apply(false);
   // A remembered viewport is kept unless it no longer shows the focus or the estate.
   if (fresh || s.refit || !view.showing(s.focus)) { s.refit = false; if (s.selection.length) view.fitWindow(false); else view.fitAll(false); }
@@ -112,12 +122,7 @@ function legend(mode) {
   }).concat([el("span", { "class": "wd-key" }, [el("i", { "class": "wd-key-more", text: "3 ››" }), "more beyond the window: select to travel"])]));
 }
 
-function lineagePage(body, m) {
-  graphWorkspace(body, m, { page: "lineage", mode: "kind", health: true, label: "Lineage graph",
-    empty: "Search for an object, or select one in the graph, to follow its lineage." });
-}
-
-function loadPage(body, m) {
+function orchestrationPage(body, m) {
   var counts = {}, failed = [], ready = [], waiting = [];
   m.nodes.forEach(function (n) {
     if (!isLoadSubject(n)) return;
@@ -137,8 +142,8 @@ function loadPage(body, m) {
     latest ? tile("Latest workflow", duration((latest.completed || 0) - (latest.started || 0)), fmt(latest.records) + " settled records · " + ago(latest.completed, m.at), latest.failed ? "bad" : "none") : null
   ]);
   var note = el("p", { "class": "wd-note", text: "Readiness is derived from the recorded state of each object's nearest loadable dependencies. It is not a queue: the catalogue records settled work only, so nothing here is shown as running." });
-  graphWorkspace(body, m, { page: "load", mode: "load", health: true, label: "Load graph", above: el("div", {}, [tiles, note]),
-    empty: "Select an object to see its last outcome and whether its dependencies have settled." });
+  graphWorkspace(body, m, { page: "orchestration", mode: "load", health: true, label: "Load orchestration graph", above: el("div", { "class": "wd-summary" }, [tiles, note]),
+    empty: "Search for an object, or select one in the graph, to follow its lineage, last outcome and readiness." });
   var lists = el("div", { "class": "wd-columns-2" }, [
     section("Ready · " + ready.length, [dataTable([
       { key: "object", title: "Object", value: function (r) { return r.n.label; } },

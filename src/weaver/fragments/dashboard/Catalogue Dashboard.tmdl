@@ -657,50 +657,18 @@ table 'Dashboard measures'
         ```
         displayFolder: Pages
 
-    /// The Lineage page for HTML Content.
-    measure 'Lineage page' = ```
+    /// The Health page for HTML Content.
+    measure 'Health page' = ```
         "<div id=""wd-app"" class=""wd""></div><script type=""text/plain"" id=""wd-data"">"
-            & SUBSTITUTE(UNICHAR(57347) & "page" & UNICHAR(57345) & "name" & UNICHAR(57346) & "lineage" & [Catalogue data] & [Graph data] & [Status data], "<", UNICHAR(57344))
+            & SUBSTITUTE(UNICHAR(57347) & "page" & UNICHAR(57345) & "name" & UNICHAR(57346) & "health" & [Catalogue data] & [Graph data] & [Status data] & [Workflow data] & [Build data], "<", UNICHAR(57344))
             & "</script>" & [Renderer]
         ```
         displayFolder: Pages
 
-    /// The Dictionary page for HTML Content.
-    measure 'Dictionary page' = ```
+    /// The Load orchestration page for HTML Content.
+    measure 'Load orchestration page' = ```
         "<div id=""wd-app"" class=""wd""></div><script type=""text/plain"" id=""wd-data"">"
-            & SUBSTITUTE(UNICHAR(57347) & "page" & UNICHAR(57345) & "name" & UNICHAR(57346) & "dictionary" & [Catalogue data] & [Graph data] & [Metadata data] & [Semantic data], "<", UNICHAR(57344))
-            & "</script>" & [Renderer]
-        ```
-        displayFolder: Pages
-
-    /// The ER diagram page for HTML Content.
-    measure 'ER diagram page' = ```
-        "<div id=""wd-app"" class=""wd""></div><script type=""text/plain"" id=""wd-data"">"
-            & SUBSTITUTE(UNICHAR(57347) & "page" & UNICHAR(57345) & "name" & UNICHAR(57346) & "er" & [Catalogue data] & [Metadata data] & [Semantic data], "<", UNICHAR(57344))
-            & "</script>" & [Renderer]
-        ```
-        displayFolder: Pages
-
-    /// The Semantics page for HTML Content.
-    measure 'Semantics page' = ```
-        "<div id=""wd-app"" class=""wd""></div><script type=""text/plain"" id=""wd-data"">"
-            & SUBSTITUTE(UNICHAR(57347) & "page" & UNICHAR(57345) & "name" & UNICHAR(57346) & "semantics" & [Catalogue data] & [Graph data] & [Status data] & [Semantic data], "<", UNICHAR(57344))
-            & "</script>" & [Renderer]
-        ```
-        displayFolder: Pages
-
-    /// The Bus matrix page for HTML Content.
-    measure 'Bus matrix page' = ```
-        "<div id=""wd-app"" class=""wd""></div><script type=""text/plain"" id=""wd-data"">"
-            & SUBSTITUTE(UNICHAR(57347) & "page" & UNICHAR(57345) & "name" & UNICHAR(57346) & "bus" & [Catalogue data] & [Semantic data], "<", UNICHAR(57344))
-            & "</script>" & [Renderer]
-        ```
-        displayFolder: Pages
-
-    /// The Load page for HTML Content.
-    measure 'Load page' = ```
-        "<div id=""wd-app"" class=""wd""></div><script type=""text/plain"" id=""wd-data"">"
-            & SUBSTITUTE(UNICHAR(57347) & "page" & UNICHAR(57345) & "name" & UNICHAR(57346) & "load" & [Catalogue data] & [Graph data] & [Status data] & [Workflow data], "<", UNICHAR(57344))
+            & SUBSTITUTE(UNICHAR(57347) & "page" & UNICHAR(57345) & "name" & UNICHAR(57346) & "orchestration" & [Catalogue data] & [Graph data] & [Status data] & [Workflow data], "<", UNICHAR(57344))
             & "</script>" & [Renderer]
         ```
         displayFolder: Pages
@@ -713,18 +681,26 @@ table 'Dashboard measures'
         ```
         displayFolder: Pages
 
-    /// The Health page for HTML Content.
-    measure 'Health page' = ```
-        "<div id=""wd-app"" class=""wd""></div><script type=""text/plain"" id=""wd-data"">"
-            & SUBSTITUTE(UNICHAR(57347) & "page" & UNICHAR(57345) & "name" & UNICHAR(57346) & "health" & [Catalogue data] & [Graph data] & [Status data] & [Workflow data] & [Build data], "<", UNICHAR(57344))
-            & "</script>" & [Renderer]
-        ```
-        displayFolder: Pages
-
     /// The Performance page for HTML Content.
     measure 'Performance page' = ```
         "<div id=""wd-app"" class=""wd""></div><script type=""text/plain"" id=""wd-data"">"
             & SUBSTITUTE(UNICHAR(57347) & "page" & UNICHAR(57345) & "name" & UNICHAR(57346) & "performance" & [Catalogue data] & [Workflow data] & [Statistic data], "<", UNICHAR(57344))
+            & "</script>" & [Renderer]
+        ```
+        displayFolder: Pages
+
+    /// The Entity dictionary page for HTML Content.
+    measure 'Entity dictionary page' = ```
+        "<div id=""wd-app"" class=""wd""></div><script type=""text/plain"" id=""wd-data"">"
+            & SUBSTITUTE(UNICHAR(57347) & "page" & UNICHAR(57345) & "name" & UNICHAR(57346) & "entities" & [Catalogue data] & [Graph data] & [Metadata data], "<", UNICHAR(57344))
+            & "</script>" & [Renderer]
+        ```
+        displayFolder: Pages
+
+    /// The Semantic model page for HTML Content.
+    measure 'Semantic model page' = ```
+        "<div id=""wd-app"" class=""wd""></div><script type=""text/plain"" id=""wd-data"">"
+            & SUBSTITUTE(UNICHAR(57347) & "page" & UNICHAR(57345) & "name" & UNICHAR(57346) & "semantic" & [Catalogue data] & [Graph data] & [Status data] & [Semantic data], "<", UNICHAR(57344))
             & "</script>" & [Renderer]
         ```
         displayFolder: Pages

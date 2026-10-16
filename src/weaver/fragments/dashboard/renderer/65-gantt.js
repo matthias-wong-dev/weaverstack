@@ -121,13 +121,22 @@ function ganttChart(rows, sum, s, m) {
     var axisY = Math.max(top, 0);
     ctx.fillStyle = P.surface; ctx.fillRect(0, axisY, width, GANTT.AXIS);
     ctx.strokeStyle = P.line; ctx.beginPath(); ctx.moveTo(0, axisY + GANTT.AXIS - 0.5); ctx.lineTo(width, axisY + GANTT.AXIS - 0.5); ctx.stroke();
+    // Clock time in UTC: the full instant at the left edge, then round ticks,
+    // with the date again wherever the day changes.
+    var a = sum.t0 + span * s.zoom.a, b = sum.t0 + span * s.zoom.b, plot = width - GANTT.LABEL - 16;
+    ctx.fillStyle = P.ink; ctx.font = "600 10.5px " + P.mono;
+    var startText = clockLabel(a, null), startEnd = GANTT.LABEL + 4 + ctx.measureText(startText).width + 18;
+    ctx.fillText(startText, GANTT.LABEL + 4, axisY + 14);
     ctx.fillStyle = P.muted; ctx.font = "10.5px " + P.mono;
-    for (var g = 0; g <= 6; g++) {
-      var t = sum.t0 + span * (s.zoom.a + (s.zoom.b - s.zoom.a) * g / 6), gx = time(t);
-      ctx.fillText("+" + duration(t - sum.t0), Math.min(width - 60, gx + 3), axisY + 14);
+    var previous = a;
+    clockTicks(a, b, plot).forEach(function (t) {
+      var gx = time(t);
       ctx.globalAlpha = 0.5; ctx.beginPath(); ctx.moveTo(gx, axisY + GANTT.AXIS); ctx.lineTo(gx, top + height); ctx.stroke(); ctx.globalAlpha = 1;
-    }
-    ctx.fillStyle = P.muted; ctx.font = "600 10px " + P.mono; ctx.fillText("RECORD", 8, axisY + 14);
+      if (gx < startEnd || gx > width - 60) return;
+      ctx.fillText(clockLabel(t, previous), gx + 3, axisY + 14);
+      previous = t;
+    });
+    ctx.fillStyle = P.muted; ctx.font = "600 10px " + P.mono; ctx.fillText("RECORD · UTC", 8, axisY + 14);
   }
   function schedule() { (root.requestAnimationFrame || setTimeout)(paint); }
   root.addEventListener("scroll", schedule, { passive: true });
@@ -165,6 +174,25 @@ function ganttChart(rows, sum, s, m) {
   wrap.addEventListener("pointerleave", function () { drag = null; tip.hidden = true; });
   wrap.addEventListener("dblclick", function () { s.zoom = { a: 0, b: 1 }; schedule(); });
   return wrap;
+}
+
+var CLOCK_STEPS = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200, 10800, 21600, 43200, 86400]
+  .map(function (seconds) { return seconds * 1000; });
+
+/* Round instants between a and b, about one per 110 px. */
+function clockTicks(a, b, width) {
+  var room = Math.max(2, Math.floor(width / 110)), step = null;
+  for (var i = 0; i < CLOCK_STEPS.length && step === null; i++) if ((b - a) / CLOCK_STEPS[i] <= room) step = CLOCK_STEPS[i];
+  if (step === null) step = 86400000 * Math.ceil((b - a) / 86400000 / room);
+  var out = [];
+  for (var t = Math.ceil(a / step) * step; t <= b; t += step) out.push(t);
+  return out;
+}
+
+/* hh:mm:ss, preceded by the date when it differs from the previous label's. */
+function clockLabel(t, previous) {
+  var iso = new Date(t).toISOString(), day = iso.slice(0, 10), clock = iso.slice(11, 19);
+  return previous === null || new Date(previous).toISOString().slice(0, 10) !== day ? day + " " + clock : clock;
 }
 
 function paletteOf(node) {

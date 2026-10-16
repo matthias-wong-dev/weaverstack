@@ -1,6 +1,6 @@
 {
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.0.0/schema.json",
-  "name": "dictionary",
+  "name": "semantic",
   "position": {
     "x": 0,
     "y": 0,
@@ -23,11 +23,11 @@
                       "Entity": "Dashboard measures"
                     }
                   },
-                  "Property": "Dictionary page"
+                  "Property": "Semantic model page"
                 }
               },
-              "queryRef": "Dashboard measures.Dictionary page",
-              "nativeQueryRef": "Dictionary page"
+              "queryRef": "Dashboard measures.Semantic model page",
+              "nativeQueryRef": "Semantic model page"
             }
           ]
         }

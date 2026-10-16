@@ -19,15 +19,12 @@ FIELD, ROW, TABLE, LESS = "", "", "", ""
 #: The data each page measure concatenates, in order.
 PAGES = {
     "overview": ("catalogue", "graph", "status", "workflow", "build"),
-    "lineage": ("catalogue", "graph", "status"),
-    "dictionary": ("catalogue", "graph", "metadata", "semantic"),
-    "er": ("catalogue", "metadata", "semantic"),
-    "semantics": ("catalogue", "graph", "status", "semantic"),
-    "bus": ("catalogue", "semantic"),
-    "load": ("catalogue", "graph", "status", "workflow"),
-    "gantt": ("catalogue", "workflow", "log"),
     "health": ("catalogue", "graph", "status", "workflow", "build"),
+    "orchestration": ("catalogue", "graph", "status", "workflow"),
+    "gantt": ("catalogue", "workflow", "log"),
     "performance": ("catalogue", "workflow", "statistic"),
+    "entities": ("catalogue", "graph", "metadata"),
+    "semantic": ("catalogue", "graph", "status", "semantic"),
 }
 
 EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
