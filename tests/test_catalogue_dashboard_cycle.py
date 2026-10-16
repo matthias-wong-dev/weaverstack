@@ -18,14 +18,14 @@ from weaver.catalogue_dashboard import (
     renderer_literal,
 )
 from weaver.declaration.repository import parse_item_repository
-from weaver.errors import DiscoveryError
+from weaver.errors import BuildError, DiscoveryError
 from weaver.fabric.resolution import FabricResolver
 from weaver.locations import Location
 from weaver.semantic_models.definition import decode_parts, encode_definition
 from weaver.semantic_models.objects import TmdlDefinition
 from weaver.sessions import TestSession
 from weaver.store import FilesystemStore
-from weaver.workspaces import Workspace
+from weaver.workspaces import TargetDeclaration, Workspace
 
 HTML_CONTENT = "htmlContent443BE3AD55E043BF878BED274D3A6855"
 #: Every measure lives here. Analysis Services reserves the name Measures.
@@ -256,7 +256,7 @@ def test_each_page_shows_one_html_content_visual_over_its_page_measure(tmp_path)
 
 
 @weaver_test()
-def test_build_compiles_and_deploys_the_dashboard_through_the_power_bi_step(tmp_path):
+def test_the_dashboard_deploys_with_the_catalogue_it_reads(tmp_path):
     root = project(tmp_path)
     workspace = Workspace(
         workspace="Demo",
@@ -299,10 +299,15 @@ def test_build_compiles_and_deploys_the_dashboard_through_the_power_bi_step(tmp_
 
     session.execute_mutation = deployed_as_requested
 
-    result = weaver.build(root, items="PowerBI", session=session)
+    from weaver.operations.build import deploy_catalogue_dashboard
+
+    result = deploy_catalogue_dashboard(root, session=session)
 
     assert result.succeeded, result.errors
     assert set(result.items) >= {str(DASHBOARD_MODEL), str(DASHBOARD_REPORT)}
+    # The catalogue tables the model reads build in the same request.
+    assert "create schema [_];\n" in session.tsql
+    assert any("#weaver_shape___LineageNode" in sql for sql in session.tsql)
     calls = [method for method, _ in model.calls]
     assert calls[:3] == ["update_definition", "refresh", "invalid_measures"]
     submitted = decode_parts(model.calls[0][1]["definition"])
@@ -316,3 +321,28 @@ def test_build_compiles_and_deploys_the_dashboard_through_the_power_bi_step(tmp_
     assert set(measures(submitted)) == set().union(*MEASURES.values())
     assert report.calls == ["update", "read"]
     assert not session.spark_sql and not session.python
+
+
+def _dashboard_workspace():
+    return Workspace(
+        workspace="Demo",
+        catalogue="Warehouse/Catalogue",
+        catalogue_dashboard="Estate Dashboard",
+        targets={"Warehouse/Curated": TargetDeclaration("Curated")},
+    )
+
+
+@weaver_test()
+def test_build_leaves_the_dashboard_to_initialise(tmp_path):
+    from weaver.operations.build import _item_bindings
+
+    root = project(tmp_path)
+    workspace = _dashboard_workspace()
+    repository = parse(root, dashboard=False)
+    unscoped = _item_bindings(None, workspace, repository=repository)
+    assert {str(b.item) for b in unscoped.entries} == {"Warehouse/Curated"}
+    with pytest.raises(BuildError, match="Run weaver initialise"):
+        _item_bindings(str(DASHBOARD_MODEL), workspace, repository=repository)
+    session = TestSession(workspace=workspace, store=FilesystemStore())
+    with pytest.raises(BuildError, match="PowerBI: no items match"):
+        weaver.build(root, items="PowerBI", session=session, dry_run=True)

@@ -75,7 +75,12 @@ Two operations create Fabric items, and their kinds do not overlap.
 Warehouses. Build creates each selected SemanticModel and Report target that is
 missing, in `weaver.fabric.powerbi_items`, before it reads build state, and
 creates nothing else; a missing Lakehouse or Warehouse target fails its
-preflight. A bundle-only Build creates nothing and refuses a missing target,
+preflight. The built-in Catalogue Dashboard is the one Power BI pair
+`initialise` deploys: `weaver.operations.build.deploy_catalogue_dashboard`
+runs Build over the Dashboard's items and the catalogue item together, so the
+tables its Direct Lake model reads exist first. Build itself never composes
+or selects the Dashboard; `configured_items` excludes it, and
+`bound_targets` keeps it for target resolution and Wipe. A bundle-only Build creates nothing and refuses a missing target,
 because a bundle freezes each target's item ID. A command naming
 no workspace and inheriting none reads `workspace-config.yml` in the directory
 it was run from, which is the last resort in `weaver.config.resolve_workspace`.

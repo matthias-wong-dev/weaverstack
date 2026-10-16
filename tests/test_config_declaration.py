@@ -378,11 +378,8 @@ def test_catalogue_dashboard_binds_the_built_in_model_and_report(tmp_path):
     assert workspace.target_for(DASHBOARD_REPORT) == ReportTarget.parse(
         "Estate Dashboard"
     )
-    assert set(workspace.configured_items) == {
-        DASHBOARD_MODEL,
-        DASHBOARD_REPORT,
-        _item("SemanticModel/Sales"),
-    }
+    # weaver initialise deploys it, so Build never selects it implicitly.
+    assert set(workspace.configured_items) == {_item("SemanticModel/Sales")}
     # targets: stays what was written.
     assert set(workspace.targets) == {_item("SemanticModel/Sales")}
 

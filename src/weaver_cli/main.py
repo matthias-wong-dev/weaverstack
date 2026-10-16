@@ -279,8 +279,10 @@ def _requires_doctor(args) -> frozenset[str]:
 
 
 def _requires_initialise(args) -> frozenset[str]:
-    from weaver.sessions.requirements import AUTH, RESOLVER, requirements
+    from weaver.sessions.requirements import AUTH, RESOLVER, TDS, requirements
 
+    if getattr(args, "catalogue_dashboard", None):
+        return requirements(AUTH, RESOLVER, TDS)
     return requirements(AUTH, RESOLVER)
 
 
@@ -1171,6 +1173,13 @@ def _add_initialise_args(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         default=None,
         help="Add the Sales example: source files and a Power BI project that reads them.",
+    )
+    parser.add_argument(
+        "--catalogue-dashboard",
+        dest="catalogue_dashboard",
+        metavar="NAME",
+        help="Deploy the Catalogue Dashboard to the SemanticModel and Report NAME, "
+        "and record it in workspace configuration. A rerun updates it.",
     )
     parser.add_argument(
         "--no-example",
@@ -2273,6 +2282,7 @@ def _initialise_once(args: argparse.Namespace, *, session):
         warehouse=args.warehouse,
         semantic_model=getattr(args, "semantic_model", None),
         example=bool(args.example),
+        catalogue_dashboard=getattr(args, "catalogue_dashboard", None),
         publish_environment=args.publish_environment,
         dry_run=args.dry_run,
         session=session,

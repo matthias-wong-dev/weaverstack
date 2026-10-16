@@ -782,10 +782,12 @@ def build_item_repository_source(
     sql_by_item=None,
     executors=None,
 ) -> ItemBuildResult:
+    from ..catalogue_dashboard import DASHBOARD_ITEMS
+
     with prepare_repository(
         source,
         source_store=source_store,
-        catalogue_dashboard=getattr(workspace, "catalogue_dashboard", None) is not None,
+        catalogue_dashboard=any(b.item in DASHBOARD_ITEMS for b in bindings.entries),
     ) as prepared:
         from ..semantic_models.binding import begin_semantic_sources
 

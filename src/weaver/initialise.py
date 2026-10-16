@@ -2,7 +2,11 @@
 
 Environment publication is optional. Examples are source files for a later
 build, load and test. The first build creates the catalogue tables. Power BI
-items are scaffolded here and created by Build.
+items are scaffolded here and created by Build. A configured Catalogue Dashboard
+is deployed here, with the catalogue tables it reads, and never by Build.
+
+Run again over a project folder, initialise keeps the files already there and
+adds only the targets a new item needs.
 """
 
 from __future__ import annotations
@@ -34,6 +38,8 @@ UNCHANGED = "unchanged"
 
 CATALOGUE_ROLE = "Catalogue"
 ENVIRONMENT_ROLE = "Environment"
+DASHBOARD_ROLE = "Catalogue Dashboard"
+DEPLOYED = "deployed"
 
 
 class InitialiseError(WeaverError):
@@ -123,6 +129,7 @@ def initialise(
     warehouse: str | None = None,
     semantic_model: str | None = None,
     example: bool = False,
+    catalogue_dashboard: str | None = None,
     publish_environment: bool = False,
     install_weaver: bool | None = None,
     dry_run: bool = False,
@@ -132,8 +139,10 @@ def initialise(
     """Validate and create a project and its requested Fabric items.
 
     ``semantic_model`` adds ``PowerBI/<name>/<name>.tmdl`` for Build to create.
-    ``example`` adds source files. ``publish_environment`` publishes the
-    Environment after writing the project.
+    ``example`` adds source files. ``catalogue_dashboard`` names the Fabric item
+    for the Catalogue Dashboard, which is deployed whenever workspace
+    configuration names one. ``publish_environment`` publishes the Environment
+    after writing the project.
     """
 
     if project_folder is None:
@@ -148,23 +157,12 @@ def initialise(
         )
         publish_environment = publish_environment or install_weaver
     destination = Path(project_folder).resolve()
-    source_items = ()
-    configured = None
-    adopted = set()
-    repository = None if semantic_model else powerbi_repository(destination)
-    if repository is not None:
-        source_items = tuple(
-            str(item)
-            for item in sorted(
-                set(repository.semantic_models) | set(repository.reports)
-            )
-        )
-        adopted.update(item.identity for item in repository.items)
-        if (destination / WORKSPACE_CONFIG_FILE).is_file():
-            from .config import load_workspace
-
-            configured = load_workspace(destination / WORKSPACE_CONFIG_FILE)
-            adopted.update(configured.configured_items)
+    source_items, adopted, configured = existing_project(
+        destination, semantic_model=semantic_model
+    )
+    _refuse_conflicts(
+        configured, workspace=workspace, catalogue=catalogue, environment=environment
+    )
     request = ProjectRequest(
         workspace=_workspace_name(workspace, session=session),
         catalogue=catalogue
@@ -187,6 +185,7 @@ def initialise(
         adopted_items=_sources(adopted),
     )
     wanted_items = _requested(request)
+    rerun = configured is not None
 
     from .sessions.host import use_or_create_session
 
@@ -235,8 +234,8 @@ def initialise(
                                 path.read_bytes()
                             )
             with opened.step("Checking the project files", str(destination)):
-                if source_items:
-                    # Adopt existing authored project files, not fresh scaffolding.
+                if rerun or source_items:
+                    # Adopt existing project files, not fresh scaffolding.
                     files = {
                         path: (destination / path).read_bytes()
                         if (destination / path).is_file()
@@ -244,16 +243,19 @@ def initialise(
                         for path, content in files.items()
                     }
                 _refuse_overwrites(destination, files)
-                if source_items:
-                    files = _with_source_targets(files, source_items)
+                files = _with_targets(files, request.items)
+                if catalogue_dashboard is not None:
+                    files = _with_dashboard(files, catalogue_dashboard)
                 _check_destination_paths(destination, files)
                 configured = _parse_generated(files, request, destination=destination)
+            dashboard = configured.catalogue_dashboard
 
             if dry_run:
                 return InitialiseReport(
                     project_folder=str(destination),
                     workspace=request.workspace,
-                    resources=_planned(request, found, wanted_items=wanted_items),
+                    resources=_planned(request, found, wanted_items=wanted_items)
+                    + _dashboard_outcome(dashboard, PLANNED),
                     files=tuple(sorted(files)),
                     example=ExampleOutcome(generated=request.example),
                     dry_run=True,
@@ -313,6 +315,10 @@ def initialise(
                 publication = (
                     "already published" if result.action == UNCHANGED else "published"
                 )
+            if dashboard is not None:
+                with opened.step("Deploying the Catalogue Dashboard", dashboard):
+                    _deploy_dashboard(destination, dashboard, session=opened)
+                resources.extend(_dashboard_outcome(dashboard, DEPLOYED))
             outcome = ExampleOutcome(generated=request.example)
 
     return InitialiseReport(
@@ -350,14 +356,63 @@ def _sources(items) -> tuple[str, ...]:
     )
 
 
-def _with_source_targets(files, source_items):
-    """Add default bindings for new source items without replacing existing targets."""
+def existing_project(destination: Path, *, semantic_model=None):
+    """The Power BI items, declared items and configuration a project folder holds."""
+
+    source_items, adopted, configured = (), set(), None
+    repository = None if semantic_model else powerbi_repository(destination)
+    if repository is not None:
+        source_items = tuple(
+            str(item)
+            for item in sorted(
+                set(repository.semantic_models) | set(repository.reports)
+            )
+        )
+        adopted.update(item.identity for item in repository.items)
+    if (destination / WORKSPACE_CONFIG_FILE).is_file():
+        from .config import load_workspace
+
+        try:
+            configured = load_workspace(destination / WORKSPACE_CONFIG_FILE)
+        except WeaverError as exc:
+            raise InitialiseError(
+                f"{destination / WORKSPACE_CONFIG_FILE} cannot be read: {exc}"
+            ) from exc
+        adopted.update(configured.configured_items)
+    return source_items, adopted, configured
+
+
+def _refuse_conflicts(configured, **requested) -> None:
+    """An existing configuration names its own workspace, catalogue and Environment."""
+
+    if configured is None:
+        return
+    current = {
+        "workspace": configured.workspace,
+        "catalogue": configured.catalogue_item.name if configured.catalogue else None,
+        "environment": configured.environment.name if configured.environment else None,
+    }
+    for name, value in requested.items():
+        if (
+            value is not None
+            and current[name] is not None
+            and str(value) != current[name]
+        ):
+            raise InitialiseError(
+                f"{WORKSPACE_CONFIG_FILE} names {name} {current[name]}, not {value}. "
+                f"Edit {WORKSPACE_CONFIG_FILE} or omit --{name}."
+            )
+
+
+def _with_targets(files, items):
+    """Add default bindings for new items without replacing existing targets."""
 
     import yaml
 
     declaration = yaml.safe_load(files[WORKSPACE_CONFIG_FILE])
-    targets = declaration.setdefault("targets", {})
-    missing = [item for item in source_items if item not in targets]
+    targets = declaration.get("targets") or {}
+    declaration["targets"] = targets
+    missing = [item for item in items if item not in targets]
     if not missing:
         return files
     for item in missing:
@@ -366,6 +421,54 @@ def _with_source_targets(files, source_items):
         **files,
         WORKSPACE_CONFIG_FILE: yaml.safe_dump(declaration, sort_keys=False),
     }
+
+
+def _with_dashboard(files, name: str):
+    """Name the Catalogue Dashboard's Fabric item, keeping the rest of the file."""
+
+    import re
+
+    import yaml
+
+    text = files[WORKSPACE_CONFIG_FILE]
+    text = text.decode("utf-8") if isinstance(text, bytes) else text
+    if (yaml.safe_load(text) or {}).get("catalogue_dashboard") == name:
+        return files
+    line = f"catalogue_dashboard: {_yaml_scalar(name)}"
+    pattern = re.compile(r"^catalogue_dashboard:.*$", re.MULTILINE)
+    if pattern.search(text):
+        text = pattern.sub(line, text, count=1)
+    else:
+        text = text + ("" if text.endswith("\n") else "\n") + "\n" + line + "\n"
+    return {**files, WORKSPACE_CONFIG_FILE: text}
+
+
+def _yaml_scalar(value: str) -> str:
+    import yaml
+
+    return yaml.safe_dump(value, default_style=None).strip().removesuffix("...").strip()
+
+
+def _dashboard_outcome(name, status) -> tuple[FabricItemOutcome, ...]:
+    return () if name is None else (FabricItemOutcome(DASHBOARD_ROLE, name, status),)
+
+
+def _deploy_dashboard(destination: Path, name: str, *, session) -> None:
+    from .operations.build import deploy_catalogue_dashboard
+
+    result = deploy_catalogue_dashboard(
+        destination,
+        workspace_config=destination / WORKSPACE_CONFIG_FILE,
+        session=session,
+    )
+    if not result.succeeded:
+        detail = (
+            "; ".join(e.message or e.action_id for e in result.errors[:3])
+            or result.status
+        )
+        raise InitialiseError(
+            f"The Catalogue Dashboard {name} was not deployed: {detail}"
+        )
 
 
 def powerbi_repository(destination):
@@ -623,6 +726,7 @@ _ROLE_ORDER = (
     ENVIRONMENT_ROLE,
     LAKEHOUSE,
     WAREHOUSE,
+    DASHBOARD_ROLE,
 )
 
 

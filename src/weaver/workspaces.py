@@ -365,7 +365,10 @@ class Workspace:
 
     @property
     def configured_items(self) -> tuple[WeaverItemId, ...]:
-        return tuple(sorted(self.bound_targets, key=str))
+        """The items ``targets`` declares. ``weaver initialise`` deploys the
+        Catalogue Dashboard, so Build never selects it implicitly."""
+
+        return tuple(sorted(self.targets, key=str))
 
     @property
     def configured_lakehouses(self) -> tuple[str, ...]:

@@ -47,11 +47,7 @@ class Project:
         from ..build_bundle.workflow import prepare_repository
 
         location, store = repository_source(self._source, self._workspace)
-        with prepare_repository(
-            location,
-            source_store=store,
-            catalogue_dashboard=self._workspace.catalogue_dashboard is not None,
-        ) as prepared:
+        with prepare_repository(location, source_store=store) as prepared:
             return prepared.repository
 
 

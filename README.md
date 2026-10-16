@@ -209,17 +209,20 @@ when its effective signature matches the installed model.
 
 ### Catalogue Dashboard
 
-`catalogue_dashboard:` in workspace configuration adds Weaver's built-in
-semantic model and Report over the catalogue, deployed to the Fabric item it
-names:
+Weaver's built-in semantic model and Report over the catalogue are deployed by
+`weaver initialise`, never by Build:
 
-```yaml
-catalogue: Warehouse/Weaver
-catalogue_dashboard: Catalogue Dashboard
+```bash
+weaver initialise --project-folder . --catalogue-dashboard "Catalogue Dashboard"
 ```
 
-`weaver build --item PowerBI` builds them with the project's own Power BI
-items. The Report has seven pages: Overview, Health, Load orchestration, Gantt,
+The option records `catalogue_dashboard: Catalogue Dashboard` in
+`workspace-config.yml`, and deploys the model and Report to that Fabric item
+with the catalogue tables they read. Running `weaver initialise` again in the
+project folder updates them, so do that after upgrading Weaver. A rerun keeps
+the project's existing files and adds only the targets new items need.
+
+The Report has seven pages: Overview, Health, Load orchestration, Gantt,
 Performance, Entity dictionary and Semantic model. Each renders in the HTML
 Content visual's regular edition, which runs scripts; its certified edition
 does not. A tenant that allows only certified visuals can admit it as an
