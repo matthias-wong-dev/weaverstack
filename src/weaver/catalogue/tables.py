@@ -138,6 +138,8 @@ WAREHOUSE_TYPES = {
 #: Wide enough for prose an author wrote, and for a comma-separated column set.
 PROSE_TYPE = "varchar(4000)"
 LIST_TYPE = "varchar(1000)"
+#: A graph node key: twelve hexadecimal digits of the node ID's SHA-256.
+NODE_KEY_TYPE = "varchar(12)"
 
 #: Unbounded, for a column set an author may declare over a wide table. Any
 #: bound here would make the catalogue, not the platform, the thing that refuses
@@ -1006,6 +1008,12 @@ GRAPH_NODE = CatalogueTable(
             description="The node's installed identity, as GraphEdge names it.",
         ),
         CatalogueColumn(
+            "node_key",
+            not_null=True,
+            sql_type=NODE_KEY_TYPE,
+            description="A short hash of the node ID, as GraphEdge's keys name it.",
+        ),
+        CatalogueColumn(
             "node_kind",
             not_null=True,
             vocabulary=NODE_KIND_VOCABULARY,
@@ -1039,6 +1047,30 @@ GRAPH_NODE = CatalogueTable(
             BOOLEAN,
             not_null=True,
             description="Whether the node is part of the Weaver catalogue.",
+        ),
+        CatalogueColumn(
+            "can_load",
+            BOOLEAN,
+            not_null=True,
+            description="Whether Weaver loads the node in this estate.",
+        ),
+        CatalogueColumn(
+            "is_static",
+            BOOLEAN,
+            not_null=True,
+            description="Whether the node is loaded once rather than refreshed.",
+        ),
+        CatalogueColumn(
+            "is_mirrored",
+            BOOLEAN,
+            not_null=True,
+            description="Whether another catalogue's estate supplies the node's data.",
+        ),
+        CatalogueColumn(
+            "is_installed",
+            BOOLEAN,
+            not_null=True,
+            description="Whether the node's runnable artefact or definition is installed.",
         ),
         _signature("the node's row"),
     ),
@@ -1084,6 +1116,23 @@ GRAPH_EDGE = CatalogueTable(
             "through_node_id",
             sql_type=LIST_TYPE,
             description="The shortcut the read passed through, if any.",
+        ),
+        CatalogueColumn(
+            "downstream_node_key",
+            not_null=True,
+            sql_type=NODE_KEY_TYPE,
+            description="The downstream node's key.",
+        ),
+        CatalogueColumn(
+            "upstream_node_key",
+            not_null=True,
+            sql_type=NODE_KEY_TYPE,
+            description="The upstream node's key, or the hash of an External reference.",
+        ),
+        CatalogueColumn(
+            "through_node_key",
+            sql_type=NODE_KEY_TYPE,
+            description="The key of the shortcut the read passed through, if any.",
         ),
         _signature("the edge's row"),
     ),

@@ -31,7 +31,7 @@ from weaver.build_bundle.catalogue_actions import (
     render_catalogue_after_build,
 )
 from weaver.build_bundle.planner import certifiable_identities
-from weaver.catalogue.graph_rows import SEARCH_TEXT_BYTES, graph_rows
+from weaver.catalogue.graph_rows import SEARCH_TEXT_BYTES, graph_rows, node_key
 from weaver.catalogue.reconcile import publish
 from weaver.catalogue.state import Catalogue
 from weaver.catalogue.tables import (
@@ -520,3 +520,43 @@ def test_the_catalogue_dashboard_is_internal():
         for row in rows
         if row["item_name"] == SALES.item_name and not row["schema_name"].endswith("_")
     )
+
+
+# --- keys and flags -----------------------------------------------------------
+
+
+@weaver_test()
+def test_each_key_is_its_node_id_hashed_and_each_edge_names_both_keys(repository):
+    built = built_catalogue(repository, _bindings(SALES, REPORTING))
+
+    nodes = _rows(built, GRAPH_NODE)
+    keys = {row["node_id"]: row["node_key"] for row in nodes}
+    assert all(key == node_key(node) for node, key in keys.items())
+    assert len(set(keys.values())) == len(keys)
+    for edge in _rows(built, GRAPH_EDGE):
+        assert edge["downstream_node_key"] == node_key(edge["downstream_node_id"])
+        assert edge["upstream_node_key"] == node_key(edge["upstream_node_id"])
+        through = edge["through_node_id"]
+        assert edge["through_node_key"] == (
+            None if through is None else node_key(through)
+        )
+
+
+@weaver_test()
+def test_the_flags_are_the_installed_nodes_own(repository):
+    """Health reads them, so they are the installed graph's answers."""
+
+    built = built_catalogue(repository, _bindings(SALES, REPORTING))
+    by_id = {node.node_id: node for node in built.dag().nodes}
+
+    flagged = {row["node_id"]: row for row in _rows(built, GRAPH_NODE)}
+    for node_id, row in flagged.items():
+        node = by_id[node_id]
+        assert (
+            row["can_load"],
+            row["is_static"],
+            row["is_mirrored"],
+            row["is_installed"],
+        ) == (node.can_load, node.is_static, node.is_mirrored, node.is_installed)
+    assert any(row["can_load"] for row in flagged.values())
+    assert not all(row["can_load"] for row in flagged.values())

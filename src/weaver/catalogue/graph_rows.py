@@ -41,6 +41,8 @@ from .tables import (
 
 #: The byte width of ``search_text``.
 SEARCH_TEXT_BYTES = 4000
+#: Hexadecimal digits of a node key. A report detects the rare collision.
+NODE_KEY_DIGITS = 12
 
 
 def with_graph_rows(
@@ -136,20 +138,35 @@ def graph_rows(catalogue: Catalogue, item: WeaverItemId) -> dict[str, tuple[Row,
                 through.setdefault((str(consumer), reference, EDGE_EXTERNAL), set())
 
     edges = tuple(
-        _signed(
-            {
-                "item_type": item.item_type,
-                "item_name": item.item_name,
-                "downstream_node_id": downstream,
-                "upstream_node_id": upstream,
-                "edge_kind": kind,
-                # Two shortcuts to one source can both be read; one is named.
-                "through_node_id": min(passes) if passes else None,
-            }
-        )
+        _edge_row(item, downstream, upstream, kind, passes)
         for (downstream, upstream, kind), passes in sorted(through.items())
     )
     return {GRAPH_NODE.name: nodes, GRAPH_EDGE.name: edges}
+
+
+def _edge_row(item, downstream, upstream, kind, passes) -> Row:
+    # Two shortcuts to one source can both be read; one is named.
+    shortcut = min(passes) if passes else None
+    return _signed(
+        {
+            "item_type": item.item_type,
+            "item_name": item.item_name,
+            "downstream_node_id": downstream,
+            "upstream_node_id": upstream,
+            "edge_kind": kind,
+            "through_node_id": shortcut,
+            "downstream_node_key": node_key(downstream),
+            "upstream_node_key": node_key(upstream),
+            "through_node_key": None if shortcut is None else node_key(shortcut),
+        }
+    )
+
+
+def node_key(node_id: str) -> str:
+    """The short key a report joins nodes and edges on."""
+
+    digest = hashlib.sha256(node_id.encode("utf-8")).hexdigest()
+    return digest[:NODE_KEY_DIGITS]
 
 
 def _descriptions(tables) -> dict[tuple[str, str], str]:
@@ -179,12 +196,17 @@ def _node_row(item: WeaverItemId, node, descriptions) -> Row:
             "schema_name": schema_name,
             "object_name": object_name,
             "node_id": node.node_id,
+            "node_key": node_key(node.node_id),
             "node_kind": _kind(node),
             "label": label,
             "item_label": item_label,
             "description": description,
             "search_text": _search_text(label, item_label, description),
             "is_internal": _is_internal(node.identity),
+            "can_load": node.can_load,
+            "is_static": node.is_static,
+            "is_mirrored": node.is_mirrored,
+            "is_installed": node.is_installed,
         }
     )
 
