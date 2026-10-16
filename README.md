@@ -221,7 +221,9 @@ catalogue_dashboard: Catalogue Dashboard
 `weaver build --item PowerBI` builds them with the project's own Power BI
 items. The Report has seven pages: Overview, Health, Load orchestration, Gantt,
 Performance, Entity dictionary and Semantic model. Each renders in the HTML
-Content visual, so the tenant must allow that custom visual and its scripts.
+Content visual's regular edition, which runs scripts; its certified edition
+does not. A tenant that allows only certified visuals can admit it as an
+organisational visual. The model needs no visual, and any Report can use it.
 The model reads the catalogue's tables over Direct Lake, so the Overview,
 Health, Load orchestration and Gantt pages show settled work as it is recorded;
 they refresh every 30 seconds, or at the capacity's minimum interval when that

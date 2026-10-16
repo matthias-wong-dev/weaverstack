@@ -28,7 +28,7 @@ function start() {
   var parsed = parsePayload(source ? source.textContent : ""), m = buildModel(parsed.tables, parsed.problems);
   if (!source) m.problems.push("The page carries no catalogue data.");
   function render() {
-    var scroll = root.scrollY || 0;
+    var scroller = scrollBox(mount), scroll = scroller ? scroller.scrollTop : root.scrollY || 0;
     mount.textContent = "";
     mount.className = "wd wd-page-" + m.page;
     var body = shell(mount, m);
@@ -37,7 +37,8 @@ function start() {
     } catch (error) {
       body.appendChild(el("pre", { "class": "wd-error", text: "This page could not be drawn: " + (error && error.message) }));
     }
-    if (scroll && root.scrollTo) root.scrollTo(0, scroll);
+    if (scroll && scroller) scroller.scrollTop = scroll;
+    else if (scroll && root.scrollTo) root.scrollTo(0, scroll);
     saveState();
   }
   root.__WD_REDRAW = render;
@@ -47,7 +48,7 @@ function start() {
 
 var api = {
   parsePayload: parsePayload, buildModel: buildModel, assessHealth: assessHealth, readiness: readiness,
-  layoutEstate: layoutEstate, focusWindow: focusWindow, searchNodes: searchNodes, dictionaryEntries: dictionaryEntries,
+  layoutEstate: layoutEstate, subModel: subModel, focusWindow: focusWindow, searchNodes: searchNodes, dictionaryEntries: dictionaryEntries,
   searchEntries: searchEntries, metadata: metadata, modelTables: modelTables, busMatrix: busMatrix, erGraph: erGraph,
   erWindow: erWindow, ganttSummary: ganttSummary, clockTicks: clockTicks, clockLabel: clockLabel, logRows: logRows, perfRows: perfRows, tone: tone, BUDGET: BUDGET,
   FIELD: FIELD, ROW: ROW, TABLE: TABLE, LESS: LESS

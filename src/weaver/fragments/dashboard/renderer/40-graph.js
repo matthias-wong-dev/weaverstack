@@ -12,13 +12,7 @@ function GraphView(host, m, lay, options) {
   this.tip = el("div", { "class": "wd-tip", hidden: "hidden" });
   this.hint = el("div", { "class": "wd-hint", hidden: "hidden", text: "Hold Ctrl or ⌘ and scroll to zoom" });
   host.appendChild(this.canvas); host.appendChild(this.tip); host.appendChild(this.hint);
-  this.grid = new Map();
-  lay.pos.forEach(function (p, key) {
-    var cell = Math.floor(p.x / CELL) + "|" + Math.floor(p.y / CELL);
-    var list = self.grid.get(cell);
-    if (!list) self.grid.set(cell, list = []);
-    list.push(key);
-  });
+  this.index(lay);
   this.markers = [];
   this.win = null;
   this.hover = null;
@@ -27,6 +21,18 @@ function GraphView(host, m, lay, options) {
   else root.addEventListener("resize", function () { self.resize(); });
   this.resize();
 }
+
+/* A spatial index of the layout's nodes, for hit testing. */
+GraphView.prototype.index = function (lay) {
+  var grid = new Map();
+  lay.pos.forEach(function (p, key) {
+    var cell = Math.floor(p.x / CELL) + "|" + Math.floor(p.y / CELL);
+    var list = grid.get(cell);
+    if (!list) grid.set(cell, list = []);
+    list.push(key);
+  });
+  this.lay = lay; this.grid = grid;
+};
 
 GraphView.prototype.resize = function () {
   var box = this.host.getBoundingClientRect(), ratio = root.devicePixelRatio || 1;
@@ -108,7 +114,8 @@ GraphView.prototype.showing = function (key) {
   return r.x < this.lay.width && r.x + r.w > 0 && r.y < this.lay.height && r.y + r.h > 0;
 };
 
-GraphView.prototype.setWindow = function (win) { this.win = win; this.draw(); };
+/* Show a window over its own layout, or with no window the whole estate. */
+GraphView.prototype.setWindow = function (win, lay) { this.win = win; this.index(lay); this.draw(); };
 
 GraphView.prototype.visibleRect = function () {
   var v = this.s.view;
@@ -156,12 +163,13 @@ GraphView.prototype.paint = function () {
     ctx.fillText(title, b.x + 16, b.y + 12 + eyebrow + name);
     if (k > 0.3) {
       ctx.fillStyle = P.muted; ctx.font = "11px " + sans;
-      var meta = fmt(b.item.nodes.length) + (b.item.nodes.length === 1 ? " object" : " objects");
+      var total = b.item.total || b.item.nodes.length;
+      var meta = (total > b.item.nodes.length ? fmt(b.item.nodes.length) + " of " : "") + fmt(total) + (total === 1 ? " object" : " objects");
       ctx.fillText(meta, b.x + b.width - 16 - ctx.measureText(meta).width, b.y + 8 + eyebrow);
     }
   });
 
-  var shown = win ? win.shown : null, lineage = win ? win.lineage : null;
+  var shown = win ? win.shown : null;
   // Edges: everything faintly without a focus; with one, the window's edges.
   ctx.lineWidth = 1 / Math.max(k, 0.5);
   if (!win) {
@@ -203,38 +211,26 @@ GraphView.prototype.paint = function () {
   m.nodes.forEach(function (n) {
     var p = lay.pos.get(n.key);
     if (!p || !inView(p.x, p.y)) return;
-    var inWin = !win || shown.has(n.key), inLine = !win || lineage.has(n.key);
-    if (!inWin) {
-      // Background: the rest of the estate, faint, and named once it can be read.
-      ctx.globalAlpha = 0.45;
-      if (k >= 0.55) {
-        glyph(ctx, n.kind, p.x, p.y, P.faint, P);
-        ctx.font = font; ctx.fillStyle = P.faint;
-        ctx.fillText(clip(ctx, n.label, GEOMETRY.SUB - 30, font), p.x + 11, p.y + 4);
-      } else { ctx.beginPath(); ctx.arc(p.x, p.y, 2.2, 0, 7); ctx.fillStyle = P["line-strong"]; ctx.fill(); }
-      ctx.globalAlpha = 1;
-      return;
-    }
-    var colour = inLine ? self.nodeColour(n, P) : P.faint;
+    var colour = self.nodeColour(n, P);
     if (win && win.seeds.has(n.key)) {
       ctx.beginPath(); ctx.arc(p.x, p.y, 10, 0, 7); ctx.fillStyle = P["blue-soft"]; ctx.fill();
       ctx.lineWidth = 2 / Math.max(k, 0.8); ctx.strokeStyle = P.ink; ctx.stroke();
     }
     glyph(ctx, n.kind, p.x, p.y, colour, P);
-    self.marks(ctx, n, p, P, inLine);
-    if (labels || (win && (inLine || k > 0.3))) {
+    self.marks(ctx, n, p, P);
+    if (labels || (win && k > 0.3)) {
       var seed = win && win.seeds.has(n.key);
       var text = clip(ctx, n.label, GEOMETRY.SUB - 30, seed ? fontStrong : font);
       ctx.font = seed ? fontStrong : font;
       // A halo in the background colour keeps labels legible over edges.
       ctx.lineJoin = "round"; ctx.lineWidth = 3; ctx.strokeStyle = P.band; ctx.strokeText(text, p.x + 11, p.y + 4);
-      ctx.fillStyle = !inLine ? P.muted : P.ink;
+      ctx.fillStyle = P.ink;
       ctx.fillText(text, p.x + 11, p.y + 4);
       self.labelEnds.set(n.key, p.x + 11 + ctx.measureText(text).width);
     }
   });
 
-  // Continuation markers: neighbours outside the window, upstream on the left.
+  // Expansion markers: neighbours outside the window, upstream on the left.
   this.markers = [];
   if (win) {
     ctx.font = "600 9.5px " + mono;
@@ -259,8 +255,7 @@ GraphView.prototype.nodeColour = function (n, P) {
 
 /* Small status marks: a dot for a load or test that needs attention, and on
    the Load page a ring for derived readiness. */
-GraphView.prototype.marks = function (ctx, n, p, P, inLine) {
-  if (!inLine) return;
+GraphView.prototype.marks = function (ctx, n, p, P) {
   if (this.o.mode === "load") {
     var ready = readiness(this.m, n);
     if (ready.state === READINESS.READY || ready.state === READINESS.WAITING) {
@@ -277,7 +272,7 @@ GraphView.prototype.marks = function (ctx, n, p, P, inLine) {
   }
 };
 
-/* A travel marker: ‹‹ N for upstream neighbours left out, N ›› downstream. */
+/* An expansion marker: ‹‹ N for upstream neighbours left out, N ›› downstream. */
 GraphView.prototype.marker = function (ctx, P, key, side, keys, x, y, join) {
   var text = side === "up" ? "‹‹ " + keys.length : keys.length + " ››", w = ctx.measureText(text).width + 12, left = side === "up" ? x - w / 2 + 14 : x;
   ctx.beginPath(); ctx.setLineDash([2, 2]);
@@ -315,10 +310,23 @@ GraphView.prototype.fitAll = function (animate) {
   this.fitRect({ x: 0, y: 0, w: this.lay.width, h: this.lay.height }, 1.1, animate);
 };
 
-/* Zoom to the selection's lineage, as a map zooms to a route. */
+/* Zoom to what is shown: the window's own layout, or the estate. */
 GraphView.prototype.fitWindow = function (animate) {
   if (!this.win) return this.fitAll(animate);
-  this.fitKeys(Array.from(this.win.lineage.keys()), animate);
+  this.fitKeys(Array.from(this.win.shown), animate);
+};
+
+/* Keep a node where it is on screen across a change of layout. */
+GraphView.prototype.pin = function (key, screen) {
+  var p = this.lay.pos.get(key), v = this.s.view;
+  if (!p || !screen) return;
+  this.s.view = { k: v.k, x: screen.x - p.x * v.k, y: screen.y - p.y * v.k };
+  this.draw();
+};
+
+GraphView.prototype.screenOf = function (key) {
+  var p = this.lay.pos.get(key), v = this.s.view;
+  return p ? { x: p.x * v.k + v.x, y: p.y * v.k + v.y } : null;
 };
 
 GraphView.prototype.fitKeys = function (keys, animate) {
@@ -486,7 +494,7 @@ GraphView.prototype.hoverAt = function (cx, cy) {
   this.canvas.style.cursor = h ? "pointer" : "grab";
   if (h && h.marker) {
     this.showTip(cx, cy, [el("b", { text: h.marker.keys.length + (h.marker.side === "up" ? " more upstream" : " more downstream") }),
-      el("div", { "class": "wd-muted", text: "Select to travel there and show " + (h.marker.keys.length > BUDGET.REVEAL ? "the first " + BUDGET.REVEAL : "them") })]);
+      el("div", { "class": "wd-muted", text: "Select to show " + (h.marker.keys.length > BUDGET.REVEAL ? "the first " + BUDGET.REVEAL : h.marker.keys.length === 1 ? "it" : "them") })]);
   } else if (key) {
     var n = this.m.nodes.get(key), s = isValidation(n) ? n.test : effectiveLoad(n);
     this.showTip(cx, cy, [el("b", { text: n.label }), el("div", { "class": "wd-muted", text: n.kind + " · " + n.item }),

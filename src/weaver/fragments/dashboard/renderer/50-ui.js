@@ -138,6 +138,33 @@ function latestSettled(m) {
   return latest;
 }
 
+/* The box that clips a node as the reader scrolls: the nearest scrolling
+   ancestor, or the viewport. Power BI's HTML Content scrolls an element, not
+   the window, and an element's scroll event does not reach the window. */
+function scrollBox(node) {
+  for (var n = node.parentElement; n && n !== document.body && n !== document.documentElement; n = n.parentElement) {
+    var o = root.getComputedStyle(n).overflowY;
+    if ((o === "auto" || o === "scroll") && n.scrollHeight > n.clientHeight) return n;
+  }
+  return null;
+}
+
+/* The part of the page a node can be seen in: inside its scrolling box and
+   below the sticky page header. */
+function clipRect(node) {
+  var box = scrollBox(node), height = root.innerHeight || 800, head = document.querySelector(".wd-top");
+  var top = 0, bottom = height;
+  if (box) { var r = box.getBoundingClientRect(); top = Math.max(0, r.top); bottom = Math.min(height, r.bottom); }
+  if (head) top = Math.max(top, head.getBoundingClientRect().bottom);
+  return { top: top, bottom: bottom };
+}
+
+/* Calls f on any scroll, in the window or an element, until node leaves the page. */
+function onAnyScroll(node, f) {
+  function listener() { if (!node.isConnected) document.removeEventListener("scroll", listener, true); else f(); }
+  document.addEventListener("scroll", listener, { capture: true, passive: true });
+}
+
 function redraw() { if (root.__WD_REDRAW) root.__WD_REDRAW(); }
 
 function section(title, children, attrs) {

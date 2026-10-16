@@ -1,11 +1,14 @@
 // The estate layout. Every item is one band; inside it, shortcuts take the
 // first layer, Tests and Assumptions the last, and every other node sits by its
 // longest path to a sink within the item, so the item's outputs align on the
-// right. Positions depend on the installed graph alone, never on the focus, so
-// moving the focus never moves a node.
+// right. A selection is laid out the same way over its own nodes alone, so it
+// fills the view instead of sitting scattered across the estate.
 
 var GEOMETRY = { COL: 214, SUB: 196, ROW: 24, HEAD: 50, PAD: 18, GAP: 30 };
-var BUDGET = { NODES: 150, EDGES: 450, CONTEXT: 80, REVEAL: 40, REVEALED: 240 };
+/* A selection's columns leave room after each label for its expansion marker
+   and the edge leaving it. */
+var WINDOW_GEOMETRY = { COL: 300, SUB: 280, ROW: 26, HEAD: 50, PAD: 18, GAP: 30 };
+var BUDGET = { NODES: 600, EDGES: 3000, REVEAL: 40, EXPANDED: 600 };
 
 function itemLevels(m, items) {
   var ups = new Map(), level = new Map(), visiting = new Set();
@@ -99,13 +102,13 @@ function orderLayers(m, it, layers) {
   return byLayer;
 }
 
-function layoutEstate(m) {
+function layoutEstate(m, geometry) {
   var items = visibleItems(m).filter(function (it) { return it.nodes.length; });
   var levels = itemLevels(m, items);
   items.sort(function (a, b) {
     return levels.get(a.label) - levels.get(b.label) || typeRank(a.type) - typeRank(b.type) || compare(a.name, b.name);
   });
-  var G = GEOMETRY, pos = new Map(), bands = [];
+  var G = geometry || GEOMETRY, pos = new Map(), bands = [];
   items.forEach(function (it) {
     var layers = itemLayers(m, it), byLayer = orderLayers(m, it, layers);
     var maxRows = Math.max(40, Math.ceil(Math.sqrt(it.nodes.length) * 5));
@@ -164,12 +167,33 @@ function layoutEstate(m) {
   return { bands: bands, pos: pos, width: width, height: height };
 }
 
-/* ---- the window around a focus ------------------------------------------ */
+/* The estate restricted to keys: the same items and nodes, with neighbour lists
+   cut to the subset, for layoutEstate. Each item remembers its full size. */
+function subModel(m, keys) {
+  var nodes = new Map(), items = new Map();
+  keys.forEach(function (k) {
+    var n = m.nodes.get(k), c = Object.create(n);
+    c.vup = n.vup.filter(function (j) { return keys.has(j); });
+    c.vdown = n.vdown.filter(function (j) { return keys.has(j); });
+    nodes.set(k, c);
+  });
+  m.items.forEach(function (it, label) {
+    var own = it.nodes.filter(function (n) { return keys.has(n.key); });
+    if (!own.length) return;
+    var c = Object.create(it);
+    c.nodes = own.map(function (n) { return nodes.get(n.key); });
+    c.total = it.nodes.length;
+    items.set(label, c);
+  });
+  return { nodes: nodes, items: items };
+}
 
-/* Three levels: the selected nodes and their lineage to the requested depths,
-   a bounded ring of surrounding context, and for every shown node the
-   neighbours left out, which become continuation markers. */
-function focusWindow(m, selection, upDepth, downDepth, revealed) {
+/* ---- the window around a selection --------------------------------------- */
+
+/* The selected nodes and their lineage to the requested depths, nearest first
+   up to the budget, plus whatever the reader has expanded. Every neighbour left
+   out is counted on the shown node it hangs from, as a marker that expands it. */
+function focusWindow(m, selection, upDepth, downDepth, expanded) {
   var seeds = (Array.isArray(selection) ? selection : [selection]).filter(function (k) { return m.nodes.has(k); });
   if (!seeds.length) return null;
   var focus = seeds[seeds.length - 1], dist = new Map();
@@ -193,46 +217,33 @@ function focusWindow(m, selection, upDepth, downDepth, revealed) {
   });
   var lineage = new Map();
   ranked.slice(0, BUDGET.NODES).forEach(function (r) { lineage.set(r.key, r.dist); });
-  var shown = new Set(lineage.keys()), context = new Set();
-  var room = Math.min(BUDGET.CONTEXT, BUDGET.NODES - lineage.size), ring = Array.from(lineage.keys());
-  for (var hop = 1; hop <= 2 && room > 0; hop++) {
-    var next = [];
-    ring.forEach(function (k) {
-      var n = m.nodes.get(k);
-      n.vup.concat(n.vdown).forEach(function (j) { if (!shown.has(j) && next.indexOf(j) < 0) next.push(j); });
-    });
-    next.sort(function (a, b) { return compare(m.nodes.get(a).label, m.nodes.get(b).label) || compare(a, b); });
-    next = next.slice(0, room);
-    next.forEach(function (j) { shown.add(j); context.add(j); });
-    room -= next.length;
-    ring = next;
-  }
-  var extra = 0;
-  (revealed || []).forEach(function (k) {
-    if (m.nodes.has(k) && !shown.has(k) && extra < BUDGET.REVEALED) { shown.add(k); context.add(k); extra += 1; }
+  var shown = new Set(lineage.keys()), added = new Set();
+  (expanded || []).forEach(function (k) {
+    if (m.nodes.has(k) && !shown.has(k) && added.size < BUDGET.EXPANDED) { shown.add(k); added.add(k); }
   });
-  var edges = [], contextEdges = [];
+  var edges = [], plain = [];
   shown.forEach(function (d) {
     m.nodes.get(d).vup.forEach(function (u) {
       if (!shown.has(u)) return;
       var du = lineage.get(u), dd = lineage.get(d);
       var line = du !== undefined && dd !== undefined && ((dd <= 0 && du < 0 && du < dd) || (du >= 0 && dd > 0 && dd > du));
-      (line ? edges : contextEdges).push({ u: u, d: d, side: line ? (dd <= 0 ? "up" : "down") : null });
+      (line ? edges : plain).push({ u: u, d: d, side: line ? (dd <= 0 ? "up" : "down") : null });
     });
   });
-  var edgeTotal = edges.length + contextEdges.length;
-  edges = edges.concat(contextEdges).slice(0, BUDGET.EDGES);
-  var more = new Map();
+  var edgeTotal = edges.length + plain.length;
+  edges = edges.concat(plain).slice(0, BUDGET.EDGES);
+  var more = new Map(), hidden = new Set();
   shown.forEach(function (k) {
     var n = m.nodes.get(k);
     var up = n.vup.filter(function (j) { return !shown.has(j); }), down = n.vdown.filter(function (j) { return !shown.has(j); });
+    up.concat(down).forEach(function (j) { hidden.add(j); });
     if (up.length || down.length) more.set(k, { up: up, down: down });
   });
-  return { focus: focus, seeds: new Set(seeds), lineage: lineage, context: context, shown: shown, edges: edges, more: more,
-    reach: dist.size, truncated: dist.size > lineage.size, edgesDropped: edgeTotal - edges.length };
+  return { focus: focus, seeds: new Set(seeds), lineage: lineage, expanded: added, shown: shown, edges: edges, more: more,
+    hidden: hidden.size, reach: dist.size, truncated: dist.size > lineage.size, edgesDropped: edgeTotal - edges.length };
 }
 
-/* The neighbours a marker reveals, nearest names first. */
+/* The neighbours a marker expands, nearest names first. */
 function revealFrom(m, keys) {
   return keys.slice().sort(function (a, b) { return compare(m.nodes.get(a).label, m.nodes.get(b).label) || compare(a, b); }).slice(0, BUDGET.REVEAL);
 }

@@ -89,9 +89,9 @@ function ganttChart(rows, sum, s, m) {
   s.zoom = s.zoom || { a: 0, b: 1 };
   var P = null, width = 0, height = 0, ratio = 1, top = 0;
   function measure() {
-    var box = wrap.getBoundingClientRect(), viewport = root.innerHeight || 800;
+    var box = wrap.getBoundingClientRect(), clip = clipRect(wrap);
     width = Math.max(320, box.width); ratio = root.devicePixelRatio || 1;
-    top = Math.max(0, -box.top); height = Math.min(viewport, box.height - top);
+    top = Math.max(0, clip.top - box.top); height = Math.min(box.height, clip.bottom - box.top) - top;
     canvas.style.top = top + "px"; canvas.style.width = width + "px"; canvas.style.height = Math.max(0, height) + "px";
     canvas.width = Math.round(width * ratio); canvas.height = Math.round(Math.max(1, height) * ratio);
   }
@@ -139,7 +139,7 @@ function ganttChart(rows, sum, s, m) {
     ctx.fillStyle = P.muted; ctx.font = "600 10px " + P.mono; ctx.fillText("RECORD · UTC", 8, axisY + 14);
   }
   function schedule() { (root.requestAnimationFrame || setTimeout)(paint); }
-  root.addEventListener("scroll", schedule, { passive: true });
+  onAnyScroll(wrap, schedule);
   if (root.ResizeObserver) new root.ResizeObserver(schedule).observe(wrap);
   schedule();
   wrap.addEventListener("wheel", function (e) {

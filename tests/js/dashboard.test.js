@@ -162,12 +162,27 @@ test("a large item wraps tall layers into sub-columns within its band", () => {
 
 // --- the window ------------------------------------------------------------------
 
-test("depth 0 still shows the surrounding context, with continuation beyond it", () => {
+test("depth 0 shows only the selection, with its neighbours as markers to expand", () => {
   const m = model(estate());
   const win = D.focusWindow(m, "b", 0, 0, []);
-  assert.deepEqual(Array.from(win.lineage.keys()), ["b"]);
-  assert.ok(win.context.has("r") && win.context.has("s") && win.context.has("v") && win.context.has("m"));
-  assert.ok(win.shown.size > 1);
+  assert.deepEqual(Array.from(win.shown), ["b"]);
+  assert.deepEqual(win.more.get("b").up.slice().sort(), ["r", "s"]);
+  assert.deepEqual(win.more.get("b").down.slice().sort(), ["m", "v"]);
+  const grown = D.focusWindow(m, "b", 0, 0, win.more.get("b").up);
+  assert.deepEqual(Array.from(grown.shown).sort(), ["b", "r", "s"]);
+  assert.deepEqual(Array.from(grown.expanded).sort(), ["r", "s"]);
+  assert.ok(!grown.more.get("b").up.length);
+});
+
+test("a selection is laid out over its own objects, and each item keeps its full size", () => {
+  const m = model(estate());
+  const win = D.focusWindow(m, "b", 1, 0, []);
+  const lay = D.layoutEstate(D.subModel(m, win.shown));
+  assert.deepEqual(Array.from(lay.pos.keys()).sort(), ["b", "r", "s"]);
+  const curated = lay.bands.find((b) => b.item.label === "Warehouse/Curated");
+  assert.equal(curated.item.nodes.length, 3);
+  assert.equal(curated.item.total, m.items.get("Warehouse/Curated").nodes.length);
+  assert.ok(lay.pos.get("s").x < lay.pos.get("b").x);
 });
 
 test("each direction walks to its own depth", () => {
@@ -184,15 +199,15 @@ test("each direction walks to its own depth", () => {
 test("the budget keeps the nearest lineage and every cut neighbour becomes a marker", () => {
   const nodes = [["hub", "Warehouse/W", "S", "Hub", "Table", "S.Hub", 9, ""]];
   const edgeRows = [];
-  for (let i = 0; i < 400; i++) { nodes.push(["c" + i, "Warehouse/W", "S", "C" + i, "Table", "S.C" + i, 9, ""]); edgeRows.push(["c" + i, "hub", "Dependency", "", ""]); }
+  for (let i = 0; i < 700; i++) { nodes.push(["c" + i, "Warehouse/W", "S", "C" + i, "Table", "S.C" + i, 9, ""]); edgeRows.push(["c" + i, "hub", "Dependency", "", ""]); }
   const text = table("page", ["name"], [["lineage"]]) + table("meta", ["at", "format"], [[AT, 1]]) + table("nodes", NODE, nodes) + table("edges", EDGE, edgeRows);
   const m = model(text);
   const win = D.focusWindow(m, "hub", 1, 1, []);
   assert.equal(win.lineage.size, D.BUDGET.NODES);
-  assert.ok(win.truncated && win.reach === 401);
-  assert.equal(win.more.get("hub").down.length, 401 - D.BUDGET.NODES);
-  const revealed = D.focusWindow(m, "hub", 1, 1, win.more.get("hub").down.slice(0, 40));
-  assert.equal(revealed.shown.size, D.BUDGET.NODES + 40);
+  assert.ok(win.truncated && win.reach === 701);
+  assert.equal(win.more.get("hub").down.length, 701 - D.BUDGET.NODES);
+  const expanded = D.focusWindow(m, "hub", 1, 1, win.more.get("hub").down.slice(0, 40));
+  assert.equal(expanded.shown.size, D.BUDGET.NODES + 40);
 });
 
 // --- readiness and Health ---------------------------------------------------------
