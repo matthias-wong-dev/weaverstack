@@ -24,7 +24,7 @@ from support.weaver_test import weaver_test
 from test_health_representation import NOW, RAW, REPORTING, YESTERDAY, _Estate, at
 
 from weaver.catalogue.claims import catalogue_columns
-from weaver.catalogue.graph_rows import graph_rows
+from weaver.catalogue.lineage_rows import lineage_rows
 from weaver.catalogue.state import Catalogue
 from weaver.health import (
     AMBIGUOUS_INSTALLATION,
@@ -144,7 +144,7 @@ def _dashboard_rows(catalogue: Catalogue) -> dict[str, list[dict]]:
 
     rows: dict[str, list[dict]] = {}
     for item, tables in catalogue.rows.items():
-        merged = {**tables, **graph_rows(Catalogue({item: tables}), item)}
+        merged = {**tables, **lineage_rows(Catalogue({item: tables}), item)}
         for name, found in merged.items():
             rows.setdefault(name, []).extend(found)
     return rows

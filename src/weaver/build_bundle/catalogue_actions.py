@@ -269,12 +269,12 @@ def desired_catalogue(
 
     Narrowing precedes binding so Registry rows certify only selected objects,
     while shortcut and Installation rows carry their physical targets. The
-    graph rows project the bound rows' graph; an item whose graph cannot be
-    projected keeps its ``current`` graph rows.
+    lineage rows project the bound rows' graph; an item whose graph cannot be
+    projected keeps its ``current`` lineage rows.
     """
 
     from .. import __version__
-    from ..catalogue.graph_rows import with_graph_rows
+    from ..catalogue.lineage_rows import with_lineage_rows
 
     selected_ids = set(selected_ids)
     logical = Catalogue.from_repository(repository)
@@ -300,7 +300,7 @@ def desired_catalogue(
         )
         for item in target_by_item
     }
-    return with_graph_rows(
+    return with_lineage_rows(
         _with_installation_rows(bound, binding_rows),
         repository,
         current=current,

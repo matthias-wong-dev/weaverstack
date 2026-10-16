@@ -20,12 +20,12 @@ model Model
             ```
 
 /// Every installed node of the graph.
-table 'Graph node'
-    annotation 'Weaver.Source' = Warehouse/_weaver/_.GraphNode
+table 'Lineage node'
+    annotation 'Weaver.Source' = Warehouse/_weaver/_.LineageNode
 
 /// Every installed edge of the graph.
-table 'Graph edge'
-    annotation 'Weaver.Source' = Warehouse/_weaver/_.GraphEdge
+table 'Lineage edge'
+    annotation 'Weaver.Source' = Warehouse/_weaver/_.LineageEdge
 
 table Installation
     annotation 'Weaver.Source' = Warehouse/_weaver/_.Installation
@@ -130,12 +130,12 @@ table 'Dashboard measures'
         displayFolder: Health
 
     /// Installed logical items, the catalogue and the Dashboard aside.
-    measure 'Items' = CALCULATE(DISTINCTCOUNT('Graph node'[Item label]), NOT 'Graph node'[Is internal]) + 0
+    measure 'Items' = CALCULATE(DISTINCTCOUNT('Lineage node'[Item label]), NOT 'Lineage node'[Is internal]) + 0
         formatString: #,##0
         displayFolder: Estate
 
     /// Installed graph nodes, the catalogue and the Dashboard aside.
-    measure 'Installed objects' = CALCULATE(COUNTROWS('Graph node'), NOT 'Graph node'[Is internal]) + 0
+    measure 'Installed objects' = CALCULATE(COUNTROWS('Lineage node'), NOT 'Lineage node'[Is internal]) + 0
         formatString: #,##0
         displayFolder: Estate
 
@@ -166,43 +166,43 @@ table 'Dashboard measures'
         displayFolder: Data
 
     /// Installed nodes and edges, the catalogue and the Dashboard aside.
-    measure 'Graph data' = ```
+    measure 'Lineage data' = ```
         VAR _f = UNICHAR(57345)
         VAR _r = UNICHAR(57346)
         VAR _t = UNICHAR(57347)
-        VAR _nodes = FILTER('Graph node', NOT 'Graph node'[Is internal])
-        VAR _keys = SELECTCOLUMNS(_nodes, "@key", 'Graph node'[Node key])
-        VAR _edges = FILTER('Graph edge', 'Graph edge'[Downstream node key] IN _keys)
+        VAR _nodes = FILTER('Lineage node', NOT 'Lineage node'[Is internal])
+        VAR _keys = SELECTCOLUMNS(_nodes, "@key", 'Lineage node'[Node key])
+        VAR _edges = FILTER('Lineage edge', 'Lineage edge'[Downstream node key] IN _keys)
         VAR _internal = EXCEPT(
-            CALCULATETABLE(VALUES('Graph node'[Item label]), 'Graph node'[Is internal]),
-            SELECTCOLUMNS(_nodes, "@item", 'Graph node'[Item label])
+            CALCULATETABLE(VALUES('Lineage node'[Item label]), 'Lineage node'[Is internal]),
+            SELECTCOLUMNS(_nodes, "@item", 'Lineage node'[Item label])
         )
         RETURN
             _t & "nodes" & _f & "key" & _f & "item" & _f & "schema" & _f & "object" & _f & "kind" & _f & "label" & _f & "flags" & _f & "description"
             & CONCATENATEX(
                 _nodes,
-                _r & 'Graph node'[Node key]
-                    & _f & 'Graph node'[Item label]
-                    & _f & 'Graph node'[Schema name]
-                    & _f & 'Graph node'[Object name]
-                    & _f & 'Graph node'[Node kind]
-                    & _f & 'Graph node'[Label]
-                    & _f & (IF('Graph node'[Can load], 1, 0) + IF('Graph node'[Is static], 2, 0) + IF('Graph node'[Is mirrored], 4, 0) + IF('Graph node'[Is installed], 8, 0))
-                    & _f & LEFT('Graph node'[Description], 400),
+                _r & 'Lineage node'[Node key]
+                    & _f & 'Lineage node'[Item label]
+                    & _f & 'Lineage node'[Schema name]
+                    & _f & 'Lineage node'[Object name]
+                    & _f & 'Lineage node'[Node kind]
+                    & _f & 'Lineage node'[Label]
+                    & _f & (IF('Lineage node'[Can load], 1, 0) + IF('Lineage node'[Is static], 2, 0) + IF('Lineage node'[Is mirrored], 4, 0) + IF('Lineage node'[Is installed], 8, 0))
+                    & _f & LEFT('Lineage node'[Description], 400),
                 ""
             )
             & _t & "edges" & _f & "down" & _f & "up" & _f & "kind" & _f & "through" & _f & "reference"
             & CONCATENATEX(
                 _edges,
-                _r & 'Graph edge'[Downstream node key]
-                    & _f & 'Graph edge'[Upstream node key]
-                    & _f & LEFT('Graph edge'[Edge kind], 1)
-                    & _f & 'Graph edge'[Through node key]
-                    & _f & IF('Graph edge'[Edge kind] = "External", 'Graph edge'[Upstream node ID]),
+                _r & 'Lineage edge'[Downstream node key]
+                    & _f & 'Lineage edge'[Upstream node key]
+                    & _f & LEFT('Lineage edge'[Edge kind], 1)
+                    & _f & 'Lineage edge'[Through node key]
+                    & _f & IF('Lineage edge'[Edge kind] = "External", 'Lineage edge'[Upstream node ID]),
                 ""
             )
             & _t & "internal" & _f & "item"
-            & CONCATENATEX(_internal, _r & 'Graph node'[Item label], "")
+            & CONCATENATEX(_internal, _r & 'Lineage node'[Item label], "")
         ```
         displayFolder: Data
 
@@ -652,7 +652,7 @@ table 'Dashboard measures'
     /// The Overview page for HTML Content.
     measure 'Overview page' = ```
         "<div id=""wd-app"" class=""wd""></div><script type=""text/plain"" id=""wd-data"">"
-            & SUBSTITUTE(UNICHAR(57347) & "page" & UNICHAR(57345) & "name" & UNICHAR(57346) & "overview" & [Catalogue data] & [Graph data] & [Status data] & [Workflow data] & [Build data], "<", UNICHAR(57344))
+            & SUBSTITUTE(UNICHAR(57347) & "page" & UNICHAR(57345) & "name" & UNICHAR(57346) & "overview" & [Catalogue data] & [Lineage data] & [Status data] & [Workflow data] & [Build data], "<", UNICHAR(57344))
             & "</script>" & [Renderer]
         ```
         displayFolder: Pages
@@ -660,7 +660,7 @@ table 'Dashboard measures'
     /// The Health page for HTML Content.
     measure 'Health page' = ```
         "<div id=""wd-app"" class=""wd""></div><script type=""text/plain"" id=""wd-data"">"
-            & SUBSTITUTE(UNICHAR(57347) & "page" & UNICHAR(57345) & "name" & UNICHAR(57346) & "health" & [Catalogue data] & [Graph data] & [Status data] & [Workflow data] & [Build data], "<", UNICHAR(57344))
+            & SUBSTITUTE(UNICHAR(57347) & "page" & UNICHAR(57345) & "name" & UNICHAR(57346) & "health" & [Catalogue data] & [Lineage data] & [Status data] & [Workflow data] & [Build data], "<", UNICHAR(57344))
             & "</script>" & [Renderer]
         ```
         displayFolder: Pages
@@ -668,7 +668,7 @@ table 'Dashboard measures'
     /// The Load orchestration page for HTML Content.
     measure 'Load orchestration page' = ```
         "<div id=""wd-app"" class=""wd""></div><script type=""text/plain"" id=""wd-data"">"
-            & SUBSTITUTE(UNICHAR(57347) & "page" & UNICHAR(57345) & "name" & UNICHAR(57346) & "orchestration" & [Catalogue data] & [Graph data] & [Status data] & [Workflow data], "<", UNICHAR(57344))
+            & SUBSTITUTE(UNICHAR(57347) & "page" & UNICHAR(57345) & "name" & UNICHAR(57346) & "orchestration" & [Catalogue data] & [Lineage data] & [Status data] & [Workflow data], "<", UNICHAR(57344))
             & "</script>" & [Renderer]
         ```
         displayFolder: Pages
@@ -692,7 +692,7 @@ table 'Dashboard measures'
     /// The Entity dictionary page for HTML Content.
     measure 'Entity dictionary page' = ```
         "<div id=""wd-app"" class=""wd""></div><script type=""text/plain"" id=""wd-data"">"
-            & SUBSTITUTE(UNICHAR(57347) & "page" & UNICHAR(57345) & "name" & UNICHAR(57346) & "entities" & [Catalogue data] & [Graph data] & [Metadata data], "<", UNICHAR(57344))
+            & SUBSTITUTE(UNICHAR(57347) & "page" & UNICHAR(57345) & "name" & UNICHAR(57346) & "entities" & [Catalogue data] & [Lineage data] & [Metadata data], "<", UNICHAR(57344))
             & "</script>" & [Renderer]
         ```
         displayFolder: Pages
@@ -700,7 +700,7 @@ table 'Dashboard measures'
     /// The Semantic model page for HTML Content.
     measure 'Semantic model page' = ```
         "<div id=""wd-app"" class=""wd""></div><script type=""text/plain"" id=""wd-data"">"
-            & SUBSTITUTE(UNICHAR(57347) & "page" & UNICHAR(57345) & "name" & UNICHAR(57346) & "semantic" & [Catalogue data] & [Graph data] & [Status data] & [Semantic data], "<", UNICHAR(57344))
+            & SUBSTITUTE(UNICHAR(57347) & "page" & UNICHAR(57345) & "name" & UNICHAR(57346) & "semantic" & [Catalogue data] & [Lineage data] & [Status data] & [Semantic data], "<", UNICHAR(57344))
             & "</script>" & [Renderer]
         ```
         displayFolder: Pages

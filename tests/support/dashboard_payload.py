@@ -105,11 +105,11 @@ def catalogue(rows, at) -> str:
 
 
 def graph(rows, at) -> str:
-    nodes = [r for r in _rows(rows, "GraphNode") if not r["is_internal"]]
+    nodes = [r for r in _rows(rows, "LineageNode") if not r["is_internal"]]
     keys = {r["node_key"] for r in nodes}
     visible = {r["item_label"] for r in nodes}
     internal = sorted(
-        {r["item_label"] for r in _rows(rows, "GraphNode") if r["is_internal"]}
+        {r["item_label"] for r in _rows(rows, "LineageNode") if r["is_internal"]}
         - visible
     )
     return (
@@ -155,7 +155,7 @@ def graph(rows, at) -> str:
                     text(r.get("through_node_key")),
                     r["upstream_node_id"] if r["edge_kind"] == "External" else "",
                 )
-                for r in _rows(rows, "GraphEdge")
+                for r in _rows(rows, "LineageEdge")
                 if r["downstream_node_key"] in keys
             ],
         )

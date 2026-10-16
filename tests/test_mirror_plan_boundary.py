@@ -624,7 +624,7 @@ def test_a_warehouse_reading_another_mirrored_warehouse_waits_for_its_reconstruc
 
 
 @weaver_test()
-def test_a_mirror_forks_the_graph_rows_only_when_the_source_has_them():
+def test_a_mirror_forks_the_lineage_rows_only_when_the_source_has_them():
     from dataclasses import replace
 
     resolved = _resolved("Model", "Warehouse")
@@ -636,7 +636,7 @@ def test_a_mirror_forks_the_graph_rows_only_when_the_source_has_them():
     held = publish_script(resolved)
     older = publish_script(replace(resolved, graphed=False))
 
-    for table in ("GraphNode", "GraphEdge"):
+    for table in ("LineageNode", "LineageEdge"):
         assert f"[Weaver].[_].[{table}]" in held
         assert f"[Weaver].[_].[{table}]" not in older
     assert "[Weaver].[_].[Registry]" in older

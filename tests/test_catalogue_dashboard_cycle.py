@@ -33,8 +33,8 @@ MEASURE_TABLE = "Dashboard measures"
 
 #: Every catalogue table the model reads, by model table.
 SOURCES = {
-    "Graph node": "GraphNode",
-    "Graph edge": "GraphEdge",
+    "Lineage node": "LineageNode",
+    "Lineage edge": "LineageEdge",
     "Installation": "Installation",
     "Registry": "Registry",
     "Dependency": "Dependency",
@@ -83,7 +83,7 @@ MEASURES = {
     "Estate": {"Items", "Installed objects", "Settled log records"},
     "Data": {
         "Catalogue data",
-        "Graph data",
+        "Lineage data",
         "Status data",
         "Build data",
         "Workflow data",
@@ -306,11 +306,11 @@ def test_build_compiles_and_deploys_the_dashboard_through_the_power_bi_step(tmp_
     calls = [method for method, _ in model.calls]
     assert calls[:3] == ["update_definition", "refresh", "invalid_measures"]
     submitted = decode_parts(model.calls[0][1]["definition"])
-    node = submitted["definition/tables/Graph%20node.tmdl"].decode()
+    node = submitted["definition/tables/Lineage%20node.tmdl"].decode()
     assert "mode: directLake" in node
-    assert "entityName: GraphNode" in node and "schemaName: _" in node
+    assert "entityName: LineageNode" in node and "schemaName: _" in node
     definition = TmdlDefinition(submitted).model
-    columns = definition.tables["Graph node"].columns
+    columns = definition.tables["Lineage node"].columns
     assert columns["Signature"].isHidden and columns["Node ID"].isHidden
     assert not columns["Label"].isHidden
     assert set(measures(submitted)) == set().union(*MEASURES.values())

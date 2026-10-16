@@ -15,7 +15,7 @@ import json
 import random
 from datetime import datetime, timedelta, timezone
 
-from weaver.catalogue.graph_rows import node_key
+from weaver.catalogue.lineage_rows import node_key
 
 CATALOGUE_NAME = "Weaver"
 WORKSPACE = "Analytics"
@@ -75,7 +75,7 @@ class _Estate:
         else:
             node_id = f"{item_type}/{item_name}/{schema}.{name}"
         row = self.add(
-            "GraphNode",
+            "LineageNode",
             {
                 "item_type": item_type,
                 "item_name": item_name,
@@ -124,7 +124,7 @@ class _Estate:
 
     def edge(self, down, up, kind="Dependency", through=None):
         self.add(
-            "GraphEdge",
+            "LineageEdge",
             {
                 "item_type": down["item_type"],
                 "item_name": down["item_name"],
@@ -141,7 +141,7 @@ class _Estate:
 
     def external(self, down, reference):
         self.add(
-            "GraphEdge",
+            "LineageEdge",
             {
                 "item_type": down["item_type"],
                 "item_name": down["item_name"],
@@ -267,7 +267,7 @@ class _Estate:
                     "duration_milliseconds": None if pending else duration,
                 },
             )
-        for row in self.rows["GraphNode"]:
+        for row in self.rows["LineageNode"]:
             if row["node_kind"] not in ("Test", "Assumption") or row["is_internal"]:
                 continue
             roll = r.random()
@@ -373,7 +373,7 @@ class _Estate:
                 "item_type": "Warehouse",
                 "item_name": "_weaver",
                 "schema_name": "_",
-                "object_name": "GraphNode",
+                "object_name": "LineageNode",
                 "workflow_id": _guid("catalogue"),
                 "started_datetime": self.at - timedelta(hours=2),
                 "completed_datetime": self.at

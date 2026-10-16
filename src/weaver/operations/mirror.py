@@ -73,7 +73,7 @@ class ResolvedMirror:
     plan: MirrorPlan
     #: Whether the source catalogue holds a ``_.Mirror``.
     borrowed: bool = False
-    #: Whether the source catalogue holds the graph tables.
+    #: Whether the source catalogue holds the lineage tables.
     graphed: bool = True
     items: tuple[MirrorItem, ...] = ()
     #: Final physical target for each logical item. Resolution completes before

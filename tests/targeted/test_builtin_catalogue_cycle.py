@@ -29,7 +29,7 @@ from weaver.build_bundle.execution import ExecutionIdentity
 from weaver.build_bundle.models import BUILD_TABLE, DROP_TABLE
 from weaver.build_bundle.workflow import BuildState
 from weaver.catalogue.state import Catalogue
-from weaver.catalogue.tables import GRAPH_TABLES, PROJECTED_TABLES
+from weaver.catalogue.tables import LINEAGE_TABLES, PROJECTED_TABLES
 from weaver.declaration.model import WeaverItemId
 from weaver.locations import Location
 from weaver.store import FilesystemStore
@@ -264,7 +264,7 @@ def test_a_build_creates_the_graph_tables_an_older_catalogue_lacks(estate, tmp_p
         workspace_name=WORKSPACE,
     )
     bound = {entry.item: entry.to_bound_target() for entry in bindings.entries}
-    introduced = {f"_.{table.name}" for table in GRAPH_TABLES}
+    introduced = {f"_.{table.name}" for table in LINEAGE_TABLES}
     held = tuple(
         sorted(
             identity.object_id.qualified
@@ -344,8 +344,7 @@ def test_a_graph_failure_is_a_build_warning(estate, tmp_path, monkeypatch):
     ).build(output=Location(str(tmp_path / "warned-bundle")))
 
     assert warned == [
-        "Catalogue Dashboard graph for Lakehouse/Sales was not updated: unexpected. "
-        "The Build continued."
+        "Lineage for Lakehouse/Sales was not updated: unexpected. The Build continued."
     ]
     published = next(
         action
@@ -355,7 +354,7 @@ def test_a_graph_failure_is_a_build_warning(estate, tmp_path, monkeypatch):
     statements = json.loads(
         estate["store"].read(bundle.location.join(*published.payload.split("/")))
     )
-    (graph,) = [line for line in statements if "[_].[GraphNode]" in line]
+    (graph,) = [line for line in statements if "[_].[LineageNode]" in line]
     assert "N'_weaver'" in graph
     assert "N'Sales'" not in graph
 

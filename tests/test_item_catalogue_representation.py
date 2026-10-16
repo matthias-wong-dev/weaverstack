@@ -491,9 +491,9 @@ def test_a_catalogue_predating_an_introduced_table_still_builds():
 @weaver_test()
 def test_a_catalogue_predating_the_graph_tables_still_builds():
     from weaver.catalogue.state import read_catalogue_state
-    from weaver.catalogue.tables import GRAPH_TABLES, PROJECTED_TABLES
+    from weaver.catalogue.tables import LINEAGE_TABLES, PROJECTED_TABLES
 
-    older = [table.name for table in PROJECTED_TABLES if table not in GRAPH_TABLES]
+    older = [table.name for table in PROJECTED_TABLES if table not in LINEAGE_TABLES]
 
     state = read_catalogue_state(_shaped(*older), ())
 

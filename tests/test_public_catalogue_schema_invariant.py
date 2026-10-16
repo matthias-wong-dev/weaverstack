@@ -252,7 +252,7 @@ PUBLIC_SCHEMA: dict[str, tuple[str, ...]] = {
         "Signature",
         *AUDIT,
     ),
-    "GraphNode": (
+    "LineageNode": (
         "Item type",
         "Item name",
         "Schema name",
@@ -272,7 +272,7 @@ PUBLIC_SCHEMA: dict[str, tuple[str, ...]] = {
         "Signature",
         *AUDIT,
     ),
-    "GraphEdge": (
+    "LineageEdge": (
         "Item type",
         "Item name",
         "Downstream node ID",

@@ -1,10 +1,10 @@
 /*
-Table ID: _.GraphNode
+Table ID: _.LineageNode
 
 Description: >-
   One row per node of the installed graph, scoped to its item: data objects,
   shortcut destinations, Tests, Assumptions, semantic models and Reports. A
-  report reads it with GraphEdge to draw lineage without resolving Weaver
+  report reads it with LineageEdge to draw lineage without resolving Weaver
   references.
 
 Lineage: >-
@@ -64,9 +64,9 @@ Column notes:
   Object name: >-
     The node's name, as Registry stores it.
   Node ID: >-
-    The node's installed identity, as GraphEdge names it.
+    The node's installed identity, as LineageEdge names it.
   Node key: >-
-    Twelve hexadecimal digits of the Node ID's SHA-256, as GraphEdge's keys
+    Twelve hexadecimal digits of the Node ID's SHA-256, as LineageEdge's keys
     name it.
   Node kind: >-
     Table, View, Folder, Shortcut, Test, Assumption, Semantic model or Report.

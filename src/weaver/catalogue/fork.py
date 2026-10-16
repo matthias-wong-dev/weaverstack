@@ -27,9 +27,9 @@ from .tables import (
     CATALOGUE_SCHEMA,
     CATALOGUE_TABLES,
     CURRENT_STATE_TABLES,
-    GRAPH_TABLES,
     HISTORY_TABLES,
     INSTALLATION,
+    LINEAGE_TABLES,
     MIRROR,
     PROJECTED_TABLES,
     SCOPE_ITEM_NAME,
@@ -42,7 +42,7 @@ FORKED_TABLES = PROJECTED_TABLES + CURRENT_STATE_TABLES
 
 #: Forked only when the source holds them. A catalogue built by an older Weaver
 #: does not, and its items gain the rows on their next build.
-OPTIONAL_TABLES = GRAPH_TABLES
+OPTIONAL_TABLES = LINEAGE_TABLES
 
 _AUDIT_TYPE = "datetime2(6)"
 

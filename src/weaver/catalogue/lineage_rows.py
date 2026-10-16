@@ -30,9 +30,9 @@ from .tables import (
     EDGE_SHORTCUT,
     EDGE_VALIDATION,
     FOLDER_DICTIONARY,
-    GRAPH_EDGE,
-    GRAPH_NODE,
-    GRAPH_TABLES,
+    LINEAGE_EDGE,
+    LINEAGE_NODE,
+    LINEAGE_TABLES,
     ROLE_SHORTCUT,
     SEMANTIC_MODEL_TABLE,
     SIGNATURE,
@@ -45,10 +45,10 @@ SEARCH_TEXT_BYTES = 4000
 NODE_KEY_DIGITS = 12
 
 
-def with_graph_rows(
+def with_lineage_rows(
     catalogue: Catalogue, repository, *, current: Catalogue | None = None, warn=None
 ) -> Catalogue:
-    """Add each item's GraphNode and GraphEdge rows to desired state.
+    """Add each item's LineageNode and LineageEdge rows to desired state.
 
     The projection is advisory. An item whose rows cannot be projected keeps
     its ``current`` rows, so publication leaves them alone, and ``warn`` says so.
@@ -58,17 +58,17 @@ def with_graph_rows(
     for item, tables in catalogue.rows.items():
         merged = dict(tables)
         try:
-            projected = graph_rows(
+            projected = lineage_rows(
                 _with_semantic_sources(item, tables, repository), item
             )
         except Exception as exc:
             kept = current.rows.get(item, {}) if current is not None else {}
             projected = {
-                table.name: tuple(kept.get(table.name, ())) for table in GRAPH_TABLES
+                table.name: tuple(kept.get(table.name, ())) for table in LINEAGE_TABLES
             }
             if warn is not None:
                 warn(
-                    f"Catalogue Dashboard graph for {item} was not updated: "
+                    f"Lineage for {item} was not updated: "
                     f"{_reason(exc)}. The Build continued."
                 )
         merged.update(projected)
@@ -107,8 +107,10 @@ def _with_semantic_sources(item, tables, repository) -> Catalogue:
     )
 
 
-def graph_rows(catalogue: Catalogue, item: WeaverItemId) -> dict[str, tuple[Row, ...]]:
-    """GraphNode and GraphEdge rows for ``item``, from its rows alone."""
+def lineage_rows(
+    catalogue: Catalogue, item: WeaverItemId
+) -> dict[str, tuple[Row, ...]]:
+    """LineageNode and LineageEdge rows for ``item``, from its rows alone."""
 
     from ..installed import item_dag
 
@@ -141,7 +143,7 @@ def graph_rows(catalogue: Catalogue, item: WeaverItemId) -> dict[str, tuple[Row,
         _edge_row(item, downstream, upstream, kind, passes)
         for (downstream, upstream, kind), passes in sorted(through.items())
     )
-    return {GRAPH_NODE.name: nodes, GRAPH_EDGE.name: edges}
+    return {LINEAGE_NODE.name: nodes, LINEAGE_EDGE.name: edges}
 
 
 def _edge_row(item, downstream, upstream, kind, passes) -> Row:

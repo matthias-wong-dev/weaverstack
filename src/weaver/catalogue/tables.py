@@ -138,7 +138,7 @@ WAREHOUSE_TYPES = {
 #: Wide enough for prose an author wrote, and for a comma-separated column set.
 PROSE_TYPE = "varchar(4000)"
 LIST_TYPE = "varchar(1000)"
-#: A graph node key: twelve hexadecimal digits of the node ID's SHA-256.
+#: A lineage node key: twelve hexadecimal digits of the node ID's SHA-256.
 NODE_KEY_TYPE = "varchar(12)"
 
 #: Unbounded, for a column set an author may declare over a wide table. Any
@@ -991,8 +991,8 @@ SEMANTIC_TABLES = (
 )
 
 
-GRAPH_NODE = CatalogueTable(
-    name="GraphNode",
+LINEAGE_NODE = CatalogueTable(
+    name="LineageNode",
     description=(
         "One row per node of the installed graph, scoped to its item, so a "
         "report can draw lineage without resolving references."
@@ -1005,13 +1005,13 @@ GRAPH_NODE = CatalogueTable(
             "node_id",
             not_null=True,
             sql_type=LIST_TYPE,
-            description="The node's installed identity, as GraphEdge names it.",
+            description="The node's installed identity, as LineageEdge names it.",
         ),
         CatalogueColumn(
             "node_key",
             not_null=True,
             sql_type=NODE_KEY_TYPE,
-            description="A short hash of the node ID, as GraphEdge's keys name it.",
+            description="A short hash of the node ID, as LineageEdge's keys name it.",
         ),
         CatalogueColumn(
             "node_kind",
@@ -1076,11 +1076,11 @@ GRAPH_NODE = CatalogueTable(
     ),
 )
 
-GRAPH_EDGE = CatalogueTable(
-    name="GraphEdge",
+LINEAGE_EDGE = CatalogueTable(
+    name="LineageEdge",
     description=(
         "One row per edge of the installed graph, scoped to the downstream "
-        "node's item, with both ends as GraphNode IDs."
+        "node's item, with both ends as LineageNode IDs."
     ),
     key=(
         SCOPE_ITEM_TYPE,
@@ -1139,7 +1139,7 @@ GRAPH_EDGE = CatalogueTable(
 )
 
 #: The installed graph, projected per item for reports that cannot resolve it.
-GRAPH_TABLES = (GRAPH_NODE, GRAPH_EDGE)
+LINEAGE_TABLES = (LINEAGE_NODE, LINEAGE_EDGE)
 
 
 #: Dictionary reconciliation order, kept stable for payloads and reports.
@@ -1155,7 +1155,7 @@ DICTIONARY_TABLES = (
     DEPENDENCY,
     SHORTCUT,
     *SEMANTIC_TABLES,
-    *GRAPH_TABLES,
+    *LINEAGE_TABLES,
 )
 
 #: Reconciliation order: descriptions, binding, then certification.
@@ -1624,9 +1624,9 @@ CATALOGUE_TABLES = PROJECTED_TABLES + RUNTIME_TABLES
 
 #: Projected state, borrowed nodes and bookmarks read by a run. Status tables are
 #: written by runs but only read by builds; see ``state.READ_FOR_BUILD``. The
-#: graph tables restate the graph a run derives from the rest.
+#: lineage tables restate the graph a run derives from the rest.
 READABLE_TABLES = (
-    tuple(table for table in PROJECTED_TABLES if table not in GRAPH_TABLES)
+    tuple(table for table in PROJECTED_TABLES if table not in LINEAGE_TABLES)
     + BORROWED_TABLES
     + (BOOKMARK,)
 )

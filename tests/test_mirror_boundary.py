@@ -440,7 +440,7 @@ def _source_tables(*, graphed: bool) -> tuple[str, ...]:
 @pytest.mark.parametrize("graphed", (True, False))
 @weaver_test()
 def test_a_source_without_the_graph_tables_still_mirrors(monkeypatch, graphed):
-    """An older catalogue forks what it has; its items gain graph rows on build."""
+    """An older catalogue forks what it has; its items gain lineage rows on build."""
 
     from weaver.operations.mirror import check_mirror
 

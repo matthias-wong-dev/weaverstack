@@ -334,7 +334,7 @@ test("the catalogue and the Dashboard never appear as part of the estate", () =>
   const PERF = ["item", "schema", "object", "loads", "duration", "longest", "read", "inserted", "updated", "deleted", "rejected", "reloads", "skips", "timedread", "timedduration", "last"];
   const perf = (item, schema, object) => [item, schema, object, 1, 1000, 1000, 10, 1, 0, 0, 0, 0, 0, 10, 1000, AT];
   const extra = table("perfmonth", PERF, [
-    perf("Warehouse/_weaver", "_", "GraphNode"), perf("Warehouse/Curated", "_", "Load"),
+    perf("Warehouse/_weaver", "_", "LineageNode"), perf("Warehouse/Curated", "_", "Load"),
     perf("SemanticModel/Catalogue Dashboard", "", ""), perf("Warehouse/Curated", "Sales", "Region")]);
   const m = model(estate({ extra }));
   assert.deepEqual(D.perfRows(m, "perfmonth").map((r) => r.item + " " + r.object), ["Warehouse/Curated Region"]);
@@ -352,7 +352,7 @@ test("a selection of several objects shows the union of their lineage", () => {
   assert.equal(win.focus, "c");
 });
 
-test("a certified object with no graph node says the graph may be out of date", () => {
+test("a certified object with no lineage node says lineage may be out of date", () => {
   const built = table("built", ["item", "schema", "object", "built"], [
     ["Warehouse/Curated", "Sales", "Region", AT], ["Warehouse/Curated", "Sales", "Unprojected", AT], ["Warehouse/_weaver", "_", "Log", AT]]);
   const text = estate().split(D.TABLE).filter((c) => !c.startsWith("built")).join(D.TABLE) + built;

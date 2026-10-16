@@ -83,7 +83,7 @@ function buildModel(tables, problems) {
   m.catalogue = { name: catalogue ? catalogue.target : null, workspace: catalogue ? catalogue.workspace : null, version: catalogue ? catalogue.version : null };
 
   t("nodes").forEach(function (r) {
-    if (m.nodes.has(r.key)) { m.problems.push("Two graph nodes share the key " + r.key + "; one of them is not shown."); return; }
+    if (m.nodes.has(r.key)) { m.problems.push("Two lineage nodes share the key " + r.key + "; one of them is not shown."); return; }
     var flags = num(r.flags) || 0;
     var n = {
       key: r.key, item: r.item, schema: r.schema, object: r.object, kind: r.kind, label: r.label || r.object || r.item,
@@ -122,7 +122,7 @@ function buildModel(tables, problems) {
     var n = m.byIdentity.get(identityKey(r.item, r.schema, r.object));
     if (n) { n.test = status(r); n.test.failures = num(r.failures); }
   });
-  // A certified data object with no graph node means its item's graph was
+  // A certified data object with no lineage node means its item's graph was
   // not projected by the build that certified it.
   m.graphGaps = new Map();
   t("built").forEach(function (r) {

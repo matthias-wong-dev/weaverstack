@@ -1,9 +1,9 @@
-"""The graph tables restate the installed graph, one item at a time.
+"""The lineage tables restate the installed graph, one item at a time.
 
-`_.GraphNode` and `_.GraphEdge` exist so a report that cannot resolve a
+`_.LineageNode` and `_.LineageEdge` exist so a report that cannot resolve a
 Weaver reference can still walk the graph. They are only useful if they are the
 graph `Catalogue.dag()` reads, so the central claim here is parity: once a
-build's rows are installed, the union of every item's graph rows is that
+build's rows are installed, the union of every item's lineage rows is that
 graph's nodes and edges.
 
 Pure Python. The rows are the ones `desired_catalogue` publishes, and the graph
@@ -31,15 +31,15 @@ from weaver.build_bundle.catalogue_actions import (
     render_catalogue_after_build,
 )
 from weaver.build_bundle.planner import certifiable_identities
-from weaver.catalogue.graph_rows import SEARCH_TEXT_BYTES, graph_rows, node_key
+from weaver.catalogue.lineage_rows import SEARCH_TEXT_BYTES, lineage_rows, node_key
 from weaver.catalogue.reconcile import publish
 from weaver.catalogue.state import Catalogue
 from weaver.catalogue.tables import (
     DEPENDENCY,
-    GRAPH_EDGE,
-    GRAPH_NODE,
-    GRAPH_TABLES,
     INSTALLATION,
+    LINEAGE_EDGE,
+    LINEAGE_NODE,
+    LINEAGE_TABLES,
     REGISTRY,
     TABLE_DICTIONARY,
 )
@@ -89,9 +89,9 @@ def _rows(catalogue: Catalogue, table) -> list[dict]:
 
 
 def _graphed(catalogue: Catalogue):
-    """The graph rows' nodes, resolved edges and External edges."""
+    """The lineage rows' nodes, resolved edges and External edges."""
 
-    nodes = {row["node_id"] for row in _rows(catalogue, GRAPH_NODE)}
+    nodes = {row["node_id"] for row in _rows(catalogue, LINEAGE_NODE)}
     edges = {
         (
             row["upstream_node_id"],
@@ -99,12 +99,12 @@ def _graphed(catalogue: Catalogue):
             row["edge_kind"],
             row["through_node_id"],
         )
-        for row in _rows(catalogue, GRAPH_EDGE)
+        for row in _rows(catalogue, LINEAGE_EDGE)
         if row["edge_kind"] != "external"
     }
     external = {
         (row["downstream_node_id"], row["upstream_node_id"])
-        for row in _rows(catalogue, GRAPH_EDGE)
+        for row in _rows(catalogue, LINEAGE_EDGE)
         if row["edge_kind"] == "external"
     }
     return nodes, edges, external
@@ -146,7 +146,7 @@ def _graph(dag, *, items=None):
 
 
 @weaver_test()
-def test_the_graph_rows_are_the_installed_graph(repository):
+def test_the_lineage_rows_are_the_installed_graph(repository):
     built = built_catalogue(repository, _bindings(SALES, REPORTING))
 
     nodes, edges, external = _graphed(built)
@@ -156,7 +156,7 @@ def test_the_graph_rows_are_the_installed_graph(repository):
     assert edges == expected_edges
     assert external == expected_external == set()
     # The fixture reaches every kind the claim depends on.
-    kinds = {row["node_kind"] for row in _rows(built, GRAPH_NODE)}
+    kinds = {row["node_kind"] for row in _rows(built, LINEAGE_NODE)}
     assert {"table", "view", "folder", "shortcut", "test", "assumption"} <= kinds
     assert {kind for _up, _down, kind, _through in edges} == {
         "dependency",
@@ -228,9 +228,9 @@ def test_a_physical_read_is_an_external_edge():
         }
     )
 
-    rows = graph_rows(catalogue, item)
+    rows = lineage_rows(catalogue, item)
 
-    (edge,) = rows[GRAPH_EDGE.name]
+    (edge,) = rows[LINEAGE_EDGE.name]
     assert (edge["upstream_node_id"], edge["downstream_node_id"]) == (
         "Ledger.dbo.Customer",
         str(consumer),
@@ -253,10 +253,10 @@ def test_an_items_rows_come_from_its_own_rows_alone(repository):
     alone = _desired(repository, _bindings(REPORTING))
     together = built_catalogue(repository, _bindings(SALES, REPORTING))
 
-    for table in GRAPH_TABLES:
+    for table in LINEAGE_TABLES:
         assert alone.rows[REPORTING][table.name] == together.rows[REPORTING][table.name]
     assert SALES not in alone.rows
-    upstreams = {row["upstream_node_id"] for row in _rows(alone, GRAPH_EDGE)}
+    upstreams = {row["upstream_node_id"] for row in _rows(alone, LINEAGE_EDGE)}
     assert str(CUSTOMER) in upstreams
 
 
@@ -266,7 +266,7 @@ def test_rows_are_published_only_for_the_items_a_build_binds(repository):
 
     built = built_catalogue(repository, _bindings(SALES, REPORTING))
     departed = {
-        **_rows(built, GRAPH_NODE)[0],
+        **_rows(built, LINEAGE_NODE)[0],
         "item_type": "Lakehouse",
         "item_name": "Sales",
         "schema_name": "Tables/DWG",
@@ -277,7 +277,7 @@ def test_rows_are_published_only_for_the_items_a_build_binds(repository):
         {
             item: {
                 **tables,
-                GRAPH_NODE.name: tables[GRAPH_NODE.name]
+                LINEAGE_NODE.name: tables[LINEAGE_NODE.name]
                 + ((departed,) if item == SALES else ()),
             }
             for item, tables in built.rows.items()
@@ -299,15 +299,15 @@ def test_rows_are_published_only_for_the_items_a_build_binds(repository):
         for stage in stages
         for content in stage.payloads.values()
         for line in json.loads(content)
-        if any(f"[{table.name}]" in line for table in GRAPH_TABLES)
+        if any(f"[{table.name}]" in line for table in LINEAGE_TABLES)
     ]
     (delete,) = lines
-    assert delete.startswith("DELETE FROM [_].[GraphNode]")
+    assert delete.startswith("DELETE FROM [_].[LineageNode]")
     assert "N'Sales'" in delete and "N'Reporting'" not in delete
 
 
 @weaver_test()
-def test_an_unchanged_estate_publishes_no_graph_rows(repository):
+def test_an_unchanged_estate_publishes_no_lineage_rows(repository):
     """Two separate projections of one estate agree row for row."""
 
     first = built_catalogue(repository, _bindings(SALES, REPORTING))
@@ -320,12 +320,12 @@ def test_an_unchanged_estate_publishes_no_graph_rows(repository):
     assert not any(
         f"[{table.name}]" in statement
         for statement in publication.statements
-        for table in GRAPH_TABLES
+        for table in LINEAGE_TABLES
     )
 
 
 @weaver_test()
-def test_a_catalogue_without_graph_rows_gains_them_on_the_next_build(repository):
+def test_a_catalogue_without_lineage_rows_gains_them_on_the_next_build(repository):
     """An estate built before these tables existed fills them in unchanged."""
 
     built = built_catalogue(repository, _bindings(SALES, REPORTING))
@@ -334,7 +334,7 @@ def test_a_catalogue_without_graph_rows_gains_them_on_the_next_build(repository)
             item: {
                 name: rows
                 for name, rows in tables.items()
-                if name not in {table.name for table in GRAPH_TABLES}
+                if name not in {table.name for table in LINEAGE_TABLES}
             }
             for item, tables in built.rows.items()
         }
@@ -345,10 +345,10 @@ def test_a_catalogue_without_graph_rows_gains_them_on_the_next_build(repository)
     touched = {
         table.name
         for statement in publication.statements
-        for table in (*GRAPH_TABLES, TABLE_DICTIONARY, REGISTRY)
+        for table in (*LINEAGE_TABLES, TABLE_DICTIONARY, REGISTRY)
         if f"[{table.name}]" in statement
     }
-    assert touched == {GRAPH_NODE.name, GRAPH_EDGE.name}
+    assert touched == {LINEAGE_NODE.name, LINEAGE_EDGE.name}
 
 
 @weaver_test()
@@ -379,7 +379,7 @@ def test_an_item_whose_graph_fails_keeps_its_rows_and_the_build_goes_on(
                 name: rows
                 for name, rows in tables.items()
                 # Sales has none yet; Reporting holds rows its graph no longer has.
-                if item != SALES or name not in {t.name for t in GRAPH_TABLES}
+                if item != SALES or name not in {t.name for t in LINEAGE_TABLES}
             }
             for item, tables in built.rows.items()
         }
@@ -398,7 +398,7 @@ def test_an_item_whose_graph_fails_keeps_its_rows_and_the_build_goes_on(
     )
 
     assert warned == [
-        "Catalogue Dashboard graph for Warehouse/Reporting was not updated: "
+        "Lineage for Warehouse/Reporting was not updated: "
         "Rpt.CustomerReport depends on itself. The Build continued."
     ]
     lines = [
@@ -406,9 +406,9 @@ def test_an_item_whose_graph_fails_keeps_its_rows_and_the_build_goes_on(
         for stage in stages
         for content in stage.payloads.values()
         for line in json.loads(content)
-        if any(f"[{table.name}]" in line for table in GRAPH_TABLES)
+        if any(f"[{table.name}]" in line for table in LINEAGE_TABLES)
     ]
-    assert lines, "Sales' graph rows still publish"
+    assert lines, "Sales' lineage rows still publish"
     assert all("N'Sales'" in line for line in lines)
     assert not any("N'Reporting'" in line for line in lines)
 
@@ -419,7 +419,7 @@ def test_an_item_whose_graph_fails_keeps_its_rows_and_the_build_goes_on(
 @weaver_test()
 def test_a_node_carries_its_name_item_description_and_search_text(repository):
     built = built_catalogue(repository, _bindings(SALES, REPORTING))
-    by_id = {row["node_id"]: row for row in _rows(built, GRAPH_NODE)}
+    by_id = {row["node_id"]: row for row in _rows(built, LINEAGE_NODE)}
 
     customer = by_id[str(CUSTOMER)]
     assert (customer["schema_name"], customer["object_name"]) == (
@@ -447,12 +447,12 @@ def test_a_node_carries_its_name_item_description_and_search_text(repository):
 @weaver_test()
 def test_the_catalogue_and_its_surface_are_internal(repository):
     built = built_catalogue(repository, _bindings(SALES, REPORTING))
-    by_id = {row["node_id"]: row for row in _rows(built, GRAPH_NODE)}
+    by_id = {row["node_id"]: row for row in _rows(built, LINEAGE_NODE)}
 
     internal = {node for node, row in by_id.items() if row["is_internal"]}
 
     assert "Warehouse/_weaver/_.Registry" in internal
-    assert "Warehouse/_weaver/_.GraphNode" in internal
+    assert "Warehouse/_weaver/_.LineageNode" in internal
     assert "Lakehouse/Sales/Tables/_.Log" in internal
     assert "Warehouse/Reporting/_.LoadStatus" in internal
     assert all(
@@ -484,7 +484,7 @@ def test_search_text_stays_within_its_column():
         }
     )
 
-    (node,) = graph_rows(catalogue, item)[GRAPH_NODE.name]
+    (node,) = lineage_rows(catalogue, item)[LINEAGE_NODE.name]
 
     stored = node["search_text"].encode("utf-8")
     assert len(stored) <= SEARCH_TEXT_BYTES
@@ -510,7 +510,7 @@ def test_the_catalogue_dashboard_is_internal():
         control_item=ItemRef("Weaver"),
         workspace_name=WORKSPACE,
     )
-    rows = _rows(built_catalogue(composed, bindings), GRAPH_NODE)
+    rows = _rows(built_catalogue(composed, bindings), LINEAGE_NODE)
     dashboard = [row for row in rows if row["item_name"] == "Catalogue Dashboard"]
 
     assert {row["item_type"] for row in dashboard} == {"SemanticModel", "Report"}
@@ -529,11 +529,11 @@ def test_the_catalogue_dashboard_is_internal():
 def test_each_key_is_its_node_id_hashed_and_each_edge_names_both_keys(repository):
     built = built_catalogue(repository, _bindings(SALES, REPORTING))
 
-    nodes = _rows(built, GRAPH_NODE)
+    nodes = _rows(built, LINEAGE_NODE)
     keys = {row["node_id"]: row["node_key"] for row in nodes}
     assert all(key == node_key(node) for node, key in keys.items())
     assert len(set(keys.values())) == len(keys)
-    for edge in _rows(built, GRAPH_EDGE):
+    for edge in _rows(built, LINEAGE_EDGE):
         assert edge["downstream_node_key"] == node_key(edge["downstream_node_id"])
         assert edge["upstream_node_key"] == node_key(edge["upstream_node_id"])
         through = edge["through_node_id"]
@@ -549,7 +549,7 @@ def test_the_flags_are_the_installed_nodes_own(repository):
     built = built_catalogue(repository, _bindings(SALES, REPORTING))
     by_id = {node.node_id: node for node in built.dag().nodes}
 
-    flagged = {row["node_id"]: row for row in _rows(built, GRAPH_NODE)}
+    flagged = {row["node_id"]: row for row in _rows(built, LINEAGE_NODE)}
     for node_id, row in flagged.items():
         node = by_id[node_id]
         assert (
@@ -570,7 +570,7 @@ def test_every_certified_data_object_has_a_graph_node(repository):
 
     nodes = {
         (row["item_type"], row["item_name"], row["schema_name"], row["object_name"])
-        for row in _rows(built, GRAPH_NODE)
+        for row in _rows(built, LINEAGE_NODE)
     }
     certified = {
         (row["item_type"], row["item_name"], row["schema_name"], row["object_name"])
@@ -595,7 +595,7 @@ def test_a_model_build_deploys_is_projected_as_refreshed():
         }
     )
 
-    (node,) = graph_rows(catalogue, item)[GRAPH_NODE.name]
+    (node,) = lineage_rows(catalogue, item)[LINEAGE_NODE.name]
 
     assert (node["node_kind"], node["can_load"], node["is_installed"]) == (
         "semantic_model",
