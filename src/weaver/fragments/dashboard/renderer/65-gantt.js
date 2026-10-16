@@ -17,7 +17,7 @@ function logRows(m) {
     return { id: r.id, workflow: flows.get(r.flow) || null, task: r.task, target: r.target, schema: r.schema, object: r.object, result: r.result,
       started: started !== null ? started : completed, completed: completed !== null ? completed : started, duration: num(r.duration),
       node: node, message: r.message, envelope: !r.object,
-      label: node ? node.label : r.object ? (r.schema ? r.schema + "." : "") + r.object : (r.message || r.task || "") };
+      label: node ? node.label : r.object ? qualified({ item: item, schema: r.schema, object: r.object }) : (r.message || r.task || "") };
   });
   return m.logRows;
 }
