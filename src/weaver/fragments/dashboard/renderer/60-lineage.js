@@ -10,8 +10,6 @@ var DEPTHS = [0, 1, 2, -1];
    derived readiness ringed. */
 function graphWorkspace(body, m, options) {
   var s = pageState(options.page), estate = layoutEstate(m);
-  var handed = takeHandOff();
-  if (handed && m.nodes.has(handed)) { s.selection = [handed]; s.expanded = []; s.moved = {}; s.item = null; s.refit = true; }
   s.selection = (s.selection || (s.focus ? [s.focus] : [])).filter(function (k) { return m.nodes.has(k); });
   if (!s.focus || s.selection.indexOf(s.focus) < 0) s.focus = s.selection[s.selection.length - 1] || null;
   if (s.up === undefined) s.up = 1;
@@ -140,7 +138,7 @@ function graphWorkspace(body, m, options) {
   view = new GraphView(host, m, estate, { state: s, mode: s.mode, onSelect: select, onReveal: expand, onMove: moved, label: options.label });
   apply(false);
   // A remembered viewport is kept unless it no longer shows the focus or the estate.
-  if (fresh || s.refit || !view.showing(s.focus)) { s.refit = false; if (s.selection.length || s.item) view.fitWindow(false); else view.fitAll(false); }
+  if (fresh || !view.showing(s.focus)) { if (s.selection.length || s.item) view.fitWindow(false); else view.fitAll(false); }
   return { select: select };
 }
 

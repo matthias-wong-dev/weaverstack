@@ -8,7 +8,7 @@ function overviewPage(body, m) {
   function open(key) {
     s.open = key;
     side.hidden = !key;
-    details(side, m, key, { onOpen: open, health: health, lineageLink: true });
+    details(side, m, key, { onOpen: open, health: health });
     if (key) side.insertBefore(el("button", { "class": "wd-icon wd-close", type: "button", "aria-label": "Close", onclick: function () { open(null); } }, ["×"]), side.firstChild);
   }
   var loadRed = health.load.filter(function (f) { return f.severity === RED; }).length;
@@ -91,7 +91,7 @@ function healthPage(body, m) {
   var side = el("aside", { "class": "wd-drawer", hidden: "hidden" });
   function open(key) {
     side.hidden = !key;
-    details(side, m, key, { onOpen: open, health: health, lineageLink: true });
+    details(side, m, key, { onOpen: open, health: health });
     if (key) side.insertBefore(el("button", { "class": "wd-icon wd-close", type: "button", "aria-label": "Close", onclick: function () { open(null); } }, ["×"]), side.firstChild);
   }
   function sectionTile(label, list, subjects) {

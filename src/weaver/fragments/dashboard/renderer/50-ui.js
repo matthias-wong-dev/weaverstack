@@ -62,20 +62,6 @@ function state() {
 
 function pageState(name) { var s = state(); s[name] = s[name] || {}; return s[name]; }
 
-/* A request from one page to another, through storage the visuals may share. */
-function handOff(key) {
-  try { root.localStorage.setItem("weaver-dashboard-focus", JSON.stringify({ key: key, at: Date.now() })); } catch (e) { /* unavailable */ }
-}
-
-function takeHandOff() {
-  try {
-    var raw = root.localStorage.getItem("weaver-dashboard-focus");
-    if (!raw) return null;
-    root.localStorage.removeItem("weaver-dashboard-focus");
-    var v = JSON.parse(raw);
-    return Date.now() - v.at < 10 * 60 * 1000 ? v.key : null;
-  } catch (e) { return null; }
-}
 
 function weaveMark() { return el("span", { "class": "wd-mark", "aria-hidden": "true" }, [el("i"), el("i"), el("i"), el("i")]); }
 
@@ -330,10 +316,6 @@ function details(panel, m, key, options) {
         return all.concat([el("dt", { text: c.column }), el("dd", { text: c.description || "" })]);
       }, [])));
     }
-  }
-  if (options.lineageLink) {
-    panel.appendChild(el("button", { "class": "wd-text-btn wd-handoff", type: "button", onclick: function () { handOff(n.key); this.textContent = "Open Load orchestration to see it"; } },
-      ["Show in Load orchestration"]));
   }
 }
 

@@ -250,7 +250,7 @@ function entryDetail(panel, m, md, e, select) {
   }
   if (e.ref && e.ref.key) {
     var n = e.ref;
-    details(panel, m, n.key, { onOpen: openNode, columns: md.columns, lineageLink: true });
+    details(panel, m, n.key, { onOpen: openNode, columns: md.columns });
     var declared = md.tables.get(n.id) || md.folders.get(n.id), validation = md.validations.get(n.id);
     if (declared) {
       var facts2 = el("dl", { "class": "wd-facts" });

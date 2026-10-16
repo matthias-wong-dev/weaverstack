@@ -148,7 +148,8 @@ body { background: #f7f7f6; }
 .wd-maximised .wd-split { flex: 1; min-height: 0; align-items: stretch; }
 .wd-maximised .wd-graph-col { min-height: 0; }
 .wd-maximised .wd-graph { flex: 1; height: auto; min-height: 0; }
-.wd-maximised .wd-side { position: static; max-height: none; min-height: 0; }
+.wd-maximised .wd-split { grid-template-columns: minmax(0, 1fr); }
+.wd-maximised .wd-side { display: none; }
 .wd-graph-canvas { display: block; touch-action: pan-y; cursor: grab; outline: none; }
 .wd-graph-canvas.wd-dragging { cursor: grabbing; }
 .wd-side, .wd-drawer {
@@ -170,7 +171,6 @@ body { background: #f7f7f6; }
 .wd-findings { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
 .wd-findings li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; }
 .wd-findings-wide li { padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
-.wd-handoff { margin-top: 16px; }
 .wd-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .wd-chip-select { display: inline-flex; align-items: center; height: 28px; border: 1px solid var(--line-strong); border-radius: 999px; background: var(--surface); overflow: hidden; }
 .wd-chip-select.wd-current { border-color: var(--blue); background: var(--blue-soft); }
