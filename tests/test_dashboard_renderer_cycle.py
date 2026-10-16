@@ -24,7 +24,7 @@ def test_the_renderer_logic_passes_its_node_tests():
     result = subprocess.run(
         [node, "--test", *map(str, TESTS)],
         capture_output=True,
-        text=True,
+        encoding="utf-8",
         timeout=120,
     )
     assert result.returncode == 0, result.stdout + result.stderr

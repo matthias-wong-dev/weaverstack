@@ -46,6 +46,7 @@ RENDERER = Path(__file__).parents[1] / "js" / "renderer.js"
 ASSESS = """
 const D = require(process.argv[1]).load();
 let text = "";
+process.stdin.setEncoding("utf8");
 process.stdin.on("data", (chunk) => { text += chunk; });
 process.stdin.on("end", () => {
   const parsed = D.parsePayload(text);
@@ -184,7 +185,9 @@ def test_the_dashboard_finds_what_weaver_health_finds(name):
         [node, "-e", ASSESS, str(RENDERER), str(as_of)],
         input=payload,
         capture_output=True,
-        text=True,
+        # The payload's separators are private-use characters, which a
+        # Windows code page cannot encode.
+        encoding="utf-8",
         timeout=60,
         check=True,
     )
