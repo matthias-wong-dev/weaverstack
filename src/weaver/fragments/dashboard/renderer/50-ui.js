@@ -93,9 +93,6 @@ function shell(mount, m) {
   var context = [m.catalogue.workspace ? "Workspace " + m.catalogue.workspace : null,
     m.catalogue.version ? "Weaver " + m.catalogue.version : null].filter(Boolean).join(" · ");
   var settled = latestSettled(m);
-  var themeButton = el("button", { "class": "wd-icon", type: "button", title: "Switch light and dark", "aria-label": "Switch light and dark",
-    onclick: function () { s.theme = mount.getAttribute("data-theme") === "dark" ? "light" : "dark"; mount.setAttribute("data-theme", s.theme); redraw(); } },
-    [el("span", { "aria-hidden": "true", text: "◐" })]);
   var head = el("header", { "class": "wd-top" }, [
     el("div", { "class": "wd-brand" }, [weaveMark(), el("div", {}, [
       el("div", { "class": "wd-eyebrow", text: "Catalogue · " + (PAGE_TITLES[m.page] || m.page) }),
@@ -107,8 +104,7 @@ function shell(mount, m) {
       el("dt", { text: "Queried" }), el("dd", { text: stamp(m.at) }),
       settled === undefined ? null : el("dt", { text: "Last settled" }),
       settled === undefined ? null : el("dd", { text: settled ? stamp(settled) + " · " + ago(settled, m.at) : "nothing has settled" })
-    ]),
-    themeButton
+    ])
   ]);
   mount.appendChild(head);
   if (m.problems.length) {
