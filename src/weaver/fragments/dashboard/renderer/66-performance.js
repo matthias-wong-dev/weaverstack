@@ -2,7 +2,7 @@
 // unknown; it is never shown as zero.
 
 function perfRows(m, name) {
-  return (m.tables[name] || []).map(function (r) {
+  return (m.tables[name] || []).filter(function (r) { return !isInternal(m, r.item, r.schema); }).map(function (r) {
     var node = m.byIdentity.get(identityKey(r.item, r.schema, r.object)) || null;
     return { item: r.item, schema: r.schema, object: r.object, node: node, label: node ? node.label : r.schema + "." + r.object,
       loads: num(r.loads) || 0, duration: num(r.duration), longest: num(r.longest), read: num(r.read), inserted: num(r.inserted),
@@ -28,7 +28,7 @@ function performancePage(body, m) {
   var s = pageState("performance");
   s.window = s.window || "month"; s.item = s.item || "all";
   var host = el("div");
-  var items = Array.from(new Set((m.tables.perftrend || []).map(function (r) { return r.item; }))).sort(compare);
+  var items = Array.from(new Set((m.tables.perftrend || []).map(function (r) { return r.item; }))).filter(function (it) { return !isInternal(m, it); }).sort(compare);
   body.appendChild(el("div", { "class": "wd-toolbar" }, [
     segmented("Window", ["day", "month"], s.window, function (v) { s.window = v; render(); saveState(); }, function (v) { return v === "day" ? "Last 24 hours" : "Last 30 days"; }),
     el("select", { "class": "wd-select", "aria-label": "Item", onchange: function () { s.item = this.value; render(); saveState(); } },
@@ -64,7 +64,7 @@ function performancePage(body, m) {
     ];
     host.appendChild(section("Objects · " + fmt(rows.length), [dataTable(columns, rows, { limit: 200, sort: "duration", emptyText: "No load statistic was recorded in this window." })]));
     var single = function (name) {
-      return (m.tables[name] || []).filter(function (r) { return s.item === "all" || r.item === s.item; }).map(function (r) {
+      return (m.tables[name] || []).filter(function (r) { return !isInternal(m, r.item, r.schema) && (s.item === "all" || r.item === s.item); }).map(function (r) {
         var node = m.byIdentity.get(identityKey(r.item, r.schema, r.object));
         return { label: node ? node.label : r.schema + "." + r.object, item: r.item, completed: num(r.completed), duration: num(r.duration), read: num(r.read),
           inserted: num(r.inserted), updated: num(r.updated), deleted: num(r.deleted), rejected: num(r.rejected), reload: !!r.reload, skip: !!r.skip, workflow: r.workflow };
@@ -88,7 +88,7 @@ function performancePage(body, m) {
 function trendChart(m, item) {
   var days = new Map();
   (m.tables.perftrend || []).forEach(function (r) {
-    if (item !== "all" && r.item !== item) return;
+    if (isInternal(m, r.item) || (item !== "all" && r.item !== item)) return;
     var d = num(r.day), e = days.get(d) || { day: d, loads: 0, duration: null, changed: null };
     e.loads += num(r.loads) || 0;
     if (num(r.duration) !== null) e.duration = (e.duration || 0) + num(r.duration);

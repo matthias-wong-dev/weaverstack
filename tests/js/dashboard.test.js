@@ -309,3 +309,25 @@ test("the Gantt summary measures elapsed span, summed work and peak concurrency"
   assert.equal(s.work, 10 + 4 + 4 + 1 + 2);
   assert.equal(s.peak, 3);
 });
+
+test("the catalogue and the Dashboard never appear as part of the estate", () => {
+  const PERF = ["item", "schema", "object", "loads", "duration", "longest", "read", "inserted", "updated", "deleted", "rejected", "reloads", "skips", "timedread", "timedduration", "last"];
+  const perf = (item, schema, object) => [item, schema, object, 1, 1000, 1000, 10, 1, 0, 0, 0, 0, 0, 10, 1000, AT];
+  const extra = table("perfmonth", PERF, [
+    perf("Warehouse/_weaver", "_", "GraphNode"), perf("Warehouse/Curated", "_", "Load"),
+    perf("SemanticModel/Catalogue Dashboard", "", ""), perf("Warehouse/Curated", "Sales", "Region")]);
+  const m = model(estate({ extra }));
+  assert.deepEqual(D.perfRows(m, "perfmonth").map((r) => r.item + " " + r.object), ["Warehouse/Curated Region"]);
+});
+
+test("a selection of several objects shows the union of their lineage", () => {
+  const m = model(estate());
+  const win = D.focusWindow(m, ["r", "c"], 0, 1, []);
+  assert.deepEqual(Array.from(win.seeds).sort(), ["c", "r"]);
+  assert.equal(win.lineage.get("r"), 0);
+  assert.equal(win.lineage.get("c"), 0);
+  // One hop down from either: the shortcut from Customer, ByRegion from Region.
+  assert.equal(win.lineage.get("s"), 1);
+  assert.equal(win.lineage.get("b"), 1);
+  assert.equal(win.focus, "c");
+});

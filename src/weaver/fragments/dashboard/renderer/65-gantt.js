@@ -7,7 +7,10 @@ function logRows(m) {
   if (m.logRows) return m.logRows;
   var byTarget = new Map(), flows = new Map((m.tables.logflows || []).map(function (r) { return [r.index, r.workflow]; }));
   m.items.forEach(function (it) { if (it.target) byTarget.set(it.type + "|" + it.target, it.label); });
-  m.logRows = (m.tables.log || []).map(function (r) {
+  m.logRows = (m.tables.log || []).filter(function (r) {
+    var item = byTarget.get(r.targettype + "|" + r.target);
+    return !(item && isInternal(m, item, r.schema)) && !(r.object && INTERNAL_SCHEMA.test(r.schema || ""));
+  }).map(function (r) {
     var item = byTarget.get(r.targettype + "|" + r.target) || null;
     var node = item && r.object ? m.byIdentity.get(identityKey(item, r.schema, r.object)) || null : null;
     var started = num(r.started), completed = num(r.completed);

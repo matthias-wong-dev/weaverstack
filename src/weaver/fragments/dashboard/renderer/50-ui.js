@@ -179,18 +179,18 @@ function searchBox(options) {
     list.hidden = !results.length;
     results.forEach(function (r, i) {
       list.appendChild(el("li", { role: "option", "aria-selected": String(i === active), "class": "wd-result",
-        onmousedown: function (e) { e.preventDefault(); choose(r); } },
+        onmousedown: function (e) { e.preventDefault(); choose(r, e.shiftKey || e.metaKey || e.ctrlKey); } },
         [el("span", { "class": "wd-result-label" }, [r.kind ? kindMark(r.kind) : null, r.label]),
           el("span", { "class": "wd-result-meta", text: r.meta }),
           r.desc ? el("span", { "class": "wd-result-desc", text: r.desc }) : null]));
     });
   }
-  function choose(r) { input.value = ""; results = []; render(); input.blur(); options.onPick(r); }
+  function choose(r, adding) { input.value = ""; results = []; render(); input.blur(); options.onPick(r, adding); }
   input.addEventListener("input", function () { results = options.find(input.value); active = 0; render(); });
   input.addEventListener("keydown", function (e) {
     if (e.key === "ArrowDown") { active = Math.min(results.length - 1, active + 1); render(); e.preventDefault(); }
     else if (e.key === "ArrowUp") { active = Math.max(0, active - 1); render(); e.preventDefault(); }
-    else if (e.key === "Enter" && results[active]) choose(results[active]);
+    else if (e.key === "Enter" && results[active]) choose(results[active], e.shiftKey || e.metaKey || e.ctrlKey);
     else if (e.key === "Escape") { input.value = ""; results = []; render(); }
   });
   input.addEventListener("blur", function () { setTimeout(function () { list.hidden = true; }, 150); });
@@ -200,11 +200,11 @@ function searchBox(options) {
 
 function nodeSearch(m, onPick) {
   return searchBox({
-    placeholder: "Search " + fmt(m.nodes.size) + " objects by name, item or description",
+    placeholder: "Search " + fmt(m.nodes.size) + " objects · Shift adds to the selection",
     find: function (q) {
       return searchNodes(m, q, 12).map(function (n) { return { key: n.key, kind: n.kind, label: n.label, meta: n.kind + " · " + n.item, desc: n.desc }; });
     },
-    onPick: function (r) { onPick(r.key); }
+    onPick: function (r, adding) { onPick(r.key, adding); }
   });
 }
 

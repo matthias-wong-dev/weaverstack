@@ -140,6 +140,15 @@ function status(r) {
   return { result: r.result, workflow: r.workflow, started: num(r.started), completed: num(r.completed), duration: num(r.duration) };
 }
 
+/* The catalogue, the Dashboard and the `_` surface the catalogue presents in
+   every item are Weaver's own; no page reports them as part of the estate. */
+var INTERNAL_SCHEMA = /^(?:Files\/|Tables\/)?_$/;
+
+function isInternal(m, item, schema) {
+  var it = m.items.get(item);
+  return !!(it && it.internal) || item === CATALOGUE_ITEM || DASHBOARD_ITEMS.indexOf(item) >= 0 || INTERNAL_SCHEMA.test(schema || "");
+}
+
 function visibleItems(m) {
   return Array.from(m.items.values()).filter(function (it) { return !it.internal; });
 }

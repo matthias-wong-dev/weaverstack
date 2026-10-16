@@ -1,11 +1,9 @@
 // The declared metadata, indexed once, and the Dictionary page.
 
-var INTERNAL_SCHEMA = /^(?:Files\/|Tables\/)?_$/;
-
 function metadata(m) {
   if (m.meta) return m.meta;
   var t = function (name) { return m.tables[name] || []; };
-  function keep(r) { var it = m.items.get(r.item); return !(it && it.internal) && !INTERNAL_SCHEMA.test(r.schema || ""); }
+  function keep(r) { return !isInternal(m, r.item, r.schema); }
   var md = { tables: new Map(), folders: new Map(), schemas: [], columns: new Map(), keys: new Map(), validations: new Map(),
     foreignKeys: [], references: new Map(), referencedBy: new Map(), models: new Map(), hasMetadata: !!m.tables.tables, hasSemantic: !!m.tables.models };
   t("tables").filter(keep).forEach(function (r) { md.tables.set(identityKey(r.item, r.schema, r.object), r); });

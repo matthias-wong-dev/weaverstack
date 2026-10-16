@@ -178,6 +178,13 @@ body:has(.wd[data-theme="dark"]) { background: #0b121b; }
 .wd-findings li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; }
 .wd-findings-wide li { padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
 .wd-handoff { margin-top: 16px; }
+.wd-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.wd-chip-select { display: inline-flex; align-items: center; height: 28px; border: 1px solid var(--line-strong); border-radius: 999px; background: var(--surface); overflow: hidden; }
+.wd-chip-select.wd-current { border-color: var(--blue); background: var(--blue-soft); }
+.wd-chip-name { display: inline-flex; align-items: center; height: 100%; padding: 0 4px 0 11px; border: 0; background: none; cursor: pointer; font-weight: 620; }
+.wd-chip-remove { height: 100%; padding: 0 10px 0 6px; border: 0; background: none; color: var(--muted); cursor: pointer; font-size: 15px; }
+.wd-chip-remove:hover { color: var(--red); }
+.wd-chip-clear { height: 28px; }
 .wd-close { float: right; margin: -4px -6px 0 8px; }
 .wd-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; color: var(--muted); font-size: 11.5px; }
 .wd-key { display: inline-flex; align-items: center; gap: 6px; }

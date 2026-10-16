@@ -147,8 +147,8 @@ GraphView.prototype.paint = function () {
         ctx.fillText(c.kind === "shortcuts" ? "SHORTCUTS" : "TESTS", c.x - 4, b.y + GEOMETRY.HEAD - 2);
       }
     });
-    // The header reads at any zoom: below 0.5 it grows with the zoom out.
-    var grow = Math.max(1, 0.5 / k), eyebrow = 9.5 * grow, name = Math.min(13 * grow, b.width / 8);
+    // The header stays readable at any zoom: below 0.9 it grows as the view zooms out.
+    var grow = Math.max(1, 0.9 / k), eyebrow = 9.5 * grow, name = Math.min(13 * grow, b.width / 7);
     ctx.fillStyle = P.blue; ctx.font = "700 " + eyebrow + "px " + mono;
     ctx.fillText(b.item.type.toUpperCase(), b.x + 16, b.y + 8 + eyebrow);
     ctx.fillStyle = P.ink; ctx.font = "700 " + name + "px " + sans;
@@ -205,19 +205,27 @@ GraphView.prototype.paint = function () {
     if (!p || !inView(p.x, p.y)) return;
     var inWin = !win || shown.has(n.key), inLine = !win || lineage.has(n.key);
     if (!inWin) {
-      ctx.beginPath(); ctx.arc(p.x, p.y, 2.2, 0, 7); ctx.fillStyle = P["line-strong"]; ctx.globalAlpha = 0.55; ctx.fill(); ctx.globalAlpha = 1;
+      // Background: the rest of the estate, faint, and named once it can be read.
+      ctx.globalAlpha = 0.45;
+      if (k >= 0.55) {
+        glyph(ctx, n.kind, p.x, p.y, P.faint, P);
+        ctx.font = font; ctx.fillStyle = P.faint;
+        ctx.fillText(clip(ctx, n.label, GEOMETRY.SUB - 30, font), p.x + 11, p.y + 4);
+      } else { ctx.beginPath(); ctx.arc(p.x, p.y, 2.2, 0, 7); ctx.fillStyle = P["line-strong"]; ctx.fill(); }
+      ctx.globalAlpha = 1;
       return;
     }
     var colour = inLine ? self.nodeColour(n, P) : P.faint;
-    if (win && n.key === win.focus) {
+    if (win && win.seeds.has(n.key)) {
       ctx.beginPath(); ctx.arc(p.x, p.y, 10, 0, 7); ctx.fillStyle = P["blue-soft"]; ctx.fill();
       ctx.lineWidth = 2 / Math.max(k, 0.8); ctx.strokeStyle = P.ink; ctx.stroke();
     }
     glyph(ctx, n.kind, p.x, p.y, colour, P);
     self.marks(ctx, n, p, P, inLine);
     if (labels || (win && (inLine || k > 0.3))) {
-      var text = clip(ctx, n.label, GEOMETRY.SUB - 30, n.key === (win && win.focus) ? fontStrong : font);
-      ctx.font = n.key === (win && win.focus) ? fontStrong : font;
+      var seed = win && win.seeds.has(n.key);
+      var text = clip(ctx, n.label, GEOMETRY.SUB - 30, seed ? fontStrong : font);
+      ctx.font = seed ? fontStrong : font;
       // A halo in the background colour keeps labels legible over edges.
       ctx.lineJoin = "round"; ctx.lineWidth = 3; ctx.strokeStyle = P.band; ctx.strokeText(text, p.x + 11, p.y + 4);
       ctx.fillStyle = !inLine ? P.muted : P.ink;
@@ -269,8 +277,9 @@ GraphView.prototype.marks = function (ctx, n, p, P, inLine) {
   }
 };
 
+/* A travel marker: ‹‹ N for upstream neighbours left out, N ›› downstream. */
 GraphView.prototype.marker = function (ctx, P, key, side, keys, x, y, join) {
-  var text = "+" + keys.length, w = ctx.measureText(text).width + 12, left = side === "up" ? x - w / 2 + 14 : x;
+  var text = side === "up" ? "‹‹ " + keys.length : keys.length + " ››", w = ctx.measureText(text).width + 12, left = side === "up" ? x - w / 2 + 14 : x;
   ctx.beginPath(); ctx.setLineDash([2, 2]);
   if (side === "up") { ctx.moveTo(left + w, y); ctx.lineTo(join, y); } else { ctx.moveTo(join, y); ctx.lineTo(left, y); }
   ctx.strokeStyle = P["line-strong"]; ctx.lineWidth = 1; ctx.stroke(); ctx.setLineDash([]);
@@ -306,16 +315,20 @@ GraphView.prototype.fitAll = function (animate) {
   this.fitRect({ x: 0, y: 0, w: this.lay.width, h: this.lay.height }, 1.1, animate);
 };
 
-/* Centre on the window: the lineage and its context, at a readable scale. */
+/* Zoom to the selection's lineage, as a map zooms to a route. */
 GraphView.prototype.fitWindow = function (animate) {
   if (!this.win) return this.fitAll(animate);
+  this.fitKeys(Array.from(this.win.lineage.keys()), animate);
+};
+
+GraphView.prototype.fitKeys = function (keys, animate) {
   var x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity, lay = this.lay;
-  this.win.shown.forEach(function (key) {
+  keys.forEach(function (key) {
     var p = lay.pos.get(key);
     x0 = Math.min(x0, p.x - 60); y0 = Math.min(y0, p.y - 20); x1 = Math.max(x1, p.x + 190); y1 = Math.max(y1, p.y + 20);
   });
   var rect = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 }, k = Math.min(1.15, Math.min(this.width / (rect.w + 160), this.height / (rect.h + 120)));
-  if (k < 0.55) {
+  if (k < 0.2 && this.win) {
     // Too spread to read at once: keep the focus legible and in the middle.
     var p = lay.pos.get(this.win.focus);
     return this.go({ k: 0.75, x: this.width / 2 - (p.x + 60) * 0.75, y: this.height / 2 - p.y * 0.75 }, animate);
@@ -416,7 +429,7 @@ GraphView.prototype.bind = function () {
     pointers.delete(e.pointerId);
     c.classList.remove("wd-dragging");
     if (pointers.size < 2) pinch = null;
-    if (wasClick && e.type === "pointerup") self.click(e.clientX, e.clientY);
+    if (wasClick && e.type === "pointerup") self.click(e.clientX, e.clientY, e.shiftKey || e.metaKey || e.ctrlKey);
     if (!pointers.size) drag = null;
   }
   c.addEventListener("pointerup", end);
@@ -461,11 +474,11 @@ GraphView.prototype.flashHint = function () {
   this.hintTimer = setTimeout(function () { hint.hidden = true; }, 1400);
 };
 
-GraphView.prototype.click = function (cx, cy) {
+GraphView.prototype.click = function (cx, cy, adding) {
   var h = this.hit(cx, cy);
   if (!h) return;
   if (h.marker && this.o.onReveal) this.o.onReveal(h.marker);
-  else if (h.node && this.o.onSelect) this.o.onSelect(h.node);
+  else if (h.node && this.o.onSelect) this.o.onSelect(h.node, adding);
 };
 
 GraphView.prototype.hoverAt = function (cx, cy) {
@@ -473,7 +486,7 @@ GraphView.prototype.hoverAt = function (cx, cy) {
   this.canvas.style.cursor = h ? "pointer" : "grab";
   if (h && h.marker) {
     this.showTip(cx, cy, [el("b", { text: h.marker.keys.length + (h.marker.side === "up" ? " more upstream" : " more downstream") }),
-      el("div", { "class": "wd-muted", text: "Select to show " + (h.marker.keys.length > BUDGET.REVEAL ? "the first " + BUDGET.REVEAL : "them") })]);
+      el("div", { "class": "wd-muted", text: "Select to travel there and show " + (h.marker.keys.length > BUDGET.REVEAL ? "the first " + BUDGET.REVEAL : "them") })]);
   } else if (key) {
     var n = this.m.nodes.get(key), s = isValidation(n) ? n.test : effectiveLoad(n);
     this.showTip(cx, cy, [el("b", { text: n.label }), el("div", { "class": "wd-muted", text: n.kind + " · " + n.item }),

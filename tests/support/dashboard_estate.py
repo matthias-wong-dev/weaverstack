@@ -364,6 +364,31 @@ class _Estate:
                         "details": json.dumps({"node_id": row["node_id"]}),
                     },
                 )
+        # The catalogue's own work, which no page reports as the estate's.
+        stat += 1
+        self.add(
+            "LoadStatistic",
+            {
+                "load_statistic_sk": stat,
+                "item_type": "Warehouse",
+                "item_name": "_weaver",
+                "schema_name": "_",
+                "object_name": "GraphNode",
+                "workflow_id": _guid("catalogue"),
+                "started_datetime": self.at - timedelta(hours=2),
+                "completed_datetime": self.at
+                - timedelta(hours=2)
+                + timedelta(seconds=40),
+                "duration_milliseconds": 40000,
+                "rows_read": 900,
+                "rows_inserted": 900,
+                "rows_updated": 0,
+                "rows_deleted": 0,
+                "rows_rejected": 0,
+                "is_reload": False,
+                "is_static_skip": False,
+            },
+        )
         for day in range(days):
             for row in self.loadable:
                 if r.random() < 0.25:

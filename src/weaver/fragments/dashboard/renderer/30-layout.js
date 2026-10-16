@@ -166,14 +166,16 @@ function layoutEstate(m) {
 
 /* ---- the window around a focus ------------------------------------------ */
 
-/* Three levels: the focus and its lineage to the requested depths, a bounded
-   ring of surrounding context, and for every shown node the neighbours left
-   out, which become continuation markers. */
-function focusWindow(m, focus, upDepth, downDepth, revealed) {
-  if (!m.nodes.has(focus)) return null;
-  var dist = new Map([[focus, 0]]);
+/* Three levels: the selected nodes and their lineage to the requested depths,
+   a bounded ring of surrounding context, and for every shown node the
+   neighbours left out, which become continuation markers. */
+function focusWindow(m, selection, upDepth, downDepth, revealed) {
+  var seeds = (Array.isArray(selection) ? selection : [selection]).filter(function (k) { return m.nodes.has(k); });
+  if (!seeds.length) return null;
+  var focus = seeds[seeds.length - 1], dist = new Map();
+  seeds.forEach(function (k) { dist.set(k, 0); });
   function walk(next, sign, depth) {
-    var limit = depth < 0 ? Infinity : depth, frontier = [focus];
+    var limit = depth < 0 ? Infinity : depth, frontier = seeds.slice();
     for (var step = 1; step <= limit && frontier.length; step++) {
       var found = [];
       frontier.forEach(function (k) {
@@ -226,7 +228,7 @@ function focusWindow(m, focus, upDepth, downDepth, revealed) {
     var up = n.vup.filter(function (j) { return !shown.has(j); }), down = n.vdown.filter(function (j) { return !shown.has(j); });
     if (up.length || down.length) more.set(k, { up: up, down: down });
   });
-  return { focus: focus, lineage: lineage, context: context, shown: shown, edges: edges, more: more,
+  return { focus: focus, seeds: new Set(seeds), lineage: lineage, context: context, shown: shown, edges: edges, more: more,
     reach: dist.size, truncated: dist.size > lineage.size, edgesDropped: edgeTotal - edges.length };
 }
 

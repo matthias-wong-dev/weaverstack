@@ -8,31 +8,56 @@ var DEPTHS = [0, 1, 2, -1];
 function graphWorkspace(body, m, options) {
   var s = pageState(options.page), lay = layoutEstate(m);
   var handed = takeHandOff();
-  if (handed && m.nodes.has(handed)) { s.focus = handed; s.revealed = []; s.refit = true; }
-  if (s.focus && !m.nodes.has(s.focus)) s.focus = null;
+  if (handed && m.nodes.has(handed)) { s.selection = [handed]; s.revealed = []; s.refit = true; }
+  s.selection = (s.selection || (s.focus ? [s.focus] : [])).filter(function (k) { return m.nodes.has(k); });
+  if (!s.focus || s.selection.indexOf(s.focus) < 0) s.focus = s.selection[s.selection.length - 1] || null;
   if (s.up === undefined) s.up = 1;
   if (s.down === undefined) s.down = 1;
   s.revealed = (s.revealed || []).filter(function (k) { return m.nodes.has(k); });
   var health = options.health ? assessHealth(m) : null;
 
   var host = el("div", { "class": "wd-graph" }), side = el("aside", { "class": "wd-side" }), line = el("div", { "class": "wd-status-line" });
+  var chips = el("div", { "class": "wd-chips", "aria-label": "Selected objects" });
   var view;
-  function select(key) {
-    s.focus = key; s.revealed = [];
+  /* A plain choice replaces the selection; Shift, Ctrl or ⌘ adds or removes. */
+  function select(key, adding) {
+    if (!key) s.selection = [];
+    else if (adding) {
+      var at = s.selection.indexOf(key);
+      if (at >= 0) s.selection.splice(at, 1); else s.selection.push(key);
+    } else s.selection = [key];
+    s.focus = key && s.selection.indexOf(key) >= 0 ? key : s.selection[s.selection.length - 1] || null;
+    s.revealed = [];
     apply(true);
-    if (key && options.onFocus) options.onFocus(key);
   }
+  /* Following a marker reveals the neighbours it counts and travels to them. */
   function reveal(marker) {
-    s.revealed = s.revealed.concat(revealFrom(m, marker.keys).filter(function (k) { return s.revealed.indexOf(k) < 0; }));
+    var shown = revealFrom(m, marker.keys).filter(function (k) { return s.revealed.indexOf(k) < 0; });
+    s.revealed = s.revealed.concat(shown);
     apply(false);
+    view.fitKeys([marker.key].concat(shown), true);
   }
   function apply(refit) {
-    var win = s.focus ? focusWindow(m, s.focus, s.up, s.down, s.revealed) : null;
+    var win = s.selection.length ? focusWindow(m, s.selection, s.up, s.down, s.revealed) : null;
     view.setWindow(win);
     status(win);
+    renderChips();
     details(side, m, s.focus, { onOpen: select, health: health, emptyText: options.empty });
     if (refit) { if (win) view.fitWindow(true); else view.fitAll(true); }
     remember();
+  }
+  function renderChips() {
+    chips.textContent = "";
+    chips.hidden = !s.selection.length;
+    s.selection.forEach(function (key) {
+      var n = m.nodes.get(key);
+      chips.appendChild(el("span", { "class": "wd-chip-select" + (key === s.focus ? " wd-current" : "") }, [
+        el("button", { type: "button", "class": "wd-chip-name", title: n.item + " · " + qualified(n), onclick: function () { s.focus = key; details(side, m, key, { onOpen: select, health: health }); renderChips(); view.fitKeys([key], true); } },
+          [kindMark(n.kind), n.label]),
+        el("button", { type: "button", "class": "wd-chip-remove", "aria-label": "Remove " + n.label, onclick: function () { select(key, true); } }, ["×"])
+      ]));
+    });
+    if (s.selection.length > 1) chips.appendChild(el("button", { type: "button", "class": "wd-text-btn wd-chip-clear", onclick: function () { select(null); } }, ["Clear"]));
   }
   function status(win) {
     line.textContent = "";
@@ -40,8 +65,8 @@ function graphWorkspace(body, m, options) {
       line.appendChild(document.createTextNode(fmt(m.nodes.size) + " objects in " + fmt(lay.bands.length) + " items. Search or select an object to follow its lineage."));
       return;
     }
-    var parts = [win.lineage.size + " in lineage", win.context.size + " around it"];
-    if (win.truncated) parts.push(el("b", { "class": "wd-warn-text", text: "lineage cut to the " + win.lineage.size + " nearest of " + fmt(win.reach) + "; lower a depth or follow a +N marker" }));
+    var parts = [(win.seeds.size > 1 ? win.seeds.size + " selected · " : "") + win.lineage.size + " in lineage", win.context.size + " around it"];
+    if (win.truncated) parts.push(el("b", { "class": "wd-warn-text", text: "lineage cut to the " + win.lineage.size + " nearest of " + fmt(win.reach) + "; lower a depth or follow a ‹‹ or ›› marker" }));
     if (win.edgesDropped) parts.push(el("b", { "class": "wd-warn-text", text: win.edgesDropped + " edges not drawn" }));
     parts.forEach(function (p, i) { if (i) line.appendChild(document.createTextNode(" · ")); line.appendChild(typeof p === "string" ? document.createTextNode(p) : p); });
   }
@@ -59,6 +84,7 @@ function graphWorkspace(body, m, options) {
   ]);
   body.appendChild(bar);
   if (options.above) body.appendChild(options.above);
+  body.appendChild(chips);
   body.appendChild(line);
   var split = el("div", { "class": "wd-split" }, [el("div", { "class": "wd-graph-col" }, [host, legend(options.mode)]), side]);
   body.appendChild(split);
@@ -67,7 +93,7 @@ function graphWorkspace(body, m, options) {
   view = new GraphView(host, m, lay, { state: s, mode: options.mode, onSelect: select, onReveal: reveal, label: options.label });
   apply(false);
   // A remembered viewport is kept unless it no longer shows the focus or the estate.
-  if (fresh || s.refit || !view.showing(s.focus)) { s.refit = false; if (s.focus) view.fitWindow(false); else view.fitAll(false); }
+  if (fresh || s.refit || !view.showing(s.focus)) { s.refit = false; if (s.selection.length) view.fitWindow(false); else view.fitAll(false); }
   function remember() { saveState(); }
   return { select: select };
 }
@@ -83,7 +109,7 @@ function legend(mode) {
   ];
   return el("div", { "class": "wd-legend" }, entries.map(function (e) {
     return el("span", { "class": "wd-key" }, [el("i", { "class": "wd-key-" + e[0] }), e[1]]);
-  }).concat([el("span", { "class": "wd-key" }, [el("i", { "class": "wd-key-more", text: "+3" }), "more beyond the window"])]));
+  }).concat([el("span", { "class": "wd-key" }, [el("i", { "class": "wd-key-more", text: "3 ››" }), "more beyond the window: select to travel"])]));
 }
 
 function lineagePage(body, m) {
