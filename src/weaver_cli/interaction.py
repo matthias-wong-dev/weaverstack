@@ -9,9 +9,11 @@ from __future__ import annotations
 import argparse
 import sys
 
-NON_INTERACTIVE_HELP = (
-    "Do not read stdin, wait for a keypress or open browser sign-in. Missing "
-    "authorisation or required input is an error."
+from weaver.command_parser import (
+    NON_INTERACTIVE_HELP as NON_INTERACTIVE_HELP,
+)
+from weaver.command_parser import (
+    add_non_interactive as add_non_interactive,
 )
 
 RETRY_PROMPT = "Enter to retry, Esc to exit."
@@ -20,12 +22,6 @@ ESC = "\x1b"
 INTERRUPT = "\x03"
 END_OF_FILE = "\x04"
 ENTER = ("\r", "\n")
-
-
-def add_non_interactive(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument(
-        "--non-interactive", action="store_true", help=NON_INTERACTIVE_HELP
-    )
 
 
 def non_interactive(args: argparse.Namespace | None) -> bool:

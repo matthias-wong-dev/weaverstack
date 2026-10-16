@@ -96,10 +96,17 @@ def test_one_spelling_and_one_help_text():
 
     import inspect
 
-    source = inspect.getsource(_module("weaver_cli.main"))
+    grammar = _module("weaver.command_parser")
+    source = inspect.getsource(grammar.build_parser) + inspect.getsource(
+        grammar._add_initialise_args
+    )
 
     assert '"--non-interactive"' not in source
     assert source.count("add_non_interactive(") == len(EXECUTABLE_COMMANDS) - 1
+    assert (
+        _module("weaver_cli.interaction").add_non_interactive
+        is grammar.add_non_interactive
+    )
 
 
 @weaver_test()
