@@ -407,19 +407,32 @@ INSTALLATION = CatalogueTable(
     columns=(
         *_scope(),
         CatalogueColumn(
+            "workspace_name",
+            not_null=True,
+            description="The resolved Fabric workspace display name.",
+        ),
+        CatalogueColumn(
+            "workspace_id",
+            not_null=True,
+            public="Workspace GUID",
+            description="The resolved Fabric workspace GUID.",
+        ),
+        CatalogueColumn(
             "target_name",
             not_null=True,
-            description="The physical item currently bound to this installation.",
+            description="The resolved Fabric target display name.",
+        ),
+        CatalogueColumn(
+            "item_id",
+            not_null=True,
+            public="Target item GUID",
+            description="The resolved Fabric target item GUID.",
         ),
         CatalogueColumn(
             "weaver_version",
             not_null=True,
             description="The Weaver version that last reconciled this installation.",
         ),
-        CatalogueColumn(
-            "workspace_id", description="The resolved Fabric workspace ID."
-        ),
-        CatalogueColumn("item_id", description="The resolved Fabric item ID."),
         _signature("the Item declaration"),
     ),
 )

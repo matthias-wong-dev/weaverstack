@@ -133,11 +133,11 @@ def generate_item_build_bundle(
     selected_ids = selected_documents | selected_shortcuts | selected_loads
     certifiable_ids = selected_ids | selected_validations
 
-    from .semantic import bind_semantic_target
+    from .targets import bind_inventory_target
 
     inventories = dict(target_inventories or {})
     target_by_item = {
-        item: bind_semantic_target(
+        item: bind_inventory_target(
             by_item[item].to_bound_target(), inventories.get(item)
         )
         for item in sorted(by_item, key=str)
@@ -978,7 +978,9 @@ def _catalogue_target(binding: WarehouseBinding, targets):
     matching = tuple(
         target
         for target in targets
-        if target.kind == physical.kind and target.item_id == physical.item_id
+        if target.kind == physical.kind
+        and target.name == physical.name
+        and (binding.item_id is None or target.item_id == physical.item_id)
     )
     for target in matching:
         if target.logical_item_name == "_weaver":

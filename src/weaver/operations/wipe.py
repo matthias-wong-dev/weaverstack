@@ -109,6 +109,10 @@ class WipePlan:
     preserve_data_source: bool = False
     #: Recorded Reports. A Report holds no data, so it is left as it is.
     left: tuple[WipeTarget, ...] = ()
+    #: Installation rows that selected an unscoped wipe's physical targets.
+    recorded_installations: tuple[Mapping[str, object], ...] | None = field(
+        default=None, repr=False, compare=False
+    )
 
     def __post_init__(self) -> None:
         for target in self.targets:
@@ -316,6 +320,8 @@ def plan_wipe(
 
     installed: dict[str, list[str]] = {}
     left: tuple[WipeTarget, ...] = ()
+    recorded_installations = None
+    recorded = ()
     if selected:
         discovered = selected
     else:
@@ -343,6 +349,13 @@ def plan_wipe(
     ):
         raise CommandError("--preserve-data-source requires a SemanticModel target")
     ordered = _execution_order(discovered, catalogue=resolved_catalogue, action=action)
+    if not selected:
+        wiped = {str(target).casefold() for target in ordered}
+        recorded_installations = tuple(
+            dict(row)
+            for (_item, target), row in zip(recorded, getattr(recorded, "rows", ()))
+            if target.item_type != REPORT and str(target).casefold() in wiped
+        )
     unbound = ()
     if action == UNBIND:
         unbound = tuple(
@@ -360,6 +373,7 @@ def plan_wipe(
         installed={key: tuple(items) for key, items in installed.items()},
         preserve_data_source=preserve_data_source,
         left=left,
+        recorded_installations=recorded_installations,
     )
 
 
@@ -475,28 +489,51 @@ def _execution_order(
     return rest + (WipeTarget.parse(catalogue),)
 
 
-def _installed_estate(
-    workspace: Workspace, *, session
-) -> tuple[tuple[str, WipeTarget], ...]:
+@dataclass(frozen=True)
+class _InstalledEstate:
+    entries: tuple[tuple[str, WipeTarget], ...]
+    rows: tuple[Mapping[str, object], ...]
+
+    def __iter__(self):
+        return iter(self.entries)
+
+
+def _installed_estate(workspace: Workspace, *, session) -> _InstalledEstate:
     """Each logical item ``_.Installation`` records, and its physical target."""
 
     from ..catalogue.connection import catalogue_connection
 
-    return installations(catalogue_connection(session, workspace))
+    rows = _installation_rows(catalogue_connection(session, workspace))
+    records = _installation_records(rows)
+    return _InstalledEstate(
+        tuple((item, target) for item, target, _row in records),
+        tuple(row for _item, _target, row in records),
+    )
 
 
 def installations(catalogue) -> tuple[tuple[str, WipeTarget], ...]:
+    return tuple(
+        (item, target)
+        for item, target, _row in _installation_records(_installation_rows(catalogue))
+    )
+
+
+def _installation_rows(catalogue) -> tuple[Mapping[str, object], ...]:
     from ..catalogue.reader import read_table
     from ..catalogue.tables import INSTALLATION
 
+    return tuple(dict(row) for row in read_table(catalogue, INSTALLATION))
+
+
+def _installation_records(rows):
     found = []
-    for row in read_table(catalogue, INSTALLATION):
+    for row in rows:
         name = row.get("target_name")
         if not name:
             continue
         # Use the target grammar so invalid catalogue rows are reported precisely.
         target = WipeTarget.parse(f"{row['item_type']}/{str(name).strip()}")
-        found.append((f"{row['item_type']}/{row['item_name']}", target))
+        found.append((f"{row['item_type']}/{row['item_name']}", target, row))
     return tuple(sorted(found, key=lambda pair: (str(pair[1]).casefold(), pair[0])))
 
 
@@ -595,6 +632,7 @@ def wipe(
             )
         )
         with task:
+            _verify_recorded_installations(plan, session=opened)
             if dry_run:
                 items, reports = _enumerate(plan, resolved, session=opened)
                 unbound = None
@@ -617,6 +655,15 @@ def wipe(
                 plan=plan,
                 dry_run=dry_run,
             )
+
+
+def _verify_recorded_installations(plan: WipePlan, *, session) -> None:
+    rows = plan.recorded_installations
+    if rows is None:
+        return
+    from ..catalogue.installation import verify_installations
+
+    verify_installations(rows, resolver=session.resolver(plan.workspace))
 
 
 def _execute(plan: WipePlan, workspace, *, session):

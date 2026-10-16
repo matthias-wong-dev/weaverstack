@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 from support.weaver_test import weaver_test
-from support.workspaces import given_workspace
+from support.workspaces import given_resolver, given_workspace
 from test_mutation_archive_install import build_plan_fixture as legacy
 
 from weaver.locations import Location
@@ -47,10 +47,22 @@ def run_bootstrap(
     legacy_plan, payloads = legacy()
     plan = legacy_plan
     if not catalogue:
+        from weaver.targets import ItemRef
+
+        resolved = given_resolver(lakehouses=["Sales"]).resolve(
+            ItemRef("Sales"), item_type="Lakehouse"
+        )
         plan = replace(
             plan,
             bundle_id="",
-            targets=(replace(plan.targets[0], item_name="Sales"),),
+            targets=(
+                replace(
+                    plan.targets[0],
+                    item_name="Sales",
+                    item_id=resolved.id,
+                    workspace_id=resolved.workspace_id,
+                ),
+            ),
             execution=replace(
                 plan.execution, catalogue_target_id=None, spark_home_target_id="sales"
             ),
@@ -73,7 +85,7 @@ def run_bootstrap(
     root = tmp_path / "physical"
 
     class Resolver:
-        def __init__(self, physical=root):
+        def __init__(self, physical):
             self.physical = physical
 
         def folder_object(self, target, schema, name):
@@ -84,6 +96,17 @@ def run_bootstrap(
 
         def folder_root(self, target):
             return Location(str(self.physical / "Files"))
+
+    def resolver_for(physical):
+        if catalogue:
+            return Resolver(physical)
+        resolver = given_resolver(lakehouses=["Sales"])
+        resolver.folder_object = lambda target, schema, name: Location(
+            str(physical / "Files" / schema / name)
+        )
+        resolver.files_root = lambda item: Location(str(physical / "Files"))
+        resolver.folder_root = lambda target: Location(str(physical / "Files"))
+        return resolver
 
     active = []
 
@@ -113,7 +136,7 @@ def run_bootstrap(
     with TestSession(
         workspace=given_workspace(),
         store=reference_store,
-        resolver=Resolver(reference_root),
+        resolver=resolver_for(reference_root),
     ) as reference_session:
         reference = execute_mutation(
             plan, payloads, reference_session, build_datetime=request["build_datetime"]
@@ -143,7 +166,9 @@ def run_bootstrap(
             def archive_session(**options):
                 assert (options["workspace"].catalogue is not None) == catalogue
                 return TestSession(
-                    workspace=options["workspace"], store=store, resolver=Resolver()
+                    workspace=options["workspace"],
+                    store=store,
+                    resolver=resolver_for(root),
                 )
 
             monkeypatch.setattr(module, "ArchiveSession", archive_session)

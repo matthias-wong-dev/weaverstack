@@ -9,7 +9,6 @@ from support.weaver_test import weaver_test
 
 from weaver.catalogue.borrow import Borrowed
 from weaver.declaration.model import WeaverDocumentId, WeaverItemId
-from weaver.fabric.resources import Item
 from weaver.locations import Location
 from weaver.mirror_plan import mirror_mutation_plan
 from weaver.operations.mirror import MirrorItem, MirrorPlan, ResolvedMirror
@@ -67,7 +66,7 @@ class _SourceSql:
 class _Session:
     def __init__(self, *, rows=(), resolver=None, store=None):
         self.rows = list(rows)
-        self._resolver = resolver
+        self._resolver = resolver if resolver is not None else _Resolver(None)
         self._store = store
 
     def sql_executor(self, target, *, workspace=None):
@@ -199,10 +198,37 @@ def test_a_warehouse_mirror_orders_same_item_reads_and_creates_each_schema_once(
 
 class _Resolver:
     def __init__(self, root):
+        from support.workspaces import given_resolver
+
         self.root = root
+        self._identity = given_resolver(
+            workspace=WORKSPACE,
+            warehouses=(
+                "Weaver",
+                "Weaver_Dev",
+                "Model",
+                "Model_Dev",
+                "Core",
+                "Core_Dev",
+                "Finance",
+                "Finance_Dev",
+                "Mart",
+                "Mart_Dev",
+            ),
+            lakehouses=("Input", "Input_Dev", "Model", "Model_Dev"),
+        )
+
+    @property
+    def workspace(self):
+        return self._identity.workspace
+
+    def resolve(self, item, *, item_type):
+        return self._identity.resolve(item, item_type=item_type)
 
     def external_item(self, name, *, item_type, workspace=None):
-        return Item(id=f"{name}-id", name=name, type=item_type, workspace_id="ws-id")
+        return self._identity.external_item(
+            name, item_type=item_type, workspace=workspace
+        )
 
     def external_root(self, item):
         return Location(str(self.root / item.name))

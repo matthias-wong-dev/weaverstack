@@ -12,20 +12,6 @@ from .payloads import sha256_hex
 from .stages import BUILD, CATALOGUE, PlannedStage
 
 
-def bind_semantic_target(target, inventory):
-    from dataclasses import replace
-
-    from .targets import SEMANTIC_MODEL_TARGET
-
-    if target.kind not in {SEMANTIC_MODEL_TARGET, "report"} or inventory is None:
-        return target
-    return replace(
-        target,
-        workspace_id=inventory.workspace_id,
-        item_id=inventory.item_id or target.item_id,
-    )
-
-
 def semantic_stage(repository, item, target, *, catalogue_target=None):
     contribution = repository.semantic_models[item]
     publishing = catalogue_target is not None

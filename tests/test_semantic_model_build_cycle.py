@@ -174,10 +174,10 @@ def engine_model(repository, *, year=2026):
 
 
 def installed_state(repository, bindings, deployed, inventories):
-    from weaver.build_bundle.semantic import bind_semantic_target
+    from weaver.build_bundle.targets import bind_inventory_target
 
     targets = {
-        item: bind_semantic_target(binding.to_bound_target(), inventories[item])
+        item: bind_inventory_target(binding.to_bound_target(), inventories[item])
         for item, binding in bindings.by_item.items()
     }
     desired = desired_catalogue(
@@ -356,7 +356,7 @@ def test_policy_change_classifies_signatures_and_deploys_all_selected_models(
 ):
     from uuid import NAMESPACE_URL, uuid5
 
-    from weaver.build_bundle.semantic import bind_semantic_target
+    from weaver.build_bundle.targets import bind_inventory_target
 
     root = project(tmp_path, False)
     other = WeaverItemId.parse("SemanticModel/Other")
@@ -386,7 +386,7 @@ def test_policy_change_classifies_signatures_and_deploys_all_selected_models(
             workspace_id="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
             item_id=str(uuid5(NAMESPACE_URL, str(item))),
         )
-        targets[item] = bind_semantic_target(targets[item], inventories[item])
+        targets[item] = bind_inventory_target(targets[item], inventories[item])
         rows[item] = project_semantic_model(
             item, repository.semantic_models[item], deployed=deployed
         )
@@ -482,9 +482,13 @@ def answer_catalogue(session, catalogue, bindings):
     from weaver.catalogue.state import READ_FOR_BUILD, read_target_occupancy
 
     session.answer_tsql(
-        "SELECT TABLE_NAME, COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = N'_'",
+        "SELECT TABLE_NAME, COLUMN_NAME, IS_NULLABLE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = N'_'",
         [
-            {"TABLE_NAME": table.name, "COLUMN_NAME": column.public_name}
+            {
+                "TABLE_NAME": table.name,
+                "COLUMN_NAME": column.public_name,
+                "IS_NULLABLE": "NO" if column.not_null else "YES",
+            }
             for table in READ_FOR_BUILD
             for column in table.columns
         ],

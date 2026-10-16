@@ -50,6 +50,9 @@ class CountingCatalogue:
             for name in table.physical_columns
         }
 
+    def nullability_of(self, table):
+        return {table.public_name_of(name): "NO" for name in table.physical_columns}
+
     def rows(self, statement: str) -> list[dict]:
         self.statements.append(statement)
         return [dict(row) for row in self.rows_by_table.get(_table_of(statement), ())]

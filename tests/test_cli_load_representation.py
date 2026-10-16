@@ -943,7 +943,11 @@ class _FakeTds:
 
         if "INFORMATION_SCHEMA.COLUMNS" in statement:
             return [
-                {"TABLE_NAME": table.name, "COLUMN_NAME": table.public_name_of(column)}
+                {
+                    "TABLE_NAME": table.name,
+                    "COLUMN_NAME": table.public_name_of(column),
+                    "IS_NULLABLE": "NO",
+                }
                 for table in PROJECTED_TABLES
                 for column in table.physical_columns
             ]

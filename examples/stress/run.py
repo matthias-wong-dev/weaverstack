@@ -209,7 +209,10 @@ class Stress:
                 self.load("source", SOURCE_ITEMS, session, "perturb")
 
     def measure(self, cycles: int, keep: bool) -> None:
-        with self.session("estate") as estate, self.session("source") as source:
+        # Each project's Session ends before the other's starts. An idle Spark
+        # session keeps its executors until Fabric's session timeout, so a step
+        # started beside one runs on a single executor.
+        with self.session("estate") as estate:
             if not keep:
                 self.wipe("estate", estate)
             self.build("estate", ESTATE_ITEMS, estate)
@@ -217,8 +220,10 @@ class Stress:
             self.test("estate", ESTATE_ITEMS, estate, "converged")
             self.build("estate", ESTATE_ITEMS, estate, step="unchanged build")
             self.load("estate", ESTATE_ITEMS, estate, "unchanged load")
-            for cycle in range(1, cycles + 1):
+        for cycle in range(1, cycles + 1):
+            with self.session("source") as source:
                 self.load("source", SOURCE_ITEMS, source, "perturb")
+            with self.session("estate") as estate:
                 self.load("estate", ESTATE_ITEMS, estate, f"day {cycle} load")
                 self.test("estate", ESTATE_ITEMS, estate, f"day {cycle} converged")
 

@@ -15,7 +15,7 @@ from support.weaver_test import weaver_test
 import weaver
 from weaver.config import parse_workspace
 from weaver.declaration.model import WeaverDocumentId, WeaverItemId
-from weaver.errors import CommandError, ConfigError
+from weaver.errors import CatalogueStateError, CommandError, ConfigError
 from weaver.operations.mirror import (
     MirrorPlan,
     MirrorResult,
@@ -410,14 +410,23 @@ class _SourceTables:
     def __init__(self, names):
         self._names = names
 
-    def sql_executor(self, _target, *, workspace=None):
-        names = self._names
+    def workspace_or_default(self, workspace):
+        return workspace
 
-        class _Sql:
-            def query(self, _statement):
-                return [{"name": name} for name in names]
+    def query_tsql(self, _statement, *, target=None, workspace=None):
+        from weaver.catalogue.tables import CATALOGUE_TABLES
 
-        return _Sql()
+        names = set(self._names)
+        return [
+            {
+                "TABLE_NAME": table.name,
+                "COLUMN_NAME": column,
+                "IS_NULLABLE": "NO",
+            }
+            for table in CATALOGUE_TABLES
+            if table.name in names
+            for column in table.public_columns
+        ]
 
 
 def _source_tables(*, graphed: bool) -> tuple[str, ...]:
@@ -451,7 +460,7 @@ def test_a_source_missing_a_required_table_is_still_refused(monkeypatch):
     plan = _plan(monkeypatch, _workspace())
     held = tuple(name for name in _source_tables(graphed=True) if name != "Registry")
 
-    with pytest.raises(CommandError, match="not compatible with this Weaver"):
+    with pytest.raises(CatalogueStateError, match="cannot be mirrored"):
         check_mirror(plan, session=_SourceTables(held))
 
 

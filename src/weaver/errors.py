@@ -133,5 +133,9 @@ class BuildError(WeaverError):
     """Raised when a build bundle cannot be planned, written or validated."""
 
 
+class InstallationIdentityError(BuildError):
+    """Raised when a recorded installation does not match the Fabric item it names."""
+
+
 class InstallError(WeaverError):
     """Raised when a build bundle cannot be installed."""

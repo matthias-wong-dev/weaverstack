@@ -45,10 +45,11 @@ PUBLIC_SCHEMA: dict[str, tuple[str, ...]] = {
     "Installation": (
         "Item type",
         "Item name",
+        "Workspace name",
+        "Workspace GUID",
         "Target name",
+        "Target item GUID",
         "Weaver version",
-        "Workspace ID",
-        "Item ID",
         "Signature",
         *AUDIT,
     ),

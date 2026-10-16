@@ -199,7 +199,7 @@ def test_shared_executor_blocks_certification_without_stopping_independent_model
 
 @weaver_test()
 @pytest.mark.parametrize("mismatch", [None, "item_id", "workspace_id"])
-def test_desktop_mutation_binds_semantic_session_without_spark(
+def test_desktop_semantic_mutation_checks_frozen_identity_without_spark(
     tmp_path, monkeypatch, mismatch
 ):
     _, repository, bindings, recording, state = prepared(tmp_path)
@@ -221,6 +221,7 @@ def test_desktop_mutation_binds_semantic_session_without_spark(
     }
     model = recording.semantic_model("Reporting_Dev")
     model.definition = encode_definition(engine_model(repository))
+    recording.calls.clear()
     with ConsoleSession(
         workspace=recording.workspace,
         resolver=recording.resolver(),
@@ -229,18 +230,24 @@ def test_desktop_mutation_binds_semantic_session_without_spark(
     ) as desktop:
         monkeypatch.setattr(desktop, "sql_executor", recording.sql_executor)
         monkeypatch.setattr(desktop, "semantic_model", recording.semantic_model)
-        report = desktop.execute_mutation(plan, payloads)
-        assert report.succeeded is (mismatch is None)
-        assert not desktop.scope().livy.acquired
         if mismatch:
+            with pytest.raises(
+                InstallError,
+                match="SemanticModel/Reporting_Dev has a different physical binding; regenerate the bundle",
+            ):
+                desktop.execute_mutation(plan, payloads)
             assert model.calls == []
-            assert any("different" in (row.error or "") for row in report.results)
+            assert not recording.tsql
         else:
+            report = desktop.execute_mutation(plan, payloads)
+            assert report.succeeded
             assert [method for method, _ in model.calls] == [
                 "update_definition",
                 "invalid_measures",
                 "get_definition",
             ]
+        assert not desktop.scope().livy.acquired
+        assert not recording.python and not recording.spark_sql
 
 
 @weaver_test()

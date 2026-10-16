@@ -203,6 +203,10 @@ def mirror_mutation_plan(resolved, *, session) -> tuple[MutationPlan, dict, dict
     from .declaration.model import LAKEHOUSE
 
     workspace = resolved.workspace
+    # The destination catalogue and each item's destination resolve from one listing.
+    discover_once = getattr(session.resolver(workspace), "discover_once", None)
+    if discover_once is not None:
+        discover_once()
     compiling = _Compiling(str(workspace.workspace))
     catalogue = compiling.target("warehouse", resolved.destination.name)
 
@@ -212,7 +216,7 @@ def mirror_mutation_plan(resolved, *, session) -> tuple[MutationPlan, dict, dict
     compiling.payloads.update(written)
     compiling.stage(f"empty {resolved.plan.target}", catalogue, wipe)
     built = _compose_catalogue_build(
-        compiling, resolved, catalogue=catalogue, after=finishing(wipe)
+        compiling, resolved, catalogue=catalogue, after=finishing(wipe), session=session
     )
 
     kinds = {str(each.item): each.kind for each in resolved.items}
@@ -279,7 +283,7 @@ def mirror_mutation_plan(resolved, *, session) -> tuple[MutationPlan, dict, dict
             )
             current[str(each.item)] = (refreshed,)
             published.append(refreshed)
-    _publish(compiling, resolved, catalogue, after=(built, *published))
+    _publish(compiling, resolved, catalogue, after=(built, *published), session=session)
 
     spark_home = next(
         (
@@ -381,7 +385,7 @@ def _producers(each, resolved) -> tuple[str, ...]:
     )
 
 
-def _compose_catalogue_build(compiling, resolved, *, catalogue, after) -> str:
+def _compose_catalogue_build(compiling, resolved, *, catalogue, after, session) -> str:
     """Add the destination catalogue's Build, planned against an empty Warehouse.
 
     The destination is emptied first in this same plan, so its state is known
@@ -402,12 +406,18 @@ def _compose_catalogue_build(compiling, resolved, *, catalogue, after) -> str:
     )
     from .catalogue.builtin import BUILTIN_ITEM
     from .catalogue.state import Catalogue
+    from .fabric.resources import WAREHOUSE
     from .locations import Location
     from .store import FilesystemStore
 
     workspace = resolved.workspace
+    resolver = session.resolver(workspace)
+    physical = _installation_target(resolver, workspace.catalogue_item, kind=WAREHOUSE)
     control = WarehouseBinding(
-        workspace.catalogue_item, workspace_name=workspace.workspace
+        workspace.catalogue_item,
+        workspace_name=resolver.workspace.name,
+        workspace_id=physical.workspace_id,
+        item_id=physical.id,
     )
     bindings = effective_item_bindings(
         ItemBindings(()),
@@ -430,6 +440,9 @@ def _compose_catalogue_build(compiling, resolved, *, catalogue, after) -> str:
                             target_id=target.id,
                             kind=target.kind,
                             target_name=target.name,
+                            workspace_name=resolver.workspace.name,
+                            workspace_id=physical.workspace_id,
+                            item_id=physical.id,
                         )
                     },
                 ),
@@ -892,7 +905,7 @@ def _lakehouse(
     }
 
 
-def _publish(compiling, resolved, catalogue, *, after) -> None:
+def _publish(compiling, resolved, catalogue, *, after, session) -> None:
     """Fork the source's state, record what each item borrows and bind each item.
 
     One transaction, after every reconstruction: until it commits, the
@@ -902,9 +915,12 @@ def _publish(compiling, resolved, catalogue, *, after) -> None:
 
     from . import __version__
     from .catalogue.borrow import record_statements
-    from .catalogue.fork import copied_tables, copy_statement, create_statement
+    from .catalogue.fork import copy_statements, create_statement
     from .catalogue.render import InstallationScope, render_merge
     from .catalogue.tables import INSTALLATION, MIRROR
+    from .targets import ItemRef
+
+    resolver = session.resolver(resolved.workspace)
 
     recorded = [
         statement
@@ -920,12 +936,18 @@ def _publish(compiling, resolved, catalogue, *, after) -> None:
     merges = []
     for each in resolved.items:
         item = each.item
+        physical = _installation_target(
+            resolver, ItemRef(each.destination), kind=each.kind
+        )
         row = dict(resolved.installations.get(item) or {})
         row.update(
             {
                 "item_type": item.item_type,
                 "item_name": item.item_name,
-                "target_name": each.destination,
+                "target_name": physical.name,
+                "workspace_name": resolver.workspace.name,
+                "workspace_id": physical.workspace_id,
+                "item_id": physical.id,
                 "weaver_version": __version__,
                 "signature": str(row.get("signature") or ""),
             }
@@ -937,10 +959,12 @@ def _publish(compiling, resolved, catalogue, *, after) -> None:
                 scope=InstallationScope(item.item_type, item.item_name),
             )
         )
-    forked = [
-        copy_statement(table, source_catalogue=resolved.source.name)
-        for table in copied_tables(borrowed=resolved.borrowed, graphed=resolved.graphed)
-    ]
+    forked = copy_statements(
+        source_catalogue=resolved.source.name,
+        borrowed=resolved.borrowed,
+        graphed=resolved.graphed,
+        source=resolved.fork,
+    )
     created = [create_statement(MIRROR)] if resolved.borrowed or recorded else []
     path, digest = compiling.payload(
         "publish.sql",
@@ -957,6 +981,21 @@ def _publish(compiling, resolved, catalogue, *, after) -> None:
         resources=(f"warehouse:{catalogue.item_id}",),
     )
     compiling.stage("publish the mirrored catalogue", catalogue, [published])
+
+
+def _installation_target(resolver, reference, *, kind):
+    from .catalogue.installation import _guid
+    from .errors import BuildError
+
+    physical = resolver.resolve(reference, item_type=kind)
+    item = f"{kind}/{reference.name}"
+    workspace_id = _guid(physical.workspace_id, item=item, column="Workspace GUID")
+    _guid(physical.id, item=item, column="Target item GUID")
+    if workspace_id != _guid(resolver.workspace.id, item=item, column="Workspace GUID"):
+        raise BuildError(
+            f"{item}: resolved Workspace GUID does not match the workspace"
+        )
+    return physical
 
 
 def transaction_script(prepared, statements) -> str:

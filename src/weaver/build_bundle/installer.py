@@ -248,7 +248,7 @@ class MutationBindings:
 
         return _Deferred(
             lambda: self.session.sql_executor(
-                WarehouseTarget(ItemRef(bound.item_id)), workspace=self.workspace
+                WarehouseTarget(ItemRef(bound.name)), workspace=self.workspace
             )
         )
 
@@ -283,7 +283,25 @@ class MutationBindings:
 
     def resolve_target(self, bound: BoundTarget) -> ResolvedTarget:
         # Resolve once so executors never derive paths or inherit a Lakehouse.
-        item = ItemRef(bound.item_id)
+        item = ItemRef(bound.name)
+        if bound.workspace_id is not None or bound.item_id != bound.name:
+            resolved = self.session.resolve_item(
+                bound.name,
+                item_type={
+                    "lakehouse": "Lakehouse",
+                    "warehouse": "Warehouse",
+                    "semanticmodel": "SemanticModel",
+                    "report": "Report",
+                }[bound.kind],
+                workspace=self.workspace,
+            )
+            if (
+                bound.workspace_id is not None
+                and resolved.workspace_id != bound.workspace_id
+            ) or (bound.item_id != bound.name and resolved.id != bound.item_id):
+                raise InstallError(
+                    f"{bound.display} has a different physical binding; regenerate the bundle"
+                )
         return ResolvedTarget(
             bound=bound,
             lakehouse=item,

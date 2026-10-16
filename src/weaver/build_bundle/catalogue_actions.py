@@ -149,10 +149,12 @@ def render_catalogue_upgrade(catalogue, *, catalogue_target):
     from ..errors import BuildError
 
     statements = []
+    if catalogue.installation_upgrade is not None:
+        from ..catalogue.installation import render_installation_upgrade
+
+        statements.append(render_installation_upgrade(catalogue.installation_upgrade))
     for table, column in catalogue.schema_additions:
-        if table == INSTALLATION.name and column in {"Workspace ID", "Item ID"}:
-            data_type = "varchar(128)"
-        elif table == SEMANTIC_MODEL_TABLE.name and column == "Table ordinal":
+        if table == SEMANTIC_MODEL_TABLE.name and column == "Table ordinal":
             data_type = "bigint"
         else:
             raise BuildError(f"Unsupported catalogue column upgrade {table}.{column}")
@@ -290,6 +292,7 @@ def desired_catalogue(
                 "item_name": item.item_name,
                 "target_name": target_by_item[item].name,
                 "workspace_id": target_by_item[item].workspace_id,
+                "workspace_name": target_by_item[item].workspace_name,
                 "item_id": target_by_item[item].item_id,
                 "weaver_version": __version__,
                 "signature": _item_signature(repository, item),

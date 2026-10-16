@@ -730,6 +730,18 @@ Enforceable as the corresponding code lands:
   `DeltaTarget` is a Lakehouse and a `WarehouseTarget` a Warehouse, and core never
   asks the workspace what a bare name is. A destructive operation must not depend
   on name inference.
+- **Names locate; GUIDs identify.** `_.Installation` records the workspace and
+  target item GUIDs beside their names. Each operation verifies, through
+  `verify_installation`, only the installations it depends on: Build its selected
+  items and required producers, Mirror its selected sources before the destination
+  is touched, Load and Test the targets their nodes use (a failing node is
+  `invalid` and blocks its dependants), Health the selected items (reported, never
+  raised). An installation nothing uses cannot fail an operation. Only a legacy
+  `_.Installation` schema upgrade resolves the whole estate, whether Build
+  upgrades it in place or Mirror copies it into its destination. A workspace
+  renamed under an unchanged GUID is drift that Build reconciles; the configured
+  name must still find the workspace. An item replaced after preflight is out of
+  scope.
 - **Delta protocol minima are creation policy.** Lakehouse Table declarations
   accept `Delta minReaderVersion` and `Delta minWriterVersion`. Authored values
   participate in declaration signatures. Omitted values resolve to Weaver's
@@ -844,6 +856,17 @@ tables, so the Warehouse waits until it sees every object it reads. The fork, th
 binding are one transaction, last, after every reconstruction. Until it commits
 the destination catalogue records no installation, so it never claims the
 source's items.
+
+The source may be any earlier Weaver version's catalogue, so a release is
+trialled in development before production is upgraded. The source is only read.
+`catalogue.fork.project_source` maps its `_` shape onto this version's tables by
+column name: a table in `state.INTRODUCED_TABLES` it lacks starts empty, a
+nullable column it lacks stays null, and a column this version does not hold is
+left behind. A legacy Installation takes the identities Build's upgrade path in
+`resolve_installations` verifies. A missing table every catalogue has, or a
+missing required column, refuses the mirror before the first wipe. Anything
+else that cannot copy fails in the copy itself, one server-side
+`INSERT ... SELECT` per table.
 
 Build materialises selected edited borrowed objects marked Prohibit Rebuild through
 ordinary DAG actions. The development destination is disposable; the source remains
