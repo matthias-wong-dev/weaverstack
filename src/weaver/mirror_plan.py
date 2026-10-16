@@ -915,7 +915,7 @@ def _publish(compiling, resolved, catalogue, *, after, session) -> None:
 
     from . import __version__
     from .catalogue.borrow import record_statements
-    from .catalogue.fork import copied_tables, copy_statement, create_statement
+    from .catalogue.fork import copy_statements, create_statement
     from .catalogue.render import InstallationScope, render_merge
     from .catalogue.tables import INSTALLATION, MIRROR
     from .targets import ItemRef
@@ -959,10 +959,11 @@ def _publish(compiling, resolved, catalogue, *, after, session) -> None:
                 scope=InstallationScope(item.item_type, item.item_name),
             )
         )
-    forked = [
-        copy_statement(table, source_catalogue=resolved.source.name)
-        for table in copied_tables(borrowed=resolved.borrowed)
-    ]
+    forked = copy_statements(
+        source_catalogue=resolved.source.name,
+        borrowed=resolved.borrowed,
+        source=resolved.fork,
+    )
     created = [create_statement(MIRROR)] if resolved.borrowed or recorded else []
     path, digest = compiling.payload(
         "publish.sql",
