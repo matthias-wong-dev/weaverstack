@@ -91,10 +91,10 @@ def operation_workspace(
     return resolved
 
 
-def current_workspace() -> Workspace:
-    """Discover the current project or Fabric notebook workspace."""
+def current_workspace(*, workspace_config=None) -> Workspace:
+    """Read a named project configuration, or discover the current workspace."""
 
-    return _operation_workspace(workspace=None, workspace_config=None)
+    return _operation_workspace(workspace=None, workspace_config=workspace_config)
 
 
 def _discovered_or_current() -> Workspace:

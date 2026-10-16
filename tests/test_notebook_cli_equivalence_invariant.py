@@ -27,3 +27,11 @@ def test_notebook_connectivity_and_bundle_install_are_public_operations():
     assert weaver.doctor is doctor
     assert weaver.DoctorReport is DoctorReport
     assert weaver.install is install
+
+
+@weaver_test()
+def test_notebook_can_name_the_workspace_from_the_same_cli_configuration(tmp_path):
+    config = tmp_path / "workspace-production.yml"
+    config.write_text("workspace: Parcel Production\n", encoding="utf-8")
+    workspace = weaver.current_workspace(workspace_config=config)
+    assert workspace.workspace == "Parcel Production"

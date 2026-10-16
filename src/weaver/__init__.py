@@ -40,6 +40,7 @@ from .operations.doctor import DoctorReport, doctor
 from .operations.health import health
 from .operations.install import install
 from .operations.load import load
+from .operations.management import publish_environment, push_notebook, run_notebook
 from .operations.mirror import (
     MirrorPlan,
     MirrorResult,
@@ -88,6 +89,9 @@ __all__ = [
     "doctor",
     "DoctorReport",
     "install",
+    "publish_environment",
+    "push_notebook",
+    "run_notebook",
     "mirror",
     "MirrorResult",
     "plan_mirror",
