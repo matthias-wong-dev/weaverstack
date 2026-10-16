@@ -1,13 +1,11 @@
-# Approved Weaver PNG identity
+# Approved Weaver two-tone PNG identity
 
-Use the PNG-derived assets approved in review, not the rejected SVG kit. The source reference SHA-256 is `bc3403b7f86b17d3c5ed6f28af1afa1cd9ed0518c0ca5f36285c3767d6473062`.
+The standard W has blue front faces and near-black reverse faces, with restrained shading and no pale/cyan terminal fade. Use the **same mark on light and dark backgrounds**. The shape and transparency derive from the supplied raster reference; this is not the rejected SVG approximation.
 
-`docs/assets/brand/` retains the native transparent full logos and compact W marks for light and dark backgrounds. Transparency was extracted from the raster reference; it is not native vector artwork. The `*-134.png` marks are 134 × 77 web derivatives of the approved 670 × 385 crops, downsampled with Pillow LANCZOS at unchanged aspect ratio.
+`docs/assets/brand/` contains the canonical transparent mark, its 134 × 77 web derivative, and full logos. The `light`/`dark` mark filenames are retained for existing references but contain identical bytes. Full-logo variants differ only in the original dark/light wordmark below the W; the lettering has not been redrawn.
 
-Headers and footers display the compact mark at **30 CSS pixels wide**, with proportional height, a 6-pixel gap to the name, and an explicit maximum width. The dark comparison heading uses a 28-pixel dark variant. Do not place the large stacked logo in the navigation or let intrinsic image width determine header size. Material's header keeps the mark and title together in one link; its mobile drawer uses the same selected-theme artwork.
+Headers and footers retain the accepted **30 CSS pixel** mark width, proportional height and 6-pixel gap to the name. The comparison-table mark remains 28 pixels. Keep the docs mark and Weaver title together in one link. Do not let intrinsic image dimensions set the navigation size or substitute a large stacked logo there.
 
-The default `og.png` and comparison `og-dbt.png` are exact copies of the approved light 1200 × 630 card, without rerendering, new wording or changed spacing. The approved dark card is retained under `assets/brand/`. Developer docs use the same approved light card, including the retained topic-specific OG URL. Each page's existing social title/description is preserved; image alt text describes the actual logo card.
+The default `og.png`, comparison `og-dbt.png` and developer-docs default/topic OG assets use the updated full logo at the existing centred position on a 1200 × 630 card. Only the W artwork changes; background, wordmark, spacing, page-specific social titles/descriptions and metadata URLs remain unchanged. The dark card is retained under `assets/brand/`.
 
-`favicon.png`, `favicon.ico`, `apple-touch-icon.png`, and the 192/512 manifest icons come from the approved asset bundle. Keep manifest dimensions aligned with the files.
-
-Both repositories contain checked-in publication image bytes. No image-processing library, browser renderer or runtime visualisation library is added to either site. Publication still requires approval; review-branch pushes and private previews are not deployment.
+Favicons, Apple touch icons and the 192/512 manifest icons use this same two-tone mark. Keep manifest dimensions aligned with the actual files. PNGs are checked-in publication assets: no image processor, renderer or visualisation runtime is added to either site. A review-branch push/private preview is not a public deployment.
