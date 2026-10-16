@@ -71,6 +71,51 @@
   .homepage .cards { margin: 20px 0; }
   .homepage .card { padding: 18px; }
 }
+/* The restored project illustration stays local to the homepage. */
+.homepage .project-glance {
+  --pv-paper: var(--paper);
+  --pv-band: var(--white);
+  --pv-surface: var(--white);
+  --pv-ink: var(--ink);
+  --pv-muted: var(--muted);
+  --pv-line: var(--line);
+  --pv-blue: var(--blue);
+  --pv-blue-soft: var(--blue-soft);
+  --pv-green: var(--green);
+  --pv-green-soft: var(--green-soft);
+  --pv-amber: var(--amber);
+  --pv-amber-soft: var(--amber-soft);
+  --pv-sans: var(--sans);
+  display: grid;
+  grid-template-columns: 340px minmax(0, 1fr);
+  gap: 28px;
+  align-items: center;
+  margin-top: 26px;
+}
+.homepage .project-glance > * { min-width: 0; }
+.homepage .project-glance .code { margin: 0; }
+.homepage .project-glance .code pre { padding: 16px; font-size: 11.5px; line-height: 1.8; }
+.homepage .project-glance figure { margin: 0; }
+.homepage .project-glance .project-diagram-scroll { overflow-x: auto; }
+.homepage .project-glance h3 { margin: 0 0 16px; font-size: 18px; }
+.homepage .project-glance figcaption { margin-top: 14px; color: var(--muted); font-size: 14px; }
+.parcel-diagram { display: block; width: 100%; min-width: 700px; height: auto; font-family: var(--pv-sans); }
+.parcel-diagram .parcel-band rect { fill: var(--pv-band); stroke: var(--pv-line); stroke-width: 1; }
+.parcel-diagram .band-1 rect, .parcel-diagram .band-3 rect { fill: var(--pv-paper); }
+.parcel-diagram .parcel-band-title { fill: var(--pv-ink); font-size: 19px; font-weight: 650; }
+.parcel-diagram .parcel-band-sub { fill: var(--pv-muted); font-size: 15px; }
+.parcel-diagram .parcel-node rect { fill: var(--pv-surface); stroke: var(--pv-blue); stroke-width: 1.2; }
+.parcel-diagram .parcel-file rect { fill: var(--pv-green-soft); stroke: var(--pv-green); }
+.parcel-diagram .parcel-shortcut rect { fill: var(--pv-amber-soft); stroke: var(--pv-amber); }
+.parcel-diagram .parcel-model rect, .parcel-diagram .parcel-report rect { fill: var(--pv-blue-soft); }
+.parcel-diagram .parcel-node-title { fill: var(--pv-ink); text-anchor: middle; font-weight: 600; }
+.parcel-diagram .parcel-node-sub { fill: var(--pv-muted); text-anchor: middle; font-size: 17px; }
+.parcel-diagram .parcel-edge { fill: none; stroke: var(--pv-blue); stroke-width: 1.5; }
+.parcel-diagram .parcel-binding { stroke-dasharray: 4 3; }
+.parcel-diagram .parcel-binding-label { fill: var(--pv-muted); text-anchor: middle; font-size: 12px; }
+@media (max-width: 1050px) {
+  .homepage .project-glance { grid-template-columns: minmax(0, 1fr); gap: 24px; }
+}
 </style>
 </head>
 <body>
@@ -113,6 +158,110 @@
 <a class="button ghost" href="/features/">Explore features →</a>
 </div>
 <p class="hero-note">Free and open source. Installs with pip. No new language to learn.</p>
+</div>
+</section>
+<section class="section" id="project-at-a-glance">
+<div class="wrap">
+<h2>What a Weaver project looks like</h2>
+<p>Ordinary Python, SQL and native Power BI files, organised by Fabric item. Start with one item; connect more as you need them.</p>
+<div class="project-glance">
+<div class="code plain">
+<div class="code-bar"><span>What you write</span></div>
+<pre><span class="c-key">parcel/</span>
+├── <span class="c-dim">workspace-config.yml</span>
+├── <span class="c-dim">workflow.yml</span>
+├── <span class="c-key">Environment/Weaver.Environment/</span>
+├── <span class="c-key">Lakehouse/Landing/</span>
+│   ├── <span class="c-fn">Files/Parcel__Events.py</span>
+│   ├── <span class="c-fn">Tables/Parcel__Event.py</span>
+│   └── <span class="c-fn">Tables/Parcel.CurrentStatus.sql</span>
+├── <span class="c-key">Warehouse/Operations/</span>
+│   ├── <span class="c-fn">Parcel.StatusEvent.sql</span>
+│   ├── <span class="c-dim">shortcuts.yml</span>
+│   ├── <span class="c-fn">Parcel.LakehouseCurrentStatus.sql</span>
+│   └── <span class="c-key">tests/</span>
+└── <span class="c-key">PowerBI/Parcel/</span>
+    ├── <span class="c-key">Parcel.SemanticModel/</span>
+    └── <span class="c-key">Parcel.Report/</span></pre>
+</div>
+<figure aria-labelledby="product-project-flow">
+<h3 id="product-project-flow">One project. Connected work.</h3>
+<div class="project-diagram-scroll" tabindex="0" role="region" aria-label="Illustrative Fabric project; scroll horizontally on narrow screens">
+<svg class="parcel-diagram" viewBox="0 0 960 340" role="img" aria-labelledby="product-project-flow parcel-product-desc">
+<desc id="parcel-product-desc">An illustrative project: Python files and Tables in a Lakehouse feed Warehouse SQL through a Shortcut, then a native semantic model and Report. A Spark SQL transformation branches from the Lakehouse Table.</desc>
+<defs><marker id="parcel-product-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L8 4 L0 8 Z" fill="var(--pv-blue)"/></marker></defs>
+<g data-project-band="Lakehouse" class="parcel-band band-0">
+<rect x="1" y="1" width="358" height="332" rx="10"/>
+<text class="parcel-band-title" x="16" y="32">Lakehouse</text>
+<text class="parcel-band-sub" x="16" y="56">Landing · Parcel</text>
+</g>
+<g data-project-band="Warehouse" class="parcel-band band-1">
+<rect x="371" y="1" width="268" height="332" rx="10"/>
+<text class="parcel-band-title" x="386" y="32">Warehouse</text>
+<text class="parcel-band-sub" x="386" y="56">Operations · Parcel</text>
+</g>
+<g data-project-band="Semantic Model" class="parcel-band band-2">
+<rect x="651" y="1" width="143" height="332" rx="10"/>
+<text class="parcel-band-title" x="666" y="28">Semantic<tspan x="666" dy="22"> Model</tspan></text>
+<text class="parcel-band-sub" x="666" y="78">Parcel</text>
+</g>
+<g data-project-band="Report" class="parcel-band band-3">
+<rect x="806" y="1" width="143" height="332" rx="10"/>
+<text class="parcel-band-title" x="821" y="32">Report</text>
+<text class="parcel-band-sub" x="821" y="56">Parcel</text>
+</g>
+<path class="parcel-edge" data-project-edge="folder|event" d="M116 164 H132" marker-end="url(#parcel-product-arrow)"/>
+<path class="parcel-edge" data-project-edge="event|current" d="M232 164 H240 V108 H248" marker-end="url(#parcel-product-arrow)"/>
+<path class="parcel-edge" data-project-edge="event|shortcut" d="M232 164 H386" marker-end="url(#parcel-product-arrow)"/>
+<path class="parcel-edge" data-project-edge="shortcut|consumer" d="M498 164 H514" marker-end="url(#parcel-product-arrow)"/>
+<path class="parcel-edge" data-project-edge="consumer|model" d="M626 164 H666" marker-end="url(#parcel-product-arrow)"/>
+<path class="parcel-edge parcel-binding" data-project-binding="model|report" d="M778 164 H821" marker-end="url(#parcel-product-arrow)"/>
+<g class="parcel-node parcel-file" data-project-node="folder" data-logical-id="Lakehouse/Landing/Files/Parcel.Events">
+<rect x="16" y="132" width="100" height="76" rx="8"/>
+<text class="parcel-node-title" style="font-size:18px" x="66.0" y="156">Events</text>
+<text class="parcel-node-sub" x="66.0" y="179">Python</text>
+<text class="parcel-node-sub" x="66.0" y="197">Folder</text>
+</g>
+<g class="parcel-node parcel-table" data-project-node="event" data-logical-id="Lakehouse/Landing/Tables/Parcel.Event">
+<rect x="132" y="132" width="100" height="76" rx="8"/>
+<text class="parcel-node-title" style="font-size:18px" x="182.0" y="156">Event</text>
+<text class="parcel-node-sub" x="182.0" y="179">Python</text>
+<text class="parcel-node-sub" x="182.0" y="197">Table</text>
+</g>
+<g class="parcel-node parcel-table" data-project-node="current" data-logical-id="Lakehouse/Landing/Tables/Parcel.CurrentStatus">
+<rect x="248" y="76" width="96" height="76" rx="8"/>
+<text class="parcel-node-title" style="font-size:18px" x="296.0" y="101">Current</text>
+<text class="parcel-node-title" style="font-size:18px" x="296.0" y="120">Status</text>
+<text class="parcel-node-sub" x="296.0" y="139">Spark SQL</text>
+</g>
+<g class="parcel-node parcel-shortcut" data-project-node="shortcut" data-logical-id="Warehouse/Operations/Parcel.LakehouseEvent">
+<rect x="386" y="132" width="112" height="76" rx="8"/>
+<text class="parcel-node-title" style="font-size:18px" x="442.0" y="163">Events</text>
+<text class="parcel-node-sub" x="442.0" y="195">Shortcut</text>
+</g>
+<g class="parcel-node parcel-table" data-project-node="consumer" data-logical-id="Warehouse/Operations/Parcel.LakehouseCurrentStatus">
+<rect x="514" y="132" width="112" height="76" rx="8"/>
+<text class="parcel-node-title" style="font-size:18px" x="570.0" y="157">Current</text>
+<text class="parcel-node-title" style="font-size:18px" x="570.0" y="176">Status</text>
+<text class="parcel-node-sub" x="570.0" y="195">T-SQL</text>
+</g>
+<g class="parcel-node parcel-model" data-project-node="model" data-logical-id="SemanticModel/Parcel">
+<rect x="666" y="132" width="112" height="76" rx="8"/>
+<text class="parcel-node-title" style="font-size:18px" x="722.0" y="156">Parcel</text>
+<text class="parcel-node-sub" x="722.0" y="179">Native</text>
+<text class="parcel-node-sub" x="722.0" y="197">TMDL</text>
+</g>
+<g class="parcel-node parcel-report" data-project-node="report" data-logical-id="Report/Parcel">
+<rect x="821" y="132" width="112" height="76" rx="8"/>
+<text class="parcel-node-title" style="font-size:18px" x="877.0" y="156">Parcel</text>
+<text class="parcel-node-sub" x="877.0" y="179">Native</text>
+<text class="parcel-node-sub" x="877.0" y="197">Report</text>
+</g>
+</svg>
+</div>
+<figcaption>An illustrative flow across Lakehouse, Warehouse and native Power BI.</figcaption>
+</figure>
+</div>
 </div>
 </section>
 <section class="section">
