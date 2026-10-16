@@ -560,3 +560,21 @@ def test_the_flags_are_the_installed_nodes_own(repository):
         ) == (node.can_load, node.is_static, node.is_mirrored, node.is_installed)
     assert any(row["can_load"] for row in flagged.values())
     assert not all(row["can_load"] for row in flagged.values())
+
+
+@weaver_test()
+def test_every_certified_data_object_has_a_graph_node(repository):
+    """The Dashboard reads a certified object without one as an unprojected graph."""
+
+    built = built_catalogue(repository, _bindings(SALES, REPORTING))
+
+    nodes = {
+        (row["item_type"], row["item_name"], row["schema_name"], row["object_name"])
+        for row in _rows(built, GRAPH_NODE)
+    }
+    certified = {
+        (row["item_type"], row["item_name"], row["schema_name"], row["object_name"])
+        for row in _rows(built, REGISTRY)
+        if row["object_role"] == "data"
+    }
+    assert certified and certified <= nodes

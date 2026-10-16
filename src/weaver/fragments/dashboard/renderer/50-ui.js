@@ -117,6 +117,14 @@ function shell(mount, m) {
       m.problems.slice(0, 3).join(" ") + (m.problems.length > 3 ? " (" + (m.problems.length - 3) + " more)" : "")
     ]));
   }
+  if (m.graphGaps && m.graphGaps.size) {
+    var gaps = Array.from(m.graphGaps.keys()).sort(compare);
+    mount.appendChild(el("div", { "class": "wd-banner wd-banner-warn wd-banner-top" }, [
+      el("b", { text: "The graph may be out of date. " }),
+      fmt(Array.from(m.graphGaps.values()).reduce(function (a, b) { return a + b; }, 0)) + " certified objects in " + gaps.join(", ") +
+      " have no graph node. Build " + (gaps.length === 1 ? "that item" : "those items") + " again to project it."
+    ]));
+  }
   var body = el("main", { "class": "wd-body" });
   mount.appendChild(body);
   return body;

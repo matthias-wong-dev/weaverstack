@@ -903,10 +903,15 @@ an execution runs and travel with either.
 `read_repository_fragment` like the catalogue declaration and the standard
 per-item schema and folder documents. Static Weaver-owned repository content is a
 fragment; nothing renders it from Python. The one composition step is the
-Catalogue Dashboard's renderer: `dashboard.js` and `dashboard.css` are checked
-in beside its model and `weaver.catalogue_dashboard.dashboard_files` inlines them
-into the model's `Renderer` measure as one DAX string. Its pure logic is tested
-under Node from `tests/js`.
+Catalogue Dashboard's renderer: the stylesheet and scripts in its `renderer/`
+folder are checked in beside its model, and
+`weaver.catalogue_dashboard.dashboard_files` inlines them, scripts in name order
+inside one function, into the model's `Renderer` measure as one DAX string. The
+model's Data measures return delimited text rather than JSON, so the TMDL needs
+no per-field escaping: private-use characters separate tables, rows and fields,
+and each page measure replaces every `<` once. The renderer's pure logic is
+tested under Node from `tests/js`, and its Health is compared with
+`weaver.health` over the same catalogue rows.
 
 **Who records is the interface.** A lower execution primitive never writes
 operational catalogue state. A run records centrally, and a standalone wrapper

@@ -119,6 +119,7 @@ body:has(.wd[data-theme="dark"]) { background: #0b121b; }
 .wd-banner { padding: 9px 13px; border: 1px solid var(--line); border-left: 3px solid var(--blue); border-radius: 0 9px 9px 0; background: var(--surface); }
 .wd-banner-bad { margin: 12px 20px 0; border-left-color: var(--red); }
 .wd-banner-warn { margin-bottom: 10px; border-left-color: var(--amber); }
+.wd-banner-top { margin: 12px 20px 0; }
 .wd-status-line { color: var(--muted); font-size: 12px; min-height: 18px; }
 .wd-empty { padding: 26px 18px; color: var(--muted); text-align: center; }
 .wd-allclear { padding: 14px 16px; border: 1px solid var(--line); border-left: 3px solid var(--green); border-radius: 0 9px 9px 0; background: var(--surface); }

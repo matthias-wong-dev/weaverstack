@@ -219,9 +219,11 @@ catalogue_dashboard: Catalogue Dashboard
 ```
 
 `weaver build --item PowerBI` builds them with the project's own Power BI
-items. The Report shows estate health, the lineage around a searched object
-and the latest run. It renders in the HTML Content visual, so the tenant must
-allow that custom visual and its scripts. Its Overview and Live run pages
+items. The Report has ten pages: Overview, Lineage, Dictionary, ER diagram,
+Semantics, Bus matrix, Load, Gantt, Health and Performance. Each renders in the
+HTML Content visual, so the tenant must allow that custom visual and its
+scripts. The model reads the catalogue's tables over Direct Lake, so the Load,
+Gantt, Health and Overview pages show settled work as it is recorded; they
 refresh every 30 seconds, or at the capacity's minimum interval when that is
 longer. A project's own `Catalogue Dashboard` model or Report is refused while
 the key is set.

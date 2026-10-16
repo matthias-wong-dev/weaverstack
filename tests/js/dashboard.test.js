@@ -331,3 +331,11 @@ test("a selection of several objects shows the union of their lineage", () => {
   assert.equal(win.lineage.get("b"), 1);
   assert.equal(win.focus, "c");
 });
+
+test("a certified object with no graph node says the graph may be out of date", () => {
+  const built = table("built", ["item", "schema", "object", "built"], [
+    ["Warehouse/Curated", "Sales", "Region", AT], ["Warehouse/Curated", "Sales", "Unprojected", AT], ["Warehouse/_weaver", "_", "Log", AT]]);
+  const text = estate().split(D.TABLE).filter((c) => !c.startsWith("built")).join(D.TABLE) + built;
+  const m = model(text);
+  assert.deepEqual(Array.from(m.graphGaps), [["Warehouse/Curated", 1]]);
+});

@@ -122,9 +122,13 @@ function buildModel(tables, problems) {
     var n = m.byIdentity.get(identityKey(r.item, r.schema, r.object));
     if (n) { n.test = status(r); n.test.failures = num(r.failures); }
   });
+  // A certified data object with no graph node means its item's graph was
+  // not projected by the build that certified it.
+  m.graphGaps = new Map();
   t("built").forEach(function (r) {
     var n = m.byIdentity.get(identityKey(r.item, r.schema, r.object));
     if (n) n.built = num(r.built);
+    else if (!isInternal(m, r.item, r.schema)) m.graphGaps.set(r.item, (m.graphGaps.get(r.item) || 0) + 1);
   });
   m.items.forEach(function (it) {
     it.nodes.sort(function (a, b) { return compare(a.schema, b.schema) || compare(a.label, b.label) || compare(a.key, b.key); });
