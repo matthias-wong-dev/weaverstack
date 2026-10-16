@@ -1,6 +1,6 @@
 {
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.0.0/schema.json",
-  "name": "explore",
+  "name": "lineage",
   "position": {
     "x": 0,
     "y": 0,
@@ -23,11 +23,11 @@
                       "Entity": "Dashboard measures"
                     }
                   },
-                  "Property": "Explore page"
+                  "Property": "Lineage page"
                 }
               },
-              "queryRef": "Dashboard measures.Explore page",
-              "nativeQueryRef": "Explore page"
+              "queryRef": "Dashboard measures.Lineage page",
+              "nativeQueryRef": "Lineage page"
             }
           ]
         }

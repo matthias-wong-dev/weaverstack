@@ -1,0 +1,225 @@
+// The ER diagram: declared keys and relationships, or one semantic model's
+// relationships, around a focus table. Relationship graphs may contain cycles;
+// every walk keeps a visited set.
+
+var ER = { NODES: 60, BOX: 220, HEAD: 34, ROW: 18, GAP_X: 110, GAP_Y: 22, COLUMNS: 8 };
+
+/* The relations and relationships of one scope, as an undirected graph whose
+   edges keep their foreign and primary ends. */
+function erGraph(m, scope) {
+  var md = metadata(m), nodes = new Map(), edges = [];
+  function node(id, label, item, columns, keys, owner) {
+    if (!nodes.has(id)) nodes.set(id, { id: id, label: label, item: item, columns: columns || [], keys: keys || [], owner: owner, refs: [], back: [] });
+    return nodes.get(id);
+  }
+  if (scope === "declared") {
+    md.foreignKeys.forEach(function (fk) {
+      [fk.from, fk.to].forEach(function (id) {
+        var parts = id.split("|"), owner = m.byIdentity.get(id);
+        // Primary keys travel with the table; the key table holds the others.
+        var declared = md.tables.get(id), keys = declared && declared.primarykey ? [{ type: "Primary key", columns: splitList(declared.primarykey) }] : [];
+        node(id, owner ? owner.label : parts[1] + "." + parts[2], parts[0], (md.columns.get(id) || []).map(function (c) { return c.column; }),
+          keys.concat((md.keys.get(id) || []).map(function (k) { return { type: k.type, columns: splitList(k.columns) }; })), owner);
+      });
+      edges.push({ from: fk.from, to: fk.to, fromColumns: fk.fromColumns, toColumns: fk.toColumns, label: "", active: true, many: true });
+    });
+  } else {
+    var mo = md.models.get(scope);
+    if (mo) {
+      mo.tables.forEach(function (tb) { node(tb.name, tb.name, mo.item, tb.columns.map(function (c) { return c.column; }), [], null); });
+      mo.relationships.forEach(function (r) {
+        node(r.from, r.from, mo.item, [], [], null); node(r.to, r.to, mo.item, [], [], null);
+        edges.push({ from: r.from, to: r.to, fromColumns: [r.fromColumn], toColumns: [r.toColumn], label: r.name, active: r.active,
+          many: r.fromCardinality === "many", one: r.toCardinality === "one", both: /both/i.test(r.crossFilter || "") });
+      });
+    }
+  }
+  edges.forEach(function (e, i) { e.id = i; nodes.get(e.from).refs.push(e); nodes.get(e.to).back.push(e); });
+  return { nodes: nodes, edges: edges };
+}
+
+/* Up to ER.NODES tables around the focus, nearest first; a signed distance
+   puts the tables it references to the right and those referencing it left. */
+function erWindow(g, focus, depth) {
+  if (!g.nodes.has(focus)) return null;
+  var dist = new Map([[focus, 0]]), frontier = [focus], limit = depth < 0 ? Infinity : depth;
+  for (var step = 1; step <= limit && frontier.length; step++) {
+    var next = [];
+    frontier.forEach(function (id) {
+      var n = g.nodes.get(id), sign = dist.get(id) < 0 ? -1 : 1;
+      n.refs.forEach(function (e) { if (!dist.has(e.to)) { dist.set(e.to, dist.get(id) === 0 ? step : sign * step); next.push(e.to); } });
+      n.back.forEach(function (e) { if (!dist.has(e.from)) { dist.set(e.from, dist.get(id) === 0 ? -step : sign * step); next.push(e.from); } });
+    });
+    frontier = next;
+  }
+  var ranked = Array.from(dist, function (x) { return { id: x[0], dist: x[1] }; }).sort(function (a, b) {
+    return Math.abs(a.dist) - Math.abs(b.dist) || compare(g.nodes.get(a.id).label, g.nodes.get(b.id).label) || compare(a.id, b.id);
+  });
+  var kept = new Map();
+  ranked.slice(0, ER.NODES).forEach(function (r) { kept.set(r.id, r.dist); });
+  var more = new Map();
+  kept.forEach(function (_, id) {
+    var n = g.nodes.get(id), hidden = new Set();
+    n.refs.forEach(function (e) { if (!kept.has(e.to)) hidden.add(e.to); });
+    n.back.forEach(function (e) { if (!kept.has(e.from)) hidden.add(e.from); });
+    if (hidden.size) more.set(id, Array.from(hidden));
+  });
+  return { focus: focus, kept: kept, reach: dist.size, truncated: dist.size > kept.size, more: more,
+    edges: g.edges.filter(function (e) { return kept.has(e.from) && kept.has(e.to); }) };
+}
+
+function erRows(n, edges) {
+  var keyCols = [], fkCols = [], rows = [];
+  n.keys.forEach(function (k) { k.columns.forEach(function (c) { if (keyCols.indexOf(c) < 0) keyCols.push(c); }); });
+  edges.forEach(function (e) {
+    if (e.from === n.id) e.fromColumns.forEach(function (c) { if (fkCols.indexOf(c) < 0) fkCols.push(c); });
+    if (e.to === n.id) e.toColumns.forEach(function (c) { if (keyCols.indexOf(c) < 0 && fkCols.indexOf(c) < 0) keyCols.push(c); });
+  });
+  keyCols.forEach(function (c) { rows.push({ name: c, mark: "key" }); });
+  fkCols.forEach(function (c) { if (keyCols.indexOf(c) < 0) rows.push({ name: c, mark: "fk" }); });
+  var rest = n.columns.filter(function (c) { return keyCols.indexOf(c) < 0 && fkCols.indexOf(c) < 0; });
+  var room = Math.max(0, ER.COLUMNS - rows.length);
+  rest.slice(0, room).forEach(function (c) { rows.push({ name: c, mark: "" }); });
+  return { rows: rows, hidden: rest.length - Math.min(room, rest.length) };
+}
+
+function erPage(body, m) {
+  var s = pageState("er"), md = metadata(m), scopes = [];
+  if (md.foreignKeys.length) scopes.push({ id: "declared", label: "Declared relationships" });
+  modelList(m).forEach(function (mo) { if (mo.relationships.length) scopes.push({ id: mo.item, label: mo.name + " · semantic model" }); });
+  if (!scopes.length) { body.appendChild(empty("No declared relationship or semantic relationship is recorded.")); return; }
+  if (!s.scope || !scopes.some(function (x) { return x.id === s.scope; })) s.scope = scopes[0].id;
+  if (s.depth === undefined) s.depth = 1;
+  var g = erGraph(m, s.scope), host = el("div", { "class": "wd-er" }), line = el("div", { "class": "wd-status-line" });
+  if (!s.focus || !g.nodes.has(s.focus)) {
+    var best = null;
+    g.nodes.forEach(function (n) { if (!best || n.refs.length + n.back.length > best.refs.length + best.back.length || (n.refs.length + n.back.length === best.refs.length + best.back.length && compare(n.label, best.label) < 0)) best = n; });
+    s.focus = best ? best.id : null;
+  }
+  var picker = el("select", { "class": "wd-select", "aria-label": "Relationships", onchange: function () { s.scope = this.value; s.focus = null; s.view = null; rerender(); } },
+    scopes.map(function (x) { return el("option", { value: x.id, selected: x.id === s.scope ? "selected" : null, text: x.label }); }));
+  var search = searchBox({
+    placeholder: "Search " + fmt(g.nodes.size) + " tables",
+    find: function (q) {
+      var terms = q.toLowerCase().split(/\s+/).filter(Boolean);
+      if (!terms.length) return [];
+      return Array.from(g.nodes.values()).filter(function (n) { return terms.every(function (t) { return (n.label + " " + n.item).toLowerCase().indexOf(t) >= 0; }); })
+        .sort(function (a, b) { return a.label.length - b.label.length || compare(a.label, b.label); }).slice(0, 12)
+        .map(function (n) { return { key: n.id, label: n.label, meta: itemName(n.item) + " · " + (n.refs.length + n.back.length) + " relationships" }; });
+    },
+    onPick: function (r) { s.focus = r.key; s.view = null; draw(); saveState(); }
+  });
+  body.appendChild(el("div", { "class": "wd-toolbar" }, [picker, search,
+    segmented("Depth", DEPTHS, s.depth, function (d) { s.depth = d; s.view = null; draw(); saveState(); }, depthLabel)]));
+  body.appendChild(line);
+  body.appendChild(host);
+  body.appendChild(el("div", { "class": "wd-legend" }, [
+    el("span", { "class": "wd-key", text: "⚿ key column" }), el("span", { "class": "wd-key", text: "↗ foreign key column" }),
+    el("span", { "class": "wd-key" }, [el("i", { "class": "wd-key-line wd-up" }), "relationship, many to one"]),
+    el("span", { "class": "wd-key" }, [el("i", { "class": "wd-key-line wd-dashed" }), "inactive"]),
+    el("span", { "class": "wd-key" }, [el("i", { "class": "wd-key-more", text: "+3" }), "related tables beyond the window"])
+  ]));
+  function rerender() { saveState(); redraw(); }
+  function draw() {
+    host.textContent = "";
+    var win = erWindow(g, s.focus, s.depth);
+    if (!win) { host.appendChild(empty("Search for a table.")); return; }
+    line.textContent = win.kept.size + " of " + fmt(g.nodes.size) + " tables" + (win.truncated ? " · cut to the " + ER.NODES + " nearest of " + win.reach + "; lower the depth or follow a +N marker" : "");
+    var columns = new Map();
+    win.kept.forEach(function (d, id) { addTo(columns, d, id); });
+    var order = Array.from(columns.keys()).sort(function (a, b) { return a - b; }), boxes = new Map(), top = Infinity, bottom = -Infinity;
+    order.forEach(function (d) {
+      var ids = columns.get(d).sort(function (a, b) { return compare(g.nodes.get(a).label, g.nodes.get(b).label); });
+      var heights = ids.map(function (id) { var r = erRows(g.nodes.get(id), win.edges); return ER.HEAD + Math.max(1, r.rows.length + (r.hidden ? 1 : 0)) * ER.ROW + 8; });
+      var total = heights.reduce(function (a, b) { return a + b + ER.GAP_Y; }, -ER.GAP_Y), y = -total / 2;
+      ids.forEach(function (id, i) {
+        var r = erRows(g.nodes.get(id), win.edges);
+        boxes.set(id, { x: d * (ER.BOX + ER.GAP_X), y: y, h: heights[i], rows: r.rows, hidden: r.hidden });
+        top = Math.min(top, y); bottom = Math.max(bottom, y + heights[i]);
+        y += heights[i] + ER.GAP_Y;
+      });
+    });
+    var x0 = order[0] * (ER.BOX + ER.GAP_X) - 80, x1 = order[order.length - 1] * (ER.BOX + ER.GAP_X) + ER.BOX + 80;
+    var svg = sv("svg", { "class": "wd-er-svg", role: "img", "aria-label": "Relationship diagram" }), stage = sv("g");
+    svg.appendChild(stage);
+    function rowY(box, column) {
+      for (var i = 0; i < box.rows.length; i++) if (box.rows[i].name === column) return box.y + ER.HEAD + i * ER.ROW + ER.ROW / 2;
+      return box.y + ER.HEAD / 2;
+    }
+    win.edges.forEach(function (e) {
+      var a = boxes.get(e.from), b = boxes.get(e.to);
+      var ax = a.x <= b.x ? a.x + ER.BOX : a.x, bx = a.x <= b.x ? b.x : b.x + ER.BOX;
+      if (a.x === b.x) { ax = a.x + ER.BOX; bx = b.x + ER.BOX; }
+      var ay = rowY(a, e.fromColumns[0]), by = rowY(b, e.toColumns[0]), c = a.x === b.x ? 60 : Math.max(40, Math.abs(bx - ax) / 2);
+      var dir = a.x === b.x ? 1 : (bx > ax ? 1 : -1);
+      var path = "M" + ax + " " + ay + "C" + (ax + dir * c) + " " + ay + " " + (bx - (a.x === b.x ? -c : dir * c)) + " " + by + " " + bx + " " + by;
+      stage.appendChild(sv("path", { "class": "wd-er-edge" + (e.active ? "" : " wd-er-inactive") + (e.from === s.focus || e.to === s.focus ? " wd-er-focus" : ""), d: path },
+        [sv("title", {}, [(e.label ? e.label + ": " : "") + g.nodes.get(e.from).label + " (" + e.fromColumns.join(", ") + ") → " + g.nodes.get(e.to).label + " (" + e.toColumns.join(", ") + ")" + (e.active ? "" : " · inactive")])]));
+      stage.appendChild(sv("circle", { "class": "wd-er-many", cx: ax, cy: ay, r: 3 }));
+    });
+    boxes.forEach(function (box, id) {
+      var n = g.nodes.get(id), focus = id === s.focus;
+      var group = sv("g", { "class": "wd-er-box" + (focus ? " wd-er-box-focus" : ""), transform: "translate(" + box.x + " " + box.y + ")", tabindex: "0", role: "button", "aria-label": n.label });
+      group.appendChild(sv("rect", { width: ER.BOX, height: box.h, rx: 9 }));
+      group.appendChild(sv("rect", { "class": "wd-er-head", width: ER.BOX, height: ER.HEAD - 6, rx: 9 }));
+      group.appendChild(sv("text", { "class": "wd-er-title", x: 12, y: 17 }, [clipText(n.label, 28)]));
+      group.appendChild(sv("text", { "class": "wd-er-item", x: 12, y: 29 }, [clipText(itemName(n.item), 34)]));
+      box.rows.forEach(function (r, i) {
+        group.appendChild(sv("text", { "class": "wd-er-col" + (r.mark ? " wd-er-" + r.mark : ""), x: 12, y: ER.HEAD + i * ER.ROW + 13 },
+          [(r.mark === "key" ? "⚿ " : r.mark === "fk" ? "↗ " : "   ") + clipText(r.name, 30)]));
+      });
+      if (box.hidden) group.appendChild(sv("text", { "class": "wd-er-col wd-er-hidden", x: 12, y: ER.HEAD + box.rows.length * ER.ROW + 13 }, [box.hidden + " more described columns"]));
+      var more = win.more.get(id);
+      if (more) {
+        var badge = sv("g", { "class": "wd-er-more", transform: "translate(" + (ER.BOX - 34) + " -8)" }, [sv("rect", { width: 30, height: 16, rx: 8 }), sv("text", { x: 15, y: 11.5 }, ["+" + more.length]),
+          sv("title", {}, [more.length + " related tables beyond the window. Select to focus here."])]);
+        group.appendChild(badge);
+      }
+      group.addEventListener("click", function () { s.focus = id; s.view = null; draw(); saveState(); });
+      group.addEventListener("keydown", function (ev) { if (ev.key === "Enter") { s.focus = id; s.view = null; draw(); saveState(); } });
+      stage.appendChild(group);
+    });
+    host.appendChild(svg);
+    panZoom(svg, stage, s, { x: x0, y: top - 40, w: x1 - x0, h: bottom - top + 80 });
+  }
+  draw();
+}
+
+function clipText(text, n) { text = String(text || ""); return text.length > n ? text.slice(0, n - 1) + "…" : text; }
+
+function sv(tag, attrs, children) {
+  var e = document.createElementNS("http://www.w3.org/2000/svg", tag);
+  setAttrs(e, attrs);
+  (children || []).forEach(function (c) { if (c) e.appendChild(typeof c === "string" ? document.createTextNode(c) : c); });
+  return e;
+}
+
+/* Pan and zoom for an SVG stage, with the same gestures as the graph. */
+function panZoom(svg, stage, s, bounds) {
+  function box() { return svg.getBoundingClientRect(); }
+  function apply() { stage.setAttribute("transform", "translate(" + s.view.x + " " + s.view.y + ") scale(" + s.view.k + ")"); }
+  function fit() {
+    var b = box(), k = Math.min(1.1, Math.max(0.2, Math.min(b.width / bounds.w, b.height / bounds.h)));
+    s.view = { k: k, x: b.width / 2 - (bounds.x + bounds.w / 2) * k, y: b.height / 2 - (bounds.y + bounds.h / 2) * k };
+    apply();
+  }
+  if (s.view) apply(); else (root.requestAnimationFrame || setTimeout)(fit);
+  var drag = null;
+  svg.addEventListener("pointerdown", function (e) {
+    if (e.target.closest && e.target.closest(".wd-er-box")) return;
+    drag = { x: e.clientX, y: e.clientY, v: s.view, touch: e.pointerType === "touch" };
+  });
+  svg.addEventListener("pointermove", function (e) {
+    if (!drag || !s.view) return;
+    s.view = { k: drag.v.k, x: drag.v.x + e.clientX - drag.x, y: drag.v.y + (drag.touch ? 0 : e.clientY - drag.y) };
+    apply();
+  });
+  ["pointerup", "pointercancel", "pointerleave"].forEach(function (t) { svg.addEventListener(t, function () { drag = null; }); });
+  svg.addEventListener("wheel", function (e) {
+    if (!(e.ctrlKey || e.metaKey) && pageScrolls()) return;
+    e.preventDefault();
+    var b = box(), k = Math.min(2.5, Math.max(0.1, s.view.k * Math.exp(-e.deltaY * 0.0025))), f = k / s.view.k, px = e.clientX - b.left, py = e.clientY - b.top;
+    s.view = { k: k, x: px - (px - s.view.x) * f, y: py - (py - s.view.y) * f };
+    apply();
+  }, { passive: false });
+}

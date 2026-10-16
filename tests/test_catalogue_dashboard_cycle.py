@@ -14,12 +14,12 @@ from weaver.catalogue_dashboard import (
     DASHBOARD_ITEMS,
     DASHBOARD_MODEL,
     DASHBOARD_REPORT,
+    renderer_html,
     renderer_literal,
 )
 from weaver.declaration.repository import parse_item_repository
 from weaver.errors import DiscoveryError
 from weaver.fabric.resolution import FabricResolver
-from weaver.fragments import fragment_files
 from weaver.locations import Location
 from weaver.semantic_models.definition import decode_parts, encode_definition
 from weaver.semantic_models.objects import TmdlDefinition
@@ -35,38 +35,67 @@ MEASURE_TABLE = "Dashboard measures"
 SOURCES = {
     "Graph node": "GraphNode",
     "Graph edge": "GraphEdge",
+    "Installation": "Installation",
+    "Registry": "Registry",
+    "Dependency": "Dependency",
     "Load status": "LoadStatus",
     "Log": "Log",
     "Load statistic": "LoadStatistic",
     "Test status": "TestStatus",
     "Test dictionary": "TestDictionary",
+    "Schema dictionary": "SchemaDictionary",
     "Table dictionary": "TableDictionary",
+    "Folder dictionary": "FolderDictionary",
     "Column dictionary": "ColumnDictionary",
-    "Semantic model table": "SemanticModelTable",
-    "Semantic model relationship": "SemanticModelRelationship",
     "Key dictionary": "KeyDictionary",
     "Foreign key dictionary": "ForeignKeyDictionary",
+    "Semantic model": "SemanticModel",
+    "Semantic model table": "SemanticModelTable",
+    "Semantic model column": "SemanticModelColumn",
+    "Semantic model measure": "SemanticModelMeasure",
+    "Semantic model relationship": "SemanticModelRelationship",
 }
+
+#: The page measure each Report page shows, in page order.
+PAGES = {
+    "overview": "Overview page",
+    "lineage": "Lineage page",
+    "dictionary": "Dictionary page",
+    "er": "ER diagram page",
+    "semantics": "Semantics page",
+    "bus": "Bus matrix page",
+    "load": "Load page",
+    "gantt": "Gantt page",
+    "health": "Health page",
+    "performance": "Performance page",
+}
+
+#: The pages that refresh themselves, because they show settling work.
+LIVE = {"overview", "load", "gantt", "health"}
 
 #: Every measure, by display folder.
 MEASURES = {
     "Health": {
-        "Red tests",
         "Failed loads",
+        "Rejected loads",
         "Pending loads",
-        "Stale loads",
+        "Failed tests",
         "Latest settled completion",
         "Observed at",
     },
-    "Data": {"Graph data", "Run data", "Health data"},
-    "Pages": {"Renderer", "Overview page", "Explore page", "Live run page"},
-}
-
-#: The page measure each Report page shows.
-PAGES = {
-    "overview": "Overview page",
-    "explore": "Explore page",
-    "liveRun": "Live run page",
+    "Estate": {"Items", "Installed objects", "Settled log records"},
+    "Data": {
+        "Catalogue data",
+        "Graph data",
+        "Status data",
+        "Build data",
+        "Workflow data",
+        "Log data",
+        "Statistic data",
+        "Metadata data",
+        "Semantic data",
+    },
+    "Pages": {"Renderer", *PAGES.values()},
 }
 
 
@@ -175,18 +204,20 @@ def test_the_measures_quote_every_table_and_avoid_reserved_names(tmp_path):
 
 @weaver_test()
 def test_the_renderer_reaches_the_model_as_one_string_literal(tmp_path):
-    files = fragment_files("dashboard")
-    css, script = (files[name].decode() for name in ("dashboard.css", "dashboard.js"))
     expression = measures(dashboard_model(tmp_path).parts)["Renderer"][2].strip()
 
     assert expression.startswith('"<style>') and expression.endswith('</script>"')
     inner = expression[1:-1]
     assert '"' not in inner.replace('""', "")
     html = inner.replace('""', '"')
+    assert html == renderer_html()
     assert html.count("</script>") == 1 and html.count("</style>") == 1
-    assert "function windowAround(" in html and "--surface:" in html
+    # Every script, in name order, inside one function.
+    assert "function focusWindow(" in html and "function assessHealth(" in html
+    assert html.index("function parsePayload(") < html.index("function start(")
+    assert "--paper:" in html
     with pytest.raises(AssertionError, match="</script"):
-        renderer_literal(css, script + "\n'</script>'")
+        renderer_literal("", "'</script>'")
 
 
 @weaver_test()
@@ -213,11 +244,16 @@ def test_each_page_shows_one_html_content_visual_over_its_page_measure(tmp_path)
         field = projection["field"]["Measure"]
         assert field["Expression"]["SourceRef"]["Entity"] == MEASURE_TABLE
         assert field["Property"] == measure and measure in names
-        # Data first, then the renderer that reads it.
+        # The data element names its page, then the renderer reads it.
         expression = names[measure][2]
-        assert expression.index("window.__WD_DATA") < expression.index("[Renderer]")
+        assert (
+            f'"page" & UNICHAR(57345) & "name" & UNICHAR(57346) & "{page}"'
+            in expression
+        )
+        assert expression.index('id=""wd-data""') < expression.index("[Renderer]")
+        assert "SUBSTITUTE(" in expression and '"<", UNICHAR(57344))' in expression
         settings = json.loads(parts[f"definition/pages/{page}/page.json"])
-        assert ("pageRefresh" in settings.get("objects", {})) is (page != "explore")
+        assert ("pageRefresh" in settings.get("objects", {})) is (page in LIVE)
 
 
 @weaver_test()

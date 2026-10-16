@@ -1,6 +1,6 @@
 {
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.0.0/schema.json",
-  "name": "liveRun",
+  "name": "dictionary",
   "position": {
     "x": 0,
     "y": 0,
@@ -23,11 +23,11 @@
                       "Entity": "Dashboard measures"
                     }
                   },
-                  "Property": "Live run page"
+                  "Property": "Dictionary page"
                 }
               },
-              "queryRef": "Dashboard measures.Live run page",
-              "nativeQueryRef": "Live run page"
+              "queryRef": "Dashboard measures.Dictionary page",
+              "nativeQueryRef": "Dictionary page"
             }
           ]
         }

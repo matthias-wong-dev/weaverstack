@@ -1,170 +1,311 @@
-// The Catalogue Dashboard renderer's pure logic. Run with: node --test tests/js
+// The Catalogue Dashboard renderer's pure logic. Run with: node --test tests/js/dashboard.test.js
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const path = require("node:path");
+const { load } = require("./renderer.js");
 
-const dashboard = require(path.join(__dirname, "../../src/weaver/fragments/dashboard/dashboard.js"));
+const D = load();
+const AT = Date.UTC(2026, 9, 16, 2, 0, 0);
+const H = 3600 * 1000;
 
-const AT = "2026-10-10T05:00:00Z";
-
-function node(id, kind = "Table", item = "Warehouse/Curated", desc = "") {
-  return [id, id.split("/").pop(), kind, item, id, desc];
+function table(name, columns, rows) {
+  return D.TABLE + name + columns.map((c) => D.FIELD + c).join("") +
+    rows.map((r) => D.ROW + r.map((v) => (v === null || v === undefined ? "" : String(v))).join(D.FIELD)).join("");
 }
 
-// Files -> Customer -> Shortcut -> ByRegion -> Model -> Report; Region -> ByRegion; Valid checks ByRegion.
-function estate() {
-  return {
-    at: AT,
-    nodes: [
-      node("L/Files.Customers", "Folder", "Lakehouse/Landing", "Customer records as exported."),
-      node("L/Sales.Customer", "Table", "Lakehouse/Landing"),
-      node("W/Sales.Customer", "Shortcut"),
-      node("W/Sales.Region", "Table", "Warehouse/Curated", "The regions customers are grouped into."),
-      node("W/Sales.ByRegion"),
-      node("W/Sales.ByRegionValid", "Assumption"),
-      node("M/Sales", "Semantic model", "SemanticModel/Sales"),
-      node("R/Sales", "Report", "Report/Sales"),
-    ],
-    edges: [
-      ["L/Sales.Customer", "L/Files.Customers", "Dependency"],
-      ["W/Sales.Customer", "L/Sales.Customer", "Shortcut"],
-      ["W/Sales.ByRegion", "W/Sales.Customer", "Dependency"],
-      ["W/Sales.ByRegion", "W/Sales.Region", "Dependency"],
-      ["W/Sales.ByRegionValid", "W/Sales.ByRegion", "Validation"],
-      ["M/Sales", "W/Sales.ByRegion", "Dependency"],
-      ["R/Sales", "M/Sales", "Dependency"],
-      ["W/Sales.Region", "Sales.Elsewhere", "External"],
-    ],
-    loads: [
-      ["L/Files.Customers", "Succeeded", "2026-10-10T04:00:00Z", "2026-10-10T04:00:05Z", 5000],
-      ["L/Sales.Customer", "Succeeded", "2026-10-10T04:00:06Z", "2026-10-10T04:00:20Z", 14000],
-      ["W/Sales.Region", "Succeeded", "2026-10-10T04:00:00Z", "2026-10-10T04:00:04Z", 4000],
-      ["W/Sales.ByRegion", "Succeeded", "2026-10-10T03:00:00Z", "2026-10-10T03:00:04Z", 4000],
-      ["M/Sales", "Pending", null, null, null],
-    ],
-    tests: [["W/Sales.ByRegionValid", "Failed", "2026-10-10T04:59:30Z", 3]],
-    stats: [["W/Sales.Region", 3, 0, 0, 0, 0]],
-    columns: [["W/Sales.Region", "Region ID", "The region's key."]],
-  };
-}
+const NODE = ["key", "item", "schema", "object", "kind", "label", "flags", "description"];
+const EDGE = ["down", "up", "kind", "through", "reference"];
+const LOAD = ["item", "schema", "object", "result", "workflow", "started", "completed", "duration"];
+const TEST = ["item", "schema", "object", "result", "workflow", "started", "completed", "failures"];
 
-const ids = (win) => win.nodes.map((n) => n.id).sort();
-
-test("the window walks each direction to its own depth", () => {
-  const g = dashboard.buildGraph(estate());
-  assert.deepEqual(ids(dashboard.windowAround(g, "W/Sales.ByRegion", 0, 0)), ["W/Sales.ByRegion"]);
-  assert.deepEqual(ids(dashboard.windowAround(g, "W/Sales.ByRegion", 1, 0)),
-    ["W/Sales.ByRegion", "W/Sales.Customer", "W/Sales.Region"]);
-  assert.deepEqual(ids(dashboard.windowAround(g, "W/Sales.ByRegion", 0, 2)),
-    ["M/Sales", "R/Sales", "W/Sales.ByRegion", "W/Sales.ByRegionValid"]);
-  const all = dashboard.windowAround(g, "W/Sales.ByRegion", -1, -1);
-  assert.equal(all.nodes.length, 8);
-  assert.equal(all.nodes.find((n) => n.id === "L/Files.Customers").dist, -3);
-  assert.equal(all.truncated, false);
-});
-
-test("the budget keeps the nearest nodes, upstream first, and marks the frontier", () => {
-  const g = dashboard.buildGraph(estate());
-  const win = dashboard.windowAround(g, "W/Sales.ByRegion", -1, -1, { nodes: 4, edges: 2 });
-  assert.equal(win.nodes.length, 4);
-  assert.equal(win.reach, 8);
-  assert.ok(win.truncated);
-  // Distance one: Customer and Region upstream before ByRegionValid downstream.
-  assert.deepEqual(win.nodes.map((n) => n.id),
-    ["W/Sales.ByRegion", "W/Sales.Customer", "W/Sales.Region", "M/Sales"]);
-  assert.ok(win.edges.length <= 2);
-  assert.deepEqual(win.more["W/Sales.Customer"], { up: 1, down: 0 });
-  assert.deepEqual(win.more["M/Sales"], { up: 0, down: 1 });
-  assert.equal(win.more["W/Sales.ByRegion"].down, 1);
-});
-
-test("an external read is a stub, not a node", () => {
-  const g = dashboard.buildGraph(estate());
-  const win = dashboard.windowAround(g, "W/Sales.Region", 0, 0);
-  assert.deepEqual(win.stubs, [{ d: "W/Sales.Region", ref: "Sales.Elsewhere" }]);
-});
-
-test("the layout places columns by signed distance and keeps items together", () => {
-  const g = dashboard.buildGraph(estate());
-  const win = dashboard.windowAround(g, "W/Sales.ByRegion", -1, -1);
-  const lay = dashboard.layout(g, win);
-  const x = (id) => lay.positions.get(id).x;
-  assert.ok(x("L/Files.Customers") < x("L/Sales.Customer"));
-  assert.ok(x("L/Sales.Customer") < x("W/Sales.ByRegion"));
-  assert.ok(x("W/Sales.ByRegion") < x("M/Sales"));
-  assert.equal(x("W/Sales.ByRegion"), 0);
-  for (const n of win.nodes) {
-    const p = lay.positions.get(n.id);
-    const box = lay.groups.find((b) => b.item === g.nodes.get(n.id).item && b.x <= p.x && p.x < b.x + b.w &&
-      b.y <= p.y && p.y < b.y + b.h);
-    assert.ok(box, `${n.id} sits inside its item's box`);
-  }
-  const ys = win.nodes.filter((n) => n.dist === -1).map((n) => lay.positions.get(n.id).y);
-  assert.equal(new Set(ys).size, ys.length, "no two nodes share a row");
-});
-
-test("readiness reads only direct upstreams", () => {
-  const g = dashboard.buildGraph(estate());
-  // ByRegion ran before its upstreams settled again: they are all fresher.
-  assert.equal(dashboard.readiness(g, "W/Sales.ByRegion"), "Candidate");
-  // The model is Pending and its one upstream has settled.
-  assert.equal(dashboard.readiness(g, "M/Sales"), "Candidate");
-  // A root that settled is Done.
-  assert.equal(dashboard.readiness(g, "L/Files.Customers"), "Done");
-  // The Report has no status of its own.
-  assert.equal(dashboard.readiness(g, "R/Sales"), null);
-  // Waiting while an upstream is Pending.
-  const data = estate();
-  data.loads.push(["R/Sales", "Succeeded", AT, AT, 1]);
-  assert.equal(dashboard.readiness(dashboard.buildGraph(data), "R/Sales"), "Waiting");
-});
-
-test("search ranks label matches above item and description matches", () => {
-  const g = dashboard.buildGraph(estate());
-  assert.equal(dashboard.search(g, "region")[0].id, "W/Sales.Region");
-  assert.deepEqual(dashboard.search(g, "grouped").map((n) => n.id), ["W/Sales.Region"]);
-  assert.equal(dashboard.search(g, "landing customer").length, 2);
-  assert.deepEqual(dashboard.search(g, ""), []);
-});
-
-test("statuses, statistics and columns join to their node by key", () => {
-  const g = dashboard.buildGraph(estate());
-  const region = g.nodes.get("W/Sales.Region");
-  assert.equal(region.result, "Succeeded");
-  assert.equal(region.stat.read, 3);
-  assert.deepEqual(region.columns, [{ name: "Region ID", note: "The region's key." }]);
-  assert.equal(g.nodes.get("W/Sales.ByRegionValid").failures, 3);
-});
-
-test("lineage follows the window both ways from a node", () => {
-  const g = dashboard.buildGraph(estate());
-  const win = dashboard.windowAround(g, "W/Sales.ByRegion", -1, -1);
-  const path = dashboard.lineage(win, "M/Sales");
-  assert.ok(path.nodes.has("R/Sales") && path.nodes.has("L/Files.Customers"));
-  assert.ok(!path.nodes.has("W/Sales.ByRegionValid"));
-});
-
-test("findings order errors before warnings before information", () => {
-  const data = estate();
-  data.loads.push(["W/Sales.Old", "Succeeded", "2026-10-08T00:00:00Z", "2026-10-08T00:00:01Z", 1000]);
-  data.views = ["W/Sales.View"];
-  data.loads.push(["W/Sales.View", "Succeeded", "2026-10-01T00:00:00Z", "2026-10-01T00:00:01Z", 1]);
-  const list = dashboard.findings(data);
-  assert.deepEqual(list.map((f) => f.severity), [1, 2, 3]);
-  assert.match(list[1].text, /No successful load for \d+ hours/);
-});
-
-test("a run's timeline orders its steps and names refreshes by their node", () => {
-  const log = [
-    ["wf1", "load", "Lakehouse", "Landing", "Tables/Sales", "Customer", "Succeeded", "2026-10-10T04:00:06Z", "2026-10-10T04:00:20Z", ""],
-    ["wf1", "load", "Lakehouse", "Landing", "", "", "Succeeded", "2026-10-10T04:00:21Z", "2026-10-10T04:00:22Z", "refresh:Lakehouse/Landing"],
-    ["wf0", "load", "Warehouse", "Curated", "Sales", "Region", "Failed", "2026-10-09T04:00:00Z", "2026-10-09T04:00:04Z", ""],
+// Landing: Files -> Customer. Curated: shortcut to Customer; ByRegion reads
+// Customer through it and Region; an Assumption checks ByRegion. Sales model
+// reads ByRegion; a Report reads the model.
+function estate(overrides = {}) {
+  const nodes = [
+    ["f", "Lakehouse/Landing", "Files/Sales", "Customers", "Folder", "Sales/Customers", 9, "Customer records as exported."],
+    ["c", "Lakehouse/Landing", "Tables/Sales", "Customer", "Table", "Sales.Customer", 9, ""],
+    ["s", "Warehouse/Curated", "Sales", "Customer", "Shortcut", "Sales.Customer", 8, ""],
+    ["r", "Warehouse/Curated", "Sales", "Region", "Table", "Sales.Region", 9, "The regions customers are grouped into."],
+    ["b", "Warehouse/Curated", "Sales", "ByRegion", "Table", "Sales.ByRegion", 9, ""],
+    ["v", "Warehouse/Curated", "Sales", "ByRegionValid", "Assumption", "Sales.ByRegionValid", 8, ""],
+    ["m", "SemanticModel/Sales", "", "", "Semantic model", "Sales", 9, ""],
+    ["p", "Report/Sales", "", "", "Report", "Sales", 8, ""],
   ];
-  assert.deepEqual(dashboard.workflows(log).map((w) => w.id), ["wf1", "wf0"]);
-  const model = dashboard.gantt(log, "wf1");
-  assert.equal(model.rows.length, 2);
-  assert.equal(model.rows[1].label, "Lakehouse/Landing");
-  assert.equal(model.rows[1].verb, "refresh");
-  assert.equal(model.t1 - model.t0, 16000);
+  const edges = [
+    ["c", "f", "Dependency", "", ""],
+    ["s", "c", "Shortcut", "", ""],
+    ["b", "c", "Dependency", "s", ""],
+    ["b", "r", "Dependency", "", ""],
+    ["v", "b", "Validation", "", ""],
+    ["m", "b", "Dependency", "", ""],
+    ["p", "m", "Dependency", "", ""],
+    ["r", "x", "External", "", "Ledger.dbo.Region"],
+    ["b", "q", "Dependency", "", ""],
+  ];
+  const loads = overrides.loads || [
+    ["Lakehouse/Landing", "Files/Sales", "Customers", "Succeeded", "w1", AT - 3 * H, AT - 3 * H + 5000, 5000],
+    ["Lakehouse/Landing", "Tables/Sales", "Customer", "Succeeded", "w1", AT - 2 * H, AT - 2 * H + 9000, 9000],
+    ["Warehouse/Curated", "Sales", "Region", "Succeeded", "w1", AT - 3 * H, AT - 3 * H + 1000, 1000],
+    ["Warehouse/Curated", "Sales", "ByRegion", "Succeeded", "w0", AT - 30 * H, AT - 30 * H + 4000, 4000],
+    ["SemanticModel/Sales", "", "", "Pending", "w1", null, null, null],
+  ];
+  const tests = overrides.tests || [["Warehouse/Curated", "Sales", "ByRegionValid", "Failed", "w1", AT - H, AT - H + 500, 3]];
+  return table("page", ["name"], [[overrides.page || "lineage"]]) +
+    table("meta", ["at", "format"], [[AT, 1]]) +
+    table("items", ["item", "workspace", "target", "version"], [
+      ["Warehouse/_weaver", "Analytics", "Weaver", "0.9.0"], ["Lakehouse/Landing", "Analytics", "Landing_LH", "0.9.0"],
+      ["Warehouse/Curated", "Analytics", "Curated_WH", "0.9.0"], ["SemanticModel/Sales", "Analytics", "Sales", "0.9.0"],
+      ["SemanticModel/Catalogue Dashboard", "Analytics", "Estate", "0.9.0"]]) +
+    table("nodes", NODE, overrides.nodes || nodes) +
+    table("edges", EDGE, edges) +
+    table("internal", ["item"], [["Warehouse/_weaver"]]) +
+    table("loads", LOAD, loads) +
+    table("tests", TEST, tests) +
+    table("built", ["item", "schema", "object", "built"], [["Warehouse/Curated", "Sales", "Region", AT - 2.5 * H]]) +
+    (overrides.extra || "");
+}
+
+function model(text) {
+  const parsed = D.parsePayload(text);
+  return D.buildModel(parsed.tables, parsed.problems);
+}
+
+// --- payload ---------------------------------------------------------------------
+
+test("the payload parses tables, nulls and the escaped <", () => {
+  const text = table("t", ["a", "b"], [["x" + D.LESS + "/script>", ""], ["y", "2"]]);
+  const parsed = D.parsePayload(text);
+  assert.deepEqual(parsed.tables.t, [{ a: "x</script>", b: null }, { a: "y", b: "2" }]);
+  assert.deepEqual(parsed.problems, []);
+});
+
+test("a row with the wrong number of fields is reported, not guessed", () => {
+  const parsed = D.parsePayload(D.TABLE + "t" + D.FIELD + "a" + D.FIELD + "b" + D.ROW + "only");
+  assert.deepEqual(parsed.tables.t, []);
+  assert.equal(parsed.problems.length, 1);
+});
+
+// --- model -----------------------------------------------------------------------
+
+test("the model names the catalogue and keeps the Dashboard's own items out", () => {
+  const m = model(estate());
+  assert.equal(m.catalogue.name, "Weaver");
+  assert.equal(m.items.get("Warehouse/_weaver").internal, true);
+  assert.equal(m.items.get("SemanticModel/Catalogue Dashboard").internal, true);
+  assert.equal(m.items.get("Lakehouse/Landing").internal, false);
+});
+
+test("a read through a shortcut is drawn from the shortcut and walked from the source", () => {
+  const m = model(estate());
+  const b = m.nodes.get("b");
+  assert.deepEqual(b.up.sort(), ["c", "r"]);
+  assert.deepEqual(b.vup.sort(), ["r", "s"]);
+  // An edge from a node the page leaves out is counted, not drawn; an External read is a stub.
+  assert.equal(m.hiddenEdges, 1);
+  assert.deepEqual(m.nodes.get("r").stubs, ["Ledger.dbo.Region"]);
+});
+
+test("two nodes with one key are reported", () => {
+  const nodes = [["k", "Lakehouse/A", "Tables/S", "One", "Table", "S.One", 9, ""], ["k", "Lakehouse/A", "Tables/S", "Two", "Table", "S.Two", 9, ""]];
+  const m = model(estate({ nodes }));
+  assert.equal(m.nodes.size, 1);
+  assert.match(m.problems[0], /share the key k/);
+});
+
+// --- layout ----------------------------------------------------------------------
+
+test("every node sits inside its item's band, shortcuts first and validations last", () => {
+  const m = model(estate());
+  const lay = D.layoutEstate(m);
+  m.nodes.forEach((n) => {
+    const p = lay.pos.get(n.key), b = p.band;
+    assert.equal(b.item.label, n.item);
+    assert.ok(p.x > b.x && p.x < b.x + b.width && p.y > b.y && p.y < b.y + b.height, n.key);
+  });
+  const curated = (key) => lay.pos.get(key).x;
+  assert.ok(curated("s") < curated("r") && curated("s") < curated("b"));
+  assert.ok(curated("v") > curated("b"));
+  // One band per item.
+  assert.equal(lay.bands.length, new Set(lay.bands.map((b) => b.item.label)).size);
+});
+
+test("cross-item edges run forward and the layout ignores the focus", () => {
+  const m = model(estate());
+  const lay = D.layoutEstate(m);
+  m.nodes.forEach((n) => n.vup.forEach((u) => {
+    if (m.nodes.get(u).item !== n.item) assert.ok(lay.pos.get(u).x < lay.pos.get(n.key).x, u + " -> " + n.key);
+  }));
+  const again = D.layoutEstate(model(estate()));
+  lay.pos.forEach((p, key) => assert.deepEqual([again.pos.get(key).x, again.pos.get(key).y], [p.x, p.y]));
+});
+
+test("a large item wraps tall layers into sub-columns within its band", () => {
+  const nodes = [];
+  for (let i = 0; i < 2000; i++) nodes.push(["n" + i, "Lakehouse/Wide", "Tables/S", "T" + i, "Table", "S.T" + i, 9, ""]);
+  const m = model(estate({ nodes }));
+  const lay = D.layoutEstate(m);
+  const band = lay.bands[0];
+  assert.ok(band.height < 2000 * 24 / 4, "wrapped");
+  m.nodes.forEach((n) => { const p = lay.pos.get(n.key); assert.ok(p.x < band.x + band.width && p.y < band.y + band.height); });
+});
+
+// --- the window ------------------------------------------------------------------
+
+test("depth 0 still shows the surrounding context, with continuation beyond it", () => {
+  const m = model(estate());
+  const win = D.focusWindow(m, "b", 0, 0, []);
+  assert.deepEqual(Array.from(win.lineage.keys()), ["b"]);
+  assert.ok(win.context.has("r") && win.context.has("s") && win.context.has("v") && win.context.has("m"));
+  assert.ok(win.shown.size > 1);
+});
+
+test("each direction walks to its own depth", () => {
+  const m = model(estate());
+  const up = D.focusWindow(m, "b", 1, 0, []);
+  assert.deepEqual(Array.from(up.lineage.keys()).sort(), ["b", "r", "s"]);
+  const all = D.focusWindow(m, "b", -1, -1, []);
+  assert.equal(all.lineage.get("f"), -3);
+  assert.equal(all.lineage.get("p"), 2);
+  assert.ok(all.edges.some((e) => e.u === "s" && e.d === "b" && e.side === "up"));
+  assert.ok(all.edges.some((e) => e.u === "m" && e.d === "p" && e.side === "down"));
+});
+
+test("the budget keeps the nearest lineage and every cut neighbour becomes a marker", () => {
+  const nodes = [["hub", "Warehouse/W", "S", "Hub", "Table", "S.Hub", 9, ""]];
+  const edgeRows = [];
+  for (let i = 0; i < 400; i++) { nodes.push(["c" + i, "Warehouse/W", "S", "C" + i, "Table", "S.C" + i, 9, ""]); edgeRows.push(["c" + i, "hub", "Dependency", "", ""]); }
+  const text = table("page", ["name"], [["lineage"]]) + table("meta", ["at", "format"], [[AT, 1]]) + table("nodes", NODE, nodes) + table("edges", EDGE, edgeRows);
+  const m = model(text);
+  const win = D.focusWindow(m, "hub", 1, 1, []);
+  assert.equal(win.lineage.size, D.BUDGET.NODES);
+  assert.ok(win.truncated && win.reach === 401);
+  assert.equal(win.more.get("hub").down.length, 401 - D.BUDGET.NODES);
+  const revealed = D.focusWindow(m, "hub", 1, 1, win.more.get("hub").down.slice(0, 40));
+  assert.equal(revealed.shown.size, D.BUDGET.NODES + 40);
+});
+
+// --- readiness and Health ---------------------------------------------------------
+
+test("readiness is derived from dependencies and never replaces the outcome", () => {
+  const m = model(estate({ loads: [
+    ["Lakehouse/Landing", "Files/Sales", "Customers", "Succeeded", "w1", AT - 3 * H, AT - 3 * H, 1],
+    ["Lakehouse/Landing", "Tables/Sales", "Customer", "Failed", "w1", AT - 2 * H, AT - 2 * H, 1],
+    ["Warehouse/Curated", "Sales", "Region", "Succeeded", "w1", AT - 3 * H, AT - 3 * H, 1],
+    ["Warehouse/Curated", "Sales", "ByRegion", "Succeeded", "w0", AT - 30 * H, AT - 30 * H, 1],
+  ] }));
+  // Customer's own load failed, but what it reads has settled: it may run again.
+  const customer = D.readiness(m, m.nodes.get("c"));
+  assert.equal(customer.state, "Ready");
+  assert.equal(m.nodes.get("c").load.result, "Failed");
+  // ByRegion reads Customer through the shortcut; Customer has settled nothing.
+  const byRegion = D.readiness(m, m.nodes.get("b"));
+  assert.equal(byRegion.state, "Waiting");
+  assert.deepEqual(byRegion.waitingOn.map((n) => n.key), ["c"]);
+  assert.equal(D.readiness(m, m.nodes.get("s")).state, "Not loaded here");
+});
+
+test("a load behind a newer upstream is Ready once every upstream has settled", () => {
+  const m = model(estate());
+  assert.equal(D.readiness(m, m.nodes.get("b")).state, "Ready");
+  assert.equal(D.readiness(m, m.nodes.get("r")).state, "Current");
+});
+
+test("Health reports Weaver's codes for the catalogue's own state", () => {
+  const extra = table("uncertified", ["item", "schema", "object"], [["Warehouse/Curated", "Sales", "Ghost"]]);
+  const m = model(estate({ extra }));
+  const health = D.assessHealth(m);
+  const codes = (list) => list.map((f) => (f.node ? f.node.key : f.label) + ":" + f.code).sort();
+  assert.deepEqual(codes(health.load), ["b:load_stale_ancestor", "b:load_stale_time", "m:load_pending"]);
+  assert.deepEqual(codes(health.tests), ["v:test_failed"]);
+  assert.deepEqual(codes(health.build), ["Warehouse/Curated Sales.Ghost:not_installed"]);
+});
+
+test("a validation that passed before its subject loaded again is stale", () => {
+  const tests = [["Warehouse/Curated", "Sales", "ByRegionValid", "Succeeded", "w0", AT - 40 * H, AT - 40 * H, 0]];
+  const m = model(estate({ tests }));
+  const codes = D.assessHealth(m).tests.map((f) => f.code);
+  assert.deepEqual(codes, ["test_stale_dependency"]);
+});
+
+test("a validation whose definition is not installed is a red Build finding", () => {
+  const nodes = [["v", "Warehouse/Curated", "Sales", "ByRegionValid", "Assumption", "Sales.ByRegionValid", 0, ""]];
+  const m = model(estate({ nodes }));
+  assert.deepEqual(D.assessHealth(m).build.map((f) => f.code), ["missing_validation_artefact"]);
+});
+
+// --- metadata ----------------------------------------------------------------------
+
+const SEMANTIC = table("models", ["item", "description"], [["SemanticModel/Sales", "Sales."]]) +
+  table("smtables", ["item", "table", "ordinal", "description", "mode", "access"], [
+    ["SemanticModel/Sales", "Sales", 1, "", "directLake", "sql"], ["SemanticModel/Sales", "Customer", 2, "", "directLake", "sql"],
+    ["SemanticModel/Sales", "Date", 3, "", "", ""], ["SemanticModel/Sales", "Bridge", 4, "", "", ""], ["SemanticModel/Sales", "Notes", 5, "", "", ""]]) +
+  table("smcolumns", ["item", "table", "column", "description", "datatype", "columntype", "sourcecolumn", "expression"], []) +
+  table("smmeasures", ["item", "table", "measure", "description", "expression", "format"], []) +
+  table("smrelationships", ["item", "name", "fromtable", "fromcolumn", "totable", "tocolumn", "fromcardinality", "tocardinality", "crossfilter", "active"], [
+    ["SemanticModel/Sales", "r1", "Sales", "Customer", "Customer", "Customer", "", "", "oneDirection", "1"],
+    ["SemanticModel/Sales", "r2", "Sales", "Order date", "Date", "Date", "many", "one", "", "1"],
+    ["SemanticModel/Sales", "r3", "Sales", "Ship date", "Date", "Date", "many", "one", "", "0"],
+    ["SemanticModel/Sales", "r4", "Date", "Year", "Customer", "Since", "one", "many", "", "1"],
+    ["SemanticModel/Sales", "r5", "Customer", "Bridge", "Bridge", "Bridge", "many", "many", "bothDirections", "1"]]) +
+  table("smsources", ["item", "table", "reference", "sourceitem", "sourceschema", "sourceobject"], [
+    ["SemanticModel/Sales", "Sales", "Warehouse/Curated/Sales.ByRegion", "Warehouse/Curated", "Sales", "ByRegion"]]);
+
+test("the bus matrix puts many sides against one sides and lists every other relationship", () => {
+  const m = model(estate({ extra: SEMANTIC }));
+  const mo = D.metadata(m).models.get("SemanticModel/Sales");
+  const bus = D.busMatrix(mo);
+  assert.deepEqual(Array.from(bus.facts.keys()).sort(), ["Customer", "Sales"]);
+  assert.deepEqual(Array.from(bus.dims.keys()).sort(), ["Customer", "Date"]);
+  // Two relationships to Date, one of them inactive: a role-playing pair.
+  assert.deepEqual(bus.cells.get("Sales\u0001Date"), { active: 1, inactive: 1, relationships: bus.cells.get("Sales\u0001Date").relationships });
+  assert.deepEqual(bus.mixed, ["Customer"]);
+  assert.deepEqual(bus.other.map((r) => r.name), ["r5"]);
+  assert.deepEqual(bus.isolated, ["Notes"]);
+  assert.equal(D.metadata(m).models.get("SemanticModel/Sales").tables.get("Sales").sources[0].node.key, "b");
+});
+
+test("tables keep their authored order, and fall back to alphabetical without one", () => {
+  const m = model(estate({ extra: SEMANTIC }));
+  const mo = D.metadata(m).models.get("SemanticModel/Sales");
+  assert.deepEqual(D.modelTables(mo, "authored").map((t) => t.name), ["Sales", "Customer", "Date", "Bridge", "Notes"]);
+  assert.deepEqual(D.modelTables(mo, "alphabetical").map((t) => t.name), ["Bridge", "Customer", "Date", "Notes", "Sales"]);
+  mo.tables.get("Notes").ordinal = null;
+  assert.deepEqual(D.modelTables(mo, "authored").map((t) => t.name), ["Bridge", "Customer", "Date", "Notes", "Sales"]);
+});
+
+test("the ER window walks a relationship cycle without repeating a table", () => {
+  const m = model(estate({ extra: SEMANTIC }));
+  const g = D.erGraph(m, "SemanticModel/Sales");
+  const win = D.erWindow(g, "Sales", -1);
+  assert.deepEqual(Array.from(win.kept.keys()).sort(), ["Bridge", "Customer", "Date", "Sales"]);
+  assert.equal(win.kept.get("Sales"), 0);
+  assert.ok(!win.more.size);
+});
+
+test("dictionary search ranks names before descriptions and finds columns", () => {
+  const extra = table("columns", ["item", "schema", "object", "column", "description", "identity"], [
+    ["Warehouse/Curated", "Sales", "Region", "Region ID", "The region's key.", ""]]) + SEMANTIC;
+  const m = model(estate({ extra }));
+  const entries = D.dictionaryEntries(m);
+  const found = D.searchEntries(entries, "region", "All").map((e) => e.kind + ":" + e.label);
+  assert.equal(found[0], "Table:Sales.Region");
+  assert.ok(found.includes("Column:Region ID"));
+  assert.deepEqual(D.searchEntries(entries, "customer records", "All").map((e) => e.label), ["Sales/Customers"]);
+});
+
+// --- Gantt -----------------------------------------------------------------------
+
+test("the Gantt summary measures elapsed span, summed work and peak concurrency", () => {
+  const rows = [
+    { started: 0, completed: 10, envelope: true },
+    { started: 1, completed: 5, envelope: false },
+    { started: 2, completed: 6, envelope: false },
+    { started: 3, completed: 4, envelope: false },
+    { started: 7, completed: 9, envelope: false },
+  ];
+  const s = D.ganttSummary(rows);
+  assert.equal(s.span, 10);
+  assert.equal(s.work, 10 + 4 + 4 + 1 + 2);
+  assert.equal(s.peak, 3);
 });
