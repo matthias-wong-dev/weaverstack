@@ -203,12 +203,22 @@ def _node_row(item: WeaverItemId, node, descriptions) -> Row:
             "description": description,
             "search_text": _search_text(label, item_label, description),
             "is_internal": _is_internal(node.identity),
-            "can_load": node.can_load,
+            "can_load": node.can_load or _deployed_model(node),
             "is_static": node.is_static,
             "is_mirrored": node.is_mirrored,
-            "is_installed": node.is_installed,
+            "is_installed": node.is_installed or _deployed_model(node),
         }
     )
+
+
+def _deployed_model(node) -> bool:
+    """A model Build deploys, which the installed graph refreshes.
+
+    The installed graph finds a model's refresh in its definition as Fabric
+    returns it, which Build reads only after it projects these rows.
+    """
+
+    return node.object_type == "semantic_model" and not node.is_mirrored
 
 
 def _kind(node) -> str:

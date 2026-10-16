@@ -578,3 +578,27 @@ def test_every_certified_data_object_has_a_graph_node(repository):
         if row["object_role"] == "data"
     }
     assert certified and certified <= nodes
+
+
+@weaver_test()
+def test_a_model_build_deploys_is_projected_as_refreshed():
+    """Its refresh is in the definition Fabric returns, read after projection."""
+
+    item = WeaverItemId.parse("SemanticModel/Sales")
+    model = WeaverDocumentId.model_root(item)
+    catalogue = Catalogue(
+        {
+            item: {
+                INSTALLATION.name: (installation_row(item, "Sales"),),
+                REGISTRY.name: (registry_row(model, object_type="semantic_model"),),
+            }
+        }
+    )
+
+    (node,) = graph_rows(catalogue, item)[GRAPH_NODE.name]
+
+    assert (node["node_kind"], node["can_load"], node["is_installed"]) == (
+        "semantic_model",
+        True,
+        True,
+    )
