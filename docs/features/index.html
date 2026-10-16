@@ -96,7 +96,7 @@
 <figure class="feature-spotlight warehouse-spotlight" data-spotlight="generated-warehouse" aria-labelledby="select-title">
 <h3 id="select-title">Write a SELECT. Get the engineering around it.</h3>
 <div class="select-engineering"><div class="authored-query"><h4>You write</h4><strong>T-SQL query</strong><span>+ native metadata comment</span></div><span class="engineering-arrow" aria-hidden="true">→</span><div class="generated-work"><h4>Weaver supplies</h4><ul><li>Physical Table</li><li>Load procedure &amp; staging</li><li>Declared-key reconciliation</li><li>Supported dependencies</li><li>Change statistics</li><li>Health evidence</li></ul></div></div>
-<figcaption>Declare the key for reconciliation; it is not a promise of a database-enforced primary-key constraint. Incremental source logic still identifies changes and explicit deletes.</figcaption>
+<figcaption>Declare the key used to reconcile rows. Incremental source logic identifies changes and explicit deletes.</figcaption>
 <p class="spotlight-docs"><a href="https://docs.weaverstack.dev/warehouse/first-project/">From a query to a managed Table</a></p>
 </figure><p class="group-docs"><a href="https://docs.weaverstack.dev/warehouse/first-project/">First Warehouse pipeline</a><span aria-hidden="true"> · </span><a href="https://docs.weaverstack.dev/reference/operation-behaviour/load/">Load behaviour</a></p></div></section>
 <section class="section feature-group" id="power-bi" data-feature-group="3"><div class="wrap"><h2>Power BI, engineered for organisations</h2>
@@ -129,7 +129,6 @@
 <div class="feature-row" data-feature="concurrency"><h3><a href="https://docs.weaverstack.dev/estate/concurrency/">Controlled concurrency</a></h3><p>Cap one invocation or tune per-resource limits while scheduling independent work in dependency order.</p></div>
 <div class="feature-row" data-feature="workflows"><h3><a href="https://docs.weaverstack.dev/estate/automation-and-deployment/">Sessions and workflows</a></h3><p>Reuse execution context and automate sequences of the same operations used interactively.</p></div>
 </div>
-<p class="scope-note">Health describes registered, Catalogue-managed work—not every object in a workspace. Selection stays inside requested items; continued execution is not transactional rollback.</p>
 <p class="group-docs"><a href="https://docs.weaverstack.dev/estate/operate/">Run and inspect an estate</a><span aria-hidden="true"> · </span><a href="https://docs.weaverstack.dev/reference/operation-behaviour/">Operation boundaries</a></p></div></section>
 <section class="section feature-group" id="advanced" data-feature-group="5"><div class="wrap"><h2>When your estate gets complicated</h2>
 <div class="feature-list">
@@ -147,11 +146,10 @@
 <figcaption>Keep unchanged objects borrowed while selected changed or affected work becomes local.</figcaption>
 <p class="scope-note">Mirror reconstructs the destination Catalogue and selected targets in the same workspace. Re-mirroring resets local work; it is not an in-place sync.</p>
 <p class="spotlight-docs"><a href="https://docs.weaverstack.dev/estate/mirror/">Develop using Mirror</a><span aria-hidden="true"> · </span><a href="https://docs.weaverstack.dev/reference/operation-behaviour/mirror/">Scope and reset boundaries</a></p>
-</figure><p class="scope-note">Build previews are read-only plans, not proof of all remote effects. Bundles are destination-specific; Build replacement protection does not prevent Load, Wipe or a deliberate reset.</p>
+</figure><p class="scope-note">Bundles are destination-specific. Build replacement guards do not protect data from Load, Wipe or deliberate resets.</p>
 </div></section>
 <section class="section feature-scale"><div class="wrap"><h2>From three objects to three thousand.</h2>
 <p>The scale benchmark records first-load and incremental processing separately. In the synthetic F64 benchmark, the 3,000-object estate’s first Load took about an hour; later measured incrementals were around 13 minutes. The first incremental day took about 19 minutes.</p>
-<p class="scope-note">A measured workload, not a guarantee for arbitrary estates.</p>
 <div class="actions"><a class="button blue" href="/scale/">Built for scale →</a><a class="button ghost" href="/get-started/">Get started →</a></div>
 </div></section></main>
 <footer class="site-footer">
