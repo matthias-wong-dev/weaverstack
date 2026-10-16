@@ -602,3 +602,57 @@ def test_a_model_build_deploys_is_projected_as_refreshed():
         True,
         True,
     )
+
+
+@weaver_test()
+def test_borrowing_changes_only_what_the_mirror_marks_in_lineage(repository):
+    """``lineage_statement`` corrects lineage published without ``_.Mirror``.
+
+    Projected with an item's ``_.Mirror`` rows, a borrowed object differs from
+    its projection without them in exactly the columns the statement sets, and
+    the statement joins on the identity both tables store.
+    """
+
+    from weaver.catalogue.borrow import lineage_statement
+    from weaver.catalogue.tables import MIRROR
+
+    built = built_catalogue(repository, _bindings(SALES, REPORTING))
+    tables = dict(built.rows[REPORTING])
+    report = {"schema_name": "Rpt", "object_name": "CustomerReport"}
+    borrowed = {
+        "item_type": "Warehouse",
+        "item_name": "Reporting",
+        **report,
+        "source_workspace_name": "Production",
+        "source_target_name": "Reporting",
+        "source_schema_name": "Rpt",
+        "source_object_name": "CustomerReport",
+        "physical_type": "table",
+    }
+    plain = lineage_rows(Catalogue({REPORTING: tables}), REPORTING)
+    mirrored = lineage_rows(
+        Catalogue({REPORTING: {**tables, MIRROR.name: (borrowed,)}}), REPORTING
+    )
+
+    assert plain[LINEAGE_EDGE.name] == mirrored[LINEAGE_EDGE.name]
+    before = {row["node_id"]: row for row in plain[LINEAGE_NODE.name]}
+    changed = {}
+    for row in mirrored[LINEAGE_NODE.name]:
+        differs = {
+            name
+            for name, value in row.items()
+            if name != "signature" and before[row["node_id"]][name] != value
+        }
+        if differs:
+            changed[(row["schema_name"], row["object_name"])] = (
+                differs,
+                row["is_mirrored"],
+                row["can_load"],
+            )
+    assert changed == {
+        ("Rpt", "CustomerReport"): ({"is_mirrored", "can_load"}, True, False)
+    }
+    statement = lineage_statement()
+    assert "set [Is mirrored] = 1, [Can load] = 0" in statement
+    for column in ("Item type", "Item name", "Schema name", "Object name"):
+        assert f"[m].[{column}] = [n].[{column}]" in statement

@@ -107,6 +107,7 @@ def catalogue(rows, at) -> str:
 def graph(rows, at) -> str:
     nodes = [r for r in _rows(rows, "LineageNode") if not r["is_internal"]]
     keys = {r["node_key"] for r in nodes}
+    known = {r["node_key"] for r in _rows(rows, "LineageNode")}
     visible = {r["item_label"] for r in nodes}
     internal = sorted(
         {r["item_label"] for r in _rows(rows, "LineageNode") if r["is_internal"]}
@@ -153,7 +154,10 @@ def graph(rows, at) -> str:
                     r["upstream_node_key"],
                     r["edge_kind"][:1],
                     text(r.get("through_node_key")),
-                    r["upstream_node_id"] if r["edge_kind"] == "External" else "",
+                    r["upstream_node_id"]
+                    if r["edge_kind"] == "External"
+                    or r["upstream_node_key"] not in known
+                    else "",
                 )
                 for r in _rows(rows, "LineageEdge")
                 if r["downstream_node_key"] in keys

@@ -281,3 +281,43 @@ def test_the_installed_graph_reads_a_borrowed_node_as_a_view_it_may_not_load(tmp
     assert not local.is_mirrored
     assert local.effective_object_type == "table"
     assert local.can_load
+
+
+# --- lineage --------------------------------------------------------------------
+
+
+def _published_sql(bundle) -> str:
+    return "\n".join(
+        batch_statements(bundle, action)
+        for _number, _batch, action in bundle.plan.actions()
+        if action.kind == "publish_catalogue"
+    )
+
+
+@weaver_test()
+def test_a_build_over_borrowed_objects_marks_them_in_the_lineage_it_publishes(
+    tmp_path,
+):
+    from weaver.catalogue.borrow import lineage_statement
+
+    _reconciled, bundle = _selective(tmp_path)
+
+    # Last in the batch, so it corrects whatever lineage this build wrote.
+    assert _published_sql(bundle).rstrip().endswith(lineage_statement())
+
+
+@weaver_test()
+def test_a_build_over_nothing_borrowed_publishes_lineage_unchanged(tmp_path):
+    from weaver.catalogue.borrow import lineage_statement
+
+    repository = _estate(tmp_path / "estate")
+    _reconciled, bundle = _build(
+        repository,
+        tmp_path / "bundle",
+        catalogue=Catalogue(rows={}),
+        inventory=mirror_inventory(repository, borrowed=()),
+    )
+    published = _published_sql(bundle)
+
+    assert "[_].[LineageNode]" in published
+    assert lineage_statement() not in published

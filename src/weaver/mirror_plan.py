@@ -914,7 +914,7 @@ def _publish(compiling, resolved, catalogue, *, after, session) -> None:
     """
 
     from . import __version__
-    from .catalogue.borrow import record_statements
+    from .catalogue.borrow import lineage_statement, record_statements
     from .catalogue.fork import copy_statements, create_statement
     from .catalogue.render import InstallationScope, render_merge
     from .catalogue.tables import INSTALLATION, MIRROR
@@ -966,9 +966,13 @@ def _publish(compiling, resolved, catalogue, *, after, session) -> None:
         source=resolved.fork,
     )
     created = [create_statement(MIRROR)] if resolved.borrowed or recorded else []
+    # The forked lineage was projected where nothing was borrowed.
+    marked = [lineage_statement()] if created else []
     path, digest = compiling.payload(
         "publish.sql",
-        transaction_script(created, [*forked, *recorded, *merges]).encode("utf-8"),
+        transaction_script(created, [*forked, *recorded, *marked, *merges]).encode(
+            "utf-8"
+        ),
     )
     published = _action(
         "mirror-publish-catalogue",

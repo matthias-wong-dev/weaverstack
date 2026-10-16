@@ -304,6 +304,11 @@ function details(panel, m, key, options) {
     panel.appendChild(el("ul", { "class": "wd-list" }, sorted.slice(0, 40).map(function (k) { return el("li", {}, [nodeLink(m, k, open)]); })
       .concat(sorted.length > 40 ? [el("li", { "class": "wd-muted", text: (sorted.length - 40) + " more" })] : [])));
   });
+  if (n.missing.length) {
+    panel.appendChild(el("h3", { "class": "wd-h3", text: "Reads objects not in lineage · " + n.missing.length }));
+    panel.appendChild(el("p", { "class": "wd-muted", text: "Not installed, or in an item no Build has recorded lineage for since." }));
+    panel.appendChild(el("ul", { "class": "wd-list wd-mono" }, n.missing.map(function (id) { return el("li", { text: id }); })));
+  }
   if (n.stubs.length) {
     panel.appendChild(el("h3", { "class": "wd-h3", text: "Reads outside Weaver · " + n.stubs.length }));
     panel.appendChild(el("ul", { "class": "wd-list wd-mono" }, n.stubs.map(function (ref) { return el("li", { text: ref }); })));

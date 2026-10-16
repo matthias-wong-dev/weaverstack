@@ -89,7 +89,7 @@ function buildModel(tables, problems) {
       key: r.key, item: r.item, schema: r.schema, object: r.object, kind: r.kind, label: r.label || r.object || r.item,
       desc: r.description || "", canLoad: !!(flags & 1), isStatic: !!(flags & 2), isMirrored: !!(flags & 4), isInstalled: !!(flags & 8),
       id: identityKey(r.item, r.schema, r.object), load: null, test: null, built: null,
-      up: [], down: [], vup: [], vdown: [], stubs: [], kinds: {}
+      up: [], down: [], vup: [], vdown: [], stubs: [], missing: [], kinds: {}
     };
     m.nodes.set(n.key, n);
     m.byIdentity.set(n.id, n);
@@ -102,7 +102,7 @@ function buildModel(tables, problems) {
     if (!d) return;
     if (kind === "External") { d.stubs.push(r.reference || r.up); m.externalCount += 1; return; }
     var u = m.nodes.get(r.up);
-    if (!u) { m.hiddenEdges += 1; return; }
+    if (!u) { if (r.reference) d.missing.push(r.reference); m.hiddenEdges += 1; return; }
     var key = u.key + ">" + d.key;
     if (!seen.has(key)) { seen.add(key); u.down.push(d.key); d.up.push(u.key); m.edgeCount += 1; }
     var from = r.through && m.nodes.has(r.through) && r.through !== d.key ? m.nodes.get(r.through) : u;

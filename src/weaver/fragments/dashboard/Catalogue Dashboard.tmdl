@@ -165,7 +165,9 @@ table 'Dashboard measures'
         ```
         displayFolder: Data
 
-    /// Installed nodes and edges, the catalogue and the Dashboard aside.
+    /// Installed nodes and edges, the catalogue and the Dashboard aside. An edge
+    /// names its upstream when it reads outside Weaver, or when no lineage node
+    /// is that upstream.
     measure 'Lineage data' = ```
         VAR _f = UNICHAR(57345)
         VAR _r = UNICHAR(57346)
@@ -173,6 +175,7 @@ table 'Dashboard measures'
         VAR _nodes = FILTER('Lineage node', NOT 'Lineage node'[Is internal])
         VAR _keys = SELECTCOLUMNS(_nodes, "@key", 'Lineage node'[Node key])
         VAR _edges = FILTER('Lineage edge', 'Lineage edge'[Downstream node key] IN _keys)
+        VAR _known = ALL('Lineage node'[Node key])
         VAR _internal = EXCEPT(
             CALCULATETABLE(VALUES('Lineage node'[Item label]), 'Lineage node'[Is internal]),
             SELECTCOLUMNS(_nodes, "@item", 'Lineage node'[Item label])
@@ -198,7 +201,7 @@ table 'Dashboard measures'
                     & _f & 'Lineage edge'[Upstream node key]
                     & _f & LEFT('Lineage edge'[Edge kind], 1)
                     & _f & 'Lineage edge'[Through node key]
-                    & _f & IF('Lineage edge'[Edge kind] = "External", 'Lineage edge'[Upstream node ID]),
+                    & _f & IF('Lineage edge'[Edge kind] = "External" || NOT ('Lineage edge'[Upstream node key] IN _known), 'Lineage edge'[Upstream node ID]),
                 ""
             )
             & _t & "internal" & _f & "item"

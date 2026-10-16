@@ -355,11 +355,13 @@ def render_catalogue_after_build(
     selected_models=(),
     warn=None,
     publication=None,
+    mirrored: bool = False,
 ) -> tuple[PlannedStage, ...]:
     """Publish dictionaries and Installation in one batch, Registry last.
 
     TDS writes are readable when committed; no SQL endpoint refresh closes the
-    build.
+    build. In a catalogue that borrows objects, the lineage just published is
+    marked from ``_.Mirror`` in the same batch.
     """
 
     from .semantic import semantic_stage
@@ -380,6 +382,10 @@ def render_catalogue_after_build(
         for table_plan in (*publication.dictionaries, publication.installation)
         for statement in table_plan.statements
     ]
+    if mirrored and catalogue_statements:
+        from ..catalogue.borrow import lineage_statement
+
+        catalogue_statements.append(lineage_statement())
     registry_statements: list[str] = list(publication.registry.statements)
 
     rendered = (

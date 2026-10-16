@@ -334,6 +334,7 @@ def generate_item_build_bundle(
             current=catalogue_after_deletions,
             selected_models=selected_models,
             publication=publication,
+            mirrored=bool(catalogue.mirrors),
         ),
     ]
     # Publication certifies only physical work that succeeded, and the Registry

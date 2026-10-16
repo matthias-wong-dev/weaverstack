@@ -41,7 +41,7 @@ function estate(overrides = {}) {
     ["m", "b", "Dependency", "", ""],
     ["p", "m", "Dependency", "", ""],
     ["r", "x", "External", "", "Ledger.dbo.Region"],
-    ["b", "q", "Dependency", "", ""],
+    ["b", "q", "Dependency", "", "Lakehouse/Landing/Tables/Sales.Gone"],
   ];
   const loads = overrides.loads || [
     ["Lakehouse/Landing", "Files/Sales", "Customers", "Succeeded", "w1", AT - 3 * H, AT - 3 * H + 5000, 5000],
@@ -111,8 +111,9 @@ test("a read through a shortcut is drawn from the shortcut and walked from the s
   const b = m.nodes.get("b");
   assert.deepEqual(b.up.sort(), ["c", "r"]);
   assert.deepEqual(b.vup.sort(), ["r", "s"]);
-  // An edge from a node the page leaves out is counted, not drawn; an External read is a stub.
+  // A read of an object with no lineage node is listed, not drawn; an External read is a stub.
   assert.equal(m.hiddenEdges, 1);
+  assert.deepEqual(b.missing, ["Lakehouse/Landing/Tables/Sales.Gone"]);
   assert.deepEqual(m.nodes.get("r").stubs, ["Ledger.dbo.Region"]);
 });
 

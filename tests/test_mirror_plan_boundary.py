@@ -640,3 +640,34 @@ def test_a_mirror_forks_the_lineage_rows_only_when_the_source_has_them():
         assert f"[Weaver].[_].[{table}]" in held
         assert f"[Weaver].[_].[{table}]" not in older
     assert "[Weaver].[_].[Registry]" in older
+
+
+@weaver_test()
+def test_a_mirror_marks_what_it_borrows_in_the_lineage_it_forks():
+    from weaver.catalogue.borrow import lineage_statement
+
+    relation = Borrowed(
+        WeaverDocumentId.parse("Warehouse/Model/Rpt.Sales"), "table", "view"
+    )
+    plan, payloads, _summary = mirror_mutation_plan(
+        _resolved("Model", "Warehouse", relations=(relation,)), session=_Session()
+    )
+    script = payloads[_actions(plan)[PUBLISH].payload].decode()
+
+    marked = script.index(lineage_statement().splitlines()[0])
+    # After the forked lineage and the record of what is borrowed, in the
+    # same transaction.
+    assert script.index("[Weaver].[_].[LineageNode]") < marked
+    assert script.rindex("insert into [_].[Mirror]") < marked
+    assert marked < script.index("commit transaction")
+
+
+@weaver_test()
+def test_a_mirror_that_borrows_nothing_leaves_lineage_as_forked():
+    from weaver.catalogue.borrow import lineage_statement
+
+    plan, payloads, _summary = mirror_mutation_plan(
+        _resolved("Model", "Warehouse"), session=_Session()
+    )
+    script = payloads[_actions(plan)[PUBLISH].payload].decode()
+    assert lineage_statement().splitlines()[0] not in script
