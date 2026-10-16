@@ -260,6 +260,9 @@ def parcel_files(request: ProjectRequest) -> dict[str, str]:
 
     def read_tree(folder, prefix):
         for entry in sorted(folder.iterdir(), key=lambda p: p.name):
+            # An installed package may hold bytecode beside the sources.
+            if entry.name == "__pycache__" or entry.name.endswith(".pyc"):
+                continue
             path = f"{prefix}/{entry.name}"
             if entry.is_dir():
                 read_tree(entry, path)
