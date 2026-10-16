@@ -33,6 +33,11 @@ def test_the_top_level_is_the_ordinary_notebook_surface_only():
         "ExampleOutcome",
         "build",
         "BuildResult",
+        "check",
+        "CheckResult",
+        "doctor",
+        "DoctorReport",
+        "install",
         # Forking an installed estate into this workspace's catalogue. The
         # pair is resolved once and proved before anything is emptied, so the
         # plan and the check are public alongside the operation.
@@ -127,13 +132,6 @@ def test_internal_composition_seams_are_not_top_level_attributes():
         "execute_load_plan",
         "open_task_log",
         "PhysicalTargetRef",
-        "check",
-        "CheckResult",
-        "install",
-        # Connectivity is a desktop question. A notebook is already inside the
-        # workspace it addresses, so it has nothing to ask.
-        "doctor",
-        "DoctorReport",
     }
     assert all(not hasattr(weaver, name) for name in internal)
 
