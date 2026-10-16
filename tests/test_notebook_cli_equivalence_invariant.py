@@ -35,3 +35,20 @@ def test_notebook_can_name_the_workspace_from_the_same_cli_configuration(tmp_pat
     config.write_text("workspace: Parcel Production\n", encoding="utf-8")
     workspace = weaver.current_workspace(workspace_config=config)
     assert workspace.workspace == "Parcel Production"
+
+
+@weaver_test()
+def test_explicit_notebook_workspace_keeps_the_reused_session_configuration():
+    from types import SimpleNamespace
+
+    from weaver.operations.workspace import operation_workspace
+    from weaver.workspaces import Workspace
+
+    selected = Workspace(
+        workspace="Parcel Development", catalogue="Warehouse/Catalogue"
+    )
+    opened = SimpleNamespace(workspace=selected)
+    resolved = operation_workspace(
+        "load", workspace="Parcel Development", session=opened
+    )
+    assert resolved == selected

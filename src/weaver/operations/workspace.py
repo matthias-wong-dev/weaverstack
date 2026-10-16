@@ -32,8 +32,15 @@ def _operation_workspace(
             "    with weaver.session(workspace=workspace) as session:\n"
             "        weaver.build('.', session=session)"
         )
-    # Apply explicit catalogue and Environment values over any resolved base.
-    if workspace is not None or workspace_config is not None:
+    # Repeating the Session's name must not discard its catalogue and bindings.
+    inherited = getattr(session, "workspace", None)
+    if (
+        workspace_config is None
+        and inherited is not None
+        and (workspace is None or workspace == inherited.workspace)
+    ):
+        base = inherited
+    elif workspace is not None or workspace_config is not None:
         from ..config import resolve_workspace
 
         base = resolve_workspace(
@@ -43,8 +50,7 @@ def _operation_workspace(
             workspace_config=workspace_config,
         )
     else:
-        inherited = getattr(session, "workspace", None)
-        base = inherited if inherited is not None else _discovered_or_current()
+        base = _discovered_or_current()
 
     changes = {}
     if catalogue is not None and base.catalogue != catalogue:

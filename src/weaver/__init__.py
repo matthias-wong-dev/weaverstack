@@ -58,6 +58,7 @@ from .operations.wipe import (
     plan_wipe,
     wipe,
 )
+from .operations.workflow import WorkflowReport, WorkflowStep, workflow
 from .operations.workspace import current_workspace
 from .sessions.public import session
 from .shortcuts import Shortcut
@@ -92,6 +93,9 @@ __all__ = [
     "publish_environment",
     "push_notebook",
     "run_notebook",
+    "workflow",
+    "WorkflowReport",
+    "WorkflowStep",
     "mirror",
     "MirrorResult",
     "plan_mirror",
