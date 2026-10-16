@@ -1450,19 +1450,6 @@ READABLE_TABLES = PROJECTED_TABLES + BORROWED_TABLES + (BOOKMARK,)
 
 TABLES_BY_NAME = {table.name: table for table in CATALOGUE_TABLES + BORROWED_TABLES}
 
-#: Columns earlier Weaver versions wrote that this version no longer holds, by
-#: table. A fork leaves them behind. Installation's held a target's identity
-#: before it recorded Fabric GUIDs.
-_RETIRED_SEMANTIC = ("Schema name", "Object name", "Properties", "Provenance")
-RETIRED_COLUMNS = {
-    INSTALLATION.name: ("Workspace ID", "Item ID"),
-    SEMANTIC_MODEL.name: (*_RETIRED_SEMANTIC, "Definition"),
-    SEMANTIC_MODEL_TABLE.name: (*_RETIRED_SEMANTIC, "Source binding"),
-    SEMANTIC_MODEL_MEASURE.name: _RETIRED_SEMANTIC,
-    SEMANTIC_MODEL_RELATIONSHIP.name: _RETIRED_SEMANTIC,
-    SEMANTIC_MODEL_COLUMN.name: _RETIRED_SEMANTIC,
-}
-
 
 #: The ``_`` schema tables no build may drop, folded for comparison. Every
 #: catalogue table holds state a rebuild cannot reproduce: projected rows belong

@@ -106,13 +106,9 @@ class ResolvedMirror:
         return tuple(target for target, _source in self.mappings)
 
     def describe(self) -> str:
-        older = self.fork is not None and not self.fork.is_current
         lines = [
             f"Workspace              {self.workspace.workspace}",
-            f"Source catalogue       {self.source}"
-            + (
-                "  (older Weaver version, upgraded in the destination)" if older else ""
-            ),
+            f"Source catalogue       {self.source}",
             f"Destination catalogue  {self.destination}",
             "Targets",
         ]
@@ -198,20 +194,21 @@ def plan_mirror(
 def check_mirror(plan: MirrorPlan, *, session=None) -> ResolvedMirror:
     """Validate the plan against the source catalogue without changing Fabric."""
 
+    from ..catalogue.connection import catalogue_connection
     from ..catalogue.state import catalogue_for
     from ..sessions.host import use_or_create_session
 
     with use_or_create_session(session, workspace=plan.workspace) as opened:
-        fork = _prove_source(plan, session=opened)
+        connection = catalogue_connection(opened, _source_workspace(plan))
+        fork = _prove_source(plan, connection)
         catalogue = (
             catalogue_for(opened, _source_workspace(plan)) if plan.items else None
         )
         resolved = resolve_mirror(plan, catalogue, borrowed=fork.borrowed)
         if fork.legacy_installation:
-            fork = _upgraded_identities(plan, fork, session=opened)
+            fork = _upgraded_identities(plan, fork, connection, session=opened)
         else:
             _verify_source_identities(resolved, session=opened)
-        _refuse_missing_values(plan, fork, session=opened)
         return replace(resolved, fork=fork)
 
 
@@ -229,57 +226,29 @@ def _verify_source_identities(resolved: "ResolvedMirror", *, session) -> None:
         verify_installations(rows, resolver=session.resolver(resolved.workspace))
 
 
-def _upgraded_identities(plan: MirrorPlan, fork, *, session):
-    """Resolve every installation a legacy source records, as Build's upgrade does.
+def _upgraded_identities(plan: MirrorPlan, fork, connection, *, session):
+    """Verify every installation a legacy source records, as Build's upgrade does."""
 
-    The destination Installation needs a verified Fabric identity on each row it
-    copies, so any recorded target that no longer resolves refuses the mirror.
-    """
+    from types import SimpleNamespace
 
     from ..catalogue.builtin import BUILTIN_ITEM
-    from ..catalogue.connection import catalogue_connection
-    from ..catalogue.installation import upgraded_installations
+    from ..catalogue.installation import resolve_installations
     from ..catalogue.reader import read_table
     from ..catalogue.tables import INSTALLATION
 
-    workspace = _source_workspace(plan)
     rows = [
         row
-        for row in read_table(catalogue_connection(session, workspace), INSTALLATION)
-        if (row.get("item_type"), row.get("item_name"))
+        for row in read_table(connection, INSTALLATION)
+        if (row["item_type"], row["item_name"])
         != (BUILTIN_ITEM.item_type, BUILTIN_ITEM.item_name)
     ]
-    identities = upgraded_installations(
+    upgrade = {"columns": dict.fromkeys(fork.legacy_installation)}
+    resolve_installations(
+        SimpleNamespace(installation_upgrade=upgrade),
         rows,
         resolver=session.resolver(plan.workspace),
-        columns=fork.installation_columns,
     )
-    return replace(fork, identities=tuple(identities))
-
-
-def _refuse_missing_values(plan: MirrorPlan, fork, *, session) -> None:
-    """Refuse a source holding null where this version requires a value."""
-
-    from ..catalogue.fork import null_count_statement
-    from ..targets import WarehouseTarget
-
-    if not fork.nullable:
-        return
-    sql = session.sql_executor(
-        WarehouseTarget(plan.source.item), workspace=plan.workspace
-    )
-    empty = [
-        f"{row['Table']}.{row['Column']} ({int(row['Rows'])} rows)"
-        for row in sql.query(null_count_statement(fork.nullable))
-        if int(row["Rows"])
-    ]
-    if empty:
-        raise CommandError(
-            f"The catalogue in {plan.source} cannot be mirrored by this Weaver "
-            "version: these columns hold no value where one is required: "
-            + ", ".join(empty)
-            + ". Repair the source catalogue."
-        )
+    return replace(fork, identities=tuple(upgrade["resolved"]))
 
 
 def resolve_mirror(
@@ -494,35 +463,22 @@ def _selected_items(items, no_item: bool, workspace: Workspace) -> tuple[str, ..
     return (items,) if isinstance(items, str) else tuple(items)
 
 
-def _prove_source(plan: MirrorPlan, *, session):
-    """Map the source catalogue onto this version's, or refuse it.
+def _prove_source(plan: MirrorPlan, connection):
+    """Map the source catalogue onto this version's; it may be an older one."""
 
-    The source may be any earlier Weaver version's catalogue. It is only read.
-    """
+    from ..catalogue.fork import project_source
+    from ..errors import WeaverError
 
-    from ..catalogue.fork import project_source, source_shape
-
-    shape = source_shape(_source_catalogue_columns(plan, session=session))
+    try:
+        shape = connection.shape()
+    except WeaverError as exc:
+        raise CommandError(f"mirror could not read {plan.source}: {exc}") from exc
     if not shape:
         raise CommandError(
             f"{plan.source} does not contain a Weaver catalogue. Name the "
             "Warehouse that holds the Weaver catalogue."
         )
     return project_source(shape, source=str(plan.source))
-
-
-def _source_catalogue_columns(plan: MirrorPlan, *, session):
-    from ..catalogue.fork import SOURCE_SHAPE_QUERY
-    from ..errors import WeaverError
-    from ..targets import WarehouseTarget
-
-    try:
-        sql = session.sql_executor(
-            WarehouseTarget(plan.source.item), workspace=plan.workspace
-        )
-        return sql.query(SOURCE_SHAPE_QUERY)
-    except WeaverError as exc:
-        raise CommandError(f"mirror could not read {plan.source}: {exc}") from exc
 
 
 def _source_workspace(plan: MirrorPlan) -> Workspace:

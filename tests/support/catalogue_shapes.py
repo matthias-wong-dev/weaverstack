@@ -1,4 +1,4 @@
-"""Physical ``_`` schemas as ``SOURCE_SHAPE_QUERY`` returns them.
+"""Physical ``_`` schemas, as a catalogue connection reports them.
 
 ``RELEASED_0_9_0`` is the catalogue Weaver 0.9.0 builds, recorded from that
 release's declarations. ``current`` derives this version's from its own.
@@ -6,82 +6,66 @@ release's declarations. ``current`` derives this version's from its own.
 
 from __future__ import annotations
 
-import re
-
 from weaver.catalogue.fork import copied_tables
 from weaver.catalogue.tables import AUDIT_COLUMN_NAMES, public_column_name
 
-_AUDIT = tuple(
-    (public_column_name(name), "datetime2(6)", True) for name in AUDIT_COLUMN_NAMES
-)
+_AUDIT = tuple(public_column_name(name) for name in AUDIT_COLUMN_NAMES)
 
-#: ``table: ((column, type, not null), ...)`` without the audit columns.
+#: ``table: (column, ...)`` without the audit columns.
 RELEASED_0_9_0 = {
-    "SchemaDictionary": (("Item type", "varchar(128)", True), ("Item name", "varchar(128)", True), ("Schema name", "varchar(128)", True), ("Description", "varchar(4000)", False), ("Description reference", "varchar(128)", False), ("Signature", "varchar(128)", True),),
-    "FolderDictionary": (("Item type", "varchar(128)", True), ("Item name", "varchar(128)", True), ("Schema name", "varchar(128)", True), ("Object name", "varchar(128)", True), ("Description", "varchar(4000)", False), ("Description reference", "varchar(128)", False), ("Lineage", "varchar(4000)", False), ("Lineage reference", "varchar(128)", False), ("File key", "varchar(1000)", False), ("Is incremental", "bit", False), ("Is static", "bit", False), ("Prohibit rebuild", "bit", False), ("Signature", "varchar(128)", True),),
-    "TableDictionary": (("Item type", "varchar(128)", True), ("Item name", "varchar(128)", True), ("Schema name", "varchar(128)", True), ("Object name", "varchar(128)", True), ("Object type", "varchar(128)", True), ("Description", "varchar(4000)", False), ("Description reference", "varchar(128)", False), ("Lineage", "varchar(4000)", False), ("Lineage reference", "varchar(128)", False), ("Primary key", "varchar(1000)", False), ("Not null columns", "varchar(1000)", False), ("Identity column", "varchar(128)", False), ("Comparison columns", "varchar(1000)", False), ("Is incremental", "bit", False), ("Is static", "bit", False), ("Prohibit rebuild", "bit", False), ("Signature", "varchar(128)", True),),
-    "ColumnDictionary": (("Item type", "varchar(128)", True), ("Item name", "varchar(128)", True), ("Schema name", "varchar(128)", True), ("Object name", "varchar(128)", True), ("Column name", "varchar(128)", True), ("Description", "varchar(4000)", False), ("Description reference", "varchar(128)", False), ("Is identity", "bit", False), ("Signature", "varchar(128)", True),),
-    "KeyDictionary": (("Item type", "varchar(128)", True), ("Item name", "varchar(128)", True), ("Schema name", "varchar(128)", True), ("Object name", "varchar(128)", True), ("Key type", "varchar(128)", True), ("Column set", "varchar(1000)", True), ("Signature", "varchar(128)", True),),
-    "ForeignKeyDictionary": (("Item type", "varchar(128)", True), ("Item name", "varchar(128)", True), ("Foreign schema name", "varchar(128)", True), ("Foreign object name", "varchar(128)", True), ("Foreign column set", "varchar(1000)", True), ("Primary item type", "varchar(128)", True), ("Primary item name", "varchar(128)", True), ("Primary schema name", "varchar(128)", True), ("Primary object name", "varchar(128)", True), ("Primary column set", "varchar(1000)", True), ("Signature", "varchar(128)", True),),
-    "TestDictionary": (("Item type", "varchar(128)", True), ("Item name", "varchar(128)", True), ("Schema name", "varchar(128)", True), ("Object name", "varchar(128)", True), ("Test type", "varchar(128)", True), ("Description", "varchar(4000)", False), ("Description reference", "varchar(128)", False), ("Primary key", "varchar(1000)", False), ("Signature", "varchar(128)", True),),
-    "Dependency": (("Item type", "varchar(128)", True), ("Item name", "varchar(128)", True), ("Referencing schema name", "varchar(128)", True), ("Referencing object name", "varchar(128)", True), ("Dependency reference", "varchar(1000)", True), ("Referenced item type", "varchar(128)", False), ("Referenced item name", "varchar(128)", False), ("Referenced schema name", "varchar(128)", False), ("Referenced object name", "varchar(128)", False), ("Signature", "varchar(128)", True),),
-    "Shortcut": (("Item type", "varchar(128)", True), ("Item name", "varchar(128)", True), ("Shortcut ID", "varchar(128)", True), ("Schema name", "varchar(128)", True), ("Object name", "varchar(128)", False), ("Shortcut type", "varchar(128)", True), ("Target type", "varchar(128)", True), ("Target item type", "varchar(128)", True), ("Target item name", "varchar(128)", True), ("Target schema name", "varchar(128)", True), ("Target object name", "varchar(128)", False), ("Target workspace name", "varchar(128)", False), ("Signature", "varchar(128)", True),),
-    "Installation": (("Item type", "varchar(128)", True), ("Item name", "varchar(128)", True), ("Target name", "varchar(128)", True), ("Weaver version", "varchar(128)", True), ("Signature", "varchar(128)", True),),
-    "Registry": (("Item type", "varchar(128)", True), ("Item name", "varchar(128)", True), ("Schema name", "varchar(128)", True), ("Object name", "varchar(128)", True), ("Object type", "varchar(128)", True), ("Object role", "varchar(128)", True), ("Signature", "varchar(128)", True), ("Build datetime", "datetime2(6)", False),),
-    "Bookmark": (("Item type", "varchar(128)", True), ("Item name", "varchar(128)", True), ("Schema name", "varchar(128)", True), ("Object name", "varchar(128)", True), ("Bookmark datetime", "datetime2(6)", True),),
-    "LoadStatus": (("Item type", "varchar(128)", True), ("Item name", "varchar(128)", True), ("Schema name", "varchar(128)", True), ("Object name", "varchar(128)", True), ("Workflow ID", "varchar(128)", False), ("Result", "varchar(128)", True), ("Started datetime", "datetime2(6)", False), ("Completed datetime", "datetime2(6)", False), ("Duration milliseconds", "bigint", False),),
-    "TestStatus": (("Item type", "varchar(128)", True), ("Item name", "varchar(128)", True), ("Schema name", "varchar(128)", True), ("Object name", "varchar(128)", True), ("Test type", "varchar(128)", False), ("Workflow ID", "varchar(128)", False), ("Result", "varchar(128)", True), ("Started datetime", "datetime2(6)", False), ("Completed datetime", "datetime2(6)", False), ("Duration milliseconds", "bigint", False), ("Failure count", "bigint", False),),
+    "SchemaDictionary": ("Item type", "Item name", "Schema name", "Description", "Description reference", "Signature"),
+    "FolderDictionary": ("Item type", "Item name", "Schema name", "Object name", "Description", "Description reference", "Lineage", "Lineage reference", "File key", "Is incremental", "Is static", "Prohibit rebuild", "Signature"),
+    "TableDictionary": ("Item type", "Item name", "Schema name", "Object name", "Object type", "Description", "Description reference", "Lineage", "Lineage reference", "Primary key", "Not null columns", "Identity column", "Comparison columns", "Is incremental", "Is static", "Prohibit rebuild", "Signature"),
+    "ColumnDictionary": ("Item type", "Item name", "Schema name", "Object name", "Column name", "Description", "Description reference", "Is identity", "Signature"),
+    "KeyDictionary": ("Item type", "Item name", "Schema name", "Object name", "Key type", "Column set", "Signature"),
+    "ForeignKeyDictionary": ("Item type", "Item name", "Foreign schema name", "Foreign object name", "Foreign column set", "Primary item type", "Primary item name", "Primary schema name", "Primary object name", "Primary column set", "Signature"),
+    "TestDictionary": ("Item type", "Item name", "Schema name", "Object name", "Test type", "Description", "Description reference", "Primary key", "Signature"),
+    "Dependency": ("Item type", "Item name", "Referencing schema name", "Referencing object name", "Dependency reference", "Referenced item type", "Referenced item name", "Referenced schema name", "Referenced object name", "Signature"),
+    "Shortcut": ("Item type", "Item name", "Shortcut ID", "Schema name", "Object name", "Shortcut type", "Target type", "Target item type", "Target item name", "Target schema name", "Target object name", "Target workspace name", "Signature"),
+    "Installation": ("Item type", "Item name", "Target name", "Weaver version", "Signature"),
+    "Registry": ("Item type", "Item name", "Schema name", "Object name", "Object type", "Object role", "Signature", "Build datetime"),
+    "Bookmark": ("Item type", "Item name", "Schema name", "Object name", "Bookmark datetime"),
+    "LoadStatus": ("Item type", "Item name", "Schema name", "Object name", "Workflow ID", "Result", "Started datetime", "Completed datetime", "Duration milliseconds"),
+    "TestStatus": ("Item type", "Item name", "Schema name", "Object name", "Test type", "Workflow ID", "Result", "Started datetime", "Completed datetime", "Duration milliseconds", "Failure count"),
 }  # fmt: skip
 
 #: ``_.Mirror`` as 0.9.0 creates it when something is mirrored into a catalogue.
-RELEASED_0_9_0_MIRROR = (("Item type", "varchar(128)", True), ("Item name", "varchar(128)", True), ("Schema name", "varchar(128)", True), ("Object name", "varchar(128)", True), ("Source workspace name", "varchar(128)", True), ("Source target name", "varchar(128)", True), ("Source schema name", "varchar(128)", True), ("Source object name", "varchar(128)", True), ("Physical type", "varchar(128)", True),)  # fmt: skip
+RELEASED_0_9_0_MIRROR = ("Item type", "Item name", "Schema name", "Object name", "Source workspace name", "Source target name", "Source schema name", "Source object name", "Physical type")  # fmt: skip
 
 #: Installation between 0.9.0 and Fabric GUIDs: ``Item ID`` held the target name.
-INTERIM_INSTALLATION = (
-    ("Item type", "varchar(128)", True),
-    ("Item name", "varchar(128)", True),
-    ("Target name", "varchar(128)", True),
-    ("Weaver version", "varchar(128)", True),
-    ("Workspace ID", "varchar(128)", False),
-    ("Item ID", "varchar(128)", False),
-    ("Signature", "varchar(128)", True),
-)
+INTERIM_INSTALLATION = ("Item type", "Item name", "Target name", "Weaver version", "Workspace ID", "Item ID", "Signature")  # fmt: skip
 
 
-def rows(tables, *, audited: bool = True) -> list[dict]:
-    """``{table: ((column, type, not null), ...)}`` as information-schema rows."""
+def shape(tables) -> dict:
+    """``{table: (column, ...)}`` as ``CatalogueConnection.shape`` returns it."""
 
-    found = []
-    for table, columns in tables.items():
-        for name, spelled, not_null in (*columns, *(_AUDIT if audited else ())):
-            data_type, length = _parsed(spelled)
-            found.append(
-                {
-                    "TABLE_NAME": table,
-                    "COLUMN_NAME": name,
-                    "IS_NULLABLE": "NO" if not_null else "YES",
-                    "DATA_TYPE": data_type,
-                    "CHARACTER_MAXIMUM_LENGTH": length,
-                }
-            )
-    return found
+    return {
+        table.casefold(): {name.casefold(): name for name in (*columns, *_AUDIT)}
+        for table, columns in tables.items()
+    }
+
+
+def rows(tables) -> list[dict]:
+    """The same tables as the information-schema rows that shape is read from."""
+
+    return [
+        {"TABLE_NAME": table, "COLUMN_NAME": name, "IS_NULLABLE": "NO"}
+        for table, columns in tables.items()
+        for name in (*columns, *_AUDIT)
+    ]
 
 
 def current(*, borrowed: bool = False) -> dict:
     """This version's copied tables, as its declarations build them."""
 
-    found = {}
-    for table in copied_tables(borrowed=borrowed):
-        found[table.name] = tuple(
-            (
-                table.public_name_of(name),
-                table.column(name).warehouse_type,
-                table.column(name).not_null,
-            )
+    return {
+        table.name: tuple(
+            table.public_name_of(name)
             for name in table.physical_columns
             if name not in AUDIT_COLUMN_NAMES
         )
-    return found
+        for table in copied_tables(borrowed=borrowed)
+    }
 
 
 def released(*, borrowed: bool = False) -> dict:
@@ -89,12 +73,3 @@ def released(*, borrowed: bool = False) -> dict:
     if borrowed:
         found["Mirror"] = RELEASED_0_9_0_MIRROR
     return found
-
-
-def _parsed(spelled: str) -> tuple[str, int | None]:
-    match = re.fullmatch(r"(\w+)(?:\((max|\d+)\))?", spelled)
-    assert match, spelled
-    data_type, size = match.groups()
-    if data_type not in {"varchar", "nvarchar", "char", "nchar", "varbinary"}:
-        return data_type, None
-    return data_type, -1 if size == "max" else int(size)

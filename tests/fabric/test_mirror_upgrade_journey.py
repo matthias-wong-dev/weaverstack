@@ -559,7 +559,7 @@ def test_a_damaged_source_is_refused_before_the_destination_is_touched(journey):
     journey.require("mirror the damaged source")
     seen = journey["mirror the damaged source"].result
 
-    assert "it has no Shortcut table" in str(seen["refusal"])
+    assert "cannot be mirrored: it has no Shortcut" in str(seen["refusal"])
     assert seen["after"] == seen["before"]
 
 

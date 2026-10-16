@@ -127,48 +127,6 @@ def verify_installations(rows, *, resolver):
     return resolved
 
 
-def _unique(rows):
-    seen = set()
-    for row in rows:
-        key = (row["item_type"], row["item_name"])
-        if key in seen:
-            raise InstallationIdentityError(
-                f"{row['item_type']}/{row['item_name']}: duplicate installation records; repair the catalogue"
-            )
-        seen.add(key)
-    return rows
-
-
-def upgraded_installations(rows, *, resolver, columns):
-    """Each legacy Installation row with the Fabric identity it now resolves to.
-
-    ``columns`` is the legacy table's physical column names. Every row is
-    verified, and returned with ``workspace_name``, ``workspace_id``,
-    ``target_name`` and ``item_id`` set from Fabric.
-    """
-
-    folded = {name.casefold() for name in columns}
-    # Old Warehouse/Lakehouse publication wrote the recorded target name into
-    # Item ID. Only that exact old-column fallback is backfillable.
-    backfillable = "item id" in folded and "target item guid" not in folded
-    rows = _unique(tuple(dict(row) for row in rows))
-    if len(rows) > 1 and hasattr(resolver, "discover_once"):
-        resolver.discover_once()
-    upgraded = []
-    for row in rows:
-        target = verify_installation(row, resolver=resolver, backfillable=backfillable)
-        upgraded.append(
-            {
-                **row,
-                "workspace_name": resolver.workspace.name,
-                "workspace_id": target.workspace_id,
-                "target_name": target.name,
-                "item_id": target.id,
-            }
-        )
-    return upgraded
-
-
 def resolve_installations(catalogue, rows, *, resolver, items=()):
     """Verify the installations ``items`` need, or every one while upgrading.
 
@@ -178,26 +136,47 @@ def resolve_installations(catalogue, rows, *, resolver, items=()):
     """
 
     upgrade = catalogue.installation_upgrade
-    observed = [dict(row) for row in rows]
-    rows = _unique(tuple(dict(row) for row in observed))
-    if upgrade is not None:
-        publication_rows = upgraded_installations(
-            rows, resolver=resolver, columns=upgrade["columns"]
-        )
-        for row, published in zip(rows, publication_rows):
-            row.update(
-                workspace_id=published["workspace_id"], item_id=published["item_id"]
-            )
-        upgrade.update(rows=observed, resolved=publication_rows)
-        return rows
+    columns = {name.casefold() for name in upgrade["columns"]} if upgrade else set()
     selected = {str(item) for item in items}
+    observed = [dict(row) for row in rows]
+    rows = tuple(dict(row) for row in observed)
+    seen = set()
+    for row in rows:
+        key = (row["item_type"], row["item_name"])
+        if key in seen:
+            raise InstallationIdentityError(
+                f"{row['item_type']}/{row['item_name']}: duplicate installation records; repair the catalogue"
+            )
+        seen.add(key)
     wanted = [
-        row for row in rows if f"{row['item_type']}/{row['item_name']}" in selected
+        row
+        for row in rows
+        if upgrade or f"{row['item_type']}/{row['item_name']}" in selected
     ]
     if len(wanted) > 1 and hasattr(resolver, "discover_once"):
         resolver.discover_once()
+    publication_rows = []
     for row in wanted:
-        verify_installation(row, resolver=resolver)
+        # Old Warehouse/Lakehouse publication wrote the recorded target name
+        # into Item ID. Only that exact old-column fallback is backfillable.
+        target = verify_installation(
+            row,
+            resolver=resolver,
+            backfillable=upgrade is not None
+            and "item id" in columns
+            and "target item guid" not in columns,
+        )
+        if upgrade:
+            row.update(workspace_id=target.workspace_id, item_id=target.id)
+            publication_rows.append(
+                {
+                    **row,
+                    "workspace_name": resolver.workspace.name,
+                    "target_name": target.name,
+                }
+            )
+    if upgrade is not None:
+        upgrade.update(rows=observed, resolved=publication_rows)
     return rows
 
 

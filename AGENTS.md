@@ -855,15 +855,14 @@ source's items.
 
 The source may be any earlier Weaver version's catalogue, so a release is
 trialled in development before production is upgraded. The source is only read.
-`check_mirror` reads its physical `_` shape once and `catalogue.fork.project_source`
-maps it onto this version's tables: by column name, a table in
-`state.INTRODUCED_TABLES` the source lacks starts empty, a nullable column it
-lacks stays null, a column in `tables.RETIRED_COLUMNS` stays behind, and a legacy
-Installation takes the identities `installation.upgraded_installations`
-verifies, the same resolution Build's in-place upgrade uses. Anything else, a
-missing required table or column, an unknown column, a type the destination
-cannot hold, or a null where a value is required, refuses the mirror before the
-first wipe. The copy stays server-side, one `INSERT ... SELECT` per table.
+`catalogue.fork.project_source` maps its `_` shape onto this version's tables by
+column name: a table in `state.INTRODUCED_TABLES` it lacks starts empty, a
+nullable column it lacks stays null, and a column this version does not hold is
+left behind. A legacy Installation takes the identities Build's upgrade path in
+`resolve_installations` verifies. A missing table every catalogue has, or a
+missing required column, refuses the mirror before the first wipe. Anything
+else that cannot copy fails in the copy itself, one server-side
+`INSERT ... SELECT` per table.
 
 Build materialises selected edited borrowed objects marked Prohibit Rebuild through
 ordinary DAG actions. The development destination is disposable; the source remains

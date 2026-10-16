@@ -7,19 +7,16 @@ build. ``_.Mirror`` moves only when present because no document declares it.
 The copy is server-side: Fabric spells another Warehouse in the same workspace
 three-part, so each table moves in one statement.
 
-The source may be an older catalogue. Its physical shape, read once before
-anything is emptied, maps each source column onto this version's by name. A
-table the source predates starts empty, a nullable column it predates is left
-null, a retired column is left behind, and an Installation without recorded
-Fabric identities takes the identities preflight verified. Anything else the
-destination cannot hold refuses the mirror before the first wipe.
+The source may be an older catalogue. Its columns are copied by name: a table
+it predates starts empty, a nullable column it predates is left null, and an
+Installation without Fabric identities takes the ones preflight verified.
 
 See https://docs.weaverstack.dev/core-concepts/catalogue/.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Mapping, Sequence
 
 from ..declaration.model import WAREHOUSE
@@ -34,7 +31,6 @@ from .tables import (
     INSTALLATION,
     MIRROR,
     PROJECTED_TABLES,
-    RETIRED_COLUMNS,
     SCOPE_ITEM_NAME,
     SCOPE_ITEM_TYPE,
 )
@@ -141,13 +137,12 @@ def copy_statements(
         if columns is None:
             continue
         if table is INSTALLATION and source.legacy_installation:
-            statements.append(
-                installation_copy_statement(
-                    source_catalogue=source_catalogue,
-                    columns=columns,
-                    identities=source.identities,
-                )
+            copied = installation_copy_statement(
+                source_catalogue=source_catalogue,
+                columns=columns,
+                identities=source.identities,
             )
+            statements.extend([copied] if copied else [])
         else:
             statements.append(
                 copy_statement(
@@ -158,72 +153,24 @@ def copy_statements(
 
 
 def fork_statements(
-    *, source_catalogue: str, borrowed: bool = False, source: ForkSource | None = None
+    *, source_catalogue: str, borrowed: bool = False
 ) -> tuple[str, ...]:
     """Return the state-copy statements, including ``_.Mirror`` when present."""
 
-    borrowed = source.borrowed if source is not None else borrowed
-    statements = list(
-        copy_statements(
-            source_catalogue=source_catalogue, borrowed=borrowed, source=source
-        )
-    )
+    statements = [
+        copy_statement(table, source_catalogue=source_catalogue)
+        for table in FORKED_TABLES
+    ]
     if borrowed:
-        statements.insert(len(statements) - 1, create_statement(MIRROR))
+        statements.append(create_statement(MIRROR))
+        statements.append(copy_statement(MIRROR, source_catalogue=source_catalogue))
     return tuple(statements)
 
 
 # --- an older source ----------------------------------------------------------
 
-#: The source catalogue's tables and columns, read before anything is emptied.
-SOURCE_SHAPE_QUERY = (
-    "select c.TABLE_NAME, c.COLUMN_NAME, c.IS_NULLABLE, c.DATA_TYPE, "
-    "c.CHARACTER_MAXIMUM_LENGTH "
-    "from INFORMATION_SCHEMA.COLUMNS as c "
-    "join INFORMATION_SCHEMA.TABLES as t "
-    "on t.TABLE_SCHEMA = c.TABLE_SCHEMA and t.TABLE_NAME = c.TABLE_NAME "
-    f"where c.TABLE_SCHEMA = {literal(CATALOGUE_SCHEMA)} "
-    "and t.TABLE_TYPE = N'BASE TABLE'"
-)
-
-#: Installation columns a legacy source lacks or holds unverified. Preflight
-#: resolves them from Fabric.
+#: Installation columns an older source lacks. Preflight resolves them from Fabric.
 IDENTITY_COLUMNS = ("workspace_name", "workspace_id", "target_name", "item_id")
-
-_LENGTHS = {"varchar", "nvarchar", "char", "nchar", "varbinary", "binary"}
-
-
-@dataclass(frozen=True)
-class SourceColumn:
-    name: str
-    nullable: bool
-    data_type: str
-    #: Character or byte length; ``-1`` is ``max``.
-    length: int | None = None
-
-    @property
-    def spelled(self) -> str:
-        if self.data_type.casefold() not in _LENGTHS or self.length is None:
-            return self.data_type
-        return f"{self.data_type}({'max' if self.length < 0 else self.length})"
-
-
-def source_shape(rows) -> dict[str, dict[str, SourceColumn]]:
-    """``SOURCE_SHAPE_QUERY`` rows under casefolded table and column names."""
-
-    shape: dict[str, dict[str, SourceColumn]] = {}
-    for row in rows:
-        values = dict(row)
-        length = values.get("CHARACTER_MAXIMUM_LENGTH")
-        column = SourceColumn(
-            name=str(values["COLUMN_NAME"]),
-            nullable=str(values["IS_NULLABLE"]).upper() == "YES",
-            data_type=str(values["DATA_TYPE"]),
-            length=None if length is None else int(length),
-        )
-        table = str(values["TABLE_NAME"]).casefold()
-        shape.setdefault(table, {})[column.name.casefold()] = column
-    return shape
 
 
 @dataclass(frozen=True)
@@ -237,154 +184,63 @@ class ForkSource:
 
     columns: Mapping[str, Mapping[str, str]]
     borrowed: bool = False
-    #: Installation records no verified Fabric identities.
-    legacy_installation: bool = False
-    #: The legacy Installation's physical column names.
-    installation_columns: tuple[str, ...] = ()
+    #: The source Installation's columns, when it records no Fabric identities.
+    legacy_installation: tuple[str, ...] = ()
     #: Every legacy Installation row with its verified identity, set by preflight.
     identities: tuple[Mapping, ...] | None = None
-    #: ``(table, source column)`` pairs the source allows null and this version
-    #: requires.
-    nullable: tuple[tuple[str, str], ...] = field(default=())
-    #: The source has exactly this version's tables and columns.
-    is_current: bool = False
-
-    @property
-    def introduced(self) -> tuple[str, ...]:
-        """Copied tables the source predates, which start empty."""
-
-        return tuple(
-            table.name
-            for table in copied_tables(borrowed=self.borrowed)
-            if table.name not in self.columns
-        )
 
 
 def project_source(shape, *, source: str) -> ForkSource:
-    """Map ``shape`` onto this version's tables, or refuse what cannot move.
+    """Map ``shape``, casefolded table to casefolded column to its spelling.
 
-    Every problem is reported at once.
+    Columns the destination does not hold are left behind. A missing table that
+    every catalogue has, or a missing required column, refuses the mirror.
     """
 
     from .state import INTRODUCED_TABLES
 
     borrowed = MIRROR.name.casefold() in shape
-    problems: list[str] = []
+    missing: list[str] = []
     mapped: dict[str, dict[str, str]] = {}
-    nullable: list[tuple[str, str]] = []
-    legacy = False
-    installation_columns: tuple[str, ...] = ()
-    current = True
+    legacy: tuple[str, ...] = ()
     for table in copied_tables(borrowed=borrowed):
         present = shape.get(table.name.casefold())
         if present is None:
-            current = False
             if table.name not in INTRODUCED_TABLES:
-                problems.append(f"it has no {table.name} table")
+                missing.append(table.name)
             continue
-        current = current and len(present) == len(table.public_columns)
-        known = {public.casefold() for public in table.public_columns} | {
-            retired.casefold() for retired in RETIRED_COLUMNS.get(table.name, ())
-        }
-        problems.extend(
-            f"{table.name}.{column.name} is not a column this Weaver version knows"
-            for key, column in present.items()
-            if key not in known
+        identity = table is INSTALLATION and any(
+            INSTALLATION.public_name_of(name).casefold() not in present
+            for name in IDENTITY_COLUMNS
         )
-        identity = table is INSTALLATION and _legacy_installation(present)
         if identity:
-            legacy = True
-            installation_columns = tuple(column.name for column in present.values())
-            if "item id" in present and "target item guid" in present:
-                problems.append("Installation holds both Item ID and Target item GUID")
+            legacy = tuple(present.values())
         columns: dict[str, str] = {}
         for name in table.physical_columns:
             if identity and name in IDENTITY_COLUMNS:
                 continue
             public = table.public_name_of(name)
-            column = present.get(public.casefold())
-            audit = name in AUDIT_COLUMN_NAMES
-            required = audit or table.column(name).not_null
-            if column is None:
-                if required:
-                    problems.append(f"{table.name}.{public} is missing")
-                continue
-            declared = _AUDIT_TYPE if audit else table.column(name).warehouse_type
-            if not _fits(column, declared):
-                problems.append(
-                    f"{table.name}.{column.name} is {column.spelled}, which does "
-                    f"not fit {declared}"
-                )
-            if column.nullable and required:
-                nullable.append((table.name, column.name))
-            current = current and column.name == public
-            columns[public] = column.name
+            if public.casefold() in present:
+                columns[public] = present[public.casefold()]
+            elif name in AUDIT_COLUMN_NAMES or table.column(name).not_null:
+                missing.append(f"{table.name}.{public}")
         mapped[table.name] = columns
-    if problems:
+    if missing:
         raise CatalogueStateError(
-            f"The catalogue in {source} cannot be mirrored by this Weaver "
-            "version: " + "; ".join(problems) + "."
+            f"The catalogue in {source} cannot be mirrored: it has no "
+            + ", ".join(missing)
+            + "."
         )
-    return ForkSource(
-        columns=mapped,
-        borrowed=borrowed,
-        legacy_installation=legacy,
-        installation_columns=installation_columns,
-        nullable=tuple(nullable),
-        is_current=current and not legacy and not nullable,
-    )
-
-
-def _legacy_installation(present) -> bool:
-    return any(
-        INSTALLATION.public_name_of(name).casefold() not in present
-        for name in IDENTITY_COLUMNS
-    ) or bool({"workspace id", "item id"} & set(present))
-
-
-def _fits(column: SourceColumn, declared: str) -> bool:
-    base, _, size = declared.partition("(")
-    if column.data_type.casefold() != base.casefold():
-        return False
-    if base.casefold() not in _LENGTHS or not size:
-        return True
-    limit = size.rstrip(")")
-    if limit.casefold() == "max":
-        return True
-    return column.length is not None and 0 <= column.length <= int(limit)
-
-
-def null_count_statement(nullable) -> str:
-    """Count copied source rows holding null where this version needs a value.
-
-    Runs on the source catalogue's own connection.
-    """
-
-    from .tables import table as catalogue_table
-
-    return "\nunion all\n".join(
-        f"select {literal(table)} as [Table], {literal(column)} as [Column], "
-        f"count_big(*) as [Rows] "
-        f"from {identifier(CATALOGUE_SCHEMA)}.{identifier(table)} "
-        f"where {identifier(column)} is null "
-        f"and {_excluding_builtin(catalogue_table(table))}"
-        for table, column in nullable
-    )
+    return ForkSource(columns=mapped, borrowed=borrowed, legacy_installation=legacy)
 
 
 def installation_copy_statement(
     *, source_catalogue: str, columns: Mapping[str, str], identities
 ) -> str:
-    """Copy a legacy Installation with the identities preflight verified.
+    """Copy a legacy Installation with the identities preflight verified."""
 
-    Only resolved rows join, so if the source's installations changed after
-    preflight the copy fails instead of landing a row without an identity.
-    """
-
-    if identities is None:
-        raise CatalogueStateError(
-            "a legacy Installation is copied only with verified identities"
-        )
+    if not identities:
+        return ""
     keys = [
         INSTALLATION.public_name_of(name) for name in (SCOPE_ITEM_TYPE, SCOPE_ITEM_NAME)
     ]
@@ -396,44 +252,28 @@ def installation_copy_statement(
             projection.append((public, f"r.{identifier(public)}"))
         elif public in columns:
             projection.append((public, f"s.{identifier(columns[public])}"))
-    source = source_relation(source_catalogue, INSTALLATION)
-    kept = _excluding_builtin(INSTALLATION, columns, alias="s.")
-    count = len(identities)
-    statements = []
-    if identities:
-        values = ",\n       ".join(
-            "("
-            + ", ".join(
-                literal(row[name])
-                for name in (SCOPE_ITEM_TYPE, SCOPE_ITEM_NAME, *IDENTITY_COLUMNS)
-            )
-            + ")"
-            for row in identities
+    values = ",\n       ".join(
+        "("
+        + ", ".join(
+            literal(row[name])
+            for name in (SCOPE_ITEM_TYPE, SCOPE_ITEM_NAME, *IDENTITY_COLUMNS)
         )
-        joined = " and ".join(
-            f"r.{identifier(key)} = s.{identifier(columns[key])}" for key in keys
-        )
-        statements.append(
-            f"insert into {local_relation(INSTALLATION)} "
-            f"({', '.join(identifier(public) for public, _ in projection)})\n"
-            f"select {', '.join(expression for _, expression in projection)}\n"
-            f"  from {source} as s\n"
-            f"  join (values {values})\n"
-            f"    as r ({', '.join(identifier(name) for name in keys + resolved)})\n"
-            f"    on {joined}\n"
-            f" where {kept};"
-        )
-    changed = literal(
-        "The source catalogue's installations changed during the mirror. Run "
-        "mirror again."
+        + ")"
+        for row in identities
     )
-    statements.append(
-        f"if (select count_big(*) from {source} as s where {kept}) <> {count}\n"
-        f"   or (select count_big(*) from {local_relation(INSTALLATION)} as s "
-        f"where {_excluding_builtin(INSTALLATION, alias='s.')}) <> {count}\n"
-        f"    throw 50000, {changed}, 1;"
+    joined = " and ".join(
+        f"r.{identifier(key)} = s.{identifier(columns[key])}" for key in keys
     )
-    return "\n".join(statements)
+    return (
+        f"insert into {local_relation(INSTALLATION)} "
+        f"({', '.join(identifier(public) for public, _ in projection)})\n"
+        f"select {', '.join(expression for _, expression in projection)}\n"
+        f"  from {source_relation(source_catalogue, INSTALLATION)} as s\n"
+        f"  join (values {values})\n"
+        f"    as r ({', '.join(identifier(name) for name in keys + resolved)})\n"
+        f"    on {joined}\n"
+        f" where {_excluding_builtin(INSTALLATION, columns, alias='s.')};"
+    )
 
 
 def copied_tables(*, borrowed: bool = False) -> tuple:
@@ -458,8 +298,6 @@ def _every_declared_table_is_accounted_for() -> bool:
 __all__: Sequence[str] = [
     "FORKED_TABLES",
     "ForkSource",
-    "SOURCE_SHAPE_QUERY",
-    "SourceColumn",
     "copied_tables",
     "copy_statement",
     "copy_statements",
@@ -468,9 +306,7 @@ __all__: Sequence[str] = [
     "forked_table_names",
     "installation_copy_statement",
     "local_relation",
-    "null_count_statement",
     "project_source",
     "source_relation",
-    "source_shape",
     "uncopied_table_names",
 ]
