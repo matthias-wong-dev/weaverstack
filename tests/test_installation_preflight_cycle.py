@@ -351,7 +351,11 @@ def test_a_producer_the_build_requires_is_verified_with_the_same_helper(monkeypa
 def check_mirror_of(monkeypatch, resolver, rows):
     """``check_mirror`` selecting ``Warehouse/Orders`` over a source with ``rows``."""
 
+    from support.catalogue_shapes import current
+    from support.catalogue_shapes import rows as rows_of
+
     import weaver.operations.mirror as module
+    from weaver.catalogue.fork import project_source, source_shape
     from weaver.catalogue.tables import INSTALLATION
     from weaver.declaration.model import WeaverItemId
     from weaver.sessions import TestSession
@@ -364,7 +368,13 @@ def check_mirror_of(monkeypatch, resolver, rows):
         destination=CatalogueRef(workspace=workspace.workspace, name="Weaver_Dev"),
         items=("Warehouse/Orders=Warehouse/Orders_Dev",),
     )
-    monkeypatch.setattr(module, "_prove_source", lambda *_a, **_k: False)
+    monkeypatch.setattr(
+        module,
+        "_prove_source",
+        lambda *_a, **_k: project_source(
+            source_shape(rows_of(current())), source="Weaver"
+        ),
+    )
     monkeypatch.setattr(
         "weaver.catalogue.state.catalogue_for",
         lambda *_a, **_k: Catalogue(

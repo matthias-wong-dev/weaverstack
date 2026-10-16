@@ -11,11 +11,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Mapping, Sequence
+from typing import TYPE_CHECKING, Mapping, Sequence
 
 from ..errors import CommandError
 from ..workspaces import CATALOGUE_KIND, CatalogueRef, Workspace
 from .workspace import operation_workspace
+
+if TYPE_CHECKING:
+    from ..catalogue.fork import ForkSource
 
 
 @dataclass(frozen=True)
@@ -77,6 +80,8 @@ class ResolvedMirror:
     #: Each selected item's source ``_.Installation`` row, which the fork copies
     #: and the mirror rebinds last.
     installations: Mapping[object, Mapping] = field(default_factory=dict)
+    #: The source catalogue mapped onto this version's; ``None`` is this version's.
+    fork: ForkSource | None = None
 
     @property
     def workspace(self) -> Workspace:
@@ -101,9 +106,13 @@ class ResolvedMirror:
         return tuple(target for target, _source in self.mappings)
 
     def describe(self) -> str:
+        older = self.fork is not None and not self.fork.is_current
         lines = [
             f"Workspace              {self.workspace.workspace}",
-            f"Source catalogue       {self.source}",
+            f"Source catalogue       {self.source}"
+            + (
+                "  (older Weaver version, upgraded in the destination)" if older else ""
+            ),
             f"Destination catalogue  {self.destination}",
             "Targets",
         ]
@@ -193,13 +202,17 @@ def check_mirror(plan: MirrorPlan, *, session=None) -> ResolvedMirror:
     from ..sessions.host import use_or_create_session
 
     with use_or_create_session(session, workspace=plan.workspace) as opened:
-        borrowed = _prove_source(plan, session=opened)
+        fork = _prove_source(plan, session=opened)
         catalogue = (
             catalogue_for(opened, _source_workspace(plan)) if plan.items else None
         )
-        resolved = resolve_mirror(plan, catalogue, borrowed=borrowed)
-        _verify_source_identities(resolved, session=opened)
-        return resolved
+        resolved = resolve_mirror(plan, catalogue, borrowed=fork.borrowed)
+        if fork.legacy_installation:
+            fork = _upgraded_identities(plan, fork, session=opened)
+        else:
+            _verify_source_identities(resolved, session=opened)
+        _refuse_missing_values(plan, fork, session=opened)
+        return replace(resolved, fork=fork)
 
 
 def _verify_source_identities(resolved: "ResolvedMirror", *, session) -> None:
@@ -214,6 +227,59 @@ def _verify_source_identities(resolved: "ResolvedMirror", *, session) -> None:
     rows = tuple(resolved.installations.values())
     if rows:
         verify_installations(rows, resolver=session.resolver(resolved.workspace))
+
+
+def _upgraded_identities(plan: MirrorPlan, fork, *, session):
+    """Resolve every installation a legacy source records, as Build's upgrade does.
+
+    The destination Installation needs a verified Fabric identity on each row it
+    copies, so any recorded target that no longer resolves refuses the mirror.
+    """
+
+    from ..catalogue.builtin import BUILTIN_ITEM
+    from ..catalogue.connection import catalogue_connection
+    from ..catalogue.installation import upgraded_installations
+    from ..catalogue.reader import read_table
+    from ..catalogue.tables import INSTALLATION
+
+    workspace = _source_workspace(plan)
+    rows = [
+        row
+        for row in read_table(catalogue_connection(session, workspace), INSTALLATION)
+        if (row.get("item_type"), row.get("item_name"))
+        != (BUILTIN_ITEM.item_type, BUILTIN_ITEM.item_name)
+    ]
+    identities = upgraded_installations(
+        rows,
+        resolver=session.resolver(plan.workspace),
+        columns=fork.installation_columns,
+    )
+    return replace(fork, identities=tuple(identities))
+
+
+def _refuse_missing_values(plan: MirrorPlan, fork, *, session) -> None:
+    """Refuse a source holding null where this version requires a value."""
+
+    from ..catalogue.fork import null_count_statement
+    from ..targets import WarehouseTarget
+
+    if not fork.nullable:
+        return
+    sql = session.sql_executor(
+        WarehouseTarget(plan.source.item), workspace=plan.workspace
+    )
+    empty = [
+        f"{row['Table']}.{row['Column']} ({int(row['Rows'])} rows)"
+        for row in sql.query(null_count_statement(fork.nullable))
+        if int(row["Rows"])
+    ]
+    if empty:
+        raise CommandError(
+            f"The catalogue in {plan.source} cannot be mirrored by this Weaver "
+            "version: these columns hold no value where one is required: "
+            + ", ".join(empty)
+            + ". Repair the source catalogue."
+        )
 
 
 def resolve_mirror(
@@ -428,31 +494,25 @@ def _selected_items(items, no_item: bool, workspace: Workspace) -> tuple[str, ..
     return (items,) if isinstance(items, str) else tuple(items)
 
 
-def _prove_source(plan: MirrorPlan, *, session) -> bool:
-    """Validate the source catalogue and report whether it holds ``_.Mirror``."""
+def _prove_source(plan: MirrorPlan, *, session):
+    """Map the source catalogue onto this version's, or refuse it.
 
-    from ..catalogue.fork import FORKED_TABLES
-    from ..catalogue.tables import MIRROR
+    The source may be any earlier Weaver version's catalogue. It is only read.
+    """
 
-    found = _source_catalogue_tables(plan, session=session)
-    if not found:
+    from ..catalogue.fork import project_source, source_shape
+
+    shape = source_shape(_source_catalogue_columns(plan, session=session))
+    if not shape:
         raise CommandError(
             f"{plan.source} does not contain a Weaver catalogue. Name the "
             "Warehouse that holds the Weaver catalogue."
         )
-    missing = [
-        table.name for table in FORKED_TABLES if table.name.casefold() not in found
-    ]
-    if missing:
-        raise CommandError(
-            f"The catalogue in {plan.source} is not compatible with this Weaver "
-            "version. Build against it with this version before mirroring."
-        )
-    return MIRROR.name.casefold() in found
+    return project_source(shape, source=str(plan.source))
 
 
-def _source_catalogue_tables(plan: MirrorPlan, *, session) -> set[str]:
-    from ..catalogue.tables import CATALOGUE_SCHEMA
+def _source_catalogue_columns(plan: MirrorPlan, *, session):
+    from ..catalogue.fork import SOURCE_SHAPE_QUERY
     from ..errors import WeaverError
     from ..targets import WarehouseTarget
 
@@ -460,16 +520,9 @@ def _source_catalogue_tables(plan: MirrorPlan, *, session) -> set[str]:
         sql = session.sql_executor(
             WarehouseTarget(plan.source.item), workspace=plan.workspace
         )
-        rows = sql.query(
-            "select objects.name as name "
-            "from sys.objects as objects "
-            "where objects.is_ms_shipped = 0 "
-            "and objects.type = N'U' "
-            f"and schema_name(objects.schema_id) = N'{CATALOGUE_SCHEMA}'"
-        )
+        return sql.query(SOURCE_SHAPE_QUERY)
     except WeaverError as exc:
         raise CommandError(f"mirror could not read {plan.source}: {exc}") from exc
-    return {str(row["name"]).casefold() for row in rows}
 
 
 def _source_workspace(plan: MirrorPlan) -> Workspace:
