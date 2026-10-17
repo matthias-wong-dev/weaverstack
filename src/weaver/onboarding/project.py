@@ -67,6 +67,7 @@ class ProjectRequest:
             and self.warehouse is None
             and self.semantic_model is None
             and not self.source_items
+            and not self.adopted_items
         ):
             raise CommandError(
                 "Choose a Lakehouse, a Warehouse, or a SemanticModel for the project."

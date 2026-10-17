@@ -31,6 +31,7 @@ _KEYS = {
     "execution",
     "targets",
     "data_sources",
+    "catalogue_dashboard",
 }
 
 _RETIRED_KEYS = ("lakehouses", "warehouses")
@@ -74,6 +75,9 @@ def parse_workspace(payload: Any, base_dir: str | Path | None = None) -> Workspa
             execution=_execution(payload.get("execution"), where="execution"),
             targets=_targets(payload.get("targets")),
             data_sources=payload.get("data_sources", {}),
+            catalogue_dashboard=_optional_text(
+                payload.get("catalogue_dashboard"), where="catalogue_dashboard"
+            ),
         )
     except TypeError as exc:
         raise ConfigError(f"Workspace configuration is incomplete: {exc}") from exc
@@ -127,6 +131,9 @@ def resolve_workspace(
         else ExecutionSettings(),
         "targets": configured.targets if configured is not None else {},
         "data_sources": configured.data_sources if configured is not None else {},
+        "catalogue_dashboard": configured.catalogue_dashboard
+        if configured is not None
+        else None,
     }
     return Workspace(**common)
 
@@ -135,6 +142,10 @@ def _text(value: Any, *, where: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ConfigError(f"{where} must be a non-empty string, got {value!r}")
     return value
+
+
+def _optional_text(value: Any, *, where: str) -> str | None:
+    return None if value is None else _text(value, where=where)
 
 
 def _execution(raw: Any, *, where: str) -> ExecutionSettings:

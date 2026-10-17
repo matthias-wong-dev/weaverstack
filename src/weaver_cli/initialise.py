@@ -371,6 +371,7 @@ def render(report):
     from weaver.onboarding.environment import environment_directory
 
     _table(report)
+    _guidance(report)
     print(f"\nWeaver project ready in {report.project_folder}.")
     print(f"\nNext:\n\n  cd {shlex.quote(report.project_folder)}")
     if report.environment_publication == "deferred":
@@ -406,4 +407,10 @@ def render_dry_run(report):
     )
     if report.example.generated:
         print(f"{report.example.name} example source will be added.")
+    _guidance(report)
     print("No changes were made.")
+
+
+def _guidance(report):
+    for line in report.guidance:
+        print(f"\n{line}")

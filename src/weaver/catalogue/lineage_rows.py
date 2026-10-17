@@ -1,0 +1,357 @@
+"""Project the installed graph into per-item rows a report can walk.
+
+Each item's rows come from :func:`weaver.installed.item_dag` over that item's
+own desired rows, so they never depend on another item's state. A read of an
+object in another item is an edge to that object's node ID, whether or not the
+object is installed. A read the graph does not resolve is an External edge to
+the reference as its author wrote it.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+from types import MappingProxyType
+
+from ..declaration.model import (
+    ARTIFACT_SHAPE,
+    MODEL_SHAPE,
+    WeaverItemId,
+    WeaverSchemaId,
+)
+from .builtin import BUILTIN_ITEM
+from .claims import catalogue_columns
+from .render import Row
+from .state import Catalogue
+from .tables import (
+    CATALOGUE_SCHEMA,
+    EDGE_DEPENDENCY,
+    EDGE_EXTERNAL,
+    EDGE_SHORTCUT,
+    EDGE_VALIDATION,
+    FOLDER_DICTIONARY,
+    LINEAGE_EDGE,
+    LINEAGE_NODE,
+    LINEAGE_TABLES,
+    ROLE_SHORTCUT,
+    SEMANTIC_MODEL_TABLE,
+    SIGNATURE,
+    TABLE_DICTIONARY,
+)
+
+#: The byte width of ``search_text``.
+SEARCH_TEXT_BYTES = 4000
+#: Hexadecimal digits of a node key. A report detects the rare collision.
+NODE_KEY_DIGITS = 12
+
+
+def with_lineage_rows(
+    catalogue: Catalogue,
+    repository,
+    *,
+    current: Catalogue | None = None,
+    materialised=(),
+    warn=None,
+) -> Catalogue:
+    """Add each item's LineageNode and LineageEdge rows to desired state.
+
+    The projection is advisory. An item whose rows cannot be projected keeps
+    its ``current`` rows, so publication leaves them alone, and ``warn`` says so.
+    Each key names its node's workspace, from this build's installations and
+    the ones ``current`` already records. What ``current`` records as borrowed
+    stays mirrored, except the ``materialised`` identities this build gives
+    rows of their own.
+    """
+
+    workspaces = {
+        **(installed_workspaces(current) if current is not None else {}),
+        **installed_workspaces(catalogue),
+    }
+    rows = {}
+    for item, tables in catalogue.rows.items():
+        merged = dict(tables)
+        try:
+            projected = lineage_rows(
+                _with_semantic_sources(
+                    item,
+                    _with_borrowed(item, tables, current, materialised),
+                    repository,
+                ),
+                item,
+                workspaces=workspaces,
+            )
+        except Exception as exc:
+            kept = current.rows.get(item, {}) if current is not None else {}
+            projected = {
+                table.name: tuple(kept.get(table.name, ())) for table in LINEAGE_TABLES
+            }
+            if warn is not None:
+                warn(
+                    f"Lineage for {item} was not updated: "
+                    f"{_reason(exc)}. The Build continued."
+                )
+        merged.update(projected)
+        rows[item] = MappingProxyType(merged)
+    return Catalogue(rows=MappingProxyType(rows))
+
+
+def _with_borrowed(item, tables, current, materialised):
+    """An item's rows with the ``_.Mirror`` rows that stay after this build."""
+
+    from .tables import MIRROR
+
+    held = current.rows.get(item, {}).get(MIRROR.name, ()) if current else ()
+    gone = {catalogue_columns(i) for i in materialised if i.item == item}
+    kept = tuple(
+        row
+        for row in held
+        if (row.get("schema_name"), row.get("object_name")) not in gone
+    )
+    return {**tables, MIRROR.name: kept} if kept else tables
+
+
+def _reason(exc: Exception) -> str:
+    return (str(exc).strip() or type(exc).__name__).rstrip(".")
+
+
+def _with_semantic_sources(item, tables, repository) -> Catalogue:
+    """An item's rows, with a model's source tables as Build deploys them.
+
+    Fabric's copy of the model is read only after deployment, so desired state
+    has no SemanticModelTable rows yet. The graph reads their source mode and
+    access, which come from the authored definition.
+    """
+
+    contribution = repository.semantic_models.get(item)
+    if contribution is None or tables.get(SEMANTIC_MODEL_TABLE.name):
+        return Catalogue({item: tables})
+    from .semantic import project_semantic_model
+
+    requested = {
+        "model": {"tables": [{"name": name} for name in contribution.table_names]}
+    }
+    projected = project_semantic_model(item, contribution, deployed=requested)
+    return Catalogue(
+        {
+            item: {
+                **tables,
+                SEMANTIC_MODEL_TABLE.name: projected[SEMANTIC_MODEL_TABLE.name],
+            }
+        }
+    )
+
+
+def lineage_rows(
+    catalogue: Catalogue, item: WeaverItemId, *, workspaces=None
+) -> dict[str, tuple[Row, ...]]:
+    """LineageNode and LineageEdge rows for ``item``, from its rows alone.
+
+    ``workspaces`` maps items to their Fabric workspace GUIDs, which every key
+    includes; it defaults to the installations ``catalogue`` records. A node in
+    an item with no known workspace is keyed by its ID alone and so matches no
+    installed node.
+    """
+
+    from ..installed import item_dag
+
+    if workspaces is None:
+        workspaces = installed_workspaces(catalogue)
+    dag = item_dag(catalogue, item)
+    owners = {node.node_id: node.item for node in dag.nodes}
+
+    def key(node_id: str) -> str:
+        return node_key(node_id, workspaces.get(owners.get(node_id)))
+
+    tables = catalogue.rows.get(item, {})
+    descriptions = _descriptions(tables)
+    nodes = tuple(
+        _node_row(item, node, descriptions, key)
+        for node in dag.nodes
+        if node.item == item
+    )
+    validations = {node.node_id for node in dag.nodes if node.is_validation}
+
+    through: dict[tuple[str, str, str], set[str]] = {}
+    for edge in dag.edges:
+        downstream = str(edge.downstream)
+        if edge.is_shortcut:
+            kind = EDGE_SHORTCUT
+        elif downstream in validations:
+            kind = EDGE_VALIDATION
+        else:
+            kind = EDGE_DEPENDENCY
+        passes = through.setdefault((downstream, str(edge.upstream), kind), set())
+        if edge.through is not None:
+            passes.add(str(edge.through))
+    for references in (dag.external_references, dag.unresolved_references):
+        for consumer, written in references.items():
+            for reference in written:
+                through.setdefault((str(consumer), reference, EDGE_EXTERNAL), set())
+
+    edges = tuple(
+        _edge_row(item, downstream, upstream, kind, passes, key)
+        for (downstream, upstream, kind), passes in sorted(through.items())
+    )
+    return {LINEAGE_NODE.name: nodes, LINEAGE_EDGE.name: edges}
+
+
+def installed_workspaces(catalogue: Catalogue) -> dict[WeaverItemId, str]:
+    """The workspace GUID each item's installation records."""
+
+    from .tables import INSTALLATION
+
+    return {
+        item: str(row["workspace_id"])
+        for item, tables in catalogue.rows.items()
+        for row in tables.get(INSTALLATION.name, ())
+        if row.get("workspace_id")
+    }
+
+
+def _edge_row(item, downstream, upstream, kind, passes, key) -> Row:
+    # Two shortcuts to one source can both be read; one is named.
+    shortcut = min(passes) if passes else None
+    return _signed(
+        {
+            "item_type": item.item_type,
+            "item_name": item.item_name,
+            "downstream_node_id": downstream,
+            "upstream_node_id": upstream,
+            "edge_kind": kind,
+            "through_node_id": shortcut,
+            "downstream_node_key": key(downstream),
+            # An External read names what its author wrote, in no workspace.
+            "upstream_node_key": (
+                node_key(upstream) if kind == EDGE_EXTERNAL else key(upstream)
+            ),
+            "through_node_key": None if shortcut is None else key(shortcut),
+        }
+    )
+
+
+def node_key(node_id: str, workspace_id: str | None = None) -> str:
+    """The short key a report joins nodes and edges on: a node in its workspace.
+
+    The workspace is its GUID, so a renamed workspace keeps its keys. Without
+    one the key hashes the node ID alone.
+    """
+
+    text = node_id if not workspace_id else f"{canonical_guid(workspace_id)}|{node_id}"
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:NODE_KEY_DIGITS]
+
+
+def canonical_guid(value) -> str:
+    """Lowercase and hyphenated, as ``str(uuid.UUID(...))`` writes it."""
+
+    import uuid
+
+    try:
+        return str(uuid.UUID(str(value).strip()))
+    except ValueError:
+        return str(value).strip().lower()
+
+
+def _descriptions(tables) -> dict[tuple[str, str], str]:
+    found = {}
+    for table in (TABLE_DICTIONARY, FOLDER_DICTIONARY):
+        for row in tables.get(table.name, ()):
+            if row.get("description"):
+                key = (str(row.get("schema_name")), str(row.get("object_name")))
+                found[key] = str(row["description"])
+    return found
+
+
+def _node_row(item: WeaverItemId, node, descriptions, key) -> Row:
+    schema_name, object_name = catalogue_columns(node.identity)
+    if node.is_validation:
+        description = node.description
+    elif node.role == ROLE_SHORTCUT:
+        description = None
+    else:
+        description = descriptions.get((schema_name, object_name))
+    label = _label(node.identity)
+    item_label = str(item)
+    return _signed(
+        {
+            "item_type": item.item_type,
+            "item_name": item.item_name,
+            "schema_name": schema_name,
+            "object_name": object_name,
+            "node_id": node.node_id,
+            "node_key": key(node.node_id),
+            "node_kind": _kind(node),
+            "label": label,
+            "item_label": item_label,
+            "description": description,
+            "search_text": _search_text(label, item_label, description),
+            "is_internal": _is_internal(node.identity),
+            "can_load": node.can_load or _deployed_model(node),
+            "is_static": node.is_static,
+            "is_mirrored": node.is_mirrored,
+            "is_installed": node.is_installed or _deployed_model(node),
+        }
+    )
+
+
+def _deployed_model(node) -> bool:
+    """A model Build deploys, which the installed graph refreshes.
+
+    The installed graph finds a model's refresh in its definition as Fabric
+    returns it, which Build reads only after it projects these rows.
+    """
+
+    return node.object_type == "semantic_model" and not node.is_mirrored
+
+
+def _kind(node) -> str:
+    if node.is_validation or node.role == ROLE_SHORTCUT:
+        return node.role
+    return node.object_type
+
+
+def _label(identity) -> str:
+    if isinstance(identity, WeaverSchemaId):
+        return identity.schema
+    if identity.shape in {MODEL_SHAPE, ARTIFACT_SHAPE}:
+        # A model or Report root is known by its item.
+        return identity.item.item_name
+    return identity.object_id.qualified
+
+
+def _is_internal(identity) -> bool:
+    """The catalogue item and the ``_`` surface it presents in every item."""
+
+    if identity.item == BUILTIN_ITEM:
+        return True
+    schema = (
+        identity.schema
+        if isinstance(identity, WeaverSchemaId)
+        else identity.object_id.schema
+    )
+    return schema == CATALOGUE_SCHEMA
+
+
+def _search_text(*parts) -> str:
+    text = " ".join(part for part in parts if part).lower()
+    return text.encode("utf-8")[:SEARCH_TEXT_BYTES].decode("utf-8", errors="ignore")
+
+
+#: Columns that differ between catalogues holding the same item: keys name its
+#: workspace, and a mirror borrows what it may not load. They are compared as
+#: themselves and left out of the signature, so Mirror can rewrite them in place.
+_PLACED = frozenset(
+    {
+        "node_key",
+        "downstream_node_key",
+        "upstream_node_key",
+        "through_node_key",
+        "is_mirrored",
+        "can_load",
+    }
+)
+
+
+def _signed(row: dict) -> Row:
+    signed = {name: value for name, value in row.items() if name not in _PLACED}
+    content = json.dumps(signed, sort_keys=True, ensure_ascii=False)
+    return {**row, SIGNATURE: hashlib.sha256(content.encode("utf-8")).hexdigest()}

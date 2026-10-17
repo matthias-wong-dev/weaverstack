@@ -99,7 +99,28 @@ installed estate graph and the runtime graph each carry their own node metadata
 and hand ordering, layers, ancestry and subgraphs to it. `Catalogue.dag()`
 derives the installed managed graph from catalogue rows already in memory, and
 it is the one place a persisted `dependency_reference` is interpreted. Load
-planning, validation planning and health read it.
+planning, validation planning and health read it. Build publishes it per item
+as `_.LineageNode` and `_.LineageEdge` through `weaver.installed.item_dag`,
+which reads one item's rows and assumes the upstreams they name in other items,
+so an item's rows never depend on another item's state. The projection is
+advisory and never blocks Build, Wipe or Mirror. A node key hashes the owning
+item's workspace GUID with the node ID (`lineage_rows.node_key`); each edge
+endpoint takes its own item's workspace, from this build's installations and
+the ones the catalogue already records, and an endpoint in no known workspace
+hashes its ID alone. Mirror re-keys forked lineage by the destination's
+installations in its final transaction (`fork.lineage_key_statements`), and
+marks what `_.Mirror` records as mirrored (`borrow.lineage_statement`). Build
+projects an item's lineage with the `_.Mirror` rows that stay after it. A
+lineage signature leaves out the keys and the mirror flags, which differ
+between catalogues holding one item and are compared as columns, so Mirror's
+in-place rewrite leaves signatures valid.
+
+The Catalogue Dashboard observes a catalogue and is no part of its lifecycle.
+`weaver catalogue-dashboard` (`operations.catalogue_dashboard`) writes the
+`dashboard` fragment as an ordinary Power BI project and builds it without a
+catalogue, with the source catalogue Warehouse as the configured target of
+`Warehouse/_weaver`, so the catalogue is read and never written. Initialise,
+Build, Wipe and Mirror know nothing of it, and no item name is reserved.
 
 ## The core abstraction
 
@@ -733,7 +754,8 @@ Enforceable as the corresponding code lands:
   is touched, Load and Test the targets their nodes use (a failing node is
   `invalid` and blocks its dependants), Health the selected items (reported, never
   raised). An installation nothing uses cannot fail an operation. Only a legacy
-  `_.Installation` schema upgrade resolves the whole estate. A workspace
+  `_.Installation` schema upgrade resolves the whole estate, whether Build
+  upgrades it in place or Mirror copies it into its destination. A workspace
   renamed under an unchanged GUID is drift that Build reconciles; the configured
   name must still find the workspace. An item replaced after preflight is out of
   scope.
@@ -748,6 +770,8 @@ Enforceable as the corresponding code lands:
 - **Semantic models compile without a catalogue.** With no catalogue, Build
   accepts only SemanticModel items, deploys every selected model and verifies
   readback on the model; Load refreshes the named models and records nothing.
+  A generated table's source must be a configured target, whose shape Fabric
+  reports.
   Nothing target-local stands in for the catalogue, so there is no fixed point.
 - **The central catalogue is authoritative.** No target-local catalogue, no
   target-local runtime, no target-local logging authority.
@@ -852,6 +876,17 @@ binding are one transaction, last, after every reconstruction. Until it commits
 the destination catalogue records no installation, so it never claims the
 source's items.
 
+The source may be any earlier Weaver version's catalogue, so a release is
+trialled in development before production is upgraded. The source is only read.
+`catalogue.fork.project_source` maps its `_` shape onto this version's tables by
+column name: a table in `state.INTRODUCED_TABLES` it lacks starts empty, a
+nullable column it lacks stays null, and a column this version does not hold is
+left behind. A legacy Installation takes the identities Build's upgrade path in
+`resolve_installations` verifies. A missing table every catalogue has, or a
+missing required column, refuses the mirror before the first wipe. Anything
+else that cannot copy fails in the copy itself, one server-side
+`INSERT ... SELECT` per table.
+
 Build materialises selected edited borrowed objects marked Prohibit Rebuild through
 ordinary DAG actions. The development destination is disposable; the source remains
 unchanged. Lakehouse Folders and Tables remove the destination shortcut through the
@@ -886,7 +921,16 @@ an execution runs and travel with either.
 `_.Load` and `_.Test` are checked-in `.sql` under `src/weaver/fragments/`, read by
 `read_repository_fragment` like the catalogue declaration and the standard
 per-item schema and folder documents. Static Weaver-owned repository content is a
-fragment; nothing renders it from Python.
+fragment; nothing renders it from Python. The one composition step is the
+Catalogue Dashboard's renderer: the stylesheet and scripts in its `renderer/`
+folder are checked in beside its model, and
+`weaver.catalogue_dashboard.dashboard_files` inlines them, scripts in name order
+inside one function, into the model's `Renderer` measure as one DAX string. The
+model's Data measures return delimited text rather than JSON, so the TMDL needs
+no per-field escaping: private-use characters separate tables, rows and fields,
+and each page measure replaces every `<` once. The renderer's pure logic is
+tested under Node from `tests/js`, and its Health is compared with
+`weaver.health` over the same catalogue rows.
 
 **Who records is the interface.** A lower execution primitive never writes
 operational catalogue state. A run records centrally, and a standalone wrapper

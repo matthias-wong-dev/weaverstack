@@ -15,7 +15,7 @@ from support.weaver_test import weaver_test
 import weaver
 from weaver.config import parse_workspace
 from weaver.declaration.model import WeaverDocumentId, WeaverItemId
-from weaver.errors import CommandError, ConfigError
+from weaver.errors import CatalogueStateError, CommandError, ConfigError
 from weaver.operations.mirror import (
     MirrorPlan,
     MirrorResult,
@@ -400,6 +400,68 @@ def test_the_source_is_proved_before_anything_is_emptied(monkeypatch):
 
     with pytest.raises(CommandError, match="no such catalogue"):
         weaver.mirror(plan=plan, session=_open())
+
+
+class _SourceTables:
+    """A Session reading a source catalogue that holds exactly these tables."""
+
+    closed = False
+
+    def __init__(self, names):
+        self._names = names
+
+    def workspace_or_default(self, workspace):
+        return workspace
+
+    def query_tsql(self, _statement, *, target=None, workspace=None):
+        from weaver.catalogue.tables import CATALOGUE_TABLES
+
+        names = set(self._names)
+        return [
+            {
+                "TABLE_NAME": table.name,
+                "COLUMN_NAME": column,
+                "IS_NULLABLE": "NO",
+            }
+            for table in CATALOGUE_TABLES
+            if table.name in names
+            for column in table.public_columns
+        ]
+
+
+def _source_tables(*, graphed: bool) -> tuple[str, ...]:
+    from weaver.catalogue.fork import FORKED_TABLES, OPTIONAL_TABLES
+
+    return tuple(
+        table.name for table in FORKED_TABLES if graphed or table not in OPTIONAL_TABLES
+    )
+
+
+@pytest.mark.parametrize("graphed", (True, False))
+@weaver_test()
+def test_a_source_without_the_graph_tables_still_mirrors(monkeypatch, graphed):
+    """An older catalogue forks what it has; its items gain lineage rows on build."""
+
+    from weaver.operations.mirror import check_mirror
+
+    plan = _plan(monkeypatch, _workspace())
+
+    resolved = check_mirror(
+        plan, session=_SourceTables(_source_tables(graphed=graphed))
+    )
+
+    assert resolved.graphed is graphed
+
+
+@weaver_test()
+def test_a_source_missing_a_required_table_is_still_refused(monkeypatch):
+    from weaver.operations.mirror import check_mirror
+
+    plan = _plan(monkeypatch, _workspace())
+    held = tuple(name for name in _source_tables(graphed=True) if name != "Registry")
+
+    with pytest.raises(CatalogueStateError, match="cannot be mirrored"):
+        check_mirror(plan, session=_SourceTables(held))
 
 
 # --- what a recreated pointer depends on --------------------------------------

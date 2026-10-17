@@ -90,6 +90,7 @@ def generate_item_build_bundle(
     catalogue_binding: WarehouseBinding | None,
     execution: ExecutionIdentity | None = None,
     shortcut_sources: Mapping[str, object] | None = None,
+    warn=None,
 ) -> BuildBundle:
     if catalogue_binding is None:
         from .workflow import require_catalogue_for
@@ -306,6 +307,9 @@ def generate_item_build_bundle(
         target_by_item,
         current=catalogue_after_deletions,
         selected_models=selected_models,
+        # The objects whose mirror the deregistration stage below removes.
+        materialised=set(selected_for_build) & set(catalogue.mirrors),
+        warn=warn,
     )
     published = [
         render_runtime_state_reconciliation(

@@ -138,6 +138,17 @@ def verify_requested(requested, actual, *, owned=(), absent=()):
     if not isinstance(actual, dict) or not isinstance(actual.get("model"), dict):
         raise InstallError("Semantic readback has no model object")
     differences = []
+    # TMDL cannot write a column's type: a calculated table's columns are
+    # calculatedTableColumn wherever they are declared.
+    calculated_tables = {
+        f"/model/tables/{escape(table['name'])}"
+        for table in requested.get("tables", [])
+        if isinstance(table, dict)
+        and any(
+            isinstance(p, dict) and p.get("source", {}).get("type") == "calculated"
+            for p in table.get("partitions", [])
+        )
+    }
 
     def structure(node, collections):
         for key, nested in collections.items():
@@ -227,7 +238,11 @@ def verify_requested(requested, actual, *, owned=(), absent=()):
                     if kind == "relationship":
                         native_default = _RELATIONSHIP_DEFAULTS.get(key)
                     elif key == "type" and kind == "column":
-                        native_default = "data"
+                        native_default = (
+                            "calculatedTableColumn"
+                            if path.rsplit("/columns/", 1)[0] in calculated_tables
+                            else "data"
+                        )
                     elif key == "summarizeBy":
                         native_default = "default"
                     if found[key] == native_default or found[key] in (

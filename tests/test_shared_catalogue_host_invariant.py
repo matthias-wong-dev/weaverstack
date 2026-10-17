@@ -60,7 +60,10 @@ def _row(table):
         elif column.type == "boolean":
             values[column.name] = False
         else:
-            values[column.name] = f"value-{column.name}"
+            # Within the declared width, which the renderer enforces.
+            width = re.fullmatch(r"varchar\((\d+)\)", column.warehouse_type)
+            value = f"value-{column.name}"
+            values[column.name] = value[: int(width[1])] if width else value
     return values
 
 

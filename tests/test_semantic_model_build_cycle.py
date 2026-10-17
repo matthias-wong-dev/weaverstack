@@ -71,6 +71,10 @@ class DefinitionClient:
             raise self.read_failure
         return self.definition
 
+    def refresh(self, **options):
+        self.calls.append(("refresh", None))
+        return {"status": "Completed"}
+
     def bind_data_sources(self):
         from weaver.fabric.semantic_model import DataSourceBinding
 
@@ -258,6 +262,40 @@ def test_build_deploys_and_certifies_readback_without_touching_source(tmp_path, 
         repository.semantic_models[ITEM].signature
         == installed.catalogue.registered[ROOT].signature
     )
+
+
+@weaver_test()
+@pytest.mark.parametrize("refresh", [False, True])
+def test_a_model_that_asks_is_refreshed_before_its_measures_are_checked(
+    tmp_path, refresh
+):
+    """A Direct Lake model answers no query until it is framed once."""
+
+    from dataclasses import replace
+
+    root, repository, bindings, session, state = prepared(tmp_path)
+    repository = replace(
+        repository,
+        semantic_models={
+            ITEM: replace(
+                repository.semantic_models[ITEM], refresh_after_deploy=refresh
+            )
+        },
+    )
+    bundle = bundle_for(tmp_path, repository, bindings, state, "refresh")
+    semantic = session.semantic_model("Reporting_Dev")
+    semantic.definition = encode_definition(engine_model(repository))
+    semantic.calls.clear()
+    report = execute_bundle(
+        load_bundle(bundle.location, store=FilesystemStore()), session
+    )
+    assert report.succeeded, report.to_mapping()
+    assert [c[0] for c in semantic.calls] == [
+        "update_definition",
+        *(["refresh"] if refresh else []),
+        "invalid_measures",
+        "get_definition",
+    ]
 
 
 @weaver_test()
