@@ -92,7 +92,6 @@ def operation_call(parsed):
     import weaver
 
     name = parsed.command
-    function = None
     if name == "initialize":
         name = "initialise"
     if name == "fabric":
@@ -104,14 +103,10 @@ def operation_call(parsed):
                 parsed.notebook_command
             ]
         elif area == "capacity":
-            from ..fabric.capacity import run_capacity_action
-
-            function = run_capacity_action
             name = "capacity"
         else:
             raise CommandError("Name a Fabric management operation")
-    if name != "capacity":
-        function = getattr(weaver, name, None)
+    function = getattr(weaver, name, None)
     if not callable(function):
         raise CommandError(f"No public Python operation for {name!r}")
     values = vars(parsed).copy()
@@ -182,6 +177,7 @@ def workflow(
     workspace_config=None,
     catalogue=None,
     environment=None,
+    arm_credential=None,
     timings=False,
     session=None,
 ) -> WorkflowReport:
@@ -240,6 +236,8 @@ def workflow(
         with opened.workflow(new_workflow_id()):
             for index, (parsed, operation, function, kwargs) in enumerate(requests):
                 parameters = inspect.signature(function).parameters
+                if operation == "capacity" and arm_credential is not None:
+                    kwargs["credential"] = arm_credential
                 if "session" in parameters:
                     # The shared Session fixes the workspace/configuration. A
                     # command can override catalogue/Environment but not retarget it.

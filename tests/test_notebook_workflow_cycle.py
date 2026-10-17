@@ -146,3 +146,37 @@ def test_notebook_workflow_applies_its_catalogue_override_to_a_reused_session(
         assert not opened.closed
     assert report.succeeded
     assert calls == ["Warehouse/Alternate"]
+
+
+@weaver_test()
+def test_notebook_workflow_uses_native_capacity_control_with_azure_credentials(
+    tmp_path, monkeypatch
+):
+    from types import SimpleNamespace
+
+    definition = tmp_path / "workflow.yml"
+    definition.write_text(
+        "workflows:\n  verify:\n    - fabric capacity status --resource-group parcel-development --capacity-name parceldev --subscription-id 00000000-0000-0000-0000-000000000000\n",
+        encoding="utf-8",
+    )
+    chosen = SimpleNamespace(get_token=lambda *args: None)
+    calls = []
+
+    def capacity(
+        action,
+        *,
+        resource_group,
+        capacity_name,
+        subscription_id=None,
+        credential=None,
+        client=None,
+    ):
+        calls.append((action, credential))
+        return weaver.CapacityAction(action, capacity_name, "Paused")
+
+    monkeypatch.setattr(weaver, "capacity", capacity)
+    report = weaver.workflow(
+        "verify", file=definition, workspace="Parcel Development", arm_credential=chosen
+    )
+    assert report.succeeded
+    assert calls == [("status", chosen)]

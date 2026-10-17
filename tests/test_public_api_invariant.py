@@ -41,6 +41,8 @@ def test_the_top_level_is_the_ordinary_notebook_surface_only():
         "publish_environment",
         "push_notebook",
         "run_notebook",
+        "capacity",
+        "CapacityAction",
         "workflow",
         "WorkflowReport",
         "WorkflowStep",

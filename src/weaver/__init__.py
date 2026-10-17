@@ -35,6 +35,7 @@ from .objects import (
     WeaverObject,
 )
 from .operations.build import BuildResult, build
+from .operations.capacity import CapacityAction, capacity
 from .operations.check import CheckResult, check
 from .operations.doctor import DoctorReport, doctor
 from .operations.health import health
@@ -93,6 +94,8 @@ __all__ = [
     "publish_environment",
     "push_notebook",
     "run_notebook",
+    "capacity",
+    "CapacityAction",
     "workflow",
     "WorkflowReport",
     "WorkflowStep",
