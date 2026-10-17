@@ -432,11 +432,18 @@ table.matrix .note code { padding: 1px 4px; font-size: 12px; }
 .features-showcase [data-feature-group="1"] .feature-row h3 { font-size: 22px; }
 .features-showcase [data-feature-group="4"] .feature-list { gap: 16px 34px; }
 .features-showcase [data-feature-group="4"] .feature-row h3 { font-size: 18px; }
-.features-showcase [data-feature-group="5"] .feature-list { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 22px 28px; }
-.features-showcase [data-feature-group="5"] .feature-row h3 { font-size: 18px; }
+.features-showcase [data-feature-group="6"] .feature-list { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 22px 28px; }
+.features-showcase [data-feature-group="6"] .feature-row h3 { font-size: 18px; }
 .features-showcase .scope-note { font-size: 15px; margin: 16px 0; }
 .features-showcase .group-docs, .features-showcase .spotlight-docs { font-size: 15px; margin: 20px 0 0; }
 .features-showcase .feature-spotlight { margin: 28px 0 34px; }
+.features-showcase .group-lead { max-width: var(--measure); margin: 14px 0 0; font-size: 18px; line-height: 1.55; color: var(--ink-soft); }
+.features-showcase .dashboard-gallery { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px; }
+.features-showcase .dashboard-gallery a { display: block; color: var(--ink); font-size: 15px; text-decoration: none; }
+.features-showcase .dashboard-gallery img { display: block; width: 100%; height: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--paper); box-shadow: var(--shadow); }
+.features-showcase .dashboard-gallery span { display: block; margin-top: 10px; font-family: var(--mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--blue-dark); }
+.features-showcase .dashboard-gallery a:hover img { border-color: var(--line-strong); }
+.features-showcase [data-feature-group="5"] .feature-list { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 22px 28px; }
 .features-showcase .feature-spotlight > h3 { max-width: 36ch; margin: 0 0 24px; font-size: clamp(24px, 2.7vw, 30px); line-height: 1.2; }
 .features-showcase .feature-spotlight figcaption { max-width: var(--measure); color: var(--ink-soft); font-size: 15.5px; line-height: 1.6; margin-top: 20px; }
 .features-showcase .fabric-dag { display: grid; grid-template-columns: minmax(0, 3fr) 90px minmax(0, 1.05fr) 72px minmax(0, 1.15fr); gap: 12px; align-items: center; }
@@ -475,7 +482,7 @@ table.matrix .note code { padding: 1px 4px; font-size: 12px; }
 .features-showcase .mirror-flow span { display: block; font-size: 15px; color: var(--ink-soft); margin-top: 10px; }
 .features-showcase .feature-scale { background: var(--paper-deep); }
 @media (max-width: 1000px) {
- .features-showcase [data-feature-group="5"] .feature-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+ .features-showcase [data-feature-group="6"] .feature-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
  .features-showcase .fabric-dag { display: flex; flex-direction: column; align-items: stretch; gap: 16px; }
  .features-showcase .dag-engine ol { max-width: 650px; }
  .features-showcase .dag-connection > span { font-size: 0; }
@@ -483,13 +490,13 @@ table.matrix .note code { padding: 1px 4px; font-size: 12px; }
  .features-showcase .dag-connection small { margin-top: 0; }
 }
 @media (max-width: 600px) {
- .features-showcase .feature-list, .features-showcase [data-feature-group="1"] .feature-list, .features-showcase [data-feature-group="5"] .feature-list { grid-template-columns: 1fr; gap: 20px; }
+ .features-showcase .feature-list, .features-showcase [data-feature-group="1"] .feature-list, .features-showcase [data-feature-group="5"] .feature-list, .features-showcase [data-feature-group="6"] .feature-list { grid-template-columns: 1fr; gap: 20px; }
  .features-showcase [data-feature-group="1"] .feature-row, .features-showcase [data-feature-group="1"] .feature-row:nth-child(n+4) { grid-column: auto; }
  .features-showcase .feature-row h3 { font-size: 19px; }
  .features-showcase .dag-engine ol { grid-template-columns: 1fr; gap: 24px; }
  .features-showcase .dag-engine li:not(:last-child)::after { content: '↓'; right: auto; top: auto; bottom: -24px; }
  .features-showcase .warehouse-spotlight { padding: 22px 18px; }
- .features-showcase .select-engineering, .features-showcase .model-variants, .features-showcase .mirror-flow { grid-template-columns: 1fr; }
+ .features-showcase .select-engineering, .features-showcase .model-variants, .features-showcase .mirror-flow, .features-showcase .dashboard-gallery { grid-template-columns: 1fr; }
  .features-showcase .generated-work ul { grid-template-columns: 1fr; }
  .features-showcase .engineering-arrow { font-size: 0; }
  .features-showcase .engineering-arrow::after { content: '↓'; font-size: 30px; }
