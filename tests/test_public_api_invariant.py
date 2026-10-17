@@ -21,6 +21,8 @@ def test_error_hierarchy_has_one_root():
 
 @weaver_test()
 def test_public_mapping_results_use_as_dict_consistently():
+    from weaver.build_bundle.preview import BuildPreview
+
     mapping_results = {
         name: value
         for name in weaver.__all__
@@ -32,6 +34,7 @@ def test_public_mapping_results_use_as_dict_consistently():
     assert {
         name for name, value in mapping_results.items() if not hasattr(value, "as_dict")
     } == set()
+    assert hasattr(BuildPreview, "as_dict")
 
 
 @weaver_test()
