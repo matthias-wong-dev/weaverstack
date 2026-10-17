@@ -12,6 +12,7 @@ from ..build_bundle.incremental import BuildSelection
 from ..build_bundle.preview import BuildPreview
 from ..errors import BuildError, CommandError
 from ..locations import Location
+from ..representation import AsDict
 from ..sessions.host import inside_fabric_session as _inside_fabric_session
 from ..workspaces import Workspace
 from .project import repository_source
@@ -46,7 +47,7 @@ class BuildFailure:
 
 
 @dataclass(frozen=True)
-class BuildResult:
+class BuildResult(AsDict):
     source: str
     items: tuple[str, ...]
     bundle_id: str

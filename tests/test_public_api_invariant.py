@@ -20,6 +20,21 @@ def test_error_hierarchy_has_one_root():
 
 
 @weaver_test()
+def test_public_mapping_results_use_as_dict_consistently():
+    mapping_results = {
+        name: value
+        for name in weaver.__all__
+        if isinstance((value := getattr(weaver, name)), type)
+        and callable(getattr(value, "to_mapping", None))
+    }
+
+    assert mapping_results
+    assert {
+        name for name, value in mapping_results.items() if not hasattr(value, "as_dict")
+    } == set()
+
+
+@weaver_test()
 def test_the_top_level_is_the_ordinary_notebook_surface_only():
     assert set(weaver.__all__) == {
         "__version__",
@@ -33,19 +48,6 @@ def test_the_top_level_is_the_ordinary_notebook_surface_only():
         "ExampleOutcome",
         "build",
         "BuildResult",
-        "check",
-        "CheckResult",
-        "doctor",
-        "DoctorReport",
-        "install",
-        "publish_environment",
-        "push_notebook",
-        "run_notebook",
-        "capacity",
-        "CapacityAction",
-        "workflow",
-        "WorkflowReport",
-        "WorkflowStep",
         # Forking an installed estate into this workspace's catalogue. The
         # pair is resolved once and proved before anything is emptied, so the
         # plan and the check are public alongside the operation.
@@ -140,6 +142,13 @@ def test_internal_composition_seams_are_not_top_level_attributes():
         "execute_load_plan",
         "open_task_log",
         "PhysicalTargetRef",
+        "check",
+        "CheckResult",
+        "install",
+        # Connectivity is a desktop question. A notebook is already inside the
+        # workspace it addresses, so it has nothing to ask.
+        "doctor",
+        "DoctorReport",
     }
     assert all(not hasattr(weaver, name) for name in internal)
 

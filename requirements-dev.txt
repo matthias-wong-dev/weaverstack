@@ -22,20 +22,12 @@
 #
 arro3-core==0.8.3
     # via deltalake
-azure-common==1.1.28
-    # via azure-mgmt-fabric
 azure-core==1.41.0
-    # via
-    #   azure-identity
-    #   azure-mgmt-core
+    # via azure-identity
 azure-identity==1.25.3
     # via
     #   weaverstack (pyproject.toml)
     #   mssql-python
-azure-mgmt-core==1.6.0
-    # via azure-mgmt-fabric
-azure-mgmt-fabric==1.0.0
-    # via weaverstack (pyproject.toml)
 build==1.5.0
     # via weaverstack (pyproject.toml)
 certifi==2026.7.22
@@ -63,8 +55,6 @@ idna==3.18
     # via requests
 iniconfig==2.3.0
     # via pytest
-isodate==0.7.2
-    # via azure-mgmt-fabric
 msal==1.37.0
     # via
     #   azure-identity
@@ -110,7 +100,6 @@ typing-extensions==4.16.0
     #   arro3-core
     #   azure-core
     #   azure-identity
-    #   azure-mgmt-fabric
 urllib3==2.7.0
     # via requests
 wcwidth==0.8.2

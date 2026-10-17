@@ -35,13 +35,8 @@ from .objects import (
     WeaverObject,
 )
 from .operations.build import BuildResult, build
-from .operations.capacity import CapacityAction, capacity
-from .operations.check import CheckResult, check
-from .operations.doctor import DoctorReport, doctor
 from .operations.health import health
-from .operations.install import install
 from .operations.load import load
-from .operations.management import publish_environment, push_notebook, run_notebook
 from .operations.mirror import (
     MirrorPlan,
     MirrorResult,
@@ -59,7 +54,6 @@ from .operations.wipe import (
     plan_wipe,
     wipe,
 )
-from .operations.workflow import WorkflowReport, WorkflowStep, workflow
 from .operations.workspace import current_workspace
 from .sessions.public import session
 from .shortcuts import Shortcut
@@ -86,19 +80,6 @@ __all__ = [
     "ExampleOutcome",
     "build",
     "BuildResult",
-    "check",
-    "CheckResult",
-    "doctor",
-    "DoctorReport",
-    "install",
-    "publish_environment",
-    "push_notebook",
-    "run_notebook",
-    "capacity",
-    "CapacityAction",
-    "workflow",
-    "WorkflowReport",
-    "WorkflowStep",
     "mirror",
     "MirrorResult",
     "plan_mirror",

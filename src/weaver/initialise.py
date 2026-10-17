@@ -23,6 +23,7 @@ from .onboarding import (
     project_files,
 )
 from .onboarding.environment import environment_directory
+from .representation import AsDict
 
 DEFAULT_CATALOGUE = "Catalogue"
 DEFAULT_ENVIRONMENT = "Weaver"
@@ -41,7 +42,7 @@ class InitialiseError(WeaverError):
 
 
 @dataclass(frozen=True)
-class FabricItemOutcome:
+class FabricItemOutcome(AsDict):
     role: str
     name: str
     status: str
@@ -57,7 +58,7 @@ class FabricItemOutcome:
 
 
 @dataclass(frozen=True)
-class ExampleOutcome:
+class ExampleOutcome(AsDict):
     generated: bool = False
     name: str | None = None
 
@@ -66,7 +67,7 @@ class ExampleOutcome:
 
 
 @dataclass(frozen=True)
-class InitialiseReport:
+class InitialiseReport(AsDict):
     project_folder: str
     workspace: str
     resources: tuple[FabricItemOutcome, ...] = ()

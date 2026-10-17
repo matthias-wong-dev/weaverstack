@@ -13,8 +13,8 @@ from ..locations import Location
 from ..store import FilesystemStore
 
 
-def install(bundle, *, workspace: str | None = None, session=None):
-    """Install a frozen bundle; workspace confirms its target, never retargets it."""
+def install(bundle, *, session=None):
+    """Validate and install a frozen bundle without rereading its repository."""
 
     from ..build_bundle import load_bundle, materialise_bundle_archive
     from ..build_bundle.execution import execution_workspace
@@ -32,12 +32,8 @@ def install(bundle, *, workspace: str | None = None, session=None):
     def run(loaded):
         # The bundle is loaded and validated before a Session exists, so a
         # damaged or incompatible bundle never acquires a Fabric resource.
-        configured = execution_workspace(loaded.plan.execution, loaded.plan)
-        if workspace is not None and workspace != configured.workspace:
-            raise CommandError(
-                f"Bundle targets {configured.workspace!r}, not {workspace!r}."
-            )
-        with use_or_create_session(session, workspace=configured) as opened:
+        workspace = execution_workspace(loaded.plan.execution, loaded.plan)
+        with use_or_create_session(session, workspace=workspace) as opened:
             with opened.task("Install", loaded.bundle_id) as frame:
                 report = execute_bundle(loaded, opened)
                 frame.failed = not report.succeeded
