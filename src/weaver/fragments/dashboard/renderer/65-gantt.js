@@ -90,8 +90,9 @@ function ganttChart(rows, sum, s, m) {
   var P = null, width = 0, height = 0, ratio = 1, top = 0;
   function measure() {
     var box = wrap.getBoundingClientRect(), clip = clipRect(wrap);
-    width = Math.max(320, box.width); ratio = root.devicePixelRatio || 1;
+    width = Math.max(320, box.width);
     top = Math.max(0, clip.top - box.top); height = Math.min(box.height, clip.bottom - box.top) - top;
+    ratio = canvasRatio(width, height);
     canvas.style.top = top + "px"; canvas.style.width = width + "px"; canvas.style.height = Math.max(0, height) + "px";
     canvas.width = Math.round(width * ratio); canvas.height = Math.round(Math.max(1, height) * ratio);
   }

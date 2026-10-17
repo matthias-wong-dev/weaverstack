@@ -36,8 +36,9 @@ GraphView.prototype.index = function (lay) {
 };
 
 GraphView.prototype.resize = function () {
-  var box = this.host.getBoundingClientRect(), ratio = root.devicePixelRatio || 1;
+  var box = this.host.getBoundingClientRect();
   this.width = Math.max(1, box.width); this.height = Math.max(1, box.height);
+  var ratio = canvasRatio(this.width, this.height);
   this.canvas.width = Math.round(this.width * ratio); this.canvas.height = Math.round(this.height * ratio);
   this.canvas.style.width = this.width + "px"; this.canvas.style.height = this.height + "px";
   this.ratio = ratio;

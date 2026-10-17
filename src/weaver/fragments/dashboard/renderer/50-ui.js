@@ -151,6 +151,14 @@ function onAnyScroll(node, f) {
   document.addEventListener("scroll", listener, { capture: true, passive: true });
 }
 
+/* Canvas pixels per CSS pixel. The Power BI Service fits a page to its window
+   by scaling the visual's frame, which enlarges a canvas drawn at the device
+   ratio alone, so a canvas draws at least twice over, within a pixel budget. */
+function canvasRatio(width, height) {
+  var device = root.devicePixelRatio || 1, wanted = Math.min(3, Math.max(2, device * 1.5));
+  return Math.max(device, Math.min(wanted, Math.sqrt(12e6 / Math.max(1, width * height))));
+}
+
 function redraw() { if (root.__WD_REDRAW) root.__WD_REDRAW(); }
 
 function section(title, children, attrs) {
