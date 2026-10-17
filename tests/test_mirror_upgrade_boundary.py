@@ -23,7 +23,6 @@ from support.workspaces import _identifier, given_resolver
 
 from weaver.catalogue.connection import CatalogueConnection
 from weaver.catalogue.fork import (
-    FORKED_TABLES,
     copy_statement,
     copy_statements,
     installation_copy_statement,
@@ -76,7 +75,7 @@ def test_tables_a_released_catalogue_predates_start_empty():
     for name in SEMANTIC:
         assert f"[{name}]" not in "\n".join(statements)
     # Installation has no rows to copy here.
-    assert len(statements) == len(FORKED_TABLES) - len(SEMANTIC) - 1
+    assert len(statements) == len(fork.columns) - 1
 
 
 @weaver_test()

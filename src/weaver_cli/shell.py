@@ -24,7 +24,7 @@ NOT_IN_A_SESSION = {
 }
 
 # Accepted at the prompt but omitted from the lifecycle banner.
-SECONDARY_SESSION_COMMANDS = {"check", "doctor", "install"}
+SECONDARY_SESSION_COMMANDS = {"catalogue-dashboard", "check", "doctor", "install"}
 
 #: Lifecycle order used by the banner.
 SESSION_COMMAND_ORDER = (

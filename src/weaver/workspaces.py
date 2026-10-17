@@ -258,6 +258,8 @@ class Workspace:
     execution: ExecutionSettings = field(default_factory=ExecutionSettings)
     targets: Mapping[WeaverItemId, TargetDeclaration] = field(default_factory=dict)
     data_sources: Mapping[str, str] = field(default_factory=dict)
+    #: The Fabric item ``weaver catalogue-dashboard`` deploys its model and Report to.
+    catalogue_dashboard: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -276,6 +278,12 @@ class Workspace:
         if not isinstance(self.execution, ExecutionSettings):
             raise ConfigError("execution must be ExecutionSettings")
         object.__setattr__(self, "targets", _target_declarations(self.targets))
+        if self.catalogue_dashboard is not None:
+            object.__setattr__(
+                self,
+                "catalogue_dashboard",
+                validate_name(self.catalogue_dashboard, what="catalogue_dashboard"),
+            )
         from .semantic_models.expressions import source_mappings
 
         if not isinstance(self.data_sources, Mapping):

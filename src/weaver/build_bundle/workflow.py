@@ -256,7 +256,10 @@ def read_build_state(
     if not catalogued:
         require_catalogue_for(bindings)
         from ..semantic_models.fragments import source_table
+        from ..semantic_models.references import source_identity
 
+        # Without a catalogue a generated table reads a configured target, whose
+        # shape Fabric reports; anything else is known only to a catalogue.
         references = sorted(
             str(item)
             for item, contribution in (
@@ -265,13 +268,15 @@ def read_build_state(
             if item in bindings.by_item
             and any(
                 not source_table(contribution.parts, name).get("partitions")
-                for name in contribution.source_references
+                and source_identity(reference).item not in workspace.configured_items
+                for name, reference in contribution.source_references.items()
             )
         )
         if references:
             raise BuildError(
-                f"{references[0]} generates tables from managed sources, which needs "
-                f"a Weaver catalogue. {CATALOGUE_HINT}"
+                f"{references[0]} generates tables from managed sources that no "
+                f"targets: entry names, which needs a Weaver catalogue. "
+                f"{CATALOGUE_HINT}"
             )
 
     # Check occupancy before the slower per-target inventory and Spark reads.

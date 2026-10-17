@@ -29,6 +29,7 @@ from .tables import (
     CURRENT_STATE_TABLES,
     HISTORY_TABLES,
     INSTALLATION,
+    LINEAGE_TABLES,
     MIRROR,
     PROJECTED_TABLES,
     SCOPE_ITEM_NAME,
@@ -38,6 +39,10 @@ from .tsql import identifier, literal
 
 #: Current installed state, excluding history owned by the source installation.
 FORKED_TABLES = PROJECTED_TABLES + CURRENT_STATE_TABLES
+
+#: Forked only when the source holds them. A catalogue built by an older Weaver
+#: does not, and its items gain the rows on their next build.
+OPTIONAL_TABLES = LINEAGE_TABLES
 
 _AUDIT_TYPE = "datetime2(6)"
 
@@ -119,7 +124,11 @@ def _excluding_builtin(table, columns=None, *, alias: str = "") -> str:
 
 
 def copy_statements(
-    *, source_catalogue: str, borrowed: bool = False, source: ForkSource | None = None
+    *,
+    source_catalogue: str,
+    borrowed: bool = False,
+    graphed: bool = True,
+    source: ForkSource | None = None,
 ) -> tuple[str, ...]:
     """Copy every table the source holds, ``_.Mirror`` last when borrowed.
 
@@ -129,10 +138,10 @@ def copy_statements(
     if source is None:
         return tuple(
             copy_statement(table, source_catalogue=source_catalogue)
-            for table in copied_tables(borrowed=borrowed)
+            for table in copied_tables(borrowed=borrowed, graphed=graphed)
         )
     statements = []
-    for table in copied_tables(borrowed=source.borrowed):
+    for table in copied_tables(borrowed=source.borrowed, graphed=graphed):
         columns = source.columns.get(table.name)
         if columns is None:
             continue
@@ -153,13 +162,13 @@ def copy_statements(
 
 
 def fork_statements(
-    *, source_catalogue: str, borrowed: bool = False
+    *, source_catalogue: str, borrowed: bool = False, graphed: bool = True
 ) -> tuple[str, ...]:
     """Return the state-copy statements, including ``_.Mirror`` when present."""
 
     statements = [
         copy_statement(table, source_catalogue=source_catalogue)
-        for table in FORKED_TABLES
+        for table in copied_tables(graphed=graphed)
     ]
     if borrowed:
         statements.append(create_statement(MIRROR))
@@ -276,13 +285,24 @@ def installation_copy_statement(
     )
 
 
-def copied_tables(*, borrowed: bool = False) -> tuple:
-    """Return copied tables in order, with an existing ``_.Mirror`` last."""
-    return FORKED_TABLES + (MIRROR,) if borrowed else FORKED_TABLES
+def copied_tables(*, borrowed: bool = False, graphed: bool = True) -> tuple:
+    """Return copied tables in order, with an existing ``_.Mirror`` last.
+
+    ``graphed`` says whether the source holds :data:`OPTIONAL_TABLES`.
+    """
+
+    forked = tuple(
+        table for table in FORKED_TABLES if graphed or table not in OPTIONAL_TABLES
+    )
+    return forked + (MIRROR,) if borrowed else forked
 
 
-def forked_table_names(*, borrowed: bool = False) -> tuple[str, ...]:
-    return tuple(table.name for table in copied_tables(borrowed=borrowed))
+def forked_table_names(
+    *, borrowed: bool = False, graphed: bool = True
+) -> tuple[str, ...]:
+    return tuple(
+        table.name for table in copied_tables(borrowed=borrowed, graphed=graphed)
+    )
 
 
 def uncopied_table_names() -> tuple[str, ...]:
@@ -297,6 +317,7 @@ def _every_declared_table_is_accounted_for() -> bool:
 
 __all__: Sequence[str] = [
     "FORKED_TABLES",
+    "OPTIONAL_TABLES",
     "ForkSource",
     "copied_tables",
     "copy_statement",
@@ -310,3 +331,75 @@ __all__: Sequence[str] = [
     "source_relation",
     "uncopied_table_names",
 ]
+
+
+# --- lineage keys in the destination --------------------------------------------
+
+
+def lineage_key_statements() -> tuple[str, ...]:
+    """Key forked lineage by the destination's workspaces.
+
+    A key hashes ``<workspace GUID>|<node ID>`` (see
+    :func:`weaver.catalogue.lineage_rows.node_key`), and forked rows carry the
+    source's workspaces. Each endpoint takes the workspace of the item that owns
+    it, as ``_.Installation`` now records; an endpoint in no recorded item, and
+    an External read, are keyed by the ID alone.
+    """
+
+    from .lineage_rows import NODE_KEY_DIGITS
+    from .tables import EDGE_EXTERNAL, INSTALLATION, LINEAGE_EDGE, LINEAGE_NODE
+
+    def column(table, name: str) -> str:
+        return identifier(table.public_name_of(name))
+
+    item_type, item_name = (
+        column(INSTALLATION, "item_type"),
+        column(INSTALLATION, "item_name"),
+    )
+    guid = f"nullif(lower(cast([i].{column(INSTALLATION, 'workspace_id')} as varchar(36))), '')"
+
+    def key(node_id: str) -> str:
+        text = (
+            f"case when {guid} is null then cast({node_id} as varchar(8000)) else "
+            f"cast(concat({guid}, '|', {node_id}) as varchar(8000)) end"
+        )
+        return (
+            f"lower(left(convert(varchar(64), hashbytes('SHA2_256', {text}), 2), "
+            f"{NODE_KEY_DIGITS}))"
+        )
+
+    def owned_by(node_id: str) -> str:
+        item = f"concat([i].{item_type}, '/', [i].{item_name})"
+        return (
+            f"({node_id} = {item} or left({node_id}, len({item}) + 1) = "
+            f"concat({item}, '/'))"
+        )
+
+    node, edge = local_relation(LINEAGE_NODE), local_relation(LINEAGE_EDGE)
+    same_item = (
+        f"[i].{item_type} = [{{alias}}].{item_type} and "
+        f"[i].{item_name} = [{{alias}}].{item_name}"
+    )
+    installation = local_relation(INSTALLATION)
+    node_id = f"[n].{column(LINEAGE_NODE, 'node_id')}"
+    external = literal(LINEAGE_EDGE.column("edge_kind").to_public(EDGE_EXTERNAL))
+    statements = [
+        f"update [n] set {column(LINEAGE_NODE, 'node_key')} = {key(node_id)}\n"
+        f"from {node} as [n]\n"
+        f"left join {installation} as [i] on {same_item.format(alias='n')};",
+    ]
+    for end, where in (
+        ("downstream", ""),
+        ("upstream", f"\nwhere [e].{column(LINEAGE_EDGE, 'edge_kind')} <> {external}"),
+        (
+            "through",
+            f"\nwhere [e].{column(LINEAGE_EDGE, 'through_node_id')} is not null",
+        ),
+    ):
+        ends = f"[e].{column(LINEAGE_EDGE, f'{end}_node_id')}"
+        statements.append(
+            f"update [e] set {column(LINEAGE_EDGE, f'{end}_node_key')} = {key(ends)}\n"
+            f"from {edge} as [e]\n"
+            f"left join {installation} as [i] on {owned_by(ends)}{where};"
+        )
+    return tuple(statements)

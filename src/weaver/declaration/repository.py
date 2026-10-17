@@ -287,9 +287,7 @@ def _claim(folded: dict[str, object], key, label: str, *, what: str) -> None:
 
 
 def parse_item_repository(
-    root: Location,
-    *,
-    store: Store | None = None,
+    root: Location, *, store: Store | None = None
 ) -> WeaverRepository:
     """Read the workspace declaration without executing authored code."""
 

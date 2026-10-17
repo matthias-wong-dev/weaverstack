@@ -353,3 +353,71 @@ def test_an_illegal_physical_name_is_a_configuration_error():
         parse_workspace(
             {"workspace": "Analytics", "targets": {"Lakehouse/Landing": "Landing/Dev"}}
         )
+
+
+@weaver_test()
+def test_catalogue_dashboard_names_an_item_and_binds_nothing(tmp_path):
+    """The key is for ``weaver catalogue-dashboard``; Build and Wipe ignore it."""
+
+    config = tmp_path / "workspace-config.yml"
+    config.write_text(
+        "workspace: Analytics\n"
+        "catalogue: Warehouse/Weaver\n"
+        "catalogue_dashboard: Estate Dashboard\n"
+        "targets:\n"
+        "  SemanticModel/Sales: Sales\n",
+        encoding="utf-8",
+    )
+    workspace = resolve_workspace(workspace_config=config)
+
+    assert workspace.catalogue_dashboard == "Estate Dashboard"
+    assert workspace.configured_items == (_item("SemanticModel/Sales"),)
+    with pytest.raises(ConfigError, match="No target is configured"):
+        workspace.target_for(_item("SemanticModel/Catalogue Dashboard"))
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"workspace": "Analytics", "catalogue_dashboard": "Estate Dashboard"},
+        {
+            "workspace": "Analytics",
+            "catalogue": "Warehouse/Weaver",
+            "catalogue_dashboard": "Estate Dashboard",
+            "targets": {"SemanticModel/Catalogue Dashboard": "Estate Dashboard"},
+        },
+    ],
+    ids=["no catalogue", "an authored item of the same name"],
+)
+@weaver_test()
+def test_catalogue_dashboard_reserves_nothing_in_configuration(payload):
+    """Its catalogue may be named on the command line, and no item name is reserved."""
+
+    assert parse_workspace(payload).catalogue_dashboard == "Estate Dashboard"
+
+
+@weaver_test()
+def test_catalogue_dashboard_must_be_a_name():
+    with pytest.raises(ConfigError, match="catalogue_dashboard"):
+        parse_workspace(
+            {
+                "workspace": "Analytics",
+                "catalogue": "Warehouse/Weaver",
+                "catalogue_dashboard": 7,
+            }
+        )
+
+
+@weaver_test()
+def test_another_items_target_may_share_the_dashboards_name_in_another_kind():
+    """Names are unique per type, so a Warehouse may share the Dashboard's name."""
+
+    workspace = parse_workspace(
+        {
+            "workspace": "Analytics",
+            "catalogue": "Warehouse/Weaver",
+            "catalogue_dashboard": "Estate",
+            "targets": {"Warehouse/Estate": "Estate"},
+        }
+    )
+    assert workspace.catalogue_dashboard == "Estate"

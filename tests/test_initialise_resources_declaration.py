@@ -144,15 +144,65 @@ def test_dry_run_writes_and_creates_nothing(tmp_path, fabric):
     assert not fabric.created and not fabric.published and not list(tmp_path.iterdir())
 
 
-@pytest.mark.parametrize("path", ["workspace-config.yml", "workflow.yml", "README.md"])
+@pytest.mark.parametrize("path", ["workflow.yml", "README.md"])
 @weaver_test()
-def test_existing_project_files_are_not_overwritten(tmp_path, fabric, path):
+def test_a_rerun_keeps_edited_project_files(tmp_path, fabric, path):
     setup(tmp_path, fabric)
     (tmp_path / path).write_text("user content")
+    report = setup(tmp_path, fabric)
+    assert report.succeeded and (tmp_path / path).read_text() == "user content"
+
+
+@weaver_test()
+def test_a_rerun_keeps_an_edited_configuration_and_needs_no_item_named(
+    tmp_path, fabric
+):
+    setup(tmp_path, fabric)
+    config = tmp_path / "workspace-config.yml"
+    edited = (
+        config.read_text()
+        + "\n# Reviewed\nexecution:\n  run:\n    spark_concurrency: 8\n"
+    )
+    config.write_text(edited)
+    report = weaver.initialise(tmp_path, workspace="Analytics", session=fabric.session)
+    assert report.succeeded and config.read_text() == edited
+
+
+@weaver_test()
+def test_a_new_item_adds_its_target_to_an_existing_configuration(tmp_path, fabric):
+    weaver.initialise(
+        tmp_path, workspace="Analytics", lakehouse="Landing", session=fabric.session
+    )
+    weaver.initialise(
+        tmp_path, workspace="Analytics", warehouse="Curated", session=fabric.session
+    )
+    text = (tmp_path / "workspace-config.yml").read_text()
+    assert "Lakehouse/Landing: Landing" in text and "Warehouse/Curated: Curated" in text
+
+
+@weaver_test()
+def test_an_unreadable_configuration_stops_a_rerun_before_creation(tmp_path, fabric):
+    setup(tmp_path, fabric)
+    (tmp_path / "workspace-config.yml").write_text("user content")
     fabric.created.clear()
+    with pytest.raises(InitialiseError, match="cannot be read"):
+        setup(tmp_path, fabric)
+    assert not fabric.created
+
+
+@weaver_test()
+def test_a_rerun_refuses_a_catalogue_the_configuration_does_not_name(tmp_path, fabric):
+    setup(tmp_path, fabric)
+    with pytest.raises(InitialiseError, match="names catalogue Catalogue, not Other"):
+        setup(tmp_path, fabric, catalogue="Other")
+
+
+@weaver_test()
+def test_new_files_beside_unrelated_ones_are_still_refused(tmp_path, fabric):
+    (tmp_path / "README.md").write_text("someone else's project")
     with pytest.raises(InitialiseError, match="Choose another project folder"):
         setup(tmp_path, fabric)
-    assert not fabric.created and (tmp_path / path).read_text() == "user content"
+    assert not fabric.created
 
 
 @weaver_test()
@@ -331,3 +381,76 @@ def test_preflight_has_progress_before_any_item_creation(tmp_path, fabric, monke
         "Checking the project files",
     ]
     assert fabric.created and not fabric.session.frames
+
+
+@weaver_test()
+def test_initialise_never_deploys_a_configured_catalogue_dashboard(
+    tmp_path, fabric, monkeypatch
+):
+    def refuse(*args, **kwargs):
+        raise AssertionError("initialise deployed the Catalogue Dashboard")
+
+    monkeypatch.setattr(
+        "weaver.operations.catalogue_dashboard.deploy_catalogue_dashboard", refuse
+    )
+    monkeypatch.setattr("weaver.operations.build.build", refuse)
+    setup(tmp_path, fabric)
+    config = tmp_path / "workspace-config.yml"
+    config.write_text(config.read_text() + "\ncatalogue_dashboard: Estate Dashboard\n")
+
+    report = setup(tmp_path, fabric)
+
+    assert report.succeeded
+    assert {outcome.role for outcome in report.resources} == {
+        "Catalogue",
+        "Environment",
+        "Lakehouse",
+        "Warehouse",
+    }
+
+
+@weaver_test()
+def test_a_session_in_another_workspace_is_refused_before_creation(tmp_path, fabric):
+    from weaver.workspaces import Workspace
+
+    setup(tmp_path, fabric)
+    fabric.created.clear()
+    elsewhere = TestSession(
+        workspace=Workspace(workspace="Elsewhere"),
+        resolver=SimpleNamespace(client=object()),
+    )
+
+    with pytest.raises(
+        InitialiseError, match="names workspace Analytics, not Elsewhere"
+    ):
+        weaver.initialise(tmp_path, lakehouse="Landing", session=elsewhere)
+    assert not fabric.created
+
+
+@weaver_test()
+def test_a_new_item_kind_names_the_workflow_steps_it_needs(tmp_path, fabric):
+    weaver.initialise(
+        tmp_path, workspace="Analytics", lakehouse="Landing", session=fabric.session
+    )
+    workflow = (tmp_path / "workflow.yml").read_text()
+
+    report = weaver.initialise(
+        tmp_path,
+        workspace="Analytics",
+        semantic_model="Sales",
+        session=fabric.session,
+    )
+
+    (guidance,) = report.guidance
+    assert "weaver build --item Lakehouse" in guidance
+    assert "weaver build --item PowerBI" in guidance
+    assert "SemanticModel" in guidance
+    assert report.to_mapping()["guidance"] == [guidance]
+    # The workflow is the user's: named, not rewritten.
+    assert (tmp_path / "workflow.yml").read_text() == workflow
+
+
+@weaver_test()
+def test_a_rerun_with_nothing_new_has_no_guidance(tmp_path, fabric):
+    setup(tmp_path, fabric)
+    assert setup(tmp_path, fabric).guidance == ()

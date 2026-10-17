@@ -30,6 +30,7 @@ EXECUTABLE_COMMANDS = (
     ["load"],
     ["test"],
     ["health"],
+    ["catalogue-dashboard"],
     ["wipe"],
     ["unbind", "Lakehouse/Sales"],
     ["mirror"],

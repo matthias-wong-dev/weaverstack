@@ -1,0 +1,711 @@
+model Model
+    annotation 'Weaver.AutoHideColumns' = ```
+            Signature
+            Search text
+            Is internal
+            * SK
+            * GUID
+            Details
+            Node ID
+            Node key
+            Downstream node ID
+            Upstream node ID
+            Through node ID
+            Downstream node key
+            Upstream node key
+            Through node key
+            Description reference
+            Lineage reference
+            Definition
+            ```
+
+/// Every installed node of the graph.
+table 'Lineage node'
+    annotation 'Weaver.Source' = Warehouse/_weaver/_.LineageNode
+
+/// Every installed edge of the graph.
+table 'Lineage edge'
+    annotation 'Weaver.Source' = Warehouse/_weaver/_.LineageEdge
+
+table Installation
+    annotation 'Weaver.Source' = Warehouse/_weaver/_.Installation
+
+table Registry
+    annotation 'Weaver.Source' = Warehouse/_weaver/_.Registry
+
+table Dependency
+    annotation 'Weaver.Source' = Warehouse/_weaver/_.Dependency
+
+table 'Load status'
+    annotation 'Weaver.Source' = Warehouse/_weaver/_.LoadStatus
+
+table 'Log'
+    annotation 'Weaver.Source' = Warehouse/_weaver/_.Log
+
+table 'Load statistic'
+    annotation 'Weaver.Source' = Warehouse/_weaver/_.LoadStatistic
+
+table 'Test status'
+    annotation 'Weaver.Source' = Warehouse/_weaver/_.TestStatus
+
+table 'Test dictionary'
+    annotation 'Weaver.Source' = Warehouse/_weaver/_.TestDictionary
+
+table 'Schema dictionary'
+    annotation 'Weaver.Source' = Warehouse/_weaver/_.SchemaDictionary
+
+table 'Table dictionary'
+    annotation 'Weaver.Source' = Warehouse/_weaver/_.TableDictionary
+
+table 'Folder dictionary'
+    annotation 'Weaver.Source' = Warehouse/_weaver/_.FolderDictionary
+
+table 'Column dictionary'
+    annotation 'Weaver.Source' = Warehouse/_weaver/_.ColumnDictionary
+
+table 'Key dictionary'
+    annotation 'Weaver.Source' = Warehouse/_weaver/_.KeyDictionary
+
+table 'Foreign key dictionary'
+    annotation 'Weaver.Source' = Warehouse/_weaver/_.ForeignKeyDictionary
+
+table 'Semantic model'
+    annotation 'Weaver.Source' = Warehouse/_weaver/_.SemanticModel
+
+table 'Semantic model table'
+    annotation 'Weaver.Source' = Warehouse/_weaver/_.SemanticModelTable
+
+table 'Semantic model column'
+    annotation 'Weaver.Source' = Warehouse/_weaver/_.SemanticModelColumn
+
+table 'Semantic model measure'
+    annotation 'Weaver.Source' = Warehouse/_weaver/_.SemanticModelMeasure
+
+table 'Semantic model relationship'
+    annotation 'Weaver.Source' = Warehouse/_weaver/_.SemanticModelRelationship
+
+/// Every measure of the Catalogue Dashboard.
+///
+/// The Data measures return delimited text for the renderer: each table starts
+/// with U+E003 and its name and column names, each row with U+E002, and
+/// U+E001 separates fields. Times are milliseconds since 1970 UTC. The page
+/// measures replace every < with U+E000, so no catalogue text can close the
+/// script element that carries the data.
+table 'Dashboard measures'
+    annotation 'Weaver.MeasureTable' = true
+
+    /// Load subjects whose last load Failed, raised an Error or was Blocked.
+    measure 'Failed loads' = CALCULATE(COUNTROWS('Load status'), 'Load status'[Result] IN {"Failed", "Error", "Blocked"}) + 0
+        formatString: #,##0
+        displayFolder: Health
+
+    /// Load subjects whose last load completed with rejected rows.
+    measure 'Rejected loads' = CALCULATE(COUNTROWS('Load status'), 'Load status'[Result] = "Rejected") + 0
+        formatString: #,##0
+        displayFolder: Health
+
+    /// Load subjects rebuilt and not loaded since.
+    measure 'Pending loads' = CALCULATE(COUNTROWS('Load status'), 'Load status'[Result] = "Pending") + 0
+        formatString: #,##0
+        displayFolder: Health
+
+    /// Tests and Assumptions whose last run Failed, raised an Error or was Blocked.
+    measure 'Failed tests' = CALCULATE(COUNTROWS('Test status'), 'Test status'[Result] IN {"Failed", "Error", "Blocked"}) + 0
+        formatString: #,##0
+        displayFolder: Health
+
+    /// When the latest load or test settled, in UTC.
+    measure 'Latest settled completion' = ```
+        MAX(
+            CALCULATE(MAX('Load status'[Completed datetime]), 'Load status'[Result] <> "Pending"),
+            CALCULATE(MAX('Test status'[Completed datetime]), 'Test status'[Result] <> "Pending")
+        )
+        ```
+        formatString: yyyy-mm-dd hh:nn:ss
+        displayFolder: Health
+
+    /// When the model answered, in UTC.
+    measure 'Observed at' = UTCNOW()
+        formatString: yyyy-mm-dd hh:nn:ss
+        displayFolder: Health
+
+    /// Installed logical items, the catalogue and the Dashboard aside.
+    measure 'Items' = CALCULATE(DISTINCTCOUNT('Lineage node'[Item label]), NOT 'Lineage node'[Is internal]) + 0
+        formatString: #,##0
+        displayFolder: Estate
+
+    /// Installed graph nodes, the catalogue and the Dashboard aside.
+    measure 'Installed objects' = CALCULATE(COUNTROWS('Lineage node'), NOT 'Lineage node'[Is internal]) + 0
+        formatString: #,##0
+        displayFolder: Estate
+
+    /// Settled Log records.
+    measure 'Settled log records' = COUNTROWS('Log') + 0
+        formatString: #,##0
+        displayFolder: Estate
+
+    /// The query instant and the catalogue's installations.
+    measure 'Catalogue data' = ```
+        VAR _f = UNICHAR(57345)
+        VAR _r = UNICHAR(57346)
+        VAR _t = UNICHAR(57347)
+        VAR _now = UTCNOW()
+        RETURN
+            _t & "meta" & _f & "at" & _f & "format"
+            & _r & FORMAT((_now - DATE(1970, 1, 1)) * 86400000, "0") & _f & "1"
+            & _t & "items" & _f & "item" & _f & "workspace" & _f & "target" & _f & "version"
+            & CONCATENATEX(
+                'Installation',
+                _r & 'Installation'[Item type] & "/" & 'Installation'[Item name]
+                    & _f & 'Installation'[Workspace name]
+                    & _f & 'Installation'[Target name]
+                    & _f & 'Installation'[Weaver version],
+                ""
+            )
+        ```
+        displayFolder: Data
+
+    /// Installed nodes and edges, the catalogue and the Dashboard aside. An edge
+    /// names its upstream when it reads outside Weaver, or when no lineage node
+    /// is that upstream.
+    measure 'Lineage data' = ```
+        VAR _f = UNICHAR(57345)
+        VAR _r = UNICHAR(57346)
+        VAR _t = UNICHAR(57347)
+        VAR _nodes = FILTER('Lineage node', NOT 'Lineage node'[Is internal])
+        VAR _keys = SELECTCOLUMNS(_nodes, "@key", 'Lineage node'[Node key])
+        VAR _edges = FILTER('Lineage edge', 'Lineage edge'[Downstream node key] IN _keys)
+        VAR _known = ALL('Lineage node'[Node key])
+        VAR _internal = EXCEPT(
+            CALCULATETABLE(VALUES('Lineage node'[Item label]), 'Lineage node'[Is internal]),
+            SELECTCOLUMNS(_nodes, "@item", 'Lineage node'[Item label])
+        )
+        RETURN
+            _t & "nodes" & _f & "key" & _f & "item" & _f & "schema" & _f & "object" & _f & "kind" & _f & "label" & _f & "flags" & _f & "description"
+            & CONCATENATEX(
+                _nodes,
+                _r & 'Lineage node'[Node key]
+                    & _f & 'Lineage node'[Item label]
+                    & _f & 'Lineage node'[Schema name]
+                    & _f & 'Lineage node'[Object name]
+                    & _f & 'Lineage node'[Node kind]
+                    & _f & 'Lineage node'[Label]
+                    & _f & (IF('Lineage node'[Can load], 1, 0) + IF('Lineage node'[Is static], 2, 0) + IF('Lineage node'[Is mirrored], 4, 0) + IF('Lineage node'[Is installed], 8, 0))
+                    & _f & LEFT('Lineage node'[Description], 400),
+                ""
+            )
+            & _t & "edges" & _f & "down" & _f & "up" & _f & "kind" & _f & "through" & _f & "reference"
+            & CONCATENATEX(
+                _edges,
+                _r & 'Lineage edge'[Downstream node key]
+                    & _f & 'Lineage edge'[Upstream node key]
+                    & _f & LEFT('Lineage edge'[Edge kind], 1)
+                    & _f & 'Lineage edge'[Through node key]
+                    & _f & IF('Lineage edge'[Edge kind] = "External" || NOT ('Lineage edge'[Upstream node key] IN _known), 'Lineage edge'[Upstream node ID]),
+                ""
+            )
+            & _t & "internal" & _f & "item"
+            & CONCATENATEX(_internal, _r & 'Lineage node'[Item label], "")
+        ```
+        displayFolder: Data
+
+    /// Current load and test outcomes, and when each data object was last built.
+    measure 'Status data' = ```
+        VAR _f = UNICHAR(57345)
+        VAR _r = UNICHAR(57346)
+        VAR _t = UNICHAR(57347)
+        RETURN
+            _t & "loads" & _f & "item" & _f & "schema" & _f & "object" & _f & "result" & _f & "completed" & _f & "duration"
+            & CONCATENATEX(
+                'Load status',
+                _r & 'Load status'[Item type] & "/" & 'Load status'[Item name]
+                    & _f & 'Load status'[Schema name]
+                    & _f & 'Load status'[Object name]
+                    & _f & 'Load status'[Result]
+                    & _f & IF(ISBLANK('Load status'[Completed datetime]), "", FORMAT(('Load status'[Completed datetime] - DATE(1970, 1, 1)) * 86400000, "0"))
+                    & _f & 'Load status'[Duration milliseconds],
+                ""
+            )
+            & _t & "tests" & _f & "item" & _f & "schema" & _f & "object" & _f & "result" & _f & "completed" & _f & "failures"
+            & CONCATENATEX(
+                'Test status',
+                _r & 'Test status'[Item type] & "/" & 'Test status'[Item name]
+                    & _f & 'Test status'[Schema name]
+                    & _f & 'Test status'[Object name]
+                    & _f & 'Test status'[Result]
+                    & _f & IF(ISBLANK('Test status'[Completed datetime]), "", FORMAT(('Test status'[Completed datetime] - DATE(1970, 1, 1)) * 86400000, "0"))
+                    & _f & 'Test status'[Failure count],
+                ""
+            )
+            & _t & "built" & _f & "item" & _f & "schema" & _f & "object" & _f & "built"
+            & CONCATENATEX(
+                FILTER('Registry', 'Registry'[Object role] = "Data"),
+                _r & 'Registry'[Item type] & "/" & 'Registry'[Item name]
+                    & _f & 'Registry'[Schema name]
+                    & _f & 'Registry'[Object name]
+                    & _f & IF(ISBLANK('Registry'[Build datetime]), "", FORMAT(('Registry'[Build datetime] - DATE(1970, 1, 1)) * 86400000, "0")),
+                ""
+            )
+        ```
+        displayFolder: Data
+
+    /// Declared tables, views and folders that Registry does not certify.
+    measure 'Build data' = ```
+        VAR _f = UNICHAR(57345)
+        VAR _r = UNICHAR(57346)
+        VAR _t = UNICHAR(57347)
+        VAR _declared = UNION(
+            SUMMARIZE('Table dictionary', 'Table dictionary'[Item type], 'Table dictionary'[Item name], 'Table dictionary'[Schema name], 'Table dictionary'[Object name]),
+            SUMMARIZE('Folder dictionary', 'Folder dictionary'[Item type], 'Folder dictionary'[Item name], 'Folder dictionary'[Schema name], 'Folder dictionary'[Object name])
+        )
+        VAR _missing = EXCEPT(_declared, SUMMARIZE('Registry', 'Registry'[Item type], 'Registry'[Item name], 'Registry'[Schema name], 'Registry'[Object name]))
+        RETURN
+            _t & "uncertified" & _f & "item" & _f & "schema" & _f & "object"
+            & CONCATENATEX(
+                _missing,
+                _r & 'Table dictionary'[Item type] & "/" & 'Table dictionary'[Item name] & _f & 'Table dictionary'[Schema name] & _f & 'Table dictionary'[Object name],
+                ""
+            )
+        ```
+        displayFolder: Data
+
+    /// The 40 latest workflows, each summarised over every record it settled.
+    measure 'Workflow data' = ```
+        VAR _f = UNICHAR(57345)
+        VAR _r = UNICHAR(57346)
+        VAR _t = UNICHAR(57347)
+        VAR _all = ADDCOLUMNS(
+            VALUES('Log'[Workflow ID]),
+            "@start", CALCULATE(MIN('Log'[Started datetime])),
+            "@end", CALCULATE(MAX('Log'[Completed datetime])),
+            "@records", CALCULATE(COUNTROWS('Log')),
+            "@failed", CALCULATE(COUNTROWS('Log'), 'Log'[Result] IN {"Failed", "Error", "Blocked"}) + 0,
+            "@tasks", CALCULATE(CONCATENATEX(VALUES('Log'[Task type]), 'Log'[Task type], ",", 'Log'[Task type], ASC))
+        )
+        VAR _recent = TOPN(40, _all, [@end], DESC, 'Log'[Workflow ID], ASC)
+        RETURN
+            _t & "workflowcount" & _f & "count" & _r & COUNTROWS(_all)
+            & _t & "workflows" & _f & "workflow" & _f & "started" & _f & "completed" & _f & "records" & _f & "failed" & _f & "tasks"
+            & CONCATENATEX(
+                _recent,
+                _r & 'Log'[Workflow ID]
+                    & _f & IF(ISBLANK([@start]), "", FORMAT(([@start] - DATE(1970, 1, 1)) * 86400000, "0"))
+                    & _f & IF(ISBLANK([@end]), "", FORMAT(([@end] - DATE(1970, 1, 1)) * 86400000, "0"))
+                    & _f & [@records]
+                    & _f & [@failed]
+                    & _f & [@tasks],
+                "",
+                [@end], DESC,
+                'Log'[Workflow ID], ASC
+            )
+        ```
+        displayFolder: Data
+
+    /// Every Log record of the twelve latest workflows, up to 20,000 records,
+    /// newest workflow first. Each workflow says how many it holds and how many
+    /// are included; a record names its workflow by that order. A message is
+    /// kept for workflow records and for work that did not succeed.
+    measure 'Log data' = ```
+        VAR _f = UNICHAR(57345)
+        VAR _r = UNICHAR(57346)
+        VAR _t = UNICHAR(57347)
+        VAR _budget = 20000
+        VAR _all = ADDCOLUMNS(
+            VALUES('Log'[Workflow ID]),
+            "@end", CALCULATE(MAX('Log'[Completed datetime])),
+            "@records", CALCULATE(COUNTROWS('Log'))
+        )
+        VAR _recent = SELECTCOLUMNS(
+            TOPN(12, _all, [@end], DESC, 'Log'[Workflow ID], ASC),
+            "@workflow", 'Log'[Workflow ID],
+            "@end", [@end],
+            "@records", [@records]
+        )
+        VAR _placed = ADDCOLUMNS(
+            _recent,
+            "@before",
+                VAR _e = [@end]
+                VAR _w = [@workflow]
+                RETURN SUMX(FILTER(_recent, [@end] > _e || ([@end] = _e && [@workflow] < _w)), [@records]) + 0,
+            "@index",
+                VAR _e = [@end]
+                VAR _w = [@workflow]
+                RETURN COUNTROWS(FILTER(_recent, [@end] > _e || ([@end] = _e && [@workflow] < _w))) + 1
+        )
+        VAR _taken = ADDCOLUMNS(_placed, "@taken", MAX(0, MIN([@records], _budget - [@before])))
+        VAR _rows = GENERATE(
+            FILTER(_taken, [@taken] > 0),
+            VAR _w = [@workflow]
+            VAR _k = [@taken]
+            RETURN TOPN(_k, CALCULATETABLE('Log', 'Log'[Workflow ID] = _w), 'Log'[Started datetime], ASC, 'Log'[Log SK], ASC)
+        )
+        RETURN
+            _t & "logflows" & _f & "index" & _f & "workflow" & _f & "records" & _f & "included"
+            & CONCATENATEX(_taken, _r & [@index] & _f & [@workflow] & _f & [@records] & _f & [@taken], "")
+            & _t & "log" & _f & "id" & _f & "flow" & _f & "task" & _f & "targettype" & _f & "target" & _f & "schema" & _f & "object" & _f & "result" & _f & "started" & _f & "completed" & _f & "duration" & _f & "message"
+            & CONCATENATEX(
+                _rows,
+                _r & 'Log'[Log SK]
+                    & _f & [@index]
+                    & _f & 'Log'[Task type]
+                    & _f & 'Log'[Target type]
+                    & _f & 'Log'[Target name]
+                    & _f & 'Log'[Schema name]
+                    & _f & 'Log'[Object name]
+                    & _f & 'Log'[Result]
+                    & _f & IF(ISBLANK('Log'[Started datetime]), "", FORMAT(('Log'[Started datetime] - DATE(1970, 1, 1)) * 86400000, "0"))
+                    & _f & IF(ISBLANK('Log'[Completed datetime]), "", FORMAT(('Log'[Completed datetime] - DATE(1970, 1, 1)) * 86400000, "0"))
+                    & _f & 'Log'[Duration milliseconds]
+                    & _f & IF(ISBLANK('Log'[Object name]) || 'Log'[Result] <> "Succeeded", LEFT('Log'[Message], 300)),
+                ""
+            )
+        ```
+        displayFolder: Data
+
+    /// Load statistics: per object over the last day and the last 30 days,
+    /// per item per day for 30 days, and the 50 slowest and 50 largest single
+    /// loads of the last 7 days.
+    measure 'Statistic data' = ```
+        VAR _f = UNICHAR(57345)
+        VAR _r = UNICHAR(57346)
+        VAR _t = UNICHAR(57347)
+        VAR _now = UTCNOW()
+        VAR _header = _f & "item" & _f & "schema" & _f & "object" & _f & "loads" & _f & "duration" & _f & "longest" & _f & "read" & _f & "inserted" & _f & "updated" & _f & "deleted" & _f & "rejected" & _f & "reloads" & _f & "skips" & _f & "timedread" & _f & "timedduration" & _f & "last"
+        VAR _day = CALCULATETABLE(
+            ADDCOLUMNS(
+                SUMMARIZE('Load statistic', 'Load statistic'[Item type], 'Load statistic'[Item name], 'Load statistic'[Schema name], 'Load statistic'[Object name]),
+                "@loads", CALCULATE(COUNTROWS('Load statistic')),
+                "@duration", CALCULATE(SUM('Load statistic'[Duration milliseconds])),
+                "@longest", CALCULATE(MAX('Load statistic'[Duration milliseconds])),
+                "@read", CALCULATE(SUM('Load statistic'[Rows read])),
+                "@inserted", CALCULATE(SUM('Load statistic'[Rows inserted])),
+                "@updated", CALCULATE(SUM('Load statistic'[Rows updated])),
+                "@deleted", CALCULATE(SUM('Load statistic'[Rows deleted])),
+                "@rejected", CALCULATE(SUM('Load statistic'[Rows rejected])),
+                "@reloads", CALCULATE(COUNTROWS('Load statistic'), 'Load statistic'[Is reload]) + 0,
+                "@skips", CALCULATE(COUNTROWS('Load statistic'), 'Load statistic'[Is static skip]) + 0,
+                "@timedread", CALCULATE(SUM('Load statistic'[Rows read]), NOT ISBLANK('Load statistic'[Rows read]), 'Load statistic'[Duration milliseconds] > 0),
+                "@timedduration", CALCULATE(SUM('Load statistic'[Duration milliseconds]), NOT ISBLANK('Load statistic'[Rows read]), 'Load statistic'[Duration milliseconds] > 0),
+                "@last", CALCULATE(MAX('Load statistic'[Completed datetime]))
+            ),
+            'Load statistic'[Completed datetime] >= _now - 1
+        )
+        VAR _month = CALCULATETABLE(
+            ADDCOLUMNS(
+                SUMMARIZE('Load statistic', 'Load statistic'[Item type], 'Load statistic'[Item name], 'Load statistic'[Schema name], 'Load statistic'[Object name]),
+                "@loads", CALCULATE(COUNTROWS('Load statistic')),
+                "@duration", CALCULATE(SUM('Load statistic'[Duration milliseconds])),
+                "@longest", CALCULATE(MAX('Load statistic'[Duration milliseconds])),
+                "@read", CALCULATE(SUM('Load statistic'[Rows read])),
+                "@inserted", CALCULATE(SUM('Load statistic'[Rows inserted])),
+                "@updated", CALCULATE(SUM('Load statistic'[Rows updated])),
+                "@deleted", CALCULATE(SUM('Load statistic'[Rows deleted])),
+                "@rejected", CALCULATE(SUM('Load statistic'[Rows rejected])),
+                "@reloads", CALCULATE(COUNTROWS('Load statistic'), 'Load statistic'[Is reload]) + 0,
+                "@skips", CALCULATE(COUNTROWS('Load statistic'), 'Load statistic'[Is static skip]) + 0,
+                "@timedread", CALCULATE(SUM('Load statistic'[Rows read]), NOT ISBLANK('Load statistic'[Rows read]), 'Load statistic'[Duration milliseconds] > 0),
+                "@timedduration", CALCULATE(SUM('Load statistic'[Duration milliseconds]), NOT ISBLANK('Load statistic'[Rows read]), 'Load statistic'[Duration milliseconds] > 0),
+                "@last", CALCULATE(MAX('Load statistic'[Completed datetime]))
+            ),
+            'Load statistic'[Completed datetime] >= _now - 30
+        )
+        VAR _days = GENERATE(
+            SELECTCOLUMNS(GENERATESERIES(0, 29), "@day", TRUNC(_now) - [Value]),
+            VAR _d = [@day]
+            RETURN CALCULATETABLE(
+                ADDCOLUMNS(
+                    SUMMARIZE('Load statistic', 'Load statistic'[Item type], 'Load statistic'[Item name]),
+                    "@loads", CALCULATE(COUNTROWS('Load statistic')),
+                    "@duration", CALCULATE(SUM('Load statistic'[Duration milliseconds])),
+                    "@read", CALCULATE(SUM('Load statistic'[Rows read])),
+                    "@changed", CALCULATE(SUM('Load statistic'[Rows inserted]) + SUM('Load statistic'[Rows updated]) + SUM('Load statistic'[Rows deleted])),
+                    "@rejected", CALCULATE(SUM('Load statistic'[Rows rejected]))
+                ),
+                'Load statistic'[Completed datetime] >= _d,
+                'Load statistic'[Completed datetime] < _d + 1
+            )
+        )
+        VAR _week = CALCULATETABLE('Load statistic', 'Load statistic'[Completed datetime] >= _now - 7)
+        VAR _slowest = TOPN(50, _week, 'Load statistic'[Duration milliseconds], DESC, 'Load statistic'[Load statistic SK], ASC)
+        VAR _largest = TOPN(
+            50,
+            FILTER(_week, NOT ISBLANK('Load statistic'[Rows inserted]) || NOT ISBLANK('Load statistic'[Rows updated]) || NOT ISBLANK('Load statistic'[Rows deleted])),
+            'Load statistic'[Rows inserted] + 'Load statistic'[Rows updated] + 'Load statistic'[Rows deleted], DESC,
+            'Load statistic'[Load statistic SK], ASC
+        )
+        VAR _single = _f & "id" & _f & "item" & _f & "schema" & _f & "object" & _f & "workflow" & _f & "started" & _f & "completed" & _f & "duration" & _f & "read" & _f & "inserted" & _f & "updated" & _f & "deleted" & _f & "rejected" & _f & "reload" & _f & "skip"
+        RETURN
+            _t & "perfday" & _header
+            & CONCATENATEX(
+                _day,
+                _r & 'Load statistic'[Item type] & "/" & 'Load statistic'[Item name] & _f & 'Load statistic'[Schema name] & _f & 'Load statistic'[Object name]
+                    & _f & [@loads] & _f & [@duration] & _f & [@longest] & _f & [@read] & _f & [@inserted] & _f & [@updated] & _f & [@deleted] & _f & [@rejected]
+                    & _f & [@reloads] & _f & [@skips] & _f & [@timedread] & _f & [@timedduration]
+                    & _f & IF(ISBLANK([@last]), "", FORMAT(([@last] - DATE(1970, 1, 1)) * 86400000, "0")),
+                ""
+            )
+            & _t & "perfmonth" & _header
+            & CONCATENATEX(
+                _month,
+                _r & 'Load statistic'[Item type] & "/" & 'Load statistic'[Item name] & _f & 'Load statistic'[Schema name] & _f & 'Load statistic'[Object name]
+                    & _f & [@loads] & _f & [@duration] & _f & [@longest] & _f & [@read] & _f & [@inserted] & _f & [@updated] & _f & [@deleted] & _f & [@rejected]
+                    & _f & [@reloads] & _f & [@skips] & _f & [@timedread] & _f & [@timedduration]
+                    & _f & IF(ISBLANK([@last]), "", FORMAT(([@last] - DATE(1970, 1, 1)) * 86400000, "0")),
+                ""
+            )
+            & _t & "perftrend" & _f & "day" & _f & "item" & _f & "loads" & _f & "duration" & _f & "read" & _f & "changed" & _f & "rejected"
+            & CONCATENATEX(
+                _days,
+                _r & FORMAT(([@day] - DATE(1970, 1, 1)) * 86400000, "0")
+                    & _f & 'Load statistic'[Item type] & "/" & 'Load statistic'[Item name]
+                    & _f & [@loads] & _f & [@duration] & _f & [@read] & _f & [@changed] & _f & [@rejected],
+                ""
+            )
+            & _t & "slowest" & _single
+            & CONCATENATEX(
+                _slowest,
+                _r & 'Load statistic'[Load statistic SK]
+                    & _f & 'Load statistic'[Item type] & "/" & 'Load statistic'[Item name] & _f & 'Load statistic'[Schema name] & _f & 'Load statistic'[Object name]
+                    & _f & 'Load statistic'[Workflow ID]
+                    & _f & IF(ISBLANK('Load statistic'[Started datetime]), "", FORMAT(('Load statistic'[Started datetime] - DATE(1970, 1, 1)) * 86400000, "0"))
+                    & _f & IF(ISBLANK('Load statistic'[Completed datetime]), "", FORMAT(('Load statistic'[Completed datetime] - DATE(1970, 1, 1)) * 86400000, "0"))
+                    & _f & 'Load statistic'[Duration milliseconds]
+                    & _f & 'Load statistic'[Rows read] & _f & 'Load statistic'[Rows inserted] & _f & 'Load statistic'[Rows updated] & _f & 'Load statistic'[Rows deleted] & _f & 'Load statistic'[Rows rejected]
+                    & _f & IF('Load statistic'[Is reload], "1") & _f & IF('Load statistic'[Is static skip], "1"),
+                ""
+            )
+            & _t & "largest" & _single
+            & CONCATENATEX(
+                _largest,
+                _r & 'Load statistic'[Load statistic SK]
+                    & _f & 'Load statistic'[Item type] & "/" & 'Load statistic'[Item name] & _f & 'Load statistic'[Schema name] & _f & 'Load statistic'[Object name]
+                    & _f & 'Load statistic'[Workflow ID]
+                    & _f & IF(ISBLANK('Load statistic'[Started datetime]), "", FORMAT(('Load statistic'[Started datetime] - DATE(1970, 1, 1)) * 86400000, "0"))
+                    & _f & IF(ISBLANK('Load statistic'[Completed datetime]), "", FORMAT(('Load statistic'[Completed datetime] - DATE(1970, 1, 1)) * 86400000, "0"))
+                    & _f & 'Load statistic'[Duration milliseconds]
+                    & _f & 'Load statistic'[Rows read] & _f & 'Load statistic'[Rows inserted] & _f & 'Load statistic'[Rows updated] & _f & 'Load statistic'[Rows deleted] & _f & 'Load statistic'[Rows rejected]
+                    & _f & IF('Load statistic'[Is reload], "1") & _f & IF('Load statistic'[Is static skip], "1"),
+                ""
+            )
+        ```
+        displayFolder: Data
+
+    /// Declared schemas, tables, views, folders, columns, keys, relationships and validations.
+    measure 'Metadata data' = ```
+        VAR _f = UNICHAR(57345)
+        VAR _r = UNICHAR(57346)
+        VAR _t = UNICHAR(57347)
+        RETURN
+            _t & "schemas" & _f & "item" & _f & "schema" & _f & "description"
+            & CONCATENATEX(
+                'Schema dictionary',
+                _r & 'Schema dictionary'[Item type] & "/" & 'Schema dictionary'[Item name] & _f & 'Schema dictionary'[Schema name] & _f & LEFT('Schema dictionary'[Description], 1000),
+                ""
+            )
+            & _t & "tables" & _f & "item" & _f & "schema" & _f & "object" & _f & "type" & _f & "description" & _f & "lineage" & _f & "primarykey" & _f & "notnull" & _f & "identity" & _f & "incremental" & _f & "static" & _f & "prohibitrebuild"
+            & CONCATENATEX(
+                'Table dictionary',
+                _r & 'Table dictionary'[Item type] & "/" & 'Table dictionary'[Item name] & _f & 'Table dictionary'[Schema name] & _f & 'Table dictionary'[Object name]
+                    & _f & 'Table dictionary'[Object type]
+                    & _f & LEFT('Table dictionary'[Description], 1000)
+                    & _f & LEFT('Table dictionary'[Lineage], 1000)
+                    & _f & 'Table dictionary'[Primary key]
+                    & _f & 'Table dictionary'[Not null columns]
+                    & _f & 'Table dictionary'[Identity column]
+                    & _f & IF('Table dictionary'[Is incremental], "1")
+                    & _f & IF('Table dictionary'[Is static], "1")
+                    & _f & IF('Table dictionary'[Prohibit rebuild], "1"),
+                ""
+            )
+            & _t & "folders" & _f & "item" & _f & "schema" & _f & "object" & _f & "description" & _f & "lineage" & _f & "filekey" & _f & "incremental" & _f & "static"
+            & CONCATENATEX(
+                'Folder dictionary',
+                _r & 'Folder dictionary'[Item type] & "/" & 'Folder dictionary'[Item name] & _f & 'Folder dictionary'[Schema name] & _f & 'Folder dictionary'[Object name]
+                    & _f & LEFT('Folder dictionary'[Description], 1000)
+                    & _f & LEFT('Folder dictionary'[Lineage], 1000)
+                    & _f & 'Folder dictionary'[File key]
+                    & _f & IF('Folder dictionary'[Is incremental], "1")
+                    & _f & IF('Folder dictionary'[Is static], "1"),
+                ""
+            )
+            & _t & "columns" & _f & "item" & _f & "schema" & _f & "object" & _f & "column" & _f & "description" & _f & "identity"
+            & CONCATENATEX(
+                'Column dictionary',
+                _r & 'Column dictionary'[Item type] & "/" & 'Column dictionary'[Item name] & _f & 'Column dictionary'[Schema name] & _f & 'Column dictionary'[Object name]
+                    & _f & 'Column dictionary'[Column name]
+                    & _f & LEFT('Column dictionary'[Description], 400)
+                    & _f & IF('Column dictionary'[Is identity], "1"),
+                ""
+            )
+            & _t & "keys" & _f & "item" & _f & "schema" & _f & "object" & _f & "type" & _f & "columns"
+            & CONCATENATEX(
+                FILTER('Key dictionary', 'Key dictionary'[Key type] <> "Primary key"),
+                _r & 'Key dictionary'[Item type] & "/" & 'Key dictionary'[Item name] & _f & 'Key dictionary'[Schema name] & _f & 'Key dictionary'[Object name]
+                    & _f & 'Key dictionary'[Key type]
+                    & _f & 'Key dictionary'[Column set],
+                ""
+            )
+            & _t & "foreignkeys" & _f & "item" & _f & "schema" & _f & "object" & _f & "columns" & _f & "primaryitem" & _f & "primaryschema" & _f & "primaryobject" & _f & "primarycolumns"
+            & CONCATENATEX(
+                'Foreign key dictionary',
+                _r & 'Foreign key dictionary'[Item type] & "/" & 'Foreign key dictionary'[Item name]
+                    & _f & 'Foreign key dictionary'[Foreign schema name]
+                    & _f & 'Foreign key dictionary'[Foreign object name]
+                    & _f & 'Foreign key dictionary'[Foreign column set]
+                    & _f & 'Foreign key dictionary'[Primary item type] & "/" & 'Foreign key dictionary'[Primary item name]
+                    & _f & 'Foreign key dictionary'[Primary schema name]
+                    & _f & 'Foreign key dictionary'[Primary object name]
+                    & _f & 'Foreign key dictionary'[Primary column set],
+                ""
+            )
+            & _t & "validations" & _f & "item" & _f & "schema" & _f & "object" & _f & "type" & _f & "description" & _f & "primarykey"
+            & CONCATENATEX(
+                'Test dictionary',
+                _r & 'Test dictionary'[Item type] & "/" & 'Test dictionary'[Item name] & _f & 'Test dictionary'[Schema name] & _f & 'Test dictionary'[Object name]
+                    & _f & 'Test dictionary'[Test type]
+                    & _f & LEFT('Test dictionary'[Description], 1000)
+                    & _f & 'Test dictionary'[Primary key],
+                ""
+            )
+        ```
+        displayFolder: Data
+
+    /// Semantic models: tables in authored order, columns, measures,
+    /// relationships and the managed sources each table reads.
+    measure 'Semantic data' = ```
+        VAR _f = UNICHAR(57345)
+        VAR _r = UNICHAR(57346)
+        VAR _t = UNICHAR(57347)
+        RETURN
+            _t & "models" & _f & "item" & _f & "description"
+            & CONCATENATEX(
+                'Semantic model',
+                _r & 'Semantic model'[Item type] & "/" & 'Semantic model'[Item name] & _f & LEFT('Semantic model'[Description], 1000),
+                ""
+            )
+            & _t & "smtables" & _f & "item" & _f & "table" & _f & "ordinal" & _f & "description" & _f & "mode" & _f & "access"
+            & CONCATENATEX(
+                'Semantic model table',
+                _r & 'Semantic model table'[Item type] & "/" & 'Semantic model table'[Item name]
+                    & _f & 'Semantic model table'[Table name]
+                    & _f & 'Semantic model table'[Table ordinal]
+                    & _f & LEFT('Semantic model table'[Description], 1000)
+                    & _f & 'Semantic model table'[Source mode]
+                    & _f & 'Semantic model table'[Source access],
+                ""
+            )
+            & _t & "smcolumns" & _f & "item" & _f & "table" & _f & "column" & _f & "description" & _f & "datatype" & _f & "columntype" & _f & "sourcecolumn" & _f & "expression"
+            & CONCATENATEX(
+                'Semantic model column',
+                _r & 'Semantic model column'[Item type] & "/" & 'Semantic model column'[Item name]
+                    & _f & 'Semantic model column'[Table name]
+                    & _f & 'Semantic model column'[Column name]
+                    & _f & LEFT('Semantic model column'[Description], 400)
+                    & _f & 'Semantic model column'[Data type]
+                    & _f & 'Semantic model column'[Column type]
+                    & _f & 'Semantic model column'[Source column]
+                    & _f & LEFT('Semantic model column'[Expression], 400),
+                ""
+            )
+            & _t & "smmeasures" & _f & "item" & _f & "table" & _f & "measure" & _f & "description" & _f & "expression" & _f & "format"
+            & CONCATENATEX(
+                'Semantic model measure',
+                _r & 'Semantic model measure'[Item type] & "/" & 'Semantic model measure'[Item name]
+                    & _f & 'Semantic model measure'[Table name]
+                    & _f & 'Semantic model measure'[Measure name]
+                    & _f & LEFT('Semantic model measure'[Description], 400)
+                    & _f & LEFT('Semantic model measure'[Expression], 1000)
+                    & _f & LEFT('Semantic model measure'[Format string], 200),
+                ""
+            )
+            & _t & "smrelationships" & _f & "item" & _f & "name" & _f & "fromtable" & _f & "fromcolumn" & _f & "totable" & _f & "tocolumn" & _f & "fromcardinality" & _f & "tocardinality" & _f & "crossfilter" & _f & "active"
+            & CONCATENATEX(
+                'Semantic model relationship',
+                _r & 'Semantic model relationship'[Item type] & "/" & 'Semantic model relationship'[Item name]
+                    & _f & 'Semantic model relationship'[Relationship name]
+                    & _f & 'Semantic model relationship'[From table]
+                    & _f & 'Semantic model relationship'[From column]
+                    & _f & 'Semantic model relationship'[To table]
+                    & _f & 'Semantic model relationship'[To column]
+                    & _f & 'Semantic model relationship'[From cardinality]
+                    & _f & 'Semantic model relationship'[To cardinality]
+                    & _f & 'Semantic model relationship'[Cross filtering behavior]
+                    & _f & IF(ISBLANK('Semantic model relationship'[Is active]), "", IF('Semantic model relationship'[Is active], "1", "0")),
+                ""
+            )
+            & _t & "smsources" & _f & "item" & _f & "table" & _f & "reference" & _f & "sourceitem" & _f & "sourceschema" & _f & "sourceobject"
+            & CONCATENATEX(
+                FILTER('Dependency', 'Dependency'[Item type] = "SemanticModel"),
+                _r & 'Dependency'[Item type] & "/" & 'Dependency'[Item name]
+                    & _f & 'Dependency'[Referencing object name]
+                    & _f & 'Dependency'[Dependency reference]
+                    & _f & IF(NOT ISBLANK('Dependency'[Referenced item type]), 'Dependency'[Referenced item type] & "/" & 'Dependency'[Referenced item name])
+                    & _f & 'Dependency'[Referenced schema name]
+                    & _f & 'Dependency'[Referenced object name],
+                ""
+            )
+        ```
+        displayFolder: Data
+
+    /// The Dashboard's stylesheet and script.
+    measure 'Renderer' = ```
+        "{renderer}"
+        ```
+        displayFolder: Pages
+        isHidden
+
+    /// The Overview page for HTML Content.
+    measure 'Overview page' = ```
+        "<div id=""wd-app"" class=""wd""></div><script type=""text/plain"" id=""wd-data"">"
+            & SUBSTITUTE(UNICHAR(57347) & "page" & UNICHAR(57345) & "name" & UNICHAR(57346) & "overview" & [Catalogue data] & [Lineage data] & [Status data] & [Workflow data] & [Build data], "<", UNICHAR(57344))
+            & "</script>" & [Renderer]
+        ```
+        displayFolder: Pages
+
+    /// The Health page for HTML Content.
+    measure 'Health page' = ```
+        "<div id=""wd-app"" class=""wd""></div><script type=""text/plain"" id=""wd-data"">"
+            & SUBSTITUTE(UNICHAR(57347) & "page" & UNICHAR(57345) & "name" & UNICHAR(57346) & "health" & [Catalogue data] & [Lineage data] & [Status data] & [Workflow data] & [Build data], "<", UNICHAR(57344))
+            & "</script>" & [Renderer]
+        ```
+        displayFolder: Pages
+
+    /// The Load orchestration page for HTML Content.
+    measure 'Load orchestration page' = ```
+        "<div id=""wd-app"" class=""wd""></div><script type=""text/plain"" id=""wd-data"">"
+            & SUBSTITUTE(UNICHAR(57347) & "page" & UNICHAR(57345) & "name" & UNICHAR(57346) & "orchestration" & [Catalogue data] & [Lineage data] & [Status data] & [Workflow data], "<", UNICHAR(57344))
+            & "</script>" & [Renderer]
+        ```
+        displayFolder: Pages
+
+    /// The Gantt page for HTML Content.
+    measure 'Gantt page' = ```
+        "<div id=""wd-app"" class=""wd""></div><script type=""text/plain"" id=""wd-data"">"
+            & SUBSTITUTE(UNICHAR(57347) & "page" & UNICHAR(57345) & "name" & UNICHAR(57346) & "gantt" & [Catalogue data] & [Workflow data] & [Log data], "<", UNICHAR(57344))
+            & "</script>" & [Renderer]
+        ```
+        displayFolder: Pages
+
+    /// The Performance page for HTML Content.
+    measure 'Performance page' = ```
+        "<div id=""wd-app"" class=""wd""></div><script type=""text/plain"" id=""wd-data"">"
+            & SUBSTITUTE(UNICHAR(57347) & "page" & UNICHAR(57345) & "name" & UNICHAR(57346) & "performance" & [Catalogue data] & [Workflow data] & [Statistic data], "<", UNICHAR(57344))
+            & "</script>" & [Renderer]
+        ```
+        displayFolder: Pages
+
+    /// The Entity dictionary page for HTML Content.
+    measure 'Entity dictionary page' = ```
+        "<div id=""wd-app"" class=""wd""></div><script type=""text/plain"" id=""wd-data"">"
+            & SUBSTITUTE(UNICHAR(57347) & "page" & UNICHAR(57345) & "name" & UNICHAR(57346) & "entities" & [Catalogue data] & [Lineage data] & [Metadata data], "<", UNICHAR(57344))
+            & "</script>" & [Renderer]
+        ```
+        displayFolder: Pages
+
+    /// The Semantic model page for HTML Content.
+    measure 'Semantic model page' = ```
+        "<div id=""wd-app"" class=""wd""></div><script type=""text/plain"" id=""wd-data"">"
+            & SUBSTITUTE(UNICHAR(57347) & "page" & UNICHAR(57345) & "name" & UNICHAR(57346) & "semantic" & [Catalogue data] & [Lineage data] & [Status data] & [Semantic data], "<", UNICHAR(57344))
+            & "</script>" & [Renderer]
+        ```
+        displayFolder: Pages

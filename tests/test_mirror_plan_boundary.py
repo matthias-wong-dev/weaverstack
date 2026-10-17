@@ -621,3 +621,94 @@ def test_a_warehouse_reading_another_mirrored_warehouse_waits_for_its_reconstruc
     for other in (produced, view):
         assert not runs_before(plan, unrelated, other)
         assert not runs_before(plan, other, unrelated)
+
+
+@weaver_test()
+def test_a_mirror_forks_the_lineage_rows_only_when_the_source_has_them():
+    from dataclasses import replace
+
+    resolved = _resolved("Model", "Warehouse")
+
+    def publish_script(mirror):
+        plan, payloads, _summary = mirror_mutation_plan(mirror, session=_Session())
+        return payloads[_actions(plan)[PUBLISH].payload].decode()
+
+    held = publish_script(resolved)
+    older = publish_script(replace(resolved, graphed=False))
+
+    for table in ("LineageNode", "LineageEdge"):
+        assert f"[Weaver].[_].[{table}]" in held
+        assert f"[Weaver].[_].[{table}]" not in older
+    assert "[Weaver].[_].[Registry]" in older
+
+
+@weaver_test()
+def test_a_mirror_marks_what_it_borrows_in_the_lineage_it_forks():
+    from weaver.catalogue.borrow import lineage_statement
+
+    relation = Borrowed(
+        WeaverDocumentId.parse("Warehouse/Model/Rpt.Sales"), "table", "view"
+    )
+    plan, payloads, _summary = mirror_mutation_plan(
+        _resolved("Model", "Warehouse", relations=(relation,)), session=_Session()
+    )
+    script = payloads[_actions(plan)[PUBLISH].payload].decode()
+
+    marked = script.index(lineage_statement().splitlines()[0])
+    # After the forked lineage and the record of what is borrowed, in the
+    # same transaction.
+    assert script.index("[Weaver].[_].[LineageNode]") < marked
+    assert script.rindex("insert into [_].[Mirror]") < marked
+    assert marked < script.index("commit transaction")
+
+
+@weaver_test()
+def test_a_mirror_that_borrows_nothing_leaves_lineage_as_forked():
+    from weaver.catalogue.borrow import lineage_statement
+
+    plan, payloads, _summary = mirror_mutation_plan(
+        _resolved("Model", "Warehouse"), session=_Session()
+    )
+    script = payloads[_actions(plan)[PUBLISH].payload].decode()
+    assert lineage_statement().splitlines()[0] not in script
+
+
+@weaver_test()
+def test_a_mirror_keys_its_forked_lineage_by_the_destinations_workspaces():
+    """Forked keys name the source's workspaces until each item's binding is merged."""
+
+    from weaver.catalogue.fork import lineage_key_statements
+
+    plan, payloads, _summary = mirror_mutation_plan(
+        _resolved("Model", "Warehouse"), session=_Session()
+    )
+    script = payloads[_actions(plan)[PUBLISH].payload].decode()
+
+    first = lineage_key_statements()[0].splitlines()[0]
+    assert script.rindex("[_].[Installation]", 0, script.index(first)) > script.index(
+        "[Weaver].[_].[LineageNode]"
+    )
+    for statement in lineage_key_statements():
+        assert statement.splitlines()[0] in script
+    assert script.index(first) < script.index("commit transaction")
+
+
+@weaver_test()
+def test_the_mirror_keys_every_lineage_endpoint_by_its_owning_item():
+    from weaver.catalogue.fork import lineage_key_statements
+
+    nodes, downstream, upstream, through = lineage_key_statements()
+
+    assert nodes.startswith("update [n] set [Node key] =")
+    assert "[i].[Item type] = [n].[Item type]" in nodes
+    for statement, end in (
+        (downstream, "Downstream"),
+        (upstream, "Upstream"),
+        (through, "Through"),
+    ):
+        assert statement.startswith(f"update [e] set [{end} node key] =")
+        # Each end takes its own item's workspace, never the downstream item's.
+        assert f"[e].[{end} node ID] = concat([i].[Item type]" in statement
+    assert "<> N'External'" in upstream
+    for statement in (nodes, downstream, upstream, through):
+        assert "hashbytes('SHA2_256'" in statement

@@ -179,18 +179,14 @@ def _validate(args):
         raise CommandError("Pass --workspace.")
     if not args.project_folder:
         raise CommandError("Pass --project-folder for non-interactive setup.")
-    source_items = ()
-    if getattr(args, "semantic_model", None) is None:
-        from weaver.initialise import powerbi_repository
+    from pathlib import Path
 
-        repository = powerbi_repository(args.project_folder)
-        if repository is not None:
-            source_items = tuple(
-                str(item)
-                for item in sorted(
-                    set(repository.semantic_models) | set(repository.reports)
-                )
-            )
+    from weaver.initialise import _sources, existing_project
+
+    source_items, adopted, _ = existing_project(
+        Path(args.project_folder).resolve(),
+        semantic_model=getattr(args, "semantic_model", None),
+    )
     ProjectRequest(
         workspace=args.workspace,
         catalogue=args.catalogue or DEFAULT_CATALOGUE,
@@ -200,6 +196,7 @@ def _validate(args):
         semantic_model=getattr(args, "semantic_model", None),
         example=bool(args.example),
         source_items=source_items,
+        adopted_items=_sources(adopted),
     )
 
 
@@ -291,6 +288,7 @@ def render(report):
     from weaver.onboarding.environment import environment_directory
 
     _table(report)
+    _guidance(report)
     print(f"\nWeaver project ready in {report.project_folder}.")
     print(f"\nNext:\n\n  cd {shlex.quote(report.project_folder)}")
     if report.environment_publication == "deferred":
@@ -326,4 +324,10 @@ def render_dry_run(report):
     )
     if report.example.generated:
         print("Sales example source will be added.")
+    _guidance(report)
     print("No changes were made.")
+
+
+def _guidance(report):
+    for line in report.guidance:
+        print(f"\n{line}")

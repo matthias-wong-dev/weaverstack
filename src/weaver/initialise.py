@@ -3,6 +3,9 @@
 Environment publication is optional. Examples are source files for a later
 build, load and test. The first build creates the catalogue tables. Power BI
 items are scaffolded here and created by Build.
+
+Run again over a project folder, initialise keeps the files already there and
+adds only the targets a new item needs.
 """
 
 from __future__ import annotations
@@ -15,6 +18,7 @@ from typing import Any
 from .declaration.model import LAKEHOUSE, REPORT, SEMANTIC_MODEL, WAREHOUSE
 from .errors import WeaverError
 from .onboarding import (
+    WORKFLOW_FILE,
     WORKSPACE_CONFIG_FILE,
     ProjectRequest,
     build_commands,
@@ -75,6 +79,8 @@ class InitialiseReport:
     environment_publication: str = "deferred"
     environment_definition: str = "written"
     builds: tuple[str, ...] = ("build",)
+    #: What the project's existing files need for the items added this run.
+    guidance: tuple[str, ...] = ()
 
     @property
     def created(self) -> tuple[str, ...]:
@@ -110,6 +116,7 @@ class InitialiseReport:
             "environment_definition": self.environment_definition,
             "dry_run": self.dry_run,
             "next_commands": list(self.next_commands),
+            "guidance": list(self.guidance),
         }
 
 
@@ -148,25 +155,17 @@ def initialise(
         )
         publish_environment = publish_environment or install_weaver
     destination = Path(project_folder).resolve()
-    source_items = ()
-    configured = None
-    adopted = set()
-    repository = None if semantic_model else powerbi_repository(destination)
-    if repository is not None:
-        source_items = tuple(
-            str(item)
-            for item in sorted(
-                set(repository.semantic_models) | set(repository.reports)
-            )
-        )
-        adopted.update(item.identity for item in repository.items)
-        if (destination / WORKSPACE_CONFIG_FILE).is_file():
-            from .config import load_workspace
-
-            configured = load_workspace(destination / WORKSPACE_CONFIG_FILE)
-            adopted.update(configured.configured_items)
+    source_items, adopted, configured = existing_project(
+        destination, semantic_model=semantic_model
+    )
+    # One workspace for every step: an explicit name, the Session's, then the
+    # project's own. A project configured for another workspace is refused here.
+    workspace = _workspace_name(workspace, session=session, configured=configured)
+    _refuse_conflicts(
+        configured, workspace=workspace, catalogue=catalogue, environment=environment
+    )
     request = ProjectRequest(
-        workspace=_workspace_name(workspace, session=session),
+        workspace=workspace,
         catalogue=catalogue
         or (
             configured.catalogue_item.name
@@ -187,6 +186,7 @@ def initialise(
         adopted_items=_sources(adopted),
     )
     wanted_items = _requested(request)
+    rerun = configured is not None
 
     from .sessions.host import use_or_create_session
 
@@ -235,8 +235,8 @@ def initialise(
                                 path.read_bytes()
                             )
             with opened.step("Checking the project files", str(destination)):
-                if source_items:
-                    # Adopt existing authored project files, not fresh scaffolding.
+                if rerun or source_items:
+                    # Adopt existing project files, not fresh scaffolding.
                     files = {
                         path: (destination / path).read_bytes()
                         if (destination / path).is_file()
@@ -244,10 +244,14 @@ def initialise(
                         for path, content in files.items()
                     }
                 _refuse_overwrites(destination, files)
-                if source_items:
-                    files = _with_source_targets(files, source_items)
+                guidance = (
+                    _workflow_guidance(files[WORKFLOW_FILE], request, configured)
+                    if rerun and WORKFLOW_FILE in files
+                    else ()
+                )
+                files = _with_targets(files, request.items)
                 _check_destination_paths(destination, files)
-                configured = _parse_generated(files, request, destination=destination)
+                _parse_generated(files, request, destination=destination)
 
             if dry_run:
                 return InitialiseReport(
@@ -259,6 +263,7 @@ def initialise(
                     dry_run=True,
                     environment_definition=definition_status,
                     builds=build_commands(request),
+                    guidance=guidance,
                 )
 
             resources.extend(
@@ -325,6 +330,7 @@ def initialise(
         environment_definition=definition_status,
         dry_run=False,
         builds=build_commands(request),
+        guidance=guidance,
     )
 
 
@@ -350,14 +356,96 @@ def _sources(items) -> tuple[str, ...]:
     )
 
 
-def _with_source_targets(files, source_items):
-    """Add default bindings for new source items without replacing existing targets."""
+def existing_project(destination: Path, *, semantic_model=None):
+    """The Power BI items, declared items and configuration a project folder holds."""
+
+    source_items, adopted, configured = (), set(), None
+    repository = None if semantic_model else powerbi_repository(destination)
+    if repository is not None:
+        source_items = tuple(
+            str(item)
+            for item in sorted(
+                set(repository.semantic_models) | set(repository.reports)
+            )
+        )
+        adopted.update(item.identity for item in repository.items)
+    if (destination / WORKSPACE_CONFIG_FILE).is_file():
+        from .config import load_workspace
+
+        try:
+            configured = load_workspace(destination / WORKSPACE_CONFIG_FILE)
+        except WeaverError as exc:
+            raise InitialiseError(
+                f"{destination / WORKSPACE_CONFIG_FILE} cannot be read: {exc}"
+            ) from exc
+        adopted.update(configured.configured_items)
+    return source_items, adopted, configured
+
+
+def _refuse_conflicts(configured, **requested) -> None:
+    """An existing configuration names its own workspace, catalogue and Environment."""
+
+    if configured is None:
+        return
+    current = {
+        "workspace": configured.workspace,
+        "catalogue": configured.catalogue_item.name if configured.catalogue else None,
+        "environment": configured.environment.name if configured.environment else None,
+    }
+    for name, value in requested.items():
+        if (
+            value is not None
+            and current[name] is not None
+            and str(value) != current[name]
+        ):
+            raise InitialiseError(
+                f"{WORKSPACE_CONFIG_FILE} names {name} {current[name]}, not {value}. "
+                f"Edit {WORKSPACE_CONFIG_FILE} or omit --{name}."
+            )
+
+
+def _workflow_guidance(
+    workflow, request: ProjectRequest, configured
+) -> tuple[str, ...]:
+    """The Build steps an existing ``workflow.yml`` lacks for item kinds new this run.
+
+    The workflow is the user's: initialise names what it needs and changes nothing.
+    """
+
+    import yaml
+
+    kinds = {item.item_type for item in configured.configured_items} | {
+        item.split("/", 1)[0] for item in request.source_items
+    }
+    added = {item.split("/", 1)[0] for item in request.items} - kinds
+    if not added:
+        return ()
+    text = workflow.decode("utf-8") if isinstance(workflow, bytes) else workflow
+    try:
+        steps = (yaml.safe_load(text) or {}).get("workflows", {}).get("full") or []
+    except yaml.YAMLError:
+        steps = []
+    present = {str(step).strip() for step in steps}
+    missing = [build for build in build_commands(request) if build not in present]
+    if not missing:
+        return ()
+    listed = ", ".join(f"weaver {build}" for build in missing)
+    return (
+        f"{WORKFLOW_FILE} does not run {listed}, which this project now needs for "
+        f"{', '.join(sorted(added))}. Add {'it' if len(missing) == 1 else 'them'} to "
+        "its full and build-only workflows.",
+    )
+
+
+def _with_targets(files, items):
+    """Add default bindings for new items without replacing existing targets."""
 
     import yaml
 
     declaration = yaml.safe_load(files[WORKSPACE_CONFIG_FILE])
-    targets = declaration.setdefault("targets", {})
-    missing = [item for item in source_items if item not in targets]
+    targets = declaration.get("targets") or {}
+    declaration["targets"] = targets
+    missing = [item for item in items if item not in targets]
     if not missing:
         return files
     for item in missing:
@@ -386,12 +474,14 @@ def _bare(request: ProjectRequest):
     return Workspace(workspace=request.workspace)
 
 
-def _workspace_name(workspace: str | None, *, session) -> str:
+def _workspace_name(workspace: str | None, *, session, configured=None) -> str:
     if workspace is not None:
         return str(workspace)
     inherited = getattr(session, "workspace", None)
     if inherited is not None:
         return inherited.workspace
+    if configured is not None:
+        return configured.workspace
     from .sessions.host import current_workspace_name
 
     discovered = current_workspace_name()

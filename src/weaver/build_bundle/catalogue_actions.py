@@ -261,14 +261,21 @@ def desired_catalogue(
     repository,
     selected_ids: Iterable[WeaverDocumentId],
     target_by_item: Mapping,
+    *,
+    current: Catalogue | None = None,
+    materialised=(),
+    warn=None,
 ) -> Catalogue:
     """Return the post-build catalogue state for ``selected_ids``.
 
     Narrowing precedes binding so Registry rows certify only selected objects,
-    while shortcut and Installation rows carry their physical targets.
+    while shortcut and Installation rows carry their physical targets. The
+    lineage rows project the bound rows' graph; an item whose graph cannot be
+    projected keeps its ``current`` lineage rows.
     """
 
     from .. import __version__
+    from ..catalogue.lineage_rows import with_lineage_rows
 
     selected_ids = set(selected_ids)
     logical = Catalogue.from_repository(repository)
@@ -294,7 +301,13 @@ def desired_catalogue(
         )
         for item in target_by_item
     }
-    return _with_installation_rows(bound, binding_rows)
+    return with_lineage_rows(
+        _with_installation_rows(bound, binding_rows),
+        repository,
+        current=current,
+        materialised=materialised,
+        warn=warn,
+    )
 
 
 DEREGISTER_MIRROR_SLUG = "deregister-mirrors"
@@ -342,6 +355,7 @@ def render_catalogue_after_build(
     catalogue_target,
     current: Catalogue | None = None,
     selected_models=(),
+    warn=None,
     publication=None,
 ) -> tuple[PlannedStage, ...]:
     """Publish dictionaries and Installation in one batch, Registry last.
@@ -359,6 +373,7 @@ def render_catalogue_after_build(
             target_by_item,
             current=current,
             selected_models=selected_models,
+            warn=warn,
         )
 
     # Registry is its own final action; table plans carry the ordering.
@@ -400,12 +415,26 @@ def render_catalogue_after_build(
 
 
 def planned_publication(
-    repository, selected_ids, target_by_item, *, current, selected_models=()
+    repository,
+    selected_ids,
+    target_by_item,
+    *,
+    current,
+    selected_models=(),
+    materialised=(),
+    warn=None,
 ):
     """Share the catalogue row decisions between rendering and presentation."""
     from .semantic import publication_catalogues
 
-    desired = desired_catalogue(repository, selected_ids, target_by_item)
+    desired = desired_catalogue(
+        repository,
+        selected_ids,
+        target_by_item,
+        current=current,
+        materialised=materialised,
+        warn=warn,
+    )
     current, desired = publication_catalogues(
         current or Catalogue(rows={}), desired, selected_models
     )
