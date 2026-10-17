@@ -40,7 +40,7 @@ function ganttSummary(rows) {
 function ganttPage(body, m) {
   var s = pageState("gantt"), all = logRows(m), flows = m.workflows || [];
   var included = new Map((m.tables.logflows || []).map(function (r) { return [r.workflow, { records: num(r.records), included: num(r.included) }]; }));
-  if (!flows.length) { body.appendChild(empty("No workflow has settled a record yet. Run weaver load to see its timeline.")); return; }
+  if (!flows.length) { body.appendChild(empty("No workflow has settled a record in the last 7 days. Run weaver load to see its timeline.")); return; }
   if (!s.workflow || !flows.some(function (w) { return w.id === s.workflow; }) || s.follow !== false) s.workflow = flows[0].id;
   s.scope = s.scope || "objects";
   var select = el("select", { "class": "wd-select", "aria-label": "Workflow", onchange: function () {

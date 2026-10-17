@@ -450,11 +450,11 @@ test("the Gantt summary measures elapsed span, summed work and peak concurrency"
 test("the catalogue never appears as part of the estate", () => {
   const PERF = ["item", "schema", "object", "loads", "duration", "longest", "read", "inserted", "updated", "deleted", "rejected", "reloads", "skips", "timedread", "timedduration", "last"];
   const perf = (item, schema, object) => [item, schema, object, 1, 1000, 1000, 10, 1, 0, 0, 0, 0, 0, 10, 1000, AT];
-  const extra = table("perfmonth", PERF, [
+  const extra = table("perfweek", PERF, [
     perf("Warehouse/_weaver", "_", "LineageNode"), perf("Warehouse/Curated", "_", "Load"),
     perf("Warehouse/Curated", "Sales", "Region")]);
   const m = model(estate({ extra }));
-  assert.deepEqual(D.perfRows(m, "perfmonth").map((r) => r.item + " " + r.object), ["Warehouse/Curated Region"]);
+  assert.deepEqual(D.perfRows(m, "perfweek").map((r) => r.item + " " + r.object), ["Warehouse/Curated Region"]);
 });
 
 test("a selection of several objects shows the union of their lineage", () => {

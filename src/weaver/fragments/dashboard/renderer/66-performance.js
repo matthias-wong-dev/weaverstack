@@ -26,18 +26,19 @@ function throughput(read, ms) { return read === null || !ms ? null : read / (ms 
 
 function performancePage(body, m) {
   var s = pageState("performance");
-  s.window = s.window || "month"; s.item = s.item || "all";
+  if (s.window !== "day") s.window = "week";
+  s.item = s.item || "all";
   var host = el("div");
   var items = Array.from(new Set((m.tables.perftrend || []).map(function (r) { return r.item; }))).filter(function (it) { return !isInternal(m, it); }).sort(compare);
   body.appendChild(el("div", { "class": "wd-toolbar" }, [
-    segmented("Window", ["day", "month"], s.window, function (v) { s.window = v; render(); saveState(); }, function (v) { return v === "day" ? "Last 24 hours" : "Last 30 days"; }),
+    segmented("Window", ["day", "week"], s.window, function (v) { s.window = v; render(); saveState(); }, function (v) { return v === "day" ? "Last 24 hours" : "Last 7 days"; }),
     el("select", { "class": "wd-select", "aria-label": "Item", onchange: function () { s.item = this.value; render(); saveState(); } },
       [el("option", { value: "all", text: "Every item" })].concat(items.map(function (it) { return el("option", { value: it, selected: it === s.item ? "selected" : null, text: it }); })))
   ]));
   body.appendChild(host);
   function render() {
     host.textContent = "";
-    var rows = perfRows(m, s.window === "day" ? "perfday" : "perfmonth").filter(function (r) { return s.item === "all" || r.item === s.item; });
+    var rows = perfRows(m, s.window === "day" ? "perfday" : "perfweek").filter(function (r) { return s.item === "all" || r.item === s.item; });
     var loads = sumOf(rows, function (r) { return r.loads; }) || 0, time = sumOf(rows, function (r) { return r.duration; });
     var read = sumOf(rows, function (r) { return r.read; }), change = sumOf(rows, changed), rejected = sumOf(rows, function (r) { return r.rejected; });
     var tp = throughput(sumOf(rows, function (r) { return r.timedRead; }), sumOf(rows, function (r) { return r.timedDuration; }));
@@ -49,7 +50,7 @@ function performancePage(body, m) {
       tile("Rows rejected", rejected === null ? "—" : fmt(rejected), rejected ? "see the objects below" : "", rejected ? "warn" : "none"),
       tile("Throughput", tp === null ? "—" : fmt(Math.round(tp)) + "/s", "rows read per second of load time", "none")
     ]));
-    host.appendChild(section("Daily trend, last 30 days", [trendChart(m, s.item)]));
+    host.appendChild(section("Daily trend, last 7 days", [trendChart(m, s.item)]));
     var columns = [
       { key: "object", title: "Object", value: function (r) { return r.label; }, render: function (r) { return r.node ? el("span", {}, [kindMark(r.node.kind), r.label]) : r.label; } },
       { key: "item", title: "Item", value: function (r) { return itemName(r.item); } },
@@ -95,7 +96,7 @@ function trendChart(m, item) {
     if (num(r.changed) !== null) e.changed = (e.changed || 0) + num(r.changed);
     days.set(d, e);
   });
-  if (!days.size) return empty("No load statistic was recorded in the last 30 days.");
+  if (!days.size) return empty("No load statistic was recorded in the last 7 days.");
   var list = [], newest = Math.max.apply(null, Array.from(days.keys())), W = 900, H = 170, pad = 34;
   for (var i = 29; i >= 0; i--) { var d = newest - i * 86400000; list.push(days.get(d) || { day: d, loads: 0, duration: null, changed: null }); }
   var maxTime = Math.max(1, Math.max.apply(null, list.map(function (e) { return e.duration || 0; })));

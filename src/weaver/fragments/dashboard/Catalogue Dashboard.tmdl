@@ -269,13 +269,14 @@ table 'Dashboard measures'
         ```
         displayFolder: Data
 
-    /// The 40 latest workflows, each summarised over every record it settled.
+    /// The 40 latest workflows of the last 7 days, each summarised over every
+    /// record it settled, and how many the 7 days hold.
     measure 'Workflow data' = ```
         VAR _f = UNICHAR(57345)
         VAR _r = UNICHAR(57346)
         VAR _t = UNICHAR(57347)
         VAR _all = ADDCOLUMNS(
-            VALUES('Log'[Workflow ID]),
+            CALCULATETABLE(VALUES('Log'[Workflow ID]), 'Log'[Completed datetime] >= UTCNOW() - 7),
             "@start", CALCULATE(MIN('Log'[Started datetime])),
             "@end", CALCULATE(MAX('Log'[Completed datetime])),
             "@records", CALCULATE(COUNTROWS('Log')),
@@ -301,8 +302,8 @@ table 'Dashboard measures'
         ```
         displayFolder: Data
 
-    /// Every Log record of the twelve latest workflows, up to 20,000 records,
-    /// newest workflow first. Each workflow says how many it holds and how many
+    /// Every Log record of the twelve latest workflows of the last 7 days, up to
+    /// 20,000 records, newest workflow first. Each workflow says how many it holds and how many
     /// are included; a record names its workflow by that order. A message is
     /// kept for workflow records and for work that did not succeed.
     measure 'Log data' = ```
@@ -311,7 +312,7 @@ table 'Dashboard measures'
         VAR _t = UNICHAR(57347)
         VAR _budget = 20000
         VAR _all = ADDCOLUMNS(
-            VALUES('Log'[Workflow ID]),
+            CALCULATETABLE(VALUES('Log'[Workflow ID]), 'Log'[Completed datetime] >= UTCNOW() - 7),
             "@end", CALCULATE(MAX('Log'[Completed datetime])),
             "@records", CALCULATE(COUNTROWS('Log'))
         )
@@ -362,9 +363,8 @@ table 'Dashboard measures'
         ```
         displayFolder: Data
 
-    /// Load statistics: per object over the last day and the last 30 days,
-    /// per item per day for 30 days, and the 50 slowest and 50 largest single
-    /// loads of the last 7 days.
+    /// Load statistics of the last 7 days: per object over the last day and the
+    /// 7 days, per item per day, and the 50 slowest and 50 largest single loads.
     measure 'Statistic data' = ```
         VAR _f = UNICHAR(57345)
         VAR _r = UNICHAR(57346)
@@ -390,7 +390,7 @@ table 'Dashboard measures'
             ),
             'Load statistic'[Completed datetime] >= _now - 1
         )
-        VAR _month = CALCULATETABLE(
+        VAR _seven = CALCULATETABLE(
             ADDCOLUMNS(
                 SUMMARIZE('Load statistic', 'Load statistic'[Item type], 'Load statistic'[Item name], 'Load statistic'[Schema name], 'Load statistic'[Object name]),
                 "@loads", CALCULATE(COUNTROWS('Load statistic')),
@@ -407,10 +407,10 @@ table 'Dashboard measures'
                 "@timedduration", CALCULATE(SUM('Load statistic'[Duration milliseconds]), NOT ISBLANK('Load statistic'[Rows read]), 'Load statistic'[Duration milliseconds] > 0),
                 "@last", CALCULATE(MAX('Load statistic'[Completed datetime]))
             ),
-            'Load statistic'[Completed datetime] >= _now - 30
+            'Load statistic'[Completed datetime] >= _now - 7
         )
         VAR _days = GENERATE(
-            SELECTCOLUMNS(GENERATESERIES(0, 29), "@day", TRUNC(_now) - [Value]),
+            SELECTCOLUMNS(GENERATESERIES(0, 6), "@day", TRUNC(_now) - [Value]),
             VAR _d = [@day]
             RETURN CALCULATETABLE(
                 ADDCOLUMNS(
@@ -444,9 +444,9 @@ table 'Dashboard measures'
                     & _f & IF(ISBLANK([@last]), "", FORMAT(([@last] - DATE(1970, 1, 1)) * 86400000, "0")),
                 ""
             )
-            & _t & "perfmonth" & _header
+            & _t & "perfweek" & _header
             & CONCATENATEX(
-                _month,
+                _seven,
                 _r & 'Load statistic'[Item type] & "/" & 'Load statistic'[Item name] & _f & 'Load statistic'[Schema name] & _f & 'Load statistic'[Object name]
                     & _f & [@loads] & _f & [@duration] & _f & [@longest] & _f & [@read] & _f & [@inserted] & _f & [@updated] & _f & [@deleted] & _f & [@rejected]
                     & _f & [@reloads] & _f & [@skips] & _f & [@timedread] & _f & [@timedduration]

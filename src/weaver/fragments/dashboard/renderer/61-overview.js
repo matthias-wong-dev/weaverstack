@@ -20,7 +20,7 @@ function overviewPage(body, m) {
     tile("Load", loadRed ? loadRed + " red" : loadAmber ? loadAmber + " amber" : "Green", health.counts.load.subjects + " subjects · " + loadAmber + " amber", loadRed ? "bad" : loadAmber ? "wait" : "ok"),
     tile("Tests", testRed ? testRed + " red" : testAmber ? testAmber + " amber" : "Green", health.counts.tests.subjects + " Tests and Assumptions", testRed ? "bad" : testAmber ? "wait" : "ok"),
     tile("Build", health.build.length ? health.build.length + " red" : "Consistent", "catalogue consistency only", health.build.length ? "bad" : "ok"),
-    tile("Workflows", m.workflowCount || 0, m.workflows.length ? "latest " + ago(m.workflows[0].completed, m.at) : "none recorded", "none")
+    tile("Workflows, 7 days", m.workflowCount || 0, m.workflows.length ? "latest " + ago(m.workflows[0].completed, m.at) : "none in the last 7 days", "none")
   ]));
 
   var inventory = section("Installed items", [itemInventory(m, open)]);
@@ -74,7 +74,7 @@ function itemInventory(m, open) {
 }
 
 function workflowTable(m, limit) {
-  if (!m.workflows.length) return empty("No workflow has settled a record yet.");
+  if (!m.workflows.length) return empty("No workflow has settled a record in the last 7 days.");
   return dataTable([
     { key: "completed", title: "Settled", value: function (w) { return w.completed; }, render: function (w) { return stamp(w.completed); }, numeric: true },
     { key: "span", title: "Span", value: function (w) { return (w.completed || 0) - (w.started || 0); }, render: function (w) { return duration((w.completed || 0) - (w.started || 0)); }, numeric: true },
