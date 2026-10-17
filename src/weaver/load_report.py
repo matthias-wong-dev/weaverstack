@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Mapping
 
-from .representation import AsDict
+from .representation import ReportAlias
 from .runtime.load_result import LoadResult
 from .runtime.semantic_refresh_result import SemanticRefreshResult
 
@@ -79,7 +79,7 @@ from .run.result import (  # noqa: E402
 
 
 @dataclass(frozen=True)
-class LoadNodeReport(AsDict):
+class LoadNodeReport(ReportAlias):
     """``executed`` is true only when work touched the target."""
 
     node_id: str
@@ -141,7 +141,7 @@ class LoadNodeReport(AsDict):
 
 
 @dataclass(frozen=True)
-class LoadRunReport(AsDict):
+class LoadRunReport(ReportAlias):
     """Dry runs use the same shape as executions but do not have task evidence."""
 
     requested: tuple[str, ...]

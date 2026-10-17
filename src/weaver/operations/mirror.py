@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Mapping, Sequence
 
 from ..errors import CommandError
-from ..representation import AsDict
+from ..representation import ReportAlias
 from ..workspaces import CATALOGUE_KIND, CatalogueRef, Workspace
 from .workspace import operation_workspace
 
@@ -118,7 +118,7 @@ class ResolvedMirror:
 
 
 @dataclass(frozen=True)
-class MirrorResult(AsDict):
+class MirrorResult(ReportAlias):
     workspace: str
     source_catalogue: str
     destination_catalogue: str

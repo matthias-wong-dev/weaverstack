@@ -5,11 +5,11 @@ from __future__ import annotations
 from typing import Any
 
 
-class AsDict:
-    """Give mapping-backed public results one canonical display method."""
+class ReportAlias:
+    """Give mapping-backed public results one Notebook display method."""
 
-    def to_mapping(self) -> dict[str, Any]:
-        raise NotImplementedError
-
-    def as_dict(self) -> dict[str, Any]:
-        return self.to_mapping()
+    def report(self) -> dict[str, Any]:
+        mapping = getattr(self, "to_mapping", None)
+        if mapping is None:
+            mapping = getattr(self, "as_dict")
+        return mapping()

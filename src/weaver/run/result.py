@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any, Mapping
 
 from ..errors import WeaverError
-from ..representation import AsDict
+from ..representation import ReportAlias
 
 # --- the contract a result must meet ------------------------------------------
 
@@ -102,7 +102,7 @@ DEPENDENCY_EXTERNAL = "dependency_external"
 
 
 @dataclass(frozen=True)
-class RunMessage(AsDict):
+class RunMessage(ReportAlias):
     """A finding about one node or the run as a whole."""
 
     severity: str

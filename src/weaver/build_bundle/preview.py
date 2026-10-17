@@ -8,11 +8,11 @@ from dataclasses import dataclass
 from ..declaration.model import FILE_SHAPE, FILES, LAKEHOUSE, TABLES
 from ..mutation.models import MutationPlan
 from ..mutation.serialization import freeze_value, thaw_value
-from ..representation import AsDict
+from ..representation import ReportAlias
 
 
 @dataclass(frozen=True)
-class BuildPreview(AsDict):
+class BuildPreview(ReportAlias):
     plan: MutationPlan
     objects: tuple
 
