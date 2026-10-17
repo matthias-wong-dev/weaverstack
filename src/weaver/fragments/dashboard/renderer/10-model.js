@@ -12,8 +12,6 @@ var KIND = {
   TEST: "Test", ASSUMPTION: "Assumption", MODEL: "Semantic model", REPORT: "Report"
 };
 var CATALOGUE_ITEM = "Warehouse/_weaver";
-// The Dashboard's own logical items, whatever Fabric items they deploy to.
-var DASHBOARD_ITEMS = ["SemanticModel/Catalogue Dashboard", "Report/Catalogue Dashboard"];
 var ITEM_TYPES = ["Lakehouse", "Warehouse", "SQLDatabase", "SemanticModel", "Report"];
 // Edge kinds travel as their first letter.
 var EDGE_KINDS = { D: "Dependency", S: "Shortcut", V: "Validation", E: "External" };
@@ -72,7 +70,7 @@ function buildModel(tables, problems) {
   t("internal").forEach(function (r) { m.internalItems.add(r.item); });
   function item(label) {
     var it = m.items.get(label);
-    if (!it) m.items.set(label, it = { label: label, type: itemType(label), name: itemName(label), workspace: null, target: null, version: null, nodes: [], internal: m.internalItems.has(label) || label === CATALOGUE_ITEM || DASHBOARD_ITEMS.indexOf(label) >= 0 });
+    if (!it) m.items.set(label, it = { label: label, type: itemType(label), name: itemName(label), workspace: null, target: null, version: null, nodes: [], internal: m.internalItems.has(label) || label === CATALOGUE_ITEM });
     return it;
   }
   t("items").forEach(function (r) {
@@ -152,7 +150,7 @@ var INTERNAL_SCHEMA = /^(?:Files\/|Tables\/)?_$/;
 
 function isInternal(m, item, schema) {
   var it = m.items.get(item);
-  return !!(it && it.internal) || item === CATALOGUE_ITEM || DASHBOARD_ITEMS.indexOf(item) >= 0 || INTERNAL_SCHEMA.test(schema || "");
+  return !!(it && it.internal) || item === CATALOGUE_ITEM || INTERNAL_SCHEMA.test(schema || "");
 }
 
 function visibleItems(m) {

@@ -256,7 +256,10 @@ def read_build_state(
     if not catalogued:
         require_catalogue_for(bindings)
         from ..semantic_models.fragments import source_table
+        from ..semantic_models.references import source_identity
 
+        # Without a catalogue a generated table reads a configured target, whose
+        # shape Fabric reports; anything else is known only to a catalogue.
         references = sorted(
             str(item)
             for item, contribution in (
@@ -265,13 +268,15 @@ def read_build_state(
             if item in bindings.by_item
             and any(
                 not source_table(contribution.parts, name).get("partitions")
-                for name in contribution.source_references
+                and source_identity(reference).item not in workspace.configured_items
+                for name, reference in contribution.source_references.items()
             )
         )
         if references:
             raise BuildError(
-                f"{references[0]} generates tables from managed sources, which needs "
-                f"a Weaver catalogue. {CATALOGUE_HINT}"
+                f"{references[0]} generates tables from managed sources that no "
+                f"targets: entry names, which needs a Weaver catalogue. "
+                f"{CATALOGUE_HINT}"
             )
 
     # Check occupancy before the slower per-target inventory and Spark reads.
@@ -597,15 +602,10 @@ def prepare_repository(
     source: Location,
     *,
     source_store: Store,
-    catalogue_dashboard: bool = False,
 ) -> Iterator[PreparedRepository]:
     with _temp_copy(source, source_store, prefix="weaver-repository-") as root:
         store = FilesystemStore()
-        repository = parse_item_repository(
-            Location(root.as_posix()),
-            store=store,
-            catalogue_dashboard=catalogue_dashboard,
-        )
+        repository = parse_item_repository(Location(root.as_posix()), store=store)
         yield PreparedRepository(repository=repository, store=store)
 
 
@@ -782,13 +782,7 @@ def build_item_repository_source(
     sql_by_item=None,
     executors=None,
 ) -> ItemBuildResult:
-    from ..catalogue_dashboard import DASHBOARD_ITEMS
-
-    with prepare_repository(
-        source,
-        source_store=source_store,
-        catalogue_dashboard=any(b.item in DASHBOARD_ITEMS for b in bindings.entries),
-    ) as prepared:
+    with prepare_repository(source, source_store=source_store) as prepared:
         from ..semantic_models.binding import begin_semantic_sources
 
         repository = begin_semantic_sources(prepared.repository, bindings.by_item)

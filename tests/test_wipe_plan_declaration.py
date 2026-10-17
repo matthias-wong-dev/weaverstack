@@ -533,9 +533,9 @@ def test_a_configured_wipe_follows_installations_the_configuration_binds(
 
 
 @weaver_test()
-def test_a_configured_wipe_follows_the_catalogue_dashboard_it_configures(
-    tmp_path, monkeypatch
-):
+def test_a_wipe_leaves_the_catalogue_dashboard_alone(tmp_path, monkeypatch):
+    """The Dashboard is not catalogued, so no wipe reaches it."""
+
     configuration = _configured(tmp_path, "  Lakehouse/Landing: DEV_Landing\n")
     configuration.write_text(
         configuration.read_text() + "catalogue_dashboard: Estate Dashboard\n",
@@ -545,12 +545,11 @@ def test_a_configured_wipe_follows_the_catalogue_dashboard_it_configures(
         monkeypatch,
         ("Warehouse/_weaver", "Warehouse/Weaver"),
         ("Lakehouse/Landing", "Lakehouse/DEV_Landing"),
-        ("SemanticModel/Catalogue Dashboard", "SemanticModel/Estate Dashboard"),
     )
 
     plan = plan_wipe(workspace_config=configuration, session=_session())
 
-    assert "SemanticModel/Estate Dashboard" in _names(plan)
+    assert not any("Estate Dashboard" in name for name in _names(plan))
 
 
 @weaver_test()

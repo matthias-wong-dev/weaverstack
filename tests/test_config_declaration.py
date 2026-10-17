@@ -356,9 +356,8 @@ def test_an_illegal_physical_name_is_a_configuration_error():
 
 
 @weaver_test()
-def test_catalogue_dashboard_binds_the_built_in_model_and_report(tmp_path):
-    from weaver.catalogue_dashboard import DASHBOARD_MODEL, DASHBOARD_REPORT
-    from weaver.targets import ReportTarget, SemanticModelTarget
+def test_catalogue_dashboard_names_an_item_and_binds_nothing(tmp_path):
+    """The key is for ``weaver catalogue-dashboard``; Build and Wipe ignore it."""
 
     config = tmp_path / "workspace-config.yml"
     config.write_text(
@@ -372,71 +371,41 @@ def test_catalogue_dashboard_binds_the_built_in_model_and_report(tmp_path):
     workspace = resolve_workspace(workspace_config=config)
 
     assert workspace.catalogue_dashboard == "Estate Dashboard"
-    assert workspace.target_for(DASHBOARD_MODEL) == SemanticModelTarget.parse(
-        "Estate Dashboard"
-    )
-    assert workspace.target_for(DASHBOARD_REPORT) == ReportTarget.parse(
-        "Estate Dashboard"
-    )
-    # weaver initialise deploys it, so Build never selects it implicitly.
-    assert set(workspace.configured_items) == {_item("SemanticModel/Sales")}
-    # targets: stays what was written.
-    assert set(workspace.targets) == {_item("SemanticModel/Sales")}
-
-
-@weaver_test()
-def test_without_catalogue_dashboard_nothing_of_it_is_bound():
-    from weaver.catalogue_dashboard import DASHBOARD_ITEMS
-
-    workspace = parse_workspace(
-        {"workspace": "Analytics", "catalogue": "Warehouse/Weaver"}
-    )
-    assert workspace.catalogue_dashboard is None
-    assert not set(DASHBOARD_ITEMS) & set(workspace.configured_items)
+    assert workspace.configured_items == (_item("SemanticModel/Sales"),)
+    with pytest.raises(ConfigError, match="No target is configured"):
+        workspace.target_for(_item("SemanticModel/Catalogue Dashboard"))
 
 
 @pytest.mark.parametrize(
-    ("payload", "named"),
+    "payload",
     [
-        (
-            {"workspace": "Analytics", "catalogue_dashboard": "Estate Dashboard"},
-            "no catalogue is configured",
-        ),
-        (
-            {
-                "workspace": "Analytics",
-                "catalogue": "Warehouse/Weaver",
-                "catalogue_dashboard": "Estate Dashboard",
-                "targets": {"SemanticModel/Catalogue Dashboard": "Estate Dashboard"},
-            },
-            "SemanticModel/Catalogue Dashboard is the built-in Catalogue Dashboard",
-        ),
-        (
-            {
-                "workspace": "Analytics",
-                "catalogue": "Warehouse/Weaver",
-                "catalogue_dashboard": "Estate Dashboard",
-                "targets": {"Report/Sales": "estate dashboard"},
-            },
-            "Report/Sales deploys to estate dashboard",
-        ),
-        (
+        {"workspace": "Analytics", "catalogue_dashboard": "Estate Dashboard"},
+        {
+            "workspace": "Analytics",
+            "catalogue": "Warehouse/Weaver",
+            "catalogue_dashboard": "Estate Dashboard",
+            "targets": {"SemanticModel/Catalogue Dashboard": "Estate Dashboard"},
+        },
+    ],
+    ids=["no catalogue", "an authored item of the same name"],
+)
+@weaver_test()
+def test_catalogue_dashboard_reserves_nothing_in_configuration(payload):
+    """Its catalogue may be named on the command line, and no item name is reserved."""
+
+    assert parse_workspace(payload).catalogue_dashboard == "Estate Dashboard"
+
+
+@weaver_test()
+def test_catalogue_dashboard_must_be_a_name():
+    with pytest.raises(ConfigError, match="catalogue_dashboard"):
+        parse_workspace(
             {
                 "workspace": "Analytics",
                 "catalogue": "Warehouse/Weaver",
                 "catalogue_dashboard": 7,
-            },
-            "catalogue_dashboard",
-        ),
-    ],
-    ids=["no catalogue", "reserved item", "shared Fabric item", "not a name"],
-)
-@weaver_test()
-def test_catalogue_dashboard_configuration_is_refused_when_it_cannot_deploy(
-    payload, named
-):
-    with pytest.raises(ConfigError, match=named):
-        parse_workspace(payload)
+            }
+        )
 
 
 @weaver_test()

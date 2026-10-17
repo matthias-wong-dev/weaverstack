@@ -1,4 +1,4 @@
-"""The built-in Catalogue Dashboard composes, deploys and builds like a project."""
+"""The Catalogue Dashboard deploys over one catalogue, outside its lifecycle."""
 
 import json
 import re
@@ -9,6 +9,7 @@ from test_semantic_model_build_cycle import DefinitionClient
 from test_semantic_source_build_cycle import SourceInventory
 
 import weaver
+from weaver.catalogue.tables import TABLES_BY_NAME
 from weaver.catalogue_dashboard import (
     DASHBOARD,
     DASHBOARD_ITEMS,
@@ -18,14 +19,22 @@ from weaver.catalogue_dashboard import (
     renderer_literal,
 )
 from weaver.declaration.repository import parse_item_repository
-from weaver.errors import BuildError, DiscoveryError
+from weaver.errors import CommandError
 from weaver.fabric.resolution import FabricResolver
 from weaver.locations import Location
-from weaver.semantic_models.definition import decode_parts, encode_definition
+from weaver.operations.catalogue_dashboard import (
+    required_tables,
+    write_dashboard_project,
+)
+from weaver.semantic_models.definition import (
+    decode_parts,
+    encode_definition,
+    encode_parts,
+)
 from weaver.semantic_models.objects import TmdlDefinition
 from weaver.sessions import TestSession
 from weaver.store import FilesystemStore
-from weaver.workspaces import TargetDeclaration, Workspace
+from weaver.workspaces import Workspace
 
 HTML_CONTENT = "htmlContent443BE3AD55E043BF878BED274D3A6855"
 #: Every measure lives here. Analysis Services reserves the name Measures.
@@ -102,14 +111,18 @@ def project(tmp_path):
     return root
 
 
-def parse(root, *, dashboard=True):
-    return parse_item_repository(
-        Location(root.as_posix()), catalogue_dashboard=dashboard
-    )
+def parse(root):
+    return parse_item_repository(Location(root.as_posix()))
+
+
+def dashboard_repository(tmp_path):
+    root = project(tmp_path)
+    write_dashboard_project(root)
+    return parse(root)
 
 
 def dashboard_model(tmp_path):
-    return parse(project(tmp_path)).semantic_models[DASHBOARD_MODEL]
+    return dashboard_repository(tmp_path).semantic_models[DASHBOARD_MODEL]
 
 
 def measures(parts):
@@ -125,48 +138,46 @@ def measures(parts):
 
 
 @weaver_test()
-def test_a_project_composes_the_dashboard_only_when_it_is_configured(tmp_path):
-    root = project(tmp_path)
+def test_the_dashboard_is_an_ordinary_power_bi_project(tmp_path):
+    repository = dashboard_repository(tmp_path)
 
-    plain = parse(root, dashboard=False)
-    assert not set(DASHBOARD_ITEMS) & {item.identity for item in plain.items}
-    assert DASHBOARD not in plain.powerbi_projects
-
-    composed = parse(root)
-    assert set(DASHBOARD_ITEMS) <= {item.identity for item in composed.items}
-    assert set(composed.powerbi_projects[DASHBOARD].items) == set(DASHBOARD_ITEMS)
-    assert composed.reports[DASHBOARD_REPORT].model == DASHBOARD_MODEL
-    model = composed.semantic_models[DASHBOARD_MODEL]
-    assert model.refresh_after_deploy
+    assert set(repository.powerbi_projects[DASHBOARD].items) == set(DASHBOARD_ITEMS)
+    assert repository.reports[DASHBOARD_REPORT].model == DASHBOARD_MODEL
+    model = repository.semantic_models[DASHBOARD_MODEL]
     assert dict(model.source_references) == {
         table: f"Warehouse/_weaver/_.{relation}" for table, relation in SOURCES.items()
     }
-    # The Dashboard is package content: it changes the repository, never the folder.
-    assert composed.signature != plain.signature
-    assert not (root / "PowerBI").exists()
+    assert required_tables() == tuple(sorted(SOURCES.values()))
 
 
-@pytest.mark.parametrize(
-    "authored",
-    [
-        "PowerBI/Reporting/Catalogue Dashboard.tmdl",
-        "PowerBI/Catalogue Dashboard/Sales.tmdl",
-    ],
-    ids=["same logical model", "same project folder"],
-)
 @weaver_test()
-def test_a_projects_own_dashboard_is_refused_rather_than_replaced(tmp_path, authored):
+def test_an_authored_model_named_like_the_dashboard_builds_like_any_other(tmp_path):
+    from weaver.onboarding.project import semantic_extension
+    from weaver.operations.build import _item_bindings
+    from weaver.workspaces import TargetDeclaration
+
     root = project(tmp_path)
-    path = root / authored
-    path.parent.mkdir(parents=True)
-    path.write_text(
-        'table Calendar\n\tpartition Calendar = calculated\n\t\tsource = ROW("Year", 2026)\n'
+    authored = root / "PowerBI/Catalogue Dashboard/Catalogue Dashboard.tmdl"
+    authored.parent.mkdir(parents=True)
+    authored.write_text(semantic_extension(), encoding="utf-8")
+    workspace = Workspace(
+        workspace="Demo",
+        catalogue="Warehouse/Catalogue",
+        catalogue_dashboard="Estate Dashboard",
+        targets={
+            "SemanticModel/Catalogue Dashboard": TargetDeclaration("Estate"),
+            "Warehouse/Curated": TargetDeclaration("Curated"),
+        },
     )
 
-    # Without the Dashboard configured it is an ordinary project.
-    parse(root, dashboard=False)
-    with pytest.raises(DiscoveryError, match="is the built-in Catalogue Dashboard"):
-        parse(root)
+    selected = _item_bindings("PowerBI", workspace, repository=parse(root))
+    unscoped = _item_bindings(None, workspace, repository=parse(root))
+
+    assert [str(b.item) for b in selected.entries] == [str(DASHBOARD_MODEL)]
+    assert {str(b.item) for b in unscoped.entries} == {
+        str(DASHBOARD_MODEL),
+        "Warehouse/Curated",
+    }
 
 
 @weaver_test()
@@ -221,7 +232,7 @@ def test_the_renderer_reaches_the_model_as_one_string_literal(tmp_path):
 
 @weaver_test()
 def test_each_page_shows_one_html_content_visual_over_its_page_measure(tmp_path):
-    repository = parse(project(tmp_path))
+    repository = dashboard_repository(tmp_path)
     parts = repository.reports[DASHBOARD_REPORT].parts
     names = measures(repository.semantic_models[DASHBOARD_MODEL].parts)
 
@@ -255,36 +266,79 @@ def test_each_page_shows_one_html_content_visual_over_its_page_measure(tmp_path)
         assert ("pageRefresh" in settings.get("objects", {})) is (page in LIVE)
 
 
-@weaver_test()
-def test_the_dashboard_deploys_with_the_catalogue_it_reads(tmp_path):
-    root = project(tmp_path)
-    workspace = Workspace(
+# --- weaver catalogue-dashboard ---------------------------------------------
+
+
+class CatalogueSource(TestSession):
+    """Answers the source catalogue's table list and each table's columns."""
+
+    def __init__(self, *, tables, **options):
+        super().__init__(**options)
+        self.tables = tables
+
+    def query_tsql(self, statement, **options):
+        if "sys.tables" in statement:
+            return [{"name": table} for table in sorted(self.tables)]
+        named = re.search(r"TABLE_NAME = N?'(\w+)'", statement)
+        if named and "INFORMATION_SCHEMA.COLUMNS" in statement:
+            return [
+                {"column_name": column, "data_type": "varchar"}
+                for column in TABLES_BY_NAME[named.group(1)].public_columns
+            ]
+        return super().query_tsql(statement, **options)
+
+
+class DashboardDefinition(DefinitionClient):
+    """A deployed model that is, or is not, a Catalogue Dashboard."""
+
+    def __init__(self, *, ours=True):
+        super().__init__()
+        self.ours = ours
+
+    def get_definition(self, format="TMSL"):
+        if format == "TMSL":
+            return super().get_definition()
+        self.calls.append(("get_definition", format))
+        table = "Dashboard measures" if self.ours else "Sales"
+        return encode_parts(
+            {
+                "definition.pbism": b"{}",
+                f"definition/tables/{table.replace(' ', '%20')}.tmdl": (
+                    f"table '{table}'\n\tmeasure 'Renderer' = 1\n".encode()
+                ),
+            }
+        )
+
+
+def dashboard_session(*, existing=True, tables=None, ours=True, workspace=None):
+    from test_report_build_cycle import ReportBoundary
+
+    workspace = workspace or Workspace(
         workspace="Demo",
         catalogue="Warehouse/Catalogue",
         catalogue_dashboard="Estate Dashboard",
     )
-    session = TestSession(
+    held = [("Warehouse", "Catalogue")]
+    if existing:
+        held += [("SemanticModel", "Estate Dashboard"), ("Report", "Estate Dashboard")]
+    session = CatalogueSource(
+        tables=set(required_tables() if tables is None else tables),
         workspace=workspace,
         store=FilesystemStore(),
-        resolver=FabricResolver(
-            workspace,
-            client=SourceInventory(
-                "Demo",
-                [
-                    ("Warehouse", "Catalogue"),
-                    ("SemanticModel", "Estate Dashboard"),
-                    ("Report", "Estate Dashboard"),
-                ],
-            ),
-        ),
+        resolver=FabricResolver(workspace, client=SourceInventory("Demo", held)),
     )
-    model = DefinitionClient()
+    model = DashboardDefinition(ours=ours)
     session.answer_semantic_model("Demo", "Estate Dashboard", model)
-    from test_report_build_cycle import ReportBoundary
-
     report = ReportBoundary([])
+    if existing:
+        model_id = session.resolve_item(
+            "Estate Dashboard", item_type="SemanticModel", workspace=workspace
+        ).id
+        bound = report.get_binding
+        report.get_binding = lambda: (
+            {"datasetId": model_id} if report.definition is None else bound()
+        )
     session.answer_report("Demo", "Estate Dashboard", report)
-
     execute = session.execute_mutation
 
     # Fabric answers readback with what Build asked for, as a deployment that kept it.
@@ -298,19 +352,32 @@ def test_the_dashboard_deploys_with_the_catalogue_it_reads(tmp_path):
         return execute(plan, payloads, **options)
 
     session.execute_mutation = deployed_as_requested
+    return session, model, report
 
-    from weaver.operations.build import deploy_catalogue_dashboard
 
-    result = deploy_catalogue_dashboard(root, session=session)
+@weaver_test()
+def test_the_dashboard_deploys_over_the_catalogue_and_only_reads_it():
+    session, model, report = dashboard_session()
+
+    result = weaver.deploy_catalogue_dashboard(session=session)
 
     assert result.succeeded, result.errors
-    assert set(result.items) >= {str(DASHBOARD_MODEL), str(DASHBOARD_REPORT)}
-    # The catalogue tables the model reads build in the same request.
-    assert "create schema [_];\n" in session.tsql
-    assert any("#weaver_shape___LineageNode" in sql for sql in session.tsql)
+    assert (result.workspace, result.catalogue, result.name) == (
+        "Demo",
+        "Demo/Warehouse/Catalogue",
+        "Estate Dashboard",
+    )
+    assert [(i.kind, i.status) for i in result.items] == [
+        ("SemanticModel", "updated"),
+        ("Report", "updated"),
+    ]
     calls = [method for method, _ in model.calls]
-    assert calls[:3] == ["update_definition", "refresh", "invalid_measures"]
-    submitted = decode_parts(model.calls[0][1]["definition"])
+    assert "update_definition" in calls and calls[-1] == "refresh"
+    submitted = decode_parts(
+        next(value for method, value in model.calls if method == "update_definition")[
+            "definition"
+        ]
+    )
     node = submitted["definition/tables/Lineage%20node.tmdl"].decode()
     assert "mode: directLake" in node
     assert "entityName: LineageNode" in node and "schemaName: _" in node
@@ -320,29 +387,169 @@ def test_the_dashboard_deploys_with_the_catalogue_it_reads(tmp_path):
     assert not columns["Label"].isHidden
     assert set(measures(submitted)) == set().union(*MEASURES.values())
     assert report.calls == ["update", "read"]
+    # The catalogue is read and never written: no table is built, no row changes.
+    assert not session.tsql
     assert not session.spark_sql and not session.python
 
 
-def _dashboard_workspace():
-    return Workspace(
-        workspace="Demo",
-        catalogue="Warehouse/Catalogue",
-        catalogue_dashboard="Estate Dashboard",
-        targets={"Warehouse/Curated": TargetDeclaration("Curated")},
-    )
+@weaver_test()
+def test_a_dry_run_resolves_everything_and_changes_nothing():
+    session, model, report = dashboard_session(existing=False)
+
+    result = weaver.deploy_catalogue_dashboard(dry_run=True, session=session)
+
+    assert result.dry_run and result.succeeded
+    assert [(i.kind, i.status) for i in result.items] == [
+        ("SemanticModel", "created"),
+        ("Report", "created"),
+    ]
+    assert result.sources == tuple(f"_.{t}" for t in sorted(SOURCES.values()))
+    assert not model.calls and not report.calls
+    assert not session.tsql
 
 
 @weaver_test()
-def test_build_leaves_the_dashboard_to_initialise(tmp_path):
-    from weaver.operations.build import _item_bindings
+def test_a_first_deploy_builds_the_project_without_a_catalogue(monkeypatch):
+    import yaml
 
-    root = project(tmp_path)
-    workspace = _dashboard_workspace()
-    repository = parse(root, dashboard=False)
-    unscoped = _item_bindings(None, workspace, repository=repository)
-    assert {str(b.item) for b in unscoped.entries} == {"Warehouse/Curated"}
-    with pytest.raises(BuildError, match="Run weaver initialise"):
-        _item_bindings(str(DASHBOARD_MODEL), workspace, repository=repository)
-    session = TestSession(workspace=workspace, store=FilesystemStore())
-    with pytest.raises(BuildError, match="PowerBI: no items match"):
-        weaver.build(root, items="PowerBI", session=session, dry_run=True)
+    session, model, _report = dashboard_session(existing=False)
+    seen = {}
+
+    def build(source, *, items, workspace_config, session):
+        seen["items"] = items
+        seen["config"] = yaml.safe_load(open(workspace_config, encoding="utf-8"))
+        seen["files"] = sorted(
+            str(path.relative_to(source)) for path in source.rglob("*.tmdl")
+        )[:1]
+        return weaver.BuildResult(
+            source=str(source),
+            items=tuple(items),
+            bundle_id=None,
+            installation=None,
+            bundle_path=None,
+            status="succeeded",
+        )
+
+    monkeypatch.setattr("weaver.operations.build.build", build)
+    monkeypatch.setattr(
+        session,
+        "resolve_item",
+        _created_after_build(session.resolve_item, seen),
+    )
+
+    result = weaver.deploy_catalogue_dashboard(session=session)
+
+    assert seen["items"] == [str(DASHBOARD_MODEL), str(DASHBOARD_REPORT)]
+    assert seen["config"] == {
+        "workspace": "Demo",
+        "targets": {
+            str(DASHBOARD_MODEL): "Estate Dashboard",
+            str(DASHBOARD_REPORT): "Estate Dashboard",
+            "Warehouse/_weaver": "Catalogue",
+        },
+    }
+    assert [(i.kind, i.status) for i in result.items] == [
+        ("SemanticModel", "created"),
+        ("Report", "created"),
+    ]
+    assert [method for method, _ in model.calls] == ["refresh"]
+
+
+def _created_after_build(resolve, seen):
+    """Fabric holds the Dashboard's items only once Build has created them."""
+
+    from types import SimpleNamespace
+
+    from weaver.fabric.resources import ItemNotFoundError
+
+    def resolved(item, *, item_type, workspace=None):
+        if item == "Estate Dashboard":
+            if "items" not in seen:
+                raise ItemNotFoundError(f"{item_type} {item!r} was not found")
+            return SimpleNamespace(id=f"{item_type}-id", name=item)
+        return resolve(item, item_type=item_type, workspace=workspace)
+
+    return resolved
+
+
+@pytest.mark.parametrize(
+    ("options", "named"),
+    [
+        (
+            {"catalogue": ["Demo/Warehouse/A", "Demo/Warehouse/B"]},
+            "reads one catalogue",
+        ),
+        ({"catalogue": "Prod/Warehouse/Catalogue"}, "Pass --workspace Prod"),
+        ({"catalogue": "Lakehouse/Catalogue"}, "Workspace/Warehouse/Name"),
+    ],
+    ids=["two catalogues", "another workspace", "not a Warehouse"],
+)
+@weaver_test()
+def test_the_source_must_be_one_warehouse_in_the_dashboards_workspace(options, named):
+    session, model, _report = dashboard_session()
+
+    with pytest.raises(CommandError, match=named):
+        weaver.deploy_catalogue_dashboard(session=session, **options)
+    assert not model.calls
+
+
+@weaver_test()
+def test_explicit_arguments_override_configuration():
+    session, _model, _report = dashboard_session(existing=False)
+    session._resolver = FabricResolver(
+        session.workspace,
+        client=SourceInventory("Demo", [("Warehouse", "Other")]),
+    )
+
+    result = weaver.deploy_catalogue_dashboard(
+        catalogue="Demo/Warehouse/Other", name="Ops", dry_run=True, session=session
+    )
+
+    assert (result.catalogue, result.name) == ("Demo/Warehouse/Other", "Ops")
+
+
+@weaver_test()
+def test_without_a_name_the_feature_stays_off():
+    session, _model, _report = dashboard_session(
+        workspace=Workspace(workspace="Demo", catalogue="Warehouse/Catalogue")
+    )
+    with pytest.raises(CommandError, match="Name the Catalogue Dashboard"):
+        weaver.deploy_catalogue_dashboard(session=session)
+
+
+@weaver_test()
+def test_a_catalogue_without_the_dashboards_tables_is_refused():
+    session, model, _report = dashboard_session(
+        tables=set(required_tables()) - {"LineageNode", "LineageEdge"}
+    )
+
+    with pytest.raises(CommandError, match="has no _.LineageEdge, _.LineageNode"):
+        weaver.deploy_catalogue_dashboard(session=session)
+    assert not model.calls
+
+
+@weaver_test()
+def test_an_unrelated_model_of_that_name_is_refused_before_any_change():
+    session, model, report = dashboard_session(ours=False)
+
+    with pytest.raises(CommandError, match="is not a Catalogue Dashboard"):
+        weaver.deploy_catalogue_dashboard(session=session)
+    assert [method for method, _ in model.calls] == ["get_definition"]
+    assert not report.calls
+
+
+@weaver_test()
+def test_a_configured_target_of_that_name_is_refused():
+    from weaver.workspaces import TargetDeclaration
+
+    session, model, _report = dashboard_session(
+        workspace=Workspace(
+            workspace="Demo",
+            catalogue="Warehouse/Catalogue",
+            catalogue_dashboard="Estate Dashboard",
+            targets={"SemanticModel/Sales": TargetDeclaration("Estate Dashboard")},
+        )
+    )
+    with pytest.raises(CommandError, match="targets: deploys SemanticModel/Sales"):
+        weaver.deploy_catalogue_dashboard(session=session)
+    assert not model.calls

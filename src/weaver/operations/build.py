@@ -118,61 +118,6 @@ def build(
     creates and closes one.
     """
 
-    return _build(
-        source,
-        items=items,
-        workspace=workspace,
-        catalogue=catalogue,
-        environment=environment,
-        workspace_config=workspace_config,
-        data_sources=data_sources,
-        bind_data_sources=bind_data_sources,
-        dry_run=dry_run,
-        bundle_only=bundle_only,
-        bundle_path=bundle_path,
-        concurrency=concurrency,
-        session=session,
-    )
-
-
-def deploy_catalogue_dashboard(
-    project_folder, *, workspace_config=None, session=None, dry_run: bool = False
-) -> BuildResult:
-    """Deploy the configured Catalogue Dashboard and the catalogue it reads.
-
-    The catalogue's own tables build in the same request, so a workspace no
-    Build has reached yet gets them first.
-    """
-
-    from ..catalogue_dashboard import DASHBOARD_ITEMS
-
-    return _build(
-        project_folder,
-        items=[str(item) for item in DASHBOARD_ITEMS],
-        workspace_config=workspace_config,
-        dry_run=dry_run,
-        session=session,
-        dashboard=True,
-    )
-
-
-def _build(
-    source=None,
-    *,
-    items=None,
-    workspace=None,
-    catalogue=None,
-    environment=None,
-    workspace_config=None,
-    data_sources=None,
-    bind_data_sources=False,
-    dry_run=False,
-    bundle_only=False,
-    bundle_path=None,
-    concurrency=None,
-    session=None,
-    dashboard=False,
-) -> BuildResult:
     from ..concurrency import validate_concurrency
 
     validate_concurrency(concurrency)
@@ -198,21 +143,9 @@ def _build(
     from ..build_bundle.workflow import prepare_repository, validate_build_request
     from ..sessions.host import use_or_create_session
 
-    if dashboard and resolved_workspace.catalogue_dashboard is None:
-        raise CommandError(
-            "No Catalogue Dashboard is configured. Add catalogue_dashboard: <name> "
-            "to workspace configuration."
-        )
-    with prepare_repository(
-        source_location,
-        source_store=source_store,
-        catalogue_dashboard=dashboard,
-    ) as prepared:
+    with prepare_repository(source_location, source_store=source_store) as prepared:
         selected = _item_bindings(
-            items,
-            resolved_workspace,
-            repository=prepared.repository,
-            dashboard=dashboard,
+            items, resolved_workspace, repository=prepared.repository
         )
         from ..build_bundle.targets import WarehouseBinding, effective_item_bindings
         from ..build_bundle.workflow import require_catalogue_for
@@ -336,9 +269,8 @@ def _preflight(workspace: Workspace, bindings, *, session):
     )
 
 
-def _item_bindings(items, workspace: Workspace, *, repository=None, dashboard=False):
+def _item_bindings(items, workspace: Workspace, *, repository=None):
     from ..build_bundle.targets import ItemBindings, parse_build_item
-    from ..catalogue_dashboard import DASHBOARD_ITEMS
 
     if items is None:
         values = [str(item) for item in workspace.configured_items]
@@ -357,15 +289,9 @@ def _item_bindings(items, workspace: Workspace, *, repository=None, dashboard=Fa
         values = expand_item_selectors(
             values, repository=repository, configured_items=workspace.configured_items
         )
-    parsed = tuple(parse_build_item(value, workspace=workspace) for value in values)
-    if not dashboard:
-        for binding in parsed:
-            if binding.item in DASHBOARD_ITEMS:
-                raise BuildError(
-                    f"{binding.item} is the Catalogue Dashboard. Run weaver initialise "
-                    "to deploy or update it."
-                )
-    return ItemBindings(parsed)
+    return ItemBindings(
+        tuple(parse_build_item(value, workspace=workspace) for value in values)
+    )
 
 
 def _present_semantic_outcomes(report, session) -> None:

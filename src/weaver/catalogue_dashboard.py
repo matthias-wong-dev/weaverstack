@@ -1,8 +1,7 @@
-"""The built-in Catalogue Dashboard: a semantic model and Report over the catalogue.
+"""The Catalogue Dashboard: a semantic model and Report over one catalogue.
 
-``catalogue_dashboard:`` in workspace configuration names the Fabric item both
-deploy to. Build composes them from the ``dashboard`` fragment as one Power BI
-project, so they build, read back and publish like an authored project.
+``weaver catalogue-dashboard`` deploys the ``dashboard`` fragment as an ordinary
+Power BI project; see :mod:`weaver.operations.catalogue_dashboard`.
 """
 
 from __future__ import annotations
@@ -14,7 +13,7 @@ DASHBOARD = "Catalogue Dashboard"
 DASHBOARD_MODEL = WeaverItemId(SEMANTIC_MODEL, DASHBOARD)
 DASHBOARD_REPORT = WeaverItemId(REPORT, DASHBOARD)
 DASHBOARD_ITEMS = (DASHBOARD_MODEL, DASHBOARD_REPORT)
-#: The Dashboard's Power BI project folder, as an authored one would be named.
+#: The Dashboard's Power BI project folder in the project it deploys from.
 DASHBOARD_PROJECT = f"PowerBI/{DASHBOARD}"
 
 #: The renderer's folder in the fragment: a stylesheet and scripts run in name order.

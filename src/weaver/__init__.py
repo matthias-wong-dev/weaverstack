@@ -35,6 +35,10 @@ from .objects import (
     WeaverObject,
 )
 from .operations.build import BuildResult, build
+from .operations.catalogue_dashboard import (
+    CatalogueDashboardResult,
+    deploy_catalogue_dashboard,
+)
 from .operations.health import health
 from .operations.load import load
 from .operations.mirror import (
@@ -80,6 +84,8 @@ __all__ = [
     "ExampleOutcome",
     "build",
     "BuildResult",
+    "deploy_catalogue_dashboard",
+    "CatalogueDashboardResult",
     "mirror",
     "MirrorResult",
     "plan_mirror",

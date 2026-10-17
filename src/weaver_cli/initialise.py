@@ -265,8 +265,6 @@ def equivalent_command(args):
             parts.extend(["--" + field, value])
     if getattr(args, "semantic_model", None):
         parts.extend(["--semantic-model", args.semantic_model])
-    if getattr(args, "catalogue_dashboard", None):
-        parts.extend(["--catalogue-dashboard", args.catalogue_dashboard])
     if args.example:
         parts.append("--example")
     if getattr(args, "publish_environment", False):
@@ -290,6 +288,7 @@ def render(report):
     from weaver.onboarding.environment import environment_directory
 
     _table(report)
+    _guidance(report)
     print(f"\nWeaver project ready in {report.project_folder}.")
     print(f"\nNext:\n\n  cd {shlex.quote(report.project_folder)}")
     if report.environment_publication == "deferred":
@@ -325,4 +324,10 @@ def render_dry_run(report):
     )
     if report.example.generated:
         print("Sales example source will be added.")
+    _guidance(report)
     print("No changes were made.")
+
+
+def _guidance(report):
+    for line in report.guidance:
+        print(f"\n{line}")

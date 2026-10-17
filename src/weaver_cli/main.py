@@ -278,11 +278,15 @@ def _requires_doctor(args) -> frozenset[str]:
     return requirements(AUTH, RESOLVER, ONELAKE, LIVY, TDS)
 
 
-def _requires_initialise(args) -> frozenset[str]:
+def _requires_catalogue_dashboard(args) -> frozenset[str]:
     from weaver.sessions.requirements import AUTH, RESOLVER, TDS, requirements
 
-    if getattr(args, "catalogue_dashboard", None):
-        return requirements(AUTH, RESOLVER, TDS)
+    return requirements(AUTH, RESOLVER, TDS)
+
+
+def _requires_initialise(args) -> frozenset[str]:
+    from weaver.sessions.requirements import AUTH, RESOLVER, requirements
+
     return requirements(AUTH, RESOLVER)
 
 
@@ -685,6 +689,46 @@ def build_parser() -> argparse.ArgumentParser:
     add_non_interactive(validate)
     _add_workspace_args(validate)
     validate.set_defaults(handler=handle_test, requires=_requires_run)
+
+    dashboard = subcommands.add_parser(
+        "catalogue-dashboard",
+        help="Deploy or update the Catalogue Dashboard over a catalogue.",
+        description=(
+            "Create or update the Catalogue Dashboard's SemanticModel and Report. "
+            "The model reads the catalogue's tables over Direct Lake; the catalogue "
+            "is only read. The Report needs the HTML Content visual."
+        ),
+    )
+    _add_workspace_args(dashboard, include_catalogue=False, include_environment=False)
+    dashboard.add_argument(
+        "--catalogue",
+        dest="source_catalogues",
+        action="append",
+        metavar="REFERENCE",
+        help=(
+            "The catalogue Warehouse to read, as Workspace/Warehouse/Name or "
+            "Warehouse/Name. Defaults to catalogue: in workspace configuration."
+        ),
+    )
+    dashboard.add_argument(
+        "--name",
+        help=(
+            "The SemanticModel and Report to deploy to. Defaults to "
+            "catalogue_dashboard: in workspace configuration."
+        ),
+    )
+    dashboard.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Resolve the source and the Dashboard's items without changing them.",
+    )
+    dashboard.add_argument(
+        "--json", action="store_true", help="Emit the result as JSON."
+    )
+    add_non_interactive(dashboard)
+    dashboard.set_defaults(
+        handler=handle_catalogue_dashboard, requires=_requires_catalogue_dashboard
+    )
 
     report = subcommands.add_parser(
         "health",
@@ -1174,13 +1218,7 @@ def _add_initialise_args(parser: argparse.ArgumentParser) -> None:
         default=None,
         help="Add the Sales example: source files and a Power BI project that reads them.",
     )
-    parser.add_argument(
-        "--catalogue-dashboard",
-        dest="catalogue_dashboard",
-        metavar="NAME",
-        help="Deploy the Catalogue Dashboard to the SemanticModel and Report NAME, "
-        "and record it in workspace configuration. A rerun updates it.",
-    )
+
     parser.add_argument(
         "--no-example",
         dest="example",
@@ -1790,6 +1828,39 @@ def _test_mapping(report, *, targeted: bool) -> dict:
     return mapping
 
 
+def handle_catalogue_dashboard(args: argparse.Namespace) -> int:
+    import json
+
+    workspace = _resolve_workspace(args)
+    with _running_session(args, workspace) as opened:
+        result = weaver.deploy_catalogue_dashboard(
+            catalogue=args.source_catalogues,
+            name=args.name,
+            dry_run=args.dry_run,
+            session=opened,
+        )
+    if args.json:
+        print(json.dumps(result.to_mapping(), indent=2))
+    else:
+        print(render_catalogue_dashboard(result))
+    return 0 if result.succeeded else 1
+
+
+def render_catalogue_dashboard(result) -> str:
+    lines = [
+        f"Catalogue Dashboard  {result.name}  in {result.workspace}",
+        f"  Reads  {result.catalogue}  ({len(result.sources)} tables)",
+    ]
+    for item in result.items:
+        status = f"would be {item.status}" if result.dry_run else item.status
+        lines.append(f"  {item.kind:<14}{item.name}  {status}")
+    for error in result.errors:
+        lines.append(f"  error: {error}")
+    if result.dry_run:
+        lines.append("No changes were made.")
+    return "\n".join(lines) + "\n"
+
+
 def handle_health(args: argparse.Namespace) -> int:
     """Return zero for Green health and one for any worse verdict."""
 
@@ -2282,7 +2353,6 @@ def _initialise_once(args: argparse.Namespace, *, session):
         warehouse=args.warehouse,
         semantic_model=getattr(args, "semantic_model", None),
         example=bool(args.example),
-        catalogue_dashboard=getattr(args, "catalogue_dashboard", None),
         publish_environment=args.publish_environment,
         dry_run=args.dry_run,
         session=session,

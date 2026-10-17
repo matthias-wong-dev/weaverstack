@@ -383,58 +383,74 @@ def test_preflight_has_progress_before_any_item_creation(tmp_path, fabric, monke
     assert fabric.created and not fabric.session.frames
 
 
-@pytest.fixture
-def deployed(monkeypatch):
-    calls = []
-
-    def deploy(project_folder, *, workspace_config=None, session=None, dry_run=False):
-        calls.append((project_folder, workspace_config))
-        return SimpleNamespace(succeeded=True, errors=(), status="succeeded")
-
-    monkeypatch.setattr("weaver.operations.build.deploy_catalogue_dashboard", deploy)
-    return calls
-
-
 @weaver_test()
-def test_initialise_records_and_deploys_the_catalogue_dashboard(
-    tmp_path, fabric, deployed
-):
-    report = setup(tmp_path, fabric, catalogue_dashboard="Estate Dashboard")
-    text = (tmp_path / "workspace-config.yml").read_text()
-    assert "catalogue_dashboard: Estate Dashboard" in text
-    assert deployed == [(tmp_path, tmp_path / "workspace-config.yml")]
-    (outcome,) = [o for o in report.resources if o.role == "Catalogue Dashboard"]
-    assert (outcome.name, outcome.status) == ("Estate Dashboard", "deployed")
-    # A rerun over the recorded configuration updates it.
-    weaver.initialise(tmp_path, workspace="Analytics", session=fabric.session)
-    assert len(deployed) == 2
-    assert (tmp_path / "workspace-config.yml").read_text() == text
-
-
-@weaver_test()
-def test_a_dry_run_plans_the_catalogue_dashboard_without_deploying(
-    tmp_path, fabric, deployed
-):
-    report = setup(
-        tmp_path, fabric, catalogue_dashboard="Estate Dashboard", dry_run=True
-    )
-    assert ("Catalogue Dashboard", "Estate Dashboard", "planned") in {
-        (o.role, o.name, o.status) for o in report.resources
-    }
-    assert not deployed and not list(tmp_path.iterdir())
-
-
-@weaver_test()
-def test_a_failed_dashboard_deployment_is_reported_after_setup(
+def test_initialise_never_deploys_a_configured_catalogue_dashboard(
     tmp_path, fabric, monkeypatch
 ):
-    failure = SimpleNamespace(action_id="semantic", message="Fabric refused the model")
+    def refuse(*args, **kwargs):
+        raise AssertionError("initialise deployed the Catalogue Dashboard")
+
     monkeypatch.setattr(
-        "weaver.operations.build.deploy_catalogue_dashboard",
-        lambda *a, **k: SimpleNamespace(
-            succeeded=False, errors=(failure,), status="failed"
-        ),
+        "weaver.operations.catalogue_dashboard.deploy_catalogue_dashboard", refuse
     )
-    with pytest.raises(InitialiseError, match="Fabric refused the model"):
-        setup(tmp_path, fabric, catalogue_dashboard="Estate Dashboard")
-    assert "catalogue_dashboard" in (tmp_path / "workspace-config.yml").read_text()
+    monkeypatch.setattr("weaver.operations.build.build", refuse)
+    setup(tmp_path, fabric)
+    config = tmp_path / "workspace-config.yml"
+    config.write_text(config.read_text() + "\ncatalogue_dashboard: Estate Dashboard\n")
+
+    report = setup(tmp_path, fabric)
+
+    assert report.succeeded
+    assert {outcome.role for outcome in report.resources} == {
+        "Catalogue",
+        "Environment",
+        "Lakehouse",
+        "Warehouse",
+    }
+
+
+@weaver_test()
+def test_a_session_in_another_workspace_is_refused_before_creation(tmp_path, fabric):
+    from weaver.workspaces import Workspace
+
+    setup(tmp_path, fabric)
+    fabric.created.clear()
+    elsewhere = TestSession(
+        workspace=Workspace(workspace="Elsewhere"),
+        resolver=SimpleNamespace(client=object()),
+    )
+
+    with pytest.raises(
+        InitialiseError, match="names workspace Analytics, not Elsewhere"
+    ):
+        weaver.initialise(tmp_path, lakehouse="Landing", session=elsewhere)
+    assert not fabric.created
+
+
+@weaver_test()
+def test_a_new_item_kind_names_the_workflow_steps_it_needs(tmp_path, fabric):
+    weaver.initialise(
+        tmp_path, workspace="Analytics", lakehouse="Landing", session=fabric.session
+    )
+    workflow = (tmp_path / "workflow.yml").read_text()
+
+    report = weaver.initialise(
+        tmp_path,
+        workspace="Analytics",
+        semantic_model="Sales",
+        session=fabric.session,
+    )
+
+    (guidance,) = report.guidance
+    assert "weaver build --item Lakehouse" in guidance
+    assert "weaver build --item PowerBI" in guidance
+    assert "SemanticModel" in guidance
+    assert report.to_mapping()["guidance"] == [guidance]
+    # The workflow is the user's: named, not rewritten.
+    assert (tmp_path / "workflow.yml").read_text() == workflow
+
+
+@weaver_test()
+def test_a_rerun_with_nothing_new_has_no_guidance(tmp_path, fabric):
+    setup(tmp_path, fabric)
+    assert setup(tmp_path, fabric).guidance == ()

@@ -492,34 +492,38 @@ def test_search_text_stays_within_its_column():
 
 
 @weaver_test()
-def test_the_catalogue_dashboard_is_internal():
-    from weaver.build_bundle.targets import ItemBindings, parse_build_item
-    from weaver.catalogue_dashboard import DASHBOARD_ITEMS
+def test_an_authored_model_is_never_internal_by_its_name(tmp_path):
+    """Only the catalogue's own item is internal; a model named like the
+    Catalogue Dashboard is an ordinary item."""
 
-    composed = parse_item_repository(
-        Location(str(CROSS_ITEM)), catalogue_dashboard=True
-    )
+    import shutil
+
+    from weaver.build_bundle.targets import ItemBindings, parse_build_item
+    from weaver.onboarding.project import semantic_extension
+
+    root = tmp_path / "project"
+    shutil.copytree(CROSS_ITEM, root)
+    model = root / "PowerBI/Catalogue Dashboard/Catalogue Dashboard.tmdl"
+    model.parent.mkdir(parents=True)
+    model.write_text(semantic_extension(), encoding="utf-8")
+    authored = parse_item_repository(Location(str(root)))
     bindings = effective_item_bindings(
         ItemBindings(
             item_bindings(("Lakehouse/Sales", "Sales_LH")).entries
-            + tuple(
-                parse_build_item(f"{item}={item.item_type}/Estate Dashboard")
-                for item in DASHBOARD_ITEMS
+            + (
+                parse_build_item(
+                    "SemanticModel/Catalogue Dashboard=SemanticModel/Estate"
+                ),
             )
         ),
         control_item=ItemRef("Weaver"),
         workspace_name=WORKSPACE,
     )
-    rows = _rows(built_catalogue(composed, bindings), LINEAGE_NODE)
-    dashboard = [row for row in rows if row["item_name"] == "Catalogue Dashboard"]
+    rows = _rows(built_catalogue(authored, bindings), LINEAGE_NODE)
 
-    assert {row["item_type"] for row in dashboard} == {"SemanticModel", "Report"}
-    assert all(row["is_internal"] for row in dashboard)
-    assert not any(
-        row["is_internal"]
-        for row in rows
-        if row["item_name"] == SALES.item_name and not row["schema_name"].endswith("_")
-    )
+    (named,) = [row for row in rows if row["item_name"] == "Catalogue Dashboard"]
+    assert not named["is_internal"]
+    assert all(row["is_internal"] for row in rows if row["item_name"] == "_weaver")
 
 
 # --- keys and flags -----------------------------------------------------------

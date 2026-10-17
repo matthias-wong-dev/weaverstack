@@ -88,11 +88,12 @@ test("a row with the wrong number of fields is reported, not guessed", () => {
 
 // --- model -----------------------------------------------------------------------
 
-test("the model names the catalogue and keeps the Dashboard's own items out", () => {
+test("the model names the catalogue and keeps only the catalogue's own item out", () => {
   const m = model(estate());
   assert.equal(m.catalogue.name, "Weaver");
   assert.equal(m.items.get("Warehouse/_weaver").internal, true);
-  assert.equal(m.items.get("SemanticModel/Catalogue Dashboard").internal, true);
+  // A model is never hidden by its name; the Dashboard is not catalogued.
+  assert.equal(m.items.get("SemanticModel/Catalogue Dashboard").internal, false);
   assert.equal(m.items.get("Lakehouse/Landing").internal, false);
 });
 
@@ -369,12 +370,12 @@ test("the Gantt summary measures elapsed span, summed work and peak concurrency"
   assert.equal(s.peak, 3);
 });
 
-test("the catalogue and the Dashboard never appear as part of the estate", () => {
+test("the catalogue never appears as part of the estate", () => {
   const PERF = ["item", "schema", "object", "loads", "duration", "longest", "read", "inserted", "updated", "deleted", "rejected", "reloads", "skips", "timedread", "timedduration", "last"];
   const perf = (item, schema, object) => [item, schema, object, 1, 1000, 1000, 10, 1, 0, 0, 0, 0, 0, 10, 1000, AT];
   const extra = table("perfmonth", PERF, [
     perf("Warehouse/_weaver", "_", "LineageNode"), perf("Warehouse/Curated", "_", "Load"),
-    perf("SemanticModel/Catalogue Dashboard", "", ""), perf("Warehouse/Curated", "Sales", "Region")]);
+    perf("Warehouse/Curated", "Sales", "Region")]);
   const m = model(estate({ extra }));
   assert.deepEqual(D.perfRows(m, "perfmonth").map((r) => r.item + " " + r.object), ["Warehouse/Curated Region"]);
 });

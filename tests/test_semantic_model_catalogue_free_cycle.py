@@ -12,7 +12,7 @@ from test_semantic_model_build_cycle import (
 
 import weaver
 from weaver.declaration.repository import parse_item_repository
-from weaver.errors import CommandError
+from weaver.errors import BuildError, CommandError
 from weaver.fabric.resolution import FabricResolver
 from weaver.locations import Location
 from weaver.semantic_models.definition import decode_parts, encode_definition
@@ -233,3 +233,24 @@ def test_a_named_model_loads_without_reading_a_project_folder(tmp_path):
         )
 
     assert [node.logical_id for node in report.nodes] == [str(ITEM)]
+
+
+@weaver_test()
+def test_a_generated_table_needs_its_source_configured_without_a_catalogue(tmp_path):
+    """A configured target's shape comes from Fabric; any other source's from a catalogue."""
+
+    root = tmp_path / "project"
+    model = root / "PowerBI/Reporting/Reporting.tmdl"
+    model.parent.mkdir(parents=True)
+    model.write_text(
+        "table Sales\n    annotation 'Weaver.Source' = Warehouse/Serving/Cake.Sales\n",
+        encoding="utf-8",
+    )
+    session = session_without_catalogue()
+
+    with pytest.raises(BuildError, match="no targets: entry names"):
+        weaver.build(
+            root,
+            items="SemanticModel/Reporting=SemanticModel/Reporting_Dev",
+            session=session,
+        )
