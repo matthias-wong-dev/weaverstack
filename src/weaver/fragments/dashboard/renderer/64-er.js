@@ -151,7 +151,8 @@ function erLayout(g, win) {
 /* The ER page's workspace, framed as the Load orchestration graph is: s holds
    the selection, depths, expansions and viewport. options.item limits it to one
    item's relationships; options.tools come first in its toolbar; options.onPick
-   hears a table chosen in the diagram, and options.describe fills the details. */
+   hears a table chosen in the diagram, options.describe fills the details, and
+   options.matches(term) lists the tables a wildcard term selects. */
 function erWorkspace(body, m, s, options) {
   var g = erGraph(m, options.item);
   s.selection = (s.selection || []).filter(function (id) { return g.nodes.has(id); });
@@ -159,11 +160,24 @@ function erWorkspace(body, m, s, options) {
   if (s.up === undefined) s.up = 1;
   if (s.down === undefined) s.down = 1;
   s.moved = s.moved || {};
+  s.patterns = s.patterns || [];
+  var matched = new Map();
+  function matches(q) {
+    if (!matched.has(q)) matched.set(q, (options.matches ? options.matches(q) : []).filter(function (id) { return g.nodes.has(id); }));
+    return matched.get(q);
+  }
+  /* The selected tables and every match of each wildcard term. */
+  function seeds() {
+    var out = s.selection.slice(), seen = new Set(out);
+    s.patterns.forEach(function (q) { matches(q).forEach(function (id) { if (!seen.has(id)) { seen.add(id); out.push(id); } }); });
+    return out;
+  }
   var f = workspaceFrame(s, function () {}), drawing = el("div", { "class": "wd-er-drawing" }), zoom = null, notice = null;
   function focus() { return s.selection[s.selection.length - 1] || null; }
+  function setPatterns(list) { s.patterns = list; s.expanded = []; s.moved = {}; s.view = null; notice = null; draw(); saveState(); }
   /* A plain choice replaces the selection; Shift, Ctrl or ⌘ adds or removes. */
   function select(id, adding) {
-    if (!id) s.selection = [];
+    if (!id) { s.selection = []; s.patterns = []; }
     else if (adding) {
       var at = s.selection.indexOf(id);
       if (at >= 0) s.selection.splice(at, 1); else s.selection.push(id);
@@ -179,7 +193,7 @@ function erWorkspace(body, m, s, options) {
     draw(id, before);
     saveState();
   }
-  function win() { return erWindow(g, s.selection, s.up, s.down, s.expanded); }
+  function win() { return erWindow(g, seeds(), s.up, s.down, s.expanded); }
   function status(w) {
     f.line.textContent = "";
     var parts = [];
@@ -196,7 +210,8 @@ function erWorkspace(body, m, s, options) {
   }
   function renderChips() {
     selectionChips(f.chips, s.selection, focus(), function (id) { var n = g.nodes.get(id); return { kind: n.owner ? n.owner.kind : "Table", label: n.label, title: n.item + " · " + n.label }; },
-      function (id) { if (options.onPick) options.onPick(id); if (zoom) zoom.fitBoxes([id]); }, function (id, adding) { select(id, adding); if (id && options.onPick && s.selection.indexOf(id) >= 0) options.onPick(id); });
+      function (id) { if (options.onPick) options.onPick(id); if (zoom) zoom.fitBoxes([id]); }, function (id, adding) { select(id, adding); if (id && options.onPick && s.selection.indexOf(id) >= 0) options.onPick(id); },
+      { list: s.patterns, count: function (q) { return matches(q).length; }, remove: function (q) { setPatterns(s.patterns.filter(function (p) { return p !== q; })); } });
   }
   /* An edge's path and its two cardinality marks, from where its boxes are now. */
   function route(e, boxes) {
@@ -340,12 +355,14 @@ function erWorkspace(body, m, s, options) {
   if (options.describe) options.describe(f.side);
   if (!g.nodes.size) {
     drawing.appendChild(empty("No declared table is recorded" + (options.item && options.item !== "all" ? " for " + itemName(options.item) : "") + "."));
-    return { has: function () { return false; }, select: function () {}, say: function () {}, side: f.side };
+    return { has: function () { return false; }, select: function () {}, addPattern: function () {}, say: function () {}, side: f.side };
   }
   draw();
   return {
     has: function (id) { return g.nodes.has(id); },
     select: function (id, adding) { if (g.nodes.has(id)) select(id, adding); },
+    /* A wildcard term joins the selection, whatever else is selected. */
+    addPattern: function (q) { if (s.patterns.indexOf(q) < 0) setPatterns(s.patterns.concat([q])); },
     /* A note on the status line until the next drawing. */
     say: function (text) { notice = text; status(win()); },
     side: f.side

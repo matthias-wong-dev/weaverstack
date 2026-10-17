@@ -48,7 +48,7 @@ function start() {
 
 var api = {
   parsePayload: parsePayload, buildModel: buildModel, assessHealth: assessHealth, readiness: readiness,
-  layoutEstate: layoutEstate, WINDOW_GEOMETRY: WINDOW_GEOMETRY, subModel: subModel, focusWindow: focusWindow, searchNodes: searchNodes, dictionaryEntries: dictionaryEntries,
+  layoutEstate: layoutEstate, WINDOW_GEOMETRY: WINDOW_GEOMETRY, subModel: subModel, focusWindow: focusWindow, searchNodes: searchNodes, nodeMatches: nodeMatches, dictionaryEntries: dictionaryEntries,
   searchEntries: searchEntries, metadata: metadata, modelTables: modelTables, busMatrix: busMatrix, erGraph: erGraph,
   erWindow: erWindow, erLayout: erLayout, ER: ER, ganttSummary: ganttSummary, clockTicks: clockTicks, clockLabel: clockLabel, logRows: logRows, perfRows: perfRows, tone: tone, BUDGET: BUDGET,
   FIELD: FIELD, ROW: ROW, TABLE: TABLE, LESS: LESS

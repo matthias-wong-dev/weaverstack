@@ -430,6 +430,10 @@ test("a * in a search term matches any run of characters across the whole name",
   assert.deepEqual(labels("sales.by"), ["Sales.ByRegion", "Sales.ByRegionValid"]);
   assert.deepEqual(labels("by*"), ["Sales.ByRegion", "Sales.ByRegionValid"]);
   assert.deepEqual(labels("reg*n"), ["Sales.Region"]);
+  // As a selection term, a wildcard selects every match, not the first twelve.
+  assert.deepEqual(D.nodeMatches(m, "sales.*").sort(), ["b", "c", "r", "s", "v"]);
+  const win = D.focusWindow(m, D.nodeMatches(m, "sales.by*"), 0, 0, []);
+  assert.deepEqual(Array.from(win.seeds).sort(), ["b", "v"]);
   const entries = D.dictionaryEntries(m);
   assert.deepEqual(D.searchEntries(entries, "*customer*", "All").map((e) => e.label).sort(),
     ["Sales.Customer", "Sales.Customer", "Sales/Customers"]);

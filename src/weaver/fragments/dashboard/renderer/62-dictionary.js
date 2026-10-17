@@ -169,10 +169,14 @@ function entitiesPage(body, m) {
     find: function (q) {
       return q.trim() ? searchEntries(entries, q, "All").slice(0, 12).map(function (e) { return { kind: e.kind, label: e.label, meta: e.meta, desc: e.desc, entry: e }; }) : [];
     },
-    onPick: function (r, adding) { choose(r.entry, adding); }
+    onPick: function (r, adding) { choose(r.entry, adding); },
+    onPattern: function (q) { er.addPattern(q); }
   });
 
-  var er = erWorkspace(body, m, s.er, { item: s.item, tools: [search, picker], describe: renderSide, onPick: function (id) {
+  var er = erWorkspace(body, m, s.er, { item: s.item, tools: [search, picker], describe: renderSide,
+    // A wildcard term selects the objects it names; a column's table joins only by name.
+    matches: function (q) { return searchEntries(entries, q, "All").filter(function (e) { return e.ref && e.ref.key; }).map(function (e) { return e.ref.id; }); },
+    onPick: function (id) {
     var entry = tableEntry(id);
     s.selected = entry ? entryId(entry) : null;
     renderSide(); renderList(); renderDetail();

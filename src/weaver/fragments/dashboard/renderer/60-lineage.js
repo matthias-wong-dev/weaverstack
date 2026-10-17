@@ -17,6 +17,15 @@ function graphWorkspace(body, m, options) {
   if (s.item && !m.items.has(s.item)) s.item = null;
   s.expanded = (s.expanded || []).filter(function (k) { return m.nodes.has(k); });
   s.moved = s.moved || {};
+  s.patterns = s.patterns || [];
+  var matched = new Map();
+  function matches(q) { if (!matched.has(q)) matched.set(q, nodeMatches(m, q)); return matched.get(q); }
+  /* The selected objects and every match of each wildcard term. */
+  function seeds() {
+    var out = s.selection.slice(), seen = new Set(out);
+    s.patterns.forEach(function (q) { matches(q).forEach(function (k) { if (!seen.has(k)) { seen.add(k); out.push(k); } }); });
+    return out;
+  }
   var health = options.health ? assessHealth(m) : null;
   s.mode = s.mode || options.mode;
   var view, f = workspaceFrame(s, function () { if (view) view.resize(); });
@@ -26,13 +35,24 @@ function graphWorkspace(body, m, options) {
   }
   /* A plain choice replaces the selection; Shift, Ctrl or ⌘ adds or removes. */
   function select(key, adding) {
-    if (!key) s.selection = [];
+    if (!key) { s.selection = []; s.patterns = []; }
     else if (adding) {
       var at = s.selection.indexOf(key);
       if (at >= 0) s.selection.splice(at, 1); else s.selection.push(key);
     } else s.selection = [key];
     if (key && s.item && m.nodes.get(key).item !== s.item) { s.item = null; itemPicker.value = ""; }
     s.focus = key && s.selection.indexOf(key) >= 0 ? key : s.selection[s.selection.length - 1] || null;
+    s.expanded = []; s.moved = {};
+    apply(true);
+  }
+  /* A wildcard term joins the selection, whatever else is selected. */
+  function addPattern(q) {
+    if (s.patterns.indexOf(q) < 0) s.patterns.push(q);
+    s.expanded = []; s.moved = {};
+    apply(true);
+  }
+  function removePattern(q) {
+    s.patterns = s.patterns.filter(function (p) { return p !== q; });
     s.expanded = []; s.moved = {};
     apply(true);
   }
@@ -46,7 +66,7 @@ function graphWorkspace(body, m, options) {
   function moved(key, p) { s.moved[key] = { x: p.x, y: p.y }; saveState(); }
   function apply(refit) {
     var only = within();
-    var win = s.selection.length || only ? focusWindow(m, s.selection, s.up, s.down, s.expanded, only) : null;
+    var seed = seeds(), win = seed.length || only ? focusWindow(m, seed, s.up, s.down, s.expanded, only) : null;
     var lay = win ? layoutEstate(subModel(m, win.shown), WINDOW_GEOMETRY) : layoutEstate(m);
     Object.keys(s.moved).forEach(function (k) { var p = lay.pos.get(k); if (p) { p.x = s.moved[k].x; p.y = s.moved[k].y; } });
     view.setWindow(win, lay);
@@ -58,7 +78,8 @@ function graphWorkspace(body, m, options) {
   }
   function renderChips() {
     selectionChips(f.chips, s.selection, s.focus, function (key) { var n = m.nodes.get(key); return { kind: n.kind, label: n.label, title: n.item + " · " + qualified(n) }; },
-      function (key) { s.focus = key; details(side, m, key, { onOpen: select, health: health }); renderChips(); view.fitKeys([key], true); }, select);
+      function (key) { s.focus = key; details(side, m, key, { onOpen: select, health: health }); renderChips(); view.fitKeys([key], true); }, select,
+      { list: s.patterns, count: function (q) { return matches(q).length; }, remove: removePattern });
   }
   function status(win) {
     line.textContent = "";
@@ -83,7 +104,7 @@ function graphWorkspace(body, m, options) {
   })));
   if (options.above) body.appendChild(options.above);
   f.mount(body, [
-    nodeSearch(m, select),
+    nodeSearch(m, select, addPattern),
     itemPicker,
     segmented("Up", DEPTHS, s.up, function (d) { s.up = d; s.expanded = []; s.moved = {}; apply(true); }, depthLabel),
     segmented("Down", DEPTHS, s.down, function (d) { s.down = d; s.expanded = []; s.moved = {}; apply(true); }, depthLabel),
@@ -106,7 +127,7 @@ function graphWorkspace(body, m, options) {
   view = new GraphView(host, m, estate, { state: s, mode: s.mode, onSelect: select, onReveal: expand, onMove: moved, label: options.label });
   apply(false);
   // A remembered viewport is kept unless it no longer shows the focus or the estate.
-  if (fresh || !view.showing(s.focus)) { if (s.selection.length || s.item) view.fitWindow(false); else view.fitAll(false); }
+  if (fresh || !view.showing(s.focus)) { if (s.selection.length || s.patterns.length || s.item) view.fitWindow(false); else view.fitAll(false); }
   return { select: select };
 }
 
@@ -141,10 +162,19 @@ function workspaceFrame(s, onResize) {
 }
 
 /* The selection as chips: a name focuses its object, × removes it. select is
-   the page's select(key, adding). */
-function selectionChips(chips, selection, focus, describe, onFocus, select) {
+   the page's select(key, adding). Each wildcard term in patterns is a chip of
+   its own, counting what it matches. */
+function selectionChips(chips, selection, focus, describe, onFocus, select, patterns) {
+  var terms = patterns ? patterns.list : [];
   chips.textContent = "";
-  chips.hidden = !selection.length;
+  chips.hidden = !selection.length && !terms.length;
+  terms.forEach(function (q) {
+    var count = patterns.count(q);
+    chips.appendChild(el("span", { "class": "wd-chip-select wd-chip-pattern" }, [
+      el("span", { "class": "wd-chip-name", title: "Every match for " + q, text: q + " · " + fmt(count) }),
+      el("button", { type: "button", "class": "wd-chip-remove", "aria-label": "Remove " + q, onclick: function () { patterns.remove(q); } }, ["×"])
+    ]));
+  });
   selection.forEach(function (key) {
     var d = describe(key);
     chips.appendChild(el("span", { "class": "wd-chip-select" + (key === focus ? " wd-current" : "") }, [
@@ -152,7 +182,7 @@ function selectionChips(chips, selection, focus, describe, onFocus, select) {
       el("button", { type: "button", "class": "wd-chip-remove", "aria-label": "Remove " + d.label, onclick: function () { select(key, true); } }, ["×"])
     ]));
   });
-  if (selection.length > 1) chips.appendChild(el("button", { type: "button", "class": "wd-text-btn wd-chip-clear", onclick: function () { select(null); } }, ["Clear"]));
+  if (selection.length + terms.length > 1) chips.appendChild(el("button", { type: "button", "class": "wd-text-btn wd-chip-clear", onclick: function () { select(null); } }, ["Clear"]));
 }
 
 function legend(mode) {
