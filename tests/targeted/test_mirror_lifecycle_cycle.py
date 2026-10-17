@@ -20,6 +20,7 @@ from factories import (
     warehouse_table,
 )
 from support.bundles import build_metadata
+from support.mirror_lineage import as_mirror_commits
 from support.weaver_test import weaver_test
 from support.workspaces import WORKSPACE
 from warehouse_mirror import (
@@ -38,6 +39,9 @@ from weaver.declaration import parse_item_repository
 from weaver.locations import Location
 from weaver.store import FilesystemStore
 from weaver.targets import ItemRef
+
+#: The workspace a Mirror's source estate is in. This catalogue records none.
+SOURCE_WORKSPACE = "6f9619ff-8b86-d011-b42d-00c04fc964ff"
 
 #: Both of the item's tables, borrowed to begin with.
 BORROWED = ("Customer", "Region")
@@ -135,15 +139,20 @@ def test_the_same_view_with_nothing_borrowed_disproves_the_claim(tmp_path):
 
 @weaver_test()
 def test_an_unchanged_build_over_a_mirrored_item_plans_nothing(tmp_path):
-    """The complete plan: no drop, no build, and no deregistration."""
+    """The complete plan: no drop, no build, no deregistration and no lineage.
+
+    Mirror rewrites lineage keys and flags in place, which signatures leave out,
+    so Build's own projection of the item matches what Mirror committed.
+    """
 
     repository = _estate(tmp_path / "repo")
 
     _reconciled, bundle = _build(
         repository,
         tmp_path / "bundle",
-        catalogue=with_borrowed(
-            built_catalogue(repository, mirror_bindings()), *BORROWED
+        catalogue=as_mirror_commits(
+            with_borrowed(built_catalogue(repository, mirror_bindings()), *BORROWED),
+            source_workspace=SOURCE_WORKSPACE,
         ),
         inventory=mirror_inventory(repository, borrowed=BORROWED),
     )
@@ -295,29 +304,35 @@ def _published_sql(bundle) -> str:
 
 
 @weaver_test()
-def test_a_build_over_borrowed_objects_marks_them_in_the_lineage_it_publishes(
-    tmp_path,
-):
+def test_a_build_projects_what_stays_borrowed_as_mirrored(tmp_path):
+    """Customer is materialised by this build; Region stays borrowed."""
+
+    from weaver.catalogue.lineage_rows import with_lineage_rows
+    from weaver.catalogue.tables import LINEAGE_NODE
+
+    installed = _estate(tmp_path / "installed")
+    current = with_borrowed(built_catalogue(installed, mirror_bindings()), *BORROWED)
+    item = item_id(ITEM)
+    desired = Catalogue(
+        {item: built_catalogue(installed, mirror_bindings()).rows[item]}
+    )
+
+    projected = with_lineage_rows(
+        desired, installed, current=current, materialised={mirror_object("Customer")}
+    )
+
+    flags = {
+        row["object_name"]: (row["is_mirrored"], row["can_load"])
+        for row in projected.rows[item][LINEAGE_NODE.name]
+        if row["object_name"] in BORROWED
+    }
+    assert flags == {"Customer": (False, True), "Region": (True, False)}
+
+
+@weaver_test()
+def test_build_never_runs_the_mirrors_lineage_marking(tmp_path):
     from weaver.catalogue.borrow import lineage_statement
 
     _reconciled, bundle = _selective(tmp_path)
 
-    # Last in the batch, so it corrects whatever lineage this build wrote.
-    assert _published_sql(bundle).rstrip().endswith(lineage_statement())
-
-
-@weaver_test()
-def test_a_build_over_nothing_borrowed_publishes_lineage_unchanged(tmp_path):
-    from weaver.catalogue.borrow import lineage_statement
-
-    repository = _estate(tmp_path / "estate")
-    _reconciled, bundle = _build(
-        repository,
-        tmp_path / "bundle",
-        catalogue=Catalogue(rows={}),
-        inventory=mirror_inventory(repository, borrowed=()),
-    )
-    published = _published_sql(bundle)
-
-    assert "[_].[LineageNode]" in published
-    assert lineage_statement() not in published
+    assert lineage_statement() not in _published_sql(bundle)

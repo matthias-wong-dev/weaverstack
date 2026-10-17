@@ -109,8 +109,11 @@ endpoint takes its own item's workspace, from this build's installations and
 the ones the catalogue already records, and an endpoint in no known workspace
 hashes its ID alone. Mirror re-keys forked lineage by the destination's
 installations in its final transaction (`fork.lineage_key_statements`), and
-marks what `_.Mirror` records as mirrored (`borrow.lineage_statement`), which
-Build repeats after publishing lineage in a catalogue that borrows.
+marks what `_.Mirror` records as mirrored (`borrow.lineage_statement`). Build
+projects an item's lineage with the `_.Mirror` rows that stay after it. A
+lineage signature leaves out the keys and the mirror flags, which differ
+between catalogues holding one item and are compared as columns, so Mirror's
+in-place rewrite leaves signatures valid.
 
 The Catalogue Dashboard observes a catalogue and is no part of its lifecycle.
 `weaver catalogue-dashboard` (`operations.catalogue_dashboard`) writes the

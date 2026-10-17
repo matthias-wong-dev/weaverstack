@@ -46,14 +46,21 @@ NODE_KEY_DIGITS = 12
 
 
 def with_lineage_rows(
-    catalogue: Catalogue, repository, *, current: Catalogue | None = None, warn=None
+    catalogue: Catalogue,
+    repository,
+    *,
+    current: Catalogue | None = None,
+    materialised=(),
+    warn=None,
 ) -> Catalogue:
     """Add each item's LineageNode and LineageEdge rows to desired state.
 
     The projection is advisory. An item whose rows cannot be projected keeps
     its ``current`` rows, so publication leaves them alone, and ``warn`` says so.
     Each key names its node's workspace, from this build's installations and
-    the ones ``current`` already records.
+    the ones ``current`` already records. What ``current`` records as borrowed
+    stays mirrored, except the ``materialised`` identities this build gives
+    rows of their own.
     """
 
     workspaces = {
@@ -65,7 +72,11 @@ def with_lineage_rows(
         merged = dict(tables)
         try:
             projected = lineage_rows(
-                _with_semantic_sources(item, tables, repository),
+                _with_semantic_sources(
+                    item,
+                    _with_borrowed(item, tables, current, materialised),
+                    repository,
+                ),
                 item,
                 workspaces=workspaces,
             )
@@ -82,6 +93,21 @@ def with_lineage_rows(
         merged.update(projected)
         rows[item] = MappingProxyType(merged)
     return Catalogue(rows=MappingProxyType(rows))
+
+
+def _with_borrowed(item, tables, current, materialised):
+    """An item's rows with the ``_.Mirror`` rows that stay after this build."""
+
+    from .tables import MIRROR
+
+    held = current.rows.get(item, {}).get(MIRROR.name, ()) if current else ()
+    gone = {catalogue_columns(i) for i in materialised if i.item == item}
+    kept = tuple(
+        row
+        for row in held
+        if (row.get("schema_name"), row.get("object_name")) not in gone
+    )
+    return {**tables, MIRROR.name: kept} if kept else tables
 
 
 def _reason(exc: Exception) -> str:
@@ -310,6 +336,22 @@ def _search_text(*parts) -> str:
     return text.encode("utf-8")[:SEARCH_TEXT_BYTES].decode("utf-8", errors="ignore")
 
 
+#: Columns that differ between catalogues holding the same item: keys name its
+#: workspace, and a mirror borrows what it may not load. They are compared as
+#: themselves and left out of the signature, so Mirror can rewrite them in place.
+_PLACED = frozenset(
+    {
+        "node_key",
+        "downstream_node_key",
+        "upstream_node_key",
+        "through_node_key",
+        "is_mirrored",
+        "can_load",
+    }
+)
+
+
 def _signed(row: dict) -> Row:
-    content = json.dumps(row, sort_keys=True, ensure_ascii=False)
+    signed = {name: value for name, value in row.items() if name not in _PLACED}
+    content = json.dumps(signed, sort_keys=True, ensure_ascii=False)
     return {**row, SIGNATURE: hashlib.sha256(content.encode("utf-8")).hexdigest()}

@@ -28,6 +28,7 @@ from factories import (
     plan_actions,
 )
 from support.bundles import build_metadata
+from support.mirror_lineage import as_mirror_commits
 from support.weaver_test import weaver_test
 from support.workspaces import WORKSPACE
 
@@ -204,14 +205,17 @@ def test_a_borrowed_relation_stands_at_its_declared_address_as_itself(tmp_path):
 
 @weaver_test()
 def test_an_unchanged_build_over_a_mirrored_lakehouse_plans_nothing(tmp_path):
-    """The complete plan: no drop, no build, and no deregistration."""
+    """The complete plan: no drop, no build, no deregistration and no lineage."""
 
     repository = _estate(tmp_path / "repo")
 
     _reconciled, bundle = _build(
         repository,
         tmp_path / "bundle",
-        catalogue=_borrowing(built_catalogue(repository, _bindings())),
+        catalogue=as_mirror_commits(
+            _borrowing(built_catalogue(repository, _bindings())),
+            source_workspace="6f9619ff-8b86-d011-b42d-00c04fc964ff",
+        ),
         inventory=_inventory(repository),
     )
 

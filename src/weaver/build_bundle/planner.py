@@ -307,6 +307,8 @@ def generate_item_build_bundle(
         target_by_item,
         current=catalogue_after_deletions,
         selected_models=selected_models,
+        # The objects whose mirror the deregistration stage below removes.
+        materialised=set(selected_for_build) & set(catalogue.mirrors),
         warn=warn,
     )
     published = [
@@ -334,7 +336,6 @@ def generate_item_build_bundle(
             current=catalogue_after_deletions,
             selected_models=selected_models,
             publication=publication,
-            mirrored=bool(catalogue.mirrors),
         ),
     ]
     # Publication certifies only physical work that succeeded, and the Registry
