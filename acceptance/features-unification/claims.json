@@ -1,0 +1,774 @@
+[
+  {
+    "id": "python-spark",
+    "group": 1,
+    "title": "Python and Spark SQL, together",
+    "brief_copy": "Both are first-class for Lakehouse work, with connected Files and Tables in one dependency model.",
+    "urls": [
+      "https://docs.weaverstack.dev/lakehouse/spark-sql/"
+    ],
+    "sources": [
+      "docs/lakehouse/spark-sql.md"
+    ],
+    "description": "Use Python and Spark SQL together for Lakehouse Files and Delta Tables in the same dependency model.",
+    "qualification": "",
+    "evidence": [
+      {
+        "repository": "matthias-wong-dev/weaverstack-docs",
+        "revision": "df5e266ffe5c6b893ef7a6291ba7b23ab0ed2b45",
+        "path": "docs/lakehouse/spark-sql.md",
+        "sha256": "bfcdeec65b70bef6841691ccead178fcce52d59e1bd78796c88c732506b00789"
+      }
+    ]
+  },
+  {
+    "id": "tsql",
+    "group": 1,
+    "title": "Ordinary T-SQL",
+    "brief_copy": "Keep the SELECTs your team knows\u2014without a proprietary modelling language or macros.",
+    "urls": [
+      "https://docs.weaverstack.dev/warehouse/first-project/"
+    ],
+    "sources": [
+      "docs/warehouse/first-project.md"
+    ],
+    "description": "Keep ordinary SELECTs, without a proprietary modelling language or macros.",
+    "qualification": "",
+    "evidence": [
+      {
+        "repository": "matthias-wong-dev/weaverstack-docs",
+        "revision": "df5e266ffe5c6b893ef7a6291ba7b23ab0ed2b45",
+        "path": "docs/warehouse/first-project.md",
+        "sha256": "2159c155a335fef6e96e397a6c4730ec7ee85eed1609e8e1c279edcb9c8496cd"
+      }
+    ]
+  },
+  {
+    "id": "native-powerbi",
+    "group": 1,
+    "title": "Native Power BI",
+    "brief_copy": "Keep PBIP, TMDL and Report definitions. No conversion to a Weaver-only modelling format.",
+    "urls": [
+      "https://docs.weaverstack.dev/semantic-models/native-tmdl/"
+    ],
+    "sources": [
+      "docs/semantic-models/native-tmdl.md"
+    ],
+    "description": "Keep PBIP, TMDL and native Report definitions rather than converting to a Weaver-only format.",
+    "qualification": "",
+    "evidence": [
+      {
+        "repository": "matthias-wong-dev/weaverstack-docs",
+        "revision": "df5e266ffe5c6b893ef7a6291ba7b23ab0ed2b45",
+        "path": "docs/semantic-models/native-tmdl.md",
+        "sha256": "853884c00e66e3eddc0c47fa127b50140b65320a3013cd6d27bd5ff83b5bd1b2"
+      }
+    ]
+  },
+  {
+    "id": "portable",
+    "group": 1,
+    "title": "Desktop, Fabric Notebooks, or both",
+    "brief_copy": "Build and operate the same project through the desktop CLI/Python API or an attached Fabric notebook.",
+    "urls": [
+      "https://docs.weaverstack.dev/advanced/portable-execution-between-desktop-and-fabric/"
+    ],
+    "sources": [
+      "docs/advanced/portable-execution-between-desktop-and-fabric.md"
+    ],
+    "description": "Build and operate the same project from desktop Python or the CLI, an attached Fabric Notebook, or both.",
+    "qualification": "",
+    "evidence": [
+      {
+        "repository": "matthias-wong-dev/weaverstack-docs",
+        "revision": "df5e266ffe5c6b893ef7a6291ba7b23ab0ed2b45",
+        "path": "docs/advanced/portable-execution-between-desktop-and-fabric.md",
+        "sha256": "4b4bb6101fe10383ab29f453b0a819f21fd79c710bfd488d4b7933156fbca8f4"
+      }
+    ]
+  },
+  {
+    "id": "pip",
+    "group": 1,
+    "title": "Install with pip",
+    "brief_copy": "Open source, no separate Weaver server, runtime platform or Weaver software licence.",
+    "urls": [
+      "https://docs.weaverstack.dev/getting-started/installation/"
+    ],
+    "sources": [
+      "docs/getting-started/installation.md"
+    ],
+    "description": "Install the open-source Python package with pip, without another Weaver server, orchestration service or software licence.",
+    "qualification": "",
+    "evidence": [
+      {
+        "repository": "matthias-wong-dev/weaverstack-docs",
+        "revision": "df5e266ffe5c6b893ef7a6291ba7b23ab0ed2b45",
+        "path": "docs/getting-started/installation.md",
+        "sha256": "aad40ae256e9ce82b18c0bba16c19c9f4e5ac42edc2ce4e987b3543eafa82bf0"
+      }
+    ]
+  },
+  {
+    "id": "fabric-dag",
+    "group": 2,
+    "title": "One dependency graph across Fabric",
+    "brief_copy": "Connect supported Lakehouse Files, Python and Spark SQL work to Warehouse T-SQL and dependent semantic-model refreshes in **one managed DAG**\u2014without stitching those managed stages together with another Fabric pipeline.",
+    "urls": [
+      "https://docs.weaverstack.dev/estate/connected-items/",
+      "https://docs.weaverstack.dev/semantic-models/managed-sources/"
+    ],
+    "sources": [
+      "docs/estate/connected-items.md",
+      "docs/semantic-models/managed-sources.md"
+    ],
+    "description": "Order selected managed Lakehouse work, Warehouse T-SQL and dependent Semantic Model refreshes in one DAG.",
+    "qualification": "",
+    "evidence": [
+      {
+        "repository": "matthias-wong-dev/weaverstack-docs",
+        "revision": "df5e266ffe5c6b893ef7a6291ba7b23ab0ed2b45",
+        "path": "docs/estate/connected-items.md",
+        "sha256": "c280d7043e9f508d1df0704ea8d77600baaeb4514839c0875496d82740716c5d"
+      },
+      {
+        "repository": "matthias-wong-dev/weaverstack-docs",
+        "revision": "df5e266ffe5c6b893ef7a6291ba7b23ab0ed2b45",
+        "path": "docs/semantic-models/managed-sources.md",
+        "sha256": "d48a7436c931b9d6851ec117323d342eb69055567c4bb1763c18b39675bce9e0"
+      }
+    ]
+  },
+  {
+    "id": "generated-warehouse",
+    "group": 2,
+    "title": "Generated Warehouse pipelines",
+    "brief_copy": "A SELECT becomes a physical Table with generated staging, key matching, row-change reconciliation and recorded results.",
+    "urls": [
+      "https://docs.weaverstack.dev/warehouse/first-project/"
+    ],
+    "sources": [
+      "docs/warehouse/first-project.md"
+    ],
+    "description": "A SELECT becomes a Table with generated staging, declared-key matching, row-change reconciliation and recorded results.",
+    "qualification": "",
+    "evidence": [
+      {
+        "repository": "matthias-wong-dev/weaverstack-docs",
+        "revision": "df5e266ffe5c6b893ef7a6291ba7b23ab0ed2b45",
+        "path": "docs/warehouse/first-project.md",
+        "sha256": "2159c155a335fef6e96e397a6c4730ec7ee85eed1609e8e1c279edcb9c8496cd"
+      }
+    ]
+  },
+  {
+    "id": "managed-lakehouse",
+    "group": 2,
+    "title": "Managed Lakehouse pipelines",
+    "brief_copy": "Files, Python and Spark SQL materialise into managed Delta Tables without hand-building a separate orchestration project.",
+    "urls": [
+      "https://docs.weaverstack.dev/lakehouse/python/"
+    ],
+    "sources": [
+      "docs/lakehouse/python.md"
+    ],
+    "description": "Materialise Files, Python and Spark SQL into managed Delta Tables without hand-building another orchestration project.",
+    "qualification": "",
+    "evidence": [
+      {
+        "repository": "matthias-wong-dev/weaverstack-docs",
+        "revision": "df5e266ffe5c6b893ef7a6291ba7b23ab0ed2b45",
+        "path": "docs/lakehouse/python.md",
+        "sha256": "17de27a727d01f1d51ae2ffec422ff27087d5d047f84cf22b74f60185e622062"
+      }
+    ]
+  },
+  {
+    "id": "dependency-discovery",
+    "group": 2,
+    "title": "Dependency discovery",
+    "brief_copy": "Python imports and supported T-SQL references supply dependencies; explicit declarations cover other cases.",
+    "urls": [
+      "https://docs.weaverstack.dev/estate/connected-items/"
+    ],
+    "sources": [
+      "docs/estate/connected-items.md"
+    ],
+    "description": "Python imports and supported T-SQL references supply dependencies; Spark SQL uses explicit declarations.",
+    "qualification": "",
+    "evidence": [
+      {
+        "repository": "matthias-wong-dev/weaverstack-docs",
+        "revision": "df5e266ffe5c6b893ef7a6291ba7b23ab0ed2b45",
+        "path": "docs/estate/connected-items.md",
+        "sha256": "c280d7043e9f508d1df0704ea8d77600baaeb4514839c0875496d82740716c5d"
+      }
+    ]
+  },
+  {
+    "id": "incremental-changes",
+    "group": 2,
+    "title": "Incremental inserts, updates and deletes",
+    "brief_copy": "Apply supported changes without reconstructing every target; source logic identifies candidates and explicit deletes.",
+    "urls": [
+      "https://docs.weaverstack.dev/warehouse/incremental/",
+      "https://docs.weaverstack.dev/lakehouse/incremental/"
+    ],
+    "sources": [
+      "docs/warehouse/incremental.md",
+      "docs/lakehouse/incremental.md"
+    ],
+    "description": "Apply insert/update candidates and explicit delete keys under the declared policy, without rebuilding every target.",
+    "qualification": "",
+    "evidence": [
+      {
+        "repository": "matthias-wong-dev/weaverstack-docs",
+        "revision": "df5e266ffe5c6b893ef7a6291ba7b23ab0ed2b45",
+        "path": "docs/warehouse/incremental.md",
+        "sha256": "af19d85acae1783cbc26190f15bd3f785074ca9ee5debde346d7be0f7372a4e7"
+      },
+      {
+        "repository": "matthias-wong-dev/weaverstack-docs",
+        "revision": "df5e266ffe5c6b893ef7a6291ba7b23ab0ed2b45",
+        "path": "docs/lakehouse/incremental.md",
+        "sha256": "bf3b31ba46d359fe52d03641d899d8acf6645c0161344618471e60cecf561faa"
+      }
+    ]
+  },
+  {
+    "id": "bookmarks",
+    "group": 2,
+    "title": "Per-consumer bookmarks",
+    "brief_copy": "Each consumer retains its own successful processing position\u2014even when multiple Tables read the same source.",
+    "urls": [
+      "https://docs.weaverstack.dev/lakehouse/incremental/"
+    ],
+    "sources": [
+      "docs/lakehouse/incremental.md"
+    ],
+    "description": "Each loadable Table or Folder keeps its own clean processing boundary, even when consumers share a source.",
+    "qualification": "Named Table/Folder ownership; a clean successful boundary rather than arbitrary source watermark.",
+    "evidence": [
+      {
+        "repository": "matthias-wong-dev/weaverstack-docs",
+        "revision": "df5e266ffe5c6b893ef7a6291ba7b23ab0ed2b45",
+        "path": "docs/lakehouse/incremental.md",
+        "sha256": "bf3b31ba46d359fe52d03641d899d8acf6645c0161344618471e60cecf561faa"
+      }
+    ]
+  },
+  {
+    "id": "data-tests",
+    "group": 2,
+    "title": "Tests and Assumptions",
+    "brief_copy": "Compare expected and actual results, or catch rows that violate a rule, in Python, SQL and DAX.",
+    "urls": [
+      "https://docs.weaverstack.dev/warehouse/tests/",
+      "https://docs.weaverstack.dev/semantic-models/validation/"
+    ],
+    "sources": [
+      "docs/warehouse/tests.md",
+      "docs/semantic-models/validation.md"
+    ],
+    "description": "Compare expected and actual results or catch rule-breaking rows through supported Python, SQL and DAX validations.",
+    "qualification": "",
+    "evidence": [
+      {
+        "repository": "matthias-wong-dev/weaverstack-docs",
+        "revision": "df5e266ffe5c6b893ef7a6291ba7b23ab0ed2b45",
+        "path": "docs/warehouse/tests.md",
+        "sha256": "74b18a6c1bb4a7d8bc131f4fdc386c3906c4dce9f8418fc7445980f09baca80e"
+      },
+      {
+        "repository": "matthias-wong-dev/weaverstack-docs",
+        "revision": "df5e266ffe5c6b893ef7a6291ba7b23ab0ed2b45",
+        "path": "docs/semantic-models/validation.md",
+        "sha256": "5f1b8399e7233acd74035e1e97020564ba2ec9632d406018eae20ade561841ec"
+      }
+    ]
+  },
+  {
+    "id": "quality-guards",
+    "group": 2,
+    "title": "Data-quality safeguards",
+    "brief_copy": "Track rejected rows and use stability thresholds to stop unusually large changes before they are applied.",
+    "urls": [
+      "https://docs.weaverstack.dev/advanced/partial-failures-rejected-data-and-thresholds/"
+    ],
+    "sources": [
+      "docs/advanced/partial-failures-rejected-data-and-thresholds.md"
+    ],
+    "description": "Record rejected input and refuse proposed update/delete changes that exceed active stability thresholds.",
+    "qualification": "",
+    "evidence": [
+      {
+        "repository": "matthias-wong-dev/weaverstack-docs",
+        "revision": "df5e266ffe5c6b893ef7a6291ba7b23ab0ed2b45",
+        "path": "docs/advanced/partial-failures-rejected-data-and-thresholds.md",
+        "sha256": "ca1d7382dd02eb31a54d1c6eedda8353b30b314895ee8da3272ae47fa9c9ec94"
+      }
+    ]
+  },
+  {
+    "id": "model-deployment",
+    "group": 3,
+    "title": "Native Semantic Model deployment",
+    "brief_copy": "Deploy the PBIP/TMDL model you already author, preserving its native source.",
+    "urls": [
+      "https://docs.weaverstack.dev/semantic-models/native-tmdl/"
+    ],
+    "sources": [
+      "docs/semantic-models/native-tmdl.md"
+    ],
+    "description": "Deploy the PBIP/TMDL model you already author while preserving its native source files.",
+    "qualification": "",
+    "evidence": [
+      {
+        "repository": "matthias-wong-dev/weaverstack-docs",
+        "revision": "df5e266ffe5c6b893ef7a6291ba7b23ab0ed2b45",
+        "path": "docs/semantic-models/native-tmdl.md",
+        "sha256": "853884c00e66e3eddc0c47fa127b50140b65320a3013cd6d27bd5ff83b5bd1b2"
+      }
+    ]
+  },
+  {
+    "id": "shared-policy",
+    "group": 3,
+    "title": "Organisation-wide modelling standards",
+    "brief_copy": "Apply shared TMDL policy across models instead of repeating formats and conventions manually.",
+    "urls": [
+      "https://docs.weaverstack.dev/semantic-models/shared-policy/"
+    ],
+    "sources": [
+      "docs/semantic-models/shared-policy.md"
+    ],
+    "description": "Apply shared native TMDL policy across Semantic Models instead of repeating formats and conventions.",
+    "qualification": "",
+    "evidence": [
+      {
+        "repository": "matthias-wong-dev/weaverstack-docs",
+        "revision": "df5e266ffe5c6b893ef7a6291ba7b23ab0ed2b45",
+        "path": "docs/semantic-models/shared-policy.md",
+        "sha256": "ee209c1216b97b392006579adf657e0b955ae1d682507dfe5eb4a04408c41d90"
+      }
+    ]
+  },
+  {
+    "id": "builtin-annotations",
+    "group": 3,
+    "title": "Built-in modelling annotations",
+    "brief_copy": "Hide foreign keys, organise measures and apply supported model rules through native TMDL declarations.",
+    "urls": [
+      "https://docs.weaverstack.dev/reference/power-bi/annotations/"
+    ],
+    "sources": [
+      "docs/reference/power-bi/annotations.md"
+    ],
+    "description": "Hide foreign keys, generate measure selectors and apply supported model rules through native TMDL annotations.",
+    "qualification": "Replaced broad organise-measures wording with supported generated measure-selector behaviour.",
+    "evidence": [
+      {
+        "repository": "matthias-wong-dev/weaverstack-docs",
+        "revision": "df5e266ffe5c6b893ef7a6291ba7b23ab0ed2b45",
+        "path": "docs/reference/power-bi/annotations.md",
+        "sha256": "d2c359fe045a8e86f5c967172808251d0df4476df7867d47235057c762646b15"
+      }
+    ]
+  },
+  {
+    "id": "custom-annotations",
+    "group": 3,
+    "title": "Custom Python annotations",
+    "brief_copy": "Write a project-specific modelling convention when native policy and built-ins aren't enough.",
+    "urls": [
+      "https://docs.weaverstack.dev/semantic-models/custom-annotations/"
+    ],
+    "sources": [
+      "docs/semantic-models/custom-annotations.md"
+    ],
+    "description": "Implement project-specific modelling conventions in trusted Python when native policy and built-ins are not enough.",
+    "qualification": "Explicit trusted Python; not sandboxed.",
+    "evidence": [
+      {
+        "repository": "matthias-wong-dev/weaverstack-docs",
+        "revision": "df5e266ffe5c6b893ef7a6291ba7b23ab0ed2b45",
+        "path": "docs/semantic-models/custom-annotations.md",
+        "sha256": "bd051198cc9cd7d9cc5102d70571dfda5a95268d5510e20845f35994944e919f"
+      }
+    ]
+  },
+  {
+    "id": "composition",
+    "group": 3,
+    "title": "Semantic Model composition",
+    "brief_copy": "Reuse a shared model foundation to produce variants for different audiences without copying everything.",
+    "urls": [
+      "https://docs.weaverstack.dev/semantic-models/composition/"
+    ],
+    "sources": [
+      "docs/semantic-models/composition.md"
+    ],
+    "description": "Reuse a native model foundation to produce audience variants without maintaining complete copies.",
+    "qualification": "",
+    "evidence": [
+      {
+        "repository": "matthias-wong-dev/weaverstack-docs",
+        "revision": "df5e266ffe5c6b893ef7a6291ba7b23ab0ed2b45",
+        "path": "docs/semantic-models/composition.md",
+        "sha256": "04c9c7138b8c7a41c6381705015acb78a7eb177a57ac356a47fb4ecc2dd0786e"
+      }
+    ]
+  },
+  {
+    "id": "dax-reconciliation",
+    "group": 3,
+    "title": "DAX validation and SQL reconciliation",
+    "brief_copy": "Independently validate measures, including comparisons against calculations over managed Lakehouse or Warehouse sources.",
+    "urls": [
+      "https://docs.weaverstack.dev/semantic-models/validation/"
+    ],
+    "sources": [
+      "docs/semantic-models/validation.md"
+    ],
+    "description": "Check DAX measures against independent expectations, including SQL calculations over managed Lakehouse or Warehouse sources.",
+    "qualification": "",
+    "evidence": [
+      {
+        "repository": "matthias-wong-dev/weaverstack-docs",
+        "revision": "df5e266ffe5c6b893ef7a6291ba7b23ab0ed2b45",
+        "path": "docs/semantic-models/validation.md",
+        "sha256": "5f1b8399e7233acd74035e1e97020564ba2ec9632d406018eae20ade561841ec"
+      }
+    ]
+  },
+  {
+    "id": "report-binding",
+    "group": 3,
+    "title": "Verified Report deployment",
+    "brief_copy": "Deploy one authored Report to different targets, resolving and checking the intended model and workspace binding.",
+    "urls": [
+      "https://docs.weaverstack.dev/reports/environments/"
+    ],
+    "sources": [
+      "docs/reports/environments.md"
+    ],
+    "description": "Deploy the same authored Report to different destinations, resolving and verifying its intended model and workspace binding.",
+    "qualification": "",
+    "evidence": [
+      {
+        "repository": "matthias-wong-dev/weaverstack-docs",
+        "revision": "df5e266ffe5c6b893ef7a6291ba7b23ab0ed2b45",
+        "path": "docs/reports/environments.md",
+        "sha256": "f557bb812a2e312cd579e3d95dec421f2cdeb16c50c97acceefb856a1cdc9cd6"
+      }
+    ]
+  },
+  {
+    "id": "catalogue",
+    "group": 4,
+    "title": "Central Fabric Catalogue",
+    "brief_copy": "Queryable installed definitions, signatures, metadata, dependencies and operational state in a Fabric Warehouse.",
+    "urls": [
+      "https://docs.weaverstack.dev/core-concepts/catalogue/"
+    ],
+    "sources": [
+      "docs/core-concepts/catalogue.md"
+    ],
+    "description": "Query installed definitions, signatures, metadata, dependencies and operational state in one Fabric Warehouse.",
+    "qualification": "",
+    "evidence": [
+      {
+        "repository": "matthias-wong-dev/weaverstack-docs",
+        "revision": "df5e266ffe5c6b893ef7a6291ba7b23ab0ed2b45",
+        "path": "docs/core-concepts/catalogue.md",
+        "sha256": "73136e01e4da3bc8dae234a2ca33e2ba77190cac2cda13b1276870e0a4a8c0d3"
+      }
+    ]
+  },
+  {
+    "id": "health",
+    "group": 4,
+    "title": "Unified Health",
+    "brief_copy": "See current, stale, pending, failed or inconsistent work across the registered managed estate.",
+    "urls": [
+      "https://docs.weaverstack.dev/estate/catalogue-and-health/"
+    ],
+    "sources": [
+      "docs/estate/catalogue-and-health.md"
+    ],
+    "description": "See current, stale, pending, failed or inconsistent work across the registered managed estate.",
+    "qualification": "",
+    "evidence": [
+      {
+        "repository": "matthias-wong-dev/weaverstack-docs",
+        "revision": "df5e266ffe5c6b893ef7a6291ba7b23ab0ed2b45",
+        "path": "docs/estate/catalogue-and-health.md",
+        "sha256": "62bb1a48c1248f9d8ad9550ce281ec1b1301384e74c6bbc12a53c2f01fb1ef5e"
+      }
+    ]
+  },
+  {
+    "id": "history",
+    "group": 4,
+    "title": "Logging and statistics",
+    "brief_copy": "Inspect workflow history, Load counts, timings, row changes and recorded outcomes.",
+    "urls": [
+      "https://docs.weaverstack.dev/advanced/row-auditing-and-operational-history/"
+    ],
+    "sources": [
+      "docs/advanced/row-auditing-and-operational-history.md"
+    ],
+    "description": "Inspect workflow history, Load counts, timings, row changes and recorded outcomes.",
+    "qualification": "",
+    "evidence": [
+      {
+        "repository": "matthias-wong-dev/weaverstack-docs",
+        "revision": "df5e266ffe5c6b893ef7a6291ba7b23ab0ed2b45",
+        "path": "docs/advanced/row-auditing-and-operational-history.md",
+        "sha256": "aef8cc6698c1a15ee42c6f27f7cd8f903acb633cc9139755dd64cbbbe0793eda"
+      }
+    ]
+  },
+  {
+    "id": "recovery",
+    "group": 4,
+    "title": "Fault-tolerant execution",
+    "brief_copy": "Preserve completed work; record failures and blocked dependants; optionally continue independent Load branches.",
+    "urls": [
+      "https://docs.weaverstack.dev/estate/recovery/"
+    ],
+    "sources": [
+      "docs/estate/recovery.md"
+    ],
+    "description": "Retain completed effects, record failures and blocked work, and optionally continue independent Load branches.",
+    "qualification": "",
+    "evidence": [
+      {
+        "repository": "matthias-wong-dev/weaverstack-docs",
+        "revision": "df5e266ffe5c6b893ef7a6291ba7b23ab0ed2b45",
+        "path": "docs/estate/recovery.md",
+        "sha256": "c55e58102f5d129de495325e80bbcfeee6cba36fbfafec26aa898b3eb2ddb16f"
+      }
+    ]
+  },
+  {
+    "id": "selection",
+    "group": 4,
+    "title": "Selective execution",
+    "brief_copy": "Select installed work by whole-name regex, add ancestors/descendants deliberately, and preview the plan.",
+    "urls": [
+      "https://docs.weaverstack.dev/estate/selective-runs/"
+    ],
+    "sources": [
+      "docs/estate/selective-runs.md"
+    ],
+    "description": "Select installed Load work by whole-name regex, deliberately add ancestors/descendants and preview the selection.",
+    "qualification": "",
+    "evidence": [
+      {
+        "repository": "matthias-wong-dev/weaverstack-docs",
+        "revision": "df5e266ffe5c6b893ef7a6291ba7b23ab0ed2b45",
+        "path": "docs/estate/selective-runs.md",
+        "sha256": "91ebebd84889f3f4c7ce60e112b8298b3476c54b6fa6013654791d742d1753b1"
+      }
+    ]
+  },
+  {
+    "id": "concurrency",
+    "group": 4,
+    "title": "Controlled concurrency",
+    "brief_copy": "Limit one invocation or tune per-resource work; schedule independent work without breaking dependency ordering.",
+    "urls": [
+      "https://docs.weaverstack.dev/estate/concurrency/"
+    ],
+    "sources": [
+      "docs/estate/concurrency.md"
+    ],
+    "description": "Cap one invocation or tune per-resource limits while scheduling independent work in dependency order.",
+    "qualification": "",
+    "evidence": [
+      {
+        "repository": "matthias-wong-dev/weaverstack-docs",
+        "revision": "df5e266ffe5c6b893ef7a6291ba7b23ab0ed2b45",
+        "path": "docs/estate/concurrency.md",
+        "sha256": "b20c5934691c59c514fa09bc6e5acde83ba947dcf399d55b72237f1892cec812"
+      }
+    ]
+  },
+  {
+    "id": "workflows",
+    "group": 4,
+    "title": "Sessions and workflows",
+    "brief_copy": "Reuse execution context and automate sequences of the same commands used interactively.",
+    "urls": [
+      "https://docs.weaverstack.dev/estate/automation-and-deployment/"
+    ],
+    "sources": [
+      "docs/estate/automation-and-deployment.md"
+    ],
+    "description": "Reuse execution context and automate sequences of the same operations used interactively.",
+    "qualification": "",
+    "evidence": [
+      {
+        "repository": "matthias-wong-dev/weaverstack-docs",
+        "revision": "df5e266ffe5c6b893ef7a6291ba7b23ab0ed2b45",
+        "path": "docs/estate/automation-and-deployment.md",
+        "sha256": "6d997a8b3ea3f04439ea84b2d814f7c3a0518f3a0444c565d33f5ea51385a9c1"
+      }
+    ]
+  },
+  {
+    "id": "environments",
+    "group": 5,
+    "title": "One project, multiple environments",
+    "brief_copy": "Keep logical identities and source files; map physical item and model destinations through workspace configuration.",
+    "urls": [
+      "https://docs.weaverstack.dev/estate/environments/"
+    ],
+    "sources": [
+      "docs/estate/environments.md"
+    ],
+    "description": "Keep source files and logical identities while workspace configuration selects physical item and model destinations.",
+    "qualification": "",
+    "evidence": [
+      {
+        "repository": "matthias-wong-dev/weaverstack-docs",
+        "revision": "df5e266ffe5c6b893ef7a6291ba7b23ab0ed2b45",
+        "path": "docs/estate/environments.md",
+        "sha256": "dcfff5cad64d7108f728a993b26278f3a593c919fdb05b1eca69a435de524807"
+      }
+    ]
+  },
+  {
+    "id": "mirror",
+    "group": 5,
+    "title": "Mirror: develop without copying everything",
+    "brief_copy": "Borrow installed Lakehouse/Warehouse data through OneLake shortcuts and Warehouse Views; materialise changed work locally.",
+    "urls": [
+      "https://docs.weaverstack.dev/estate/mirror/"
+    ],
+    "sources": [
+      "docs/estate/mirror.md"
+    ],
+    "description": "Borrow installed Lakehouse/Warehouse data through Shortcuts and Views, then materialise selected changed or affected work locally.",
+    "qualification": "",
+    "evidence": [
+      {
+        "repository": "matthias-wong-dev/weaverstack-docs",
+        "revision": "df5e266ffe5c6b893ef7a6291ba7b23ab0ed2b45",
+        "path": "docs/estate/mirror.md",
+        "sha256": "5168b9e9d0f6e57f061e8cc614fe4f4be1804fd7be4093053df7f0e2ab80951d"
+      }
+    ]
+  },
+  {
+    "id": "incremental-build",
+    "group": 5,
+    "title": "Incremental Build",
+    "brief_copy": "Detect changed definitions and affected installed descendants; leave certified unchanged work in place.",
+    "urls": [
+      "https://docs.weaverstack.dev/advanced/incremental-build-selection/"
+    ],
+    "sources": [
+      "docs/advanced/incremental-build-selection.md"
+    ],
+    "description": "Reconcile changed source-data definitions and affected selected descendants, retaining certified unchanged source work.",
+    "qualification": "Limited unchanged-work claim to source-data Build; selected models redeploy even unchanged.",
+    "evidence": [
+      {
+        "repository": "matthias-wong-dev/weaverstack-docs",
+        "revision": "df5e266ffe5c6b893ef7a6291ba7b23ab0ed2b45",
+        "path": "docs/advanced/incremental-build-selection.md",
+        "sha256": "87fce4db6b7d94f224c963190ece307b3ee82b582142f26a40e39d259ae378e0"
+      }
+    ]
+  },
+  {
+    "id": "build-preview",
+    "group": 5,
+    "title": "Build previews",
+    "brief_copy": "See selected actions, physical targets and destructive effects before running Build.",
+    "urls": [
+      "https://docs.weaverstack.dev/estate/development-cycle/"
+    ],
+    "sources": [
+      "docs/estate/development-cycle.md"
+    ],
+    "description": "Inspect selected actions, physical targets and destructive effects through a read-only Build plan.",
+    "qualification": "",
+    "evidence": [
+      {
+        "repository": "matthias-wong-dev/weaverstack-docs",
+        "revision": "df5e266ffe5c6b893ef7a6291ba7b23ab0ed2b45",
+        "path": "docs/estate/development-cycle.md",
+        "sha256": "c32e4eef0d00617f13eaa9382efae2d453fe9bd871e5e28afbd9863aaf8aea04"
+      }
+    ]
+  },
+  {
+    "id": "bundles",
+    "group": 5,
+    "title": "Controlled deployment bundles",
+    "brief_copy": "Review and hand off frozen, destination-specific installation plans without replanning them during Install.",
+    "urls": [
+      "https://docs.weaverstack.dev/advanced/build-bundles-and-controlled-installation/"
+    ],
+    "sources": [
+      "docs/advanced/build-bundles-and-controlled-installation.md"
+    ],
+    "description": "Review and hand off frozen, destination-specific installation plans without replanning during Install.",
+    "qualification": "",
+    "evidence": [
+      {
+        "repository": "matthias-wong-dev/weaverstack-docs",
+        "revision": "df5e266ffe5c6b893ef7a6291ba7b23ab0ed2b45",
+        "path": "docs/advanced/build-bundles-and-controlled-installation.md",
+        "sha256": "eff89163f2100cef0d59ebdaaa5feab221968d955cfa80951334fe31d5d97274"
+      }
+    ]
+  },
+  {
+    "id": "publication-readiness",
+    "group": 5,
+    "title": "Cross-engine publication and readiness",
+    "brief_copy": "Handle supported Lakehouse publication and SQL endpoint-readiness barriers before dependent Warehouse consumers execute.",
+    "urls": [
+      "https://docs.weaverstack.dev/estate/connected-items/"
+    ],
+    "sources": [
+      "docs/estate/connected-items.md"
+    ],
+    "description": "Order supported OneLake publication and SQL endpoint-readiness barriers before dependent cross-engine consumers.",
+    "qualification": "",
+    "evidence": [
+      {
+        "repository": "matthias-wong-dev/weaverstack-docs",
+        "revision": "df5e266ffe5c6b893ef7a6291ba7b23ab0ed2b45",
+        "path": "docs/estate/connected-items.md",
+        "sha256": "c280d7043e9f508d1df0704ea8d77600baaeb4514839c0875496d82740716c5d"
+      }
+    ]
+  },
+  {
+    "id": "data-protection",
+    "group": 5,
+    "title": "Protect important data",
+    "brief_copy": "Separate source ownership from managed targets, preserve protected objects and bound destructive operations.",
+    "urls": [
+      "https://docs.weaverstack.dev/advanced/protecting-data/"
+    ],
+    "sources": [
+      "docs/advanced/protecting-data.md"
+    ],
+    "description": "Keep irreplaceable sources outside managed targets and use Build replacement guards for protected owned objects.",
+    "qualification": "Build replacement guard is not protection from Load, Wipe or re-Mirror.",
+    "evidence": [
+      {
+        "repository": "matthias-wong-dev/weaverstack-docs",
+        "revision": "df5e266ffe5c6b893ef7a6291ba7b23ab0ed2b45",
+        "path": "docs/advanced/protecting-data.md",
+        "sha256": "e4b1516243065bb5f8f837eb38cdf2f149fe301ea565ee38e0a5e8d816a97b9b"
+      }
+    ]
+  }
+]

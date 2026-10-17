@@ -1,11 +1,27 @@
 {
-  "name": "Weaver: Microsoft Fabric, made easier.",
+  "name": "Weaver: making Fabric easier to use",
   "short_name": "Weaver",
-  "description": "Build and operate data pipelines across Microsoft Fabric from one project.",
+  "description": "Manage Fabric Lakehouses, Warehouses, semantic models and Reports in one project using Python, SQL and native Power BI files.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "background_color": "#f7f7f6",
   "theme_color": "#f7f7f6",
-  "icons": [{ "src": "/favicon.png", "sizes": "128x128", "type": "image/png" }]
+  "icons": [
+    {
+      "src": "/favicon.png",
+      "sizes": "128x128",
+      "type": "image/png"
+    },
+    {
+      "src": "/assets/brand/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/assets/brand/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
 }

@@ -182,7 +182,7 @@ def test_notebook_initialise_allows_project_configuration_in_the_same_workspace(
             environment="OtherRuntime",
         )
     ) as session:
-        report = _initialise(tmp_path, session=session, example=True)
+        report = _initialise(tmp_path, session=session, example="Sales")
     assert report.example.generated
     assert report.environment_publication == "deferred"
     assert report.succeeded

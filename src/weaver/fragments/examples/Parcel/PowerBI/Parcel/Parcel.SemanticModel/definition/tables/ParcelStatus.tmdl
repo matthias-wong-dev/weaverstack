@@ -1,0 +1,21 @@
+/// The latest status of each parcel, in the same shape as the Warehouse source.
+table ParcelStatus
+	column 'Parcel ID'
+		dataType: string
+		sourceColumn: Parcel ID
+		summarizeBy: none
+	column Status
+		dataType: string
+		sourceColumn: Status
+		summarizeBy: none
+	column Depot
+		dataType: string
+		sourceColumn: Depot
+		summarizeBy: none
+	partition ParcelStatus = m
+		mode: import
+		source =
+			let
+			    Source = #table(type table [#"Parcel ID" = text, Status = text, Depot = text], {{"P-1001", "In transit", "Central"}, {"P-1002", "Delivered", "South"}})
+			in
+			    Source
