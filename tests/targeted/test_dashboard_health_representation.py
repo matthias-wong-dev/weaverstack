@@ -26,7 +26,7 @@ from test_health_representation import NOW, RAW, REPORTING, YESTERDAY, _Estate, 
 from weaver.catalogue.claims import catalogue_columns
 from weaver.catalogue.lineage_rows import lineage_rows
 from weaver.catalogue.state import Catalogue
-from weaver.catalogue.tables import LINEAGE_NODE, MIRROR
+from weaver.catalogue.tables import INSTALLATION, LINEAGE_NODE, MIRROR
 from weaver.health import (
     AMBIGUOUS_INSTALLATION,
     CERTIFIED_MISSING,
@@ -43,6 +43,10 @@ UNOBSERVED = {
 }
 
 RENDERER = Path(__file__).parents[1] / "js" / "renderer.js"
+
+#: Two workspaces, as their GUIDs.
+FIRST = "6f9619ff-8b86-d011-b42d-00c04fc964ff"
+SECOND = "0e6c41d4-7b1f-4a63-9e7a-3a3c4b0d5f21"
 
 ASSESS = """
 const D = require(process.argv[1]).load();
@@ -148,12 +152,24 @@ def _dashboard_rows(catalogue: Catalogue) -> dict[str, list[dict]]:
     is what the lineage projection test proves it to be.
     """
 
+    # Items in two workspaces, keyed from every installation as Build keys them.
+    workspaces = {
+        item: SECOND if item == REPORTING else FIRST for item in catalogue.rows
+    }
     rows: dict[str, list[dict]] = {}
     for item, tables in catalogue.rows.items():
         declared = {
-            name: found for name, found in tables.items() if name != MIRROR.name
+            name: (
+                tuple({**row, "workspace_id": workspaces[item]} for row in found)
+                if name == INSTALLATION.name
+                else found
+            )
+            for name, found in tables.items()
+            if name != MIRROR.name
         }
-        projected = lineage_rows(Catalogue({item: declared}), item)
+        projected = lineage_rows(
+            Catalogue({item: declared}), item, workspaces=workspaces
+        )
         borrowed = {
             (row["schema_name"], row["object_name"])
             for row in tables.get(MIRROR.name, ())
@@ -164,7 +180,7 @@ def _dashboard_rows(catalogue: Catalogue) -> dict[str, list[dict]]:
             else row
             for row in projected[LINEAGE_NODE.name]
         )
-        for name, found in {**tables, **projected}.items():
+        for name, found in {**tables, **declared, **projected}.items():
             rows.setdefault(name, []).extend(found)
     return rows
 

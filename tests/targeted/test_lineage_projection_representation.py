@@ -36,6 +36,8 @@ from weaver.catalogue.reconcile import publish
 from weaver.catalogue.state import Catalogue
 from weaver.catalogue.tables import (
     DEPENDENCY,
+    EDGE_EXTERNAL,
+    EDGE_SHORTCUT,
     INSTALLATION,
     LINEAGE_EDGE,
     LINEAGE_NODE,
@@ -529,21 +531,174 @@ def test_an_authored_model_is_never_internal_by_its_name(tmp_path):
 # --- keys and flags -----------------------------------------------------------
 
 
+#: Two workspaces, as their GUIDs. Sales and Reporting may live in either.
+FIRST = "6F9619FF-8B86-D011-B42D-00C04FC964FF"
+SECOND = "0e6c41d4-7b1f-4a63-9e7a-3a3c4b0d5f21"
+
+
+def _keyed(built: Catalogue, workspaces):
+    """Every item's lineage rows, projected with these workspaces."""
+
+    return {
+        item: lineage_rows(Catalogue({item: tables}), item, workspaces=workspaces)
+        for item, tables in built.rows.items()
+    }
+
+
+def _keyed_rows(projected, table):
+    return [row for rows in projected.values() for row in rows[table.name]]
+
+
 @weaver_test()
-def test_each_key_is_its_node_id_hashed_and_each_edge_names_both_keys(repository):
+def test_a_key_is_the_node_in_its_workspace_and_each_edge_names_both_keys(repository):
+    built = built_catalogue(repository, _bindings(SALES, REPORTING))
+    workspaces = {SALES: FIRST, REPORTING: SECOND}
+    projected = _keyed(built, workspaces)
+
+    owners = {}
+    for row in _keyed_rows(projected, LINEAGE_NODE):
+        item = WeaverItemId(row["item_type"], row["item_name"])
+        owners[row["node_id"]] = workspaces.get(item)
+        assert row["node_key"] == node_key(row["node_id"], workspaces.get(item))
+    keys = {
+        row["node_id"]: row["node_key"] for row in _keyed_rows(projected, LINEAGE_NODE)
+    }
+    assert len(set(keys.values())) == len(keys)
+    # The GUID is canonical, so its case does not change a key.
+    assert node_key("x", FIRST) == node_key("x", FIRST.lower())
+    for edge in _keyed_rows(projected, LINEAGE_EDGE):
+        assert edge["downstream_node_key"] == keys[edge["downstream_node_id"]]
+        if edge["edge_kind"] != EDGE_EXTERNAL:
+            assert edge["upstream_node_key"] == keys[edge["upstream_node_id"]]
+        through = edge["through_node_id"]
+        assert edge["through_node_key"] == (None if through is None else keys[through])
+
+
+@weaver_test()
+def test_one_object_in_two_workspaces_has_two_keys_and_a_rename_changes_neither(
+    repository,
+):
+    built = built_catalogue(repository, _bindings(SALES, REPORTING))
+    first = _keyed(built, dict.fromkeys(built.rows, FIRST))
+    second = _keyed(built, dict.fromkeys(built.rows, SECOND))
+
+    def keys(projected):
+        return {
+            row["node_id"]: row["node_key"]
+            for row in _keyed_rows(projected, LINEAGE_NODE)
+        }
+
+    assert keys(first).keys() == keys(second).keys()
+    assert not set(keys(first).values()) & set(keys(second).values())
+    # A display name is no part of a key, so renaming a workspace keeps them.
+    renamed = Catalogue(
+        {
+            item: {
+                **tables,
+                "Installation": tuple(
+                    {**row, "workspace_name": "Renamed", "workspace_id": FIRST}
+                    for row in tables.get("Installation", ())
+                ),
+            }
+            for item, tables in built.rows.items()
+        }
+    )
+    assert keys(_keyed(renamed, dict.fromkeys(renamed.rows, FIRST))) == keys(first)
+    assert keys({item: lineage_rows(renamed, item) for item in renamed.rows}) == keys(
+        first
+    )
+
+
+@weaver_test()
+def test_a_shortcut_across_workspaces_reads_the_source_in_its_own_workspace(
+    repository,
+):
+    """Reporting shortcuts Sales; each item is projected from its own rows."""
+
+    built = built_catalogue(repository, _bindings(SALES, REPORTING))
+    projected = _keyed(built, {SALES: FIRST, REPORTING: SECOND})
+    sales = {
+        row["node_id"]: row["node_key"] for row in projected[SALES][LINEAGE_NODE.name]
+    }
+    (crossing,) = [
+        edge
+        for edge in projected[REPORTING][LINEAGE_EDGE.name]
+        if edge["edge_kind"] == EDGE_SHORTCUT and edge["upstream_node_id"] in sales
+    ]
+
+    assert crossing["upstream_node_key"] == sales[crossing["upstream_node_id"]]
+    assert crossing["upstream_node_key"] == node_key(
+        crossing["upstream_node_id"], FIRST
+    )
+    assert crossing["downstream_node_key"] == node_key(
+        crossing["downstream_node_id"], SECOND
+    )
+
+
+@weaver_test()
+def test_an_upstream_in_no_known_workspace_matches_no_node(repository):
+    """Neither an External read nor an item no installation records is invented."""
+
+    built = built_catalogue(repository, _bindings(SALES, REPORTING))
+    projected = _keyed(built, {REPORTING: SECOND})
+    reporting_keys = {
+        row["node_key"] for row in projected[REPORTING][LINEAGE_NODE.name]
+    }
+    crossing = [
+        edge
+        for edge in projected[REPORTING][LINEAGE_EDGE.name]
+        if edge["upstream_node_id"].startswith(f"{SALES}/")
+    ]
+
+    assert crossing
+    for edge in crossing:
+        assert edge["upstream_node_key"] == node_key(edge["upstream_node_id"])
+        assert edge["upstream_node_key"] not in reporting_keys
+    unresolved = _keyed(
+        _desired(repository, _bindings(SALES, REPORTING), omitted={CUSTOMER}),
+        {SALES: FIRST, REPORTING: SECOND},
+    )
+    external = [
+        edge
+        for edge in _keyed_rows(unresolved, LINEAGE_EDGE)
+        if edge["edge_kind"] == EDGE_EXTERNAL
+    ]
+    keys = {row["node_key"] for row in _keyed_rows(unresolved, LINEAGE_NODE)}
+    assert external
+    assert all(edge["upstream_node_key"] not in keys for edge in external)
+
+
+@weaver_test()
+def test_a_build_keys_lineage_by_every_workspace_the_catalogue_records(repository):
+    """The upstream item's workspace comes from the current catalogue."""
+
+    from weaver.catalogue.lineage_rows import with_lineage_rows
+
     built = built_catalogue(repository, _bindings(SALES, REPORTING))
 
-    nodes = _rows(built, LINEAGE_NODE)
-    keys = {row["node_id"]: row["node_key"] for row in nodes}
-    assert all(key == node_key(node) for node, key in keys.items())
-    assert len(set(keys.values())) == len(keys)
-    for edge in _rows(built, LINEAGE_EDGE):
-        assert edge["downstream_node_key"] == node_key(edge["downstream_node_id"])
-        assert edge["upstream_node_key"] == node_key(edge["upstream_node_id"])
-        through = edge["through_node_id"]
-        assert edge["through_node_key"] == (
-            None if through is None else node_key(through)
-        )
+    def installed(item, guid):
+        return {
+            **built.rows[item],
+            "Installation": tuple(
+                {**row, "workspace_id": guid}
+                for row in built.rows[item]["Installation"]
+            ),
+        }
+
+    current = Catalogue({SALES: installed(SALES, FIRST)})
+    desired = Catalogue({REPORTING: installed(REPORTING, SECOND)})
+    projected = with_lineage_rows(desired, repository, current=current)
+
+    crossing = [
+        edge
+        for edge in projected.rows[REPORTING][LINEAGE_EDGE.name]
+        if edge["upstream_node_id"].startswith(f"{SALES}/")
+    ]
+    assert crossing
+    assert all(
+        edge["upstream_node_key"] == node_key(edge["upstream_node_id"], FIRST)
+        for edge in crossing
+    )
 
 
 @weaver_test()

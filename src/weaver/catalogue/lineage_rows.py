@@ -52,14 +52,22 @@ def with_lineage_rows(
 
     The projection is advisory. An item whose rows cannot be projected keeps
     its ``current`` rows, so publication leaves them alone, and ``warn`` says so.
+    Each key names its node's workspace, from this build's installations and
+    the ones ``current`` already records.
     """
 
+    workspaces = {
+        **(installed_workspaces(current) if current is not None else {}),
+        **installed_workspaces(catalogue),
+    }
     rows = {}
     for item, tables in catalogue.rows.items():
         merged = dict(tables)
         try:
             projected = lineage_rows(
-                _with_semantic_sources(item, tables, repository), item
+                _with_semantic_sources(item, tables, repository),
+                item,
+                workspaces=workspaces,
             )
         except Exception as exc:
             kept = current.rows.get(item, {}) if current is not None else {}
@@ -108,17 +116,32 @@ def _with_semantic_sources(item, tables, repository) -> Catalogue:
 
 
 def lineage_rows(
-    catalogue: Catalogue, item: WeaverItemId
+    catalogue: Catalogue, item: WeaverItemId, *, workspaces=None
 ) -> dict[str, tuple[Row, ...]]:
-    """LineageNode and LineageEdge rows for ``item``, from its rows alone."""
+    """LineageNode and LineageEdge rows for ``item``, from its rows alone.
+
+    ``workspaces`` maps items to their Fabric workspace GUIDs, which every key
+    includes; it defaults to the installations ``catalogue`` records. A node in
+    an item with no known workspace is keyed by its ID alone and so matches no
+    installed node.
+    """
 
     from ..installed import item_dag
 
+    if workspaces is None:
+        workspaces = installed_workspaces(catalogue)
     dag = item_dag(catalogue, item)
+    owners = {node.node_id: node.item for node in dag.nodes}
+
+    def key(node_id: str) -> str:
+        return node_key(node_id, workspaces.get(owners.get(node_id)))
+
     tables = catalogue.rows.get(item, {})
     descriptions = _descriptions(tables)
     nodes = tuple(
-        _node_row(item, node, descriptions) for node in dag.nodes if node.item == item
+        _node_row(item, node, descriptions, key)
+        for node in dag.nodes
+        if node.item == item
     )
     validations = {node.node_id for node in dag.nodes if node.is_validation}
 
@@ -140,13 +163,26 @@ def lineage_rows(
                 through.setdefault((str(consumer), reference, EDGE_EXTERNAL), set())
 
     edges = tuple(
-        _edge_row(item, downstream, upstream, kind, passes)
+        _edge_row(item, downstream, upstream, kind, passes, key)
         for (downstream, upstream, kind), passes in sorted(through.items())
     )
     return {LINEAGE_NODE.name: nodes, LINEAGE_EDGE.name: edges}
 
 
-def _edge_row(item, downstream, upstream, kind, passes) -> Row:
+def installed_workspaces(catalogue: Catalogue) -> dict[WeaverItemId, str]:
+    """The workspace GUID each item's installation records."""
+
+    from .tables import INSTALLATION
+
+    return {
+        item: str(row["workspace_id"])
+        for item, tables in catalogue.rows.items()
+        for row in tables.get(INSTALLATION.name, ())
+        if row.get("workspace_id")
+    }
+
+
+def _edge_row(item, downstream, upstream, kind, passes, key) -> Row:
     # Two shortcuts to one source can both be read; one is named.
     shortcut = min(passes) if passes else None
     return _signed(
@@ -157,18 +193,36 @@ def _edge_row(item, downstream, upstream, kind, passes) -> Row:
             "upstream_node_id": upstream,
             "edge_kind": kind,
             "through_node_id": shortcut,
-            "downstream_node_key": node_key(downstream),
-            "upstream_node_key": node_key(upstream),
-            "through_node_key": None if shortcut is None else node_key(shortcut),
+            "downstream_node_key": key(downstream),
+            # An External read names what its author wrote, in no workspace.
+            "upstream_node_key": (
+                node_key(upstream) if kind == EDGE_EXTERNAL else key(upstream)
+            ),
+            "through_node_key": None if shortcut is None else key(shortcut),
         }
     )
 
 
-def node_key(node_id: str) -> str:
-    """The short key a report joins nodes and edges on."""
+def node_key(node_id: str, workspace_id: str | None = None) -> str:
+    """The short key a report joins nodes and edges on: a node in its workspace.
 
-    digest = hashlib.sha256(node_id.encode("utf-8")).hexdigest()
-    return digest[:NODE_KEY_DIGITS]
+    The workspace is its GUID, so a renamed workspace keeps its keys. Without
+    one the key hashes the node ID alone.
+    """
+
+    text = node_id if not workspace_id else f"{canonical_guid(workspace_id)}|{node_id}"
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:NODE_KEY_DIGITS]
+
+
+def canonical_guid(value) -> str:
+    """Lowercase and hyphenated, as ``str(uuid.UUID(...))`` writes it."""
+
+    import uuid
+
+    try:
+        return str(uuid.UUID(str(value).strip()))
+    except ValueError:
+        return str(value).strip().lower()
 
 
 def _descriptions(tables) -> dict[tuple[str, str], str]:
@@ -181,7 +235,7 @@ def _descriptions(tables) -> dict[tuple[str, str], str]:
     return found
 
 
-def _node_row(item: WeaverItemId, node, descriptions) -> Row:
+def _node_row(item: WeaverItemId, node, descriptions, key) -> Row:
     schema_name, object_name = catalogue_columns(node.identity)
     if node.is_validation:
         description = node.description
@@ -198,7 +252,7 @@ def _node_row(item: WeaverItemId, node, descriptions) -> Row:
             "schema_name": schema_name,
             "object_name": object_name,
             "node_id": node.node_id,
-            "node_key": node_key(node.node_id),
+            "node_key": key(node.node_id),
             "node_kind": _kind(node),
             "label": label,
             "item_label": item_label,

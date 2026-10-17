@@ -209,18 +209,20 @@ when its effective signature matches the installed model.
 
 ### Catalogue Dashboard
 
-Weaver's built-in semantic model and Report over the catalogue are deployed by
-`weaver initialise`, never by Build:
+An optional semantic model and Report over one catalogue. Initialise, Build,
+Load and Mirror never deploy or need it:
 
 ```bash
-weaver initialise --project-folder . --catalogue-dashboard "Catalogue Dashboard"
+weaver catalogue-dashboard --catalogue Analytics/Warehouse/Weaver --name "Catalogue Dashboard"
 ```
 
-The option records `catalogue_dashboard: Catalogue Dashboard` in
-`workspace-config.yml`, and deploys the model and Report to that Fabric item
-with the catalogue tables they read. Running `weaver initialise` again in the
-project folder updates them, so do that after upgrading Weaver. A rerun keeps
-the project's existing files and adds only the targets new items need.
+`--catalogue` and `--name` default to `catalogue:` and `catalogue_dashboard:` in
+`workspace-config.yml`. The command creates the model and Report, or updates the
+ones it deployed before; run it again after upgrading Weaver. It reads the
+catalogue and changes nothing in it, so the catalogue must already hold this
+Weaver version's tables; build a project into it first. The Dashboard deploys
+in the catalogue's own workspace. `--dry-run` resolves the source and the two
+items without changing anything.
 
 The Report has seven pages: Overview, Health, Load orchestration, Gantt,
 Performance, Entity dictionary and Semantic model. Each renders in the HTML
@@ -230,8 +232,7 @@ organisational visual. The model needs no visual, and any Report can use it.
 The model reads the catalogue's tables over Direct Lake, so the Overview,
 Health, Load orchestration and Gantt pages show settled work as it is recorded;
 they refresh every 30 seconds, or at the capacity's minimum interval when that
-is longer. A project's own `Catalogue Dashboard` model or Report is refused while
-the key is set.
+is longer.
 
 ### Shared data sources
 
@@ -487,8 +488,10 @@ weaver load SemanticModel/Reporting --workspace Analytics
 Build deploys each selected model and verifies its readback. With no catalogue
 Load records nothing. Authored tables can retain logical `Weaver.Source` annotations
 without catalogue metadata; each names a configured or mapped target, or a Table
-or View the project declares. Tests and Assumptions run in file mode. Source
-generation, Lakehouse and Warehouse operations, installed lineage, and
+or View the project declares. A table with no partition is generated from a
+configured target, whose columns Fabric reports. Tests and Assumptions run in
+file mode. Generation from any other source, Lakehouse and Warehouse operations,
+installed lineage, and
 `load --stale`, `--name`, `--reload`, `--ancestors` or `--descendants` need a catalogue.
 
 ### Load and connections

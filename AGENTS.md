@@ -75,12 +75,7 @@ Two operations create Fabric items, and their kinds do not overlap.
 Warehouses. Build creates each selected SemanticModel and Report target that is
 missing, in `weaver.fabric.powerbi_items`, before it reads build state, and
 creates nothing else; a missing Lakehouse or Warehouse target fails its
-preflight. The built-in Catalogue Dashboard is the one Power BI pair
-`initialise` deploys: `weaver.operations.build.deploy_catalogue_dashboard`
-runs Build over the Dashboard's items and the catalogue item together, so the
-tables its Direct Lake model reads exist first. Build itself never composes
-or selects the Dashboard; `configured_items` excludes it, and
-`bound_targets` keeps it for target resolution and Wipe. A bundle-only Build creates nothing and refuses a missing target,
+preflight. A bundle-only Build creates nothing and refuses a missing target,
 because a bundle freezes each target's item ID. A command naming
 no workspace and inheriting none reads `workspace-config.yml` in the directory
 it was run from, which is the last resort in `weaver.config.resolve_workspace`.
@@ -108,7 +103,21 @@ planning, validation planning and health read it. Build publishes it per item
 as `_.LineageNode` and `_.LineageEdge` through `weaver.installed.item_dag`,
 which reads one item's rows and assumes the upstreams they name in other items,
 so an item's rows never depend on another item's state. The projection is
-advisory and never blocks Build, Wipe or Mirror.
+advisory and never blocks Build, Wipe or Mirror. A node key hashes the owning
+item's workspace GUID with the node ID (`lineage_rows.node_key`); each edge
+endpoint takes its own item's workspace, from this build's installations and
+the ones the catalogue already records, and an endpoint in no known workspace
+hashes its ID alone. Mirror re-keys forked lineage by the destination's
+installations in its final transaction (`fork.lineage_key_statements`), and
+marks what `_.Mirror` records as mirrored (`borrow.lineage_statement`), which
+Build repeats after publishing lineage in a catalogue that borrows.
+
+The Catalogue Dashboard observes a catalogue and is no part of its lifecycle.
+`weaver catalogue-dashboard` (`operations.catalogue_dashboard`) writes the
+`dashboard` fragment as an ordinary Power BI project and builds it without a
+catalogue, with the source catalogue Warehouse as the configured target of
+`Warehouse/_weaver`, so the catalogue is read and never written. Initialise,
+Build, Wipe and Mirror know nothing of it, and no item name is reserved.
 
 ## The core abstraction
 
@@ -758,6 +767,8 @@ Enforceable as the corresponding code lands:
 - **Semantic models compile without a catalogue.** With no catalogue, Build
   accepts only SemanticModel items, deploys every selected model and verifies
   readback on the model; Load refreshes the named models and records nothing.
+  A generated table's source must be a configured target, whose shape Fabric
+  reports.
   Nothing target-local stands in for the catalogue, so there is no fixed point.
 - **The central catalogue is authoritative.** No target-local catalogue, no
   target-local runtime, no target-local logging authority.
