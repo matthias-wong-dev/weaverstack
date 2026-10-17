@@ -3,11 +3,12 @@
 // its children the tables referencing it. Relationship graphs may contain
 // cycles; every walk keeps a visited set.
 
-var ER = { NODES: 80, EXPANDED: 120, BOX: 220, HEAD: 34, ROW: 18, GAP_X: 64, GAP_ROW: 120, COLUMNS: 8 };
+var ER = { NODES: 80, EXPANDED: 120, WRAP: 8, BOX: 220, HEAD: 34, ROW: 18, GAP_X: 64, GAP_ROW: 120, COLUMNS: 8 };
 
-/* The declared relationships of the Lakehouses and Warehouses, or of one of
-   them: a relationship belongs to an item when either end is in it. Both ends
-   keep their foreign and primary columns. */
+/* The declared tables and relationships of the Lakehouses and Warehouses, or
+   of one of them: a relationship belongs to an item when either end is in it.
+   A table with no relationship is a node of its own. Both ends of a
+   relationship keep their foreign and primary columns. */
 function erGraph(m, item) {
   var md = metadata(m), nodes = new Map(), edges = [];
   function node(id) {
@@ -25,6 +26,7 @@ function erGraph(m, item) {
     node(fk.from); node(fk.to);
     edges.push({ from: fk.from, to: fk.to, fromColumns: fk.fromColumns, toColumns: fk.toColumns, label: "", active: true, many: true });
   });
+  md.tables.forEach(function (_, id) { if (!item || item === "all" || id.split("|")[0] === item) node(id); });
   edges.forEach(function (e, i) { e.id = i; nodes.get(e.from).refs.push(e); nodes.get(e.to).back.push(e); });
   return { nodes: nodes, edges: edges };
 }
@@ -35,12 +37,12 @@ function childrenOf(n) { return n.back.map(function (e) { return e.from; }); }
 /* The selected tables with their parents to depth up and their children to
    depth down, nearest first up to ER.NODES, plus what the reader has expanded.
    rank orders the rows: parents above, children below. With nothing selected
-   the window is the whole graph when it fits, ranked by each table's longest
-   chain of references, and otherwise null. Every related table left out is
-   counted on the shown table it hangs from. */
+   the window is the whole graph, or its ER.NODES most related tables, ranked
+   by each table's longest chain of references. Every related table left out
+   is counted on the shown table it hangs from. */
 function erWindow(g, selection, up, down, expanded) {
   var seeds = (Array.isArray(selection) ? selection : [selection]).filter(function (id) { return g.nodes.has(id); });
-  var rank = new Map(), reach;
+  var rank = new Map(), reach = g.nodes.size;
   if (seeds.length) {
     seeds.forEach(function (id) { rank.set(id, 0); });
     [[parentsOf, -1, up], [childrenOf, 1, down]].forEach(function (w) {
@@ -59,20 +61,21 @@ function erWindow(g, selection, up, down, expanded) {
     });
     rank = new Map(ranked.slice(0, ER.NODES).map(function (r) { return [r.id, r.d]; }));
   } else {
-    if (g.nodes.size > ER.NODES) return null;
+    var most = Array.from(g.nodes.values()).sort(function (a, b) {
+      return b.refs.length + b.back.length - a.refs.length - a.back.length || compare(a.label, b.label) || compare(a.id, b.id);
+    }).slice(0, ER.NODES), inside = new Set(most.map(function (n) { return n.id; }));
     var visiting = new Set();
     var level = function (id) {
       if (rank.has(id)) return rank.get(id);
       if (visiting.has(id)) return 0;
       visiting.add(id);
       var deepest = -1;
-      parentsOf(g.nodes.get(id)).forEach(function (p) { if (p !== id) deepest = Math.max(deepest, level(p)); });
+      parentsOf(g.nodes.get(id)).forEach(function (p) { if (p !== id && inside.has(p)) deepest = Math.max(deepest, level(p)); });
       visiting.delete(id);
       rank.set(id, deepest + 1);
       return deepest + 1;
     };
-    g.nodes.forEach(function (n) { level(n.id); });
-    reach = rank.size;
+    inside.forEach(level);
   }
   var kept = rank.size, added = new Set();
   // An expanded table sits a row above the shown table it is a parent of, or a
@@ -92,7 +95,7 @@ function erWindow(g, selection, up, down, expanded) {
     ups.concat(downs).forEach(function (j) { hidden.add(j); });
     if (ups.length || downs.length) more.set(id, { up: ups, down: downs });
   });
-  return { seeds: new Set(seeds), rank: rank, expanded: added, reach: reach, truncated: seeds.length > 0 && reach > kept, more: more, hidden: hidden.size,
+  return { seeds: new Set(seeds), rank: rank, expanded: added, reach: reach, truncated: reach > kept, more: more, hidden: hidden.size,
     edges: g.edges.filter(function (e) { return rank.has(e.from) && rank.has(e.to); }) };
 }
 
@@ -127,16 +130,20 @@ function erLayout(g, win) {
       return [id, near.length ? near.reduce(function (a, b) { return a + b; }, 0) / near.length : 0];
     }));
     ids.sort(function (a, b) { return bary.get(a) - bary.get(b) || compare(g.nodes.get(a).label, g.nodes.get(b).label) || compare(a, b); });
-    var rows = ids.map(function (id) { return erRows(g.nodes.get(id), win.edges); });
-    var heights = rows.map(function (r) { return ER.HEAD + Math.max(1, r.rows.length + (r.hidden ? 1 : 0)) * ER.ROW + 8; });
-    var width = ids.length * ER.BOX + (ids.length - 1) * ER.GAP_X, x = -width / 2;
-    ids.forEach(function (id, i) {
-      boxes.set(id, { x: x, y: y, h: heights[i], rows: rows[i].rows, hidden: rows[i].hidden });
-      placedX.set(id, x + ER.BOX / 2);
-      left = Math.min(left, x); right = Math.max(right, x + ER.BOX);
-      x += ER.BOX + ER.GAP_X;
-    });
-    y += Math.max.apply(null, heights) + ER.GAP_ROW;
+    // A rank wider than ER.WRAP tables wraps onto further rows.
+    for (var start = 0; start < ids.length; start += ER.WRAP) {
+      var line = ids.slice(start, start + ER.WRAP);
+      var rows = line.map(function (id) { return erRows(g.nodes.get(id), win.edges); });
+      var heights = rows.map(function (r) { return ER.HEAD + Math.max(1, r.rows.length + (r.hidden ? 1 : 0)) * ER.ROW + 8; });
+      var width = line.length * ER.BOX + (line.length - 1) * ER.GAP_X, x = -width / 2;
+      line.forEach(function (id, i) {
+        boxes.set(id, { x: x, y: y, h: heights[i], rows: rows[i].rows, hidden: rows[i].hidden });
+        placedX.set(id, x + ER.BOX / 2);
+        left = Math.min(left, x); right = Math.max(right, x + ER.BOX);
+        x += ER.BOX + ER.GAP_X;
+      });
+      y += Math.max.apply(null, heights) + (start + ER.WRAP < ids.length ? ER.GAP_ROW / 2 : ER.GAP_ROW);
+    }
   });
   return { boxes: boxes, bounds: { x: left - 80, y: -80, w: right - left + 160, h: y - ER.GAP_ROW + 160 } };
 }
@@ -152,14 +159,7 @@ function erWorkspace(body, m, s, options) {
   if (s.up === undefined) s.up = 1;
   if (s.down === undefined) s.down = 1;
   var f = workspaceFrame(s, function () {}), drawing = el("div", { "class": "wd-er-drawing" }), zoom = null, notice = null;
-  // The most related table stands in for a selection when the graph is too large to draw whole.
-  var standIn = null;
-  g.nodes.forEach(function (n) {
-    var deg = n.refs.length + n.back.length, best = standIn ? standIn.refs.length + standIn.back.length : -1;
-    if (deg > best || (deg === best && compare(n.label, standIn.label) < 0)) standIn = n;
-  });
-  function seeds() { return s.selection.length || g.nodes.size <= ER.NODES ? s.selection : [standIn.id]; }
-  function focus() { var list = seeds(); return list[list.length - 1] || null; }
+  function focus() { return s.selection[s.selection.length - 1] || null; }
   /* A plain choice replaces the selection; Shift, Ctrl or ⌘ adds or removes. */
   function select(id, adding) {
     if (!id) s.selection = [];
@@ -178,16 +178,17 @@ function erWorkspace(body, m, s, options) {
     draw(id, before);
     saveState();
   }
-  function win() { return erWindow(g, seeds(), s.up, s.down, s.expanded); }
+  function win() { return erWindow(g, s.selection, s.up, s.down, s.expanded); }
   function status(w) {
     f.line.textContent = "";
     var parts = [];
     if (w) {
-      parts.push(fmt(w.rank.size) + " of " + fmt(g.nodes.size) + " related tables shown" + (w.seeds.size > 1 ? " · " + w.seeds.size + " selected" : ""));
-      if (!s.selection.length && w.seeds.size) parts.push("around " + g.nodes.get(focus()).label + ", the most related; search or select a table to choose another");
+      parts.push(fmt(w.rank.size) + " of " + fmt(g.nodes.size) + " tables shown" + (w.seeds.size > 1 ? " · " + w.seeds.size + " selected" : ""));
+      if (!w.seeds.size && w.truncated) parts.push("the most related; search or select a table to follow its relationships");
+      if (w.seeds.size && !w.edges.length && !w.hidden) parts.push(w.seeds.size > 1 ? "none has a declared relationship" : "it has no declared relationship");
       if (w.expanded.size) parts.push(fmt(w.expanded.size) + " expanded");
       if (w.hidden) parts.push(fmt(w.hidden) + " more beside them; select a ↑ or ↓ marker to expand");
-      if (w.truncated) parts.push(el("b", { "class": "wd-warn-text", text: "cut to the " + ER.NODES + " nearest of " + fmt(w.reach) + "; lower a depth" }));
+      if (w.seeds.size && w.truncated) parts.push(el("b", { "class": "wd-warn-text", text: "cut to the " + ER.NODES + " nearest of " + fmt(w.reach) + "; lower a depth" }));
     }
     if (notice) parts.push(el("b", { "class": "wd-warn-text", text: notice }));
     parts.forEach(function (p, i) { if (i) f.line.appendChild(document.createTextNode(" · ")); f.line.appendChild(typeof p === "string" ? document.createTextNode(p) : p); });
@@ -291,7 +292,7 @@ function erWorkspace(body, m, s, options) {
   ]));
   if (options.describe) options.describe(f.side);
   if (!g.nodes.size) {
-    drawing.appendChild(empty("No declared relationship is recorded" + (options.item && options.item !== "all" ? " for " + itemName(options.item) : "") + "."));
+    drawing.appendChild(empty("No declared table is recorded" + (options.item && options.item !== "all" ? " for " + itemName(options.item) : "") + "."));
     return { has: function () { return false; }, select: function () {}, say: function () {}, side: f.side };
   }
   draw();

@@ -374,6 +374,36 @@ test("the ER diagram walks parents and children to their own depths", () => {
   assert.ok(lay.boxes.get(id("Region")).y < lay.boxes.get(id("Customer")).y);
 });
 
+test("the ER diagram keeps a table with no relationship, and caps the unselected window", () => {
+  const TABLES = ["item", "schema", "object", "type", "description", "lineage", "primarykey", "notnull", "identity", "incremental", "static", "prohibitrebuild"];
+  const W = "Warehouse/Curated", rows = [];
+  for (let i = 0; i < 100; i++) rows.push([W, "Sales", "Lone" + String(i).padStart(3, "0"), "table", "", "", "", "", "", "", "", ""]);
+  const g = D.erGraph(model(estate({ extra: table("tables", TABLES, rows) })), "all");
+  const lone = W + "|Sales|Lone007";
+  assert.ok(g.nodes.has(lone));
+  const alone = D.erWindow(g, [lone], -1, -1, []);
+  assert.deepEqual(Array.from(alone.rank.keys()), [lone]);
+  assert.ok(!alone.more.size && !alone.truncated);
+  const whole = D.erWindow(g, [], 1, 1, []);
+  assert.equal(whole.rank.size, D.ER.NODES);
+  assert.ok(whole.truncated && whole.reach === 100);
+  // A wide rank wraps rather than running on.
+  const rowsUsed = new Set(Array.from(D.erLayout(g, whole).boxes.values()).map((b) => b.y));
+  assert.equal(rowsUsed.size, Math.ceil(D.ER.NODES / D.ER.WRAP));
+});
+
+test("every second column of an item sits half a row lower", () => {
+  const nodes = [], edgeRows = [];
+  for (let i = 0; i < 4; i++) nodes.push(["n" + i, "Warehouse/Chain", "S", "T" + i, "Table", "S.T" + i, 9, ""]);
+  for (let i = 1; i < 4; i++) edgeRows.push(["n" + i, "n" + (i - 1), "Dependency", "", ""]);
+  const text = table("page", ["name"], [["lineage"]]) + table("meta", ["at", "format"], [[AT, 1]]) + table("nodes", NODE, nodes) + table("edges", EDGE, edgeRows);
+  const lay = D.layoutEstate(model(text), D.WINDOW_GEOMETRY);
+  const ys = ["n0", "n1", "n2", "n3"].map((k) => lay.pos.get(k).y);
+  assert.deepEqual(ys.map((y) => y - ys[0]), [0, D.WINDOW_GEOMETRY.ROW / 2, 0, D.WINDOW_GEOMETRY.ROW / 2]);
+  const band = lay.bands[0];
+  ["n0", "n1", "n2", "n3"].forEach((k) => assert.ok(lay.pos.get(k).y < band.y + band.height));
+});
+
 test("dictionary search ranks names before descriptions and finds columns", () => {
   const extra = table("columns", ["item", "schema", "object", "column", "description", "identity"], [
     ["Warehouse/Curated", "Sales", "Region", "Region ID", "The region's key.", ""]]) + SEMANTIC;

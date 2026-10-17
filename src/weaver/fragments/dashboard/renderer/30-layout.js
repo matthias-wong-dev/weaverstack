@@ -6,8 +6,8 @@
 
 /* LABEL is the widest a node's label is drawn; each column leaves room after it
    for the edges leaving it, and a selection's columns for its expansion marker. */
-var GEOMETRY = { COL: 290, SUB: 260, ROW: 34, HEAD: 54, PAD: 22, GAP: 40, LABEL: 200 };
-var WINDOW_GEOMETRY = { COL: 390, SUB: 360, ROW: 46, HEAD: 54, PAD: 22, GAP: 48, LABEL: 240 };
+var GEOMETRY = { COL: 290, SUB: 260, ROW: 40, HEAD: 54, PAD: 22, GAP: 40, LABEL: 200 };
+var WINDOW_GEOMETRY = { COL: 390, SUB: 360, ROW: 58, HEAD: 54, PAD: 22, GAP: 48, LABEL: 240 };
 var BUDGET = { NODES: 600, EDGES: 3000, REVEAL: 40, EXPANDED: 600 };
 
 function itemLevels(m, items) {
@@ -112,7 +112,9 @@ function layoutEstate(m, geometry) {
   items.forEach(function (it) {
     var layers = itemLayers(m, it), byLayer = orderLayers(m, it, layers);
     var maxRows = Math.max(40, Math.ceil(Math.sqrt(it.nodes.length) * 5));
-    var x = 0, rows = 1, columns = [];
+    // Every second column sits half a row lower, so an edge running straight
+    // through a column passes between its nodes rather than over one.
+    var x = 0, rows = 1, columns = [], drawn = 0;
     byLayer.forEach(function (list, l) {
       var subs = Math.max(1, Math.ceil(list.length / maxRows)), perSub = Math.max(1, Math.ceil(list.length / subs));
       var width = subs > 1 ? subs * G.SUB : G.COL;
@@ -120,9 +122,10 @@ function layoutEstate(m, geometry) {
         kind: layers.shortcuts && l === 0 ? "shortcuts" : layers.validations && l === layers.last ? "validations" : "objects" });
       list.forEach(function (n, i) {
         var sub = Math.floor(i / perSub), row = i - sub * perSub;
-        pos.set(n.key, { x: x + sub * G.SUB, y: row, layer: l });
+        pos.set(n.key, { x: x + sub * G.SUB, y: row + ((drawn + sub) % 2) / 2, layer: l });
       });
-      rows = Math.max(rows, Math.min(list.length, perSub));
+      drawn += subs;
+      rows = Math.max(rows, Math.min(list.length, perSub) + (drawn > 1 ? 0.5 : 0));
       x += width;
     });
     bands.push({ item: it, width: G.PAD * 2 + x, height: G.HEAD + rows * G.ROW + G.PAD, columns: columns, level: levels.get(it.label) });

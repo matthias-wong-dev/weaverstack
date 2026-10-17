@@ -218,7 +218,7 @@ function entitiesPage(body, m) {
     s.selected = entryId(e);
     var id = tableOf(e);
     if (id && er.has(id)) er.select(id, adding);
-    else if (id) er.say(e.label + " has no declared relationship" + (s.item !== "all" ? " in " + itemName(s.item) : ""));
+    else if (id) er.say(e.label + " is not a declared table" + (s.item !== "all" ? " in " + itemName(s.item) : ""));
     renderSide(); renderList(); renderDetail();
     saveState();
   }
