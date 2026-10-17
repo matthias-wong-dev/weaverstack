@@ -11,11 +11,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Mapping, Sequence
+from typing import TYPE_CHECKING, Mapping, Sequence
 
 from ..errors import CommandError
 from ..workspaces import CATALOGUE_KIND, CatalogueRef, Workspace
 from .workspace import operation_workspace
+
+if TYPE_CHECKING:
+    from ..catalogue.fork import ForkSource
 
 
 @dataclass(frozen=True)
@@ -70,6 +73,8 @@ class ResolvedMirror:
     plan: MirrorPlan
     #: Whether the source catalogue holds a ``_.Mirror``.
     borrowed: bool = False
+    #: Whether the source catalogue holds the lineage tables.
+    graphed: bool = True
     items: tuple[MirrorItem, ...] = ()
     #: Final physical target for each logical item. Resolution completes before
     #: any writes so shortcut rebuilding does not depend on item order.
@@ -77,6 +82,8 @@ class ResolvedMirror:
     #: Each selected item's source ``_.Installation`` row, which the fork copies
     #: and the mirror rebinds last.
     installations: Mapping[object, Mapping] = field(default_factory=dict)
+    #: The source catalogue mapped onto this version's; ``None`` is this version's.
+    fork: ForkSource | None = None
 
     @property
     def workspace(self) -> Workspace:
@@ -189,17 +196,27 @@ def plan_mirror(
 def check_mirror(plan: MirrorPlan, *, session=None) -> ResolvedMirror:
     """Validate the plan against the source catalogue without changing Fabric."""
 
+    from ..catalogue.connection import catalogue_connection
     from ..catalogue.state import catalogue_for
     from ..sessions.host import use_or_create_session
 
     with use_or_create_session(session, workspace=plan.workspace) as opened:
-        borrowed = _prove_source(plan, session=opened)
+        connection = catalogue_connection(opened, _source_workspace(plan))
+        fork = _prove_source(plan, connection)
         catalogue = (
             catalogue_for(opened, _source_workspace(plan)) if plan.items else None
         )
-        resolved = resolve_mirror(plan, catalogue, borrowed=borrowed)
-        _verify_source_identities(resolved, session=opened)
-        return resolved
+        from ..catalogue.fork import OPTIONAL_TABLES
+
+        graphed = all(table.name in fork.columns for table in OPTIONAL_TABLES)
+        resolved = resolve_mirror(
+            plan, catalogue, borrowed=fork.borrowed, graphed=graphed
+        )
+        if fork.legacy_installation:
+            fork = _upgraded_identities(plan, fork, connection, session=opened)
+        else:
+            _verify_source_identities(resolved, session=opened)
+        return replace(resolved, fork=fork)
 
 
 def _verify_source_identities(resolved: "ResolvedMirror", *, session) -> None:
@@ -216,8 +233,33 @@ def _verify_source_identities(resolved: "ResolvedMirror", *, session) -> None:
         verify_installations(rows, resolver=session.resolver(resolved.workspace))
 
 
+def _upgraded_identities(plan: MirrorPlan, fork, connection, *, session):
+    """Verify every installation a legacy source records, as Build's upgrade does."""
+
+    from types import SimpleNamespace
+
+    from ..catalogue.builtin import BUILTIN_ITEM
+    from ..catalogue.installation import resolve_installations
+    from ..catalogue.reader import read_table
+    from ..catalogue.tables import INSTALLATION
+
+    rows = [
+        row
+        for row in read_table(connection, INSTALLATION)
+        if (row["item_type"], row["item_name"])
+        != (BUILTIN_ITEM.item_type, BUILTIN_ITEM.item_name)
+    ]
+    upgrade = {"columns": dict.fromkeys(fork.legacy_installation)}
+    resolve_installations(
+        SimpleNamespace(installation_upgrade=upgrade),
+        rows,
+        resolver=session.resolver(plan.workspace),
+    )
+    return replace(fork, identities=tuple(upgrade["resolved"]))
+
+
 def resolve_mirror(
-    plan: MirrorPlan, catalogue, *, borrowed: bool = False
+    plan: MirrorPlan, catalogue, *, borrowed: bool = False, graphed: bool = True
 ) -> ResolvedMirror:
     """Settle a plan against the source catalogue; ``None`` selects no items."""
 
@@ -225,6 +267,7 @@ def resolve_mirror(
     resolved = ResolvedMirror(
         plan=plan,
         borrowed=borrowed,
+        graphed=graphed,
         items=items,
         bindings=_final_bindings(plan, catalogue, items),
         installations=_installations(catalogue, items),
@@ -350,11 +393,13 @@ def _copied(workspace: Workspace, forking: ResolvedMirror, *, session) -> dict:
     sql = session.sql_executor(
         WarehouseTarget(forking.destination.item), workspace=workspace
     )
-    rows = sql.query(_count_statement(borrowed=forking.borrowed))
+    rows = sql.query(
+        _count_statement(borrowed=forking.borrowed, graphed=forking.graphed)
+    )
     counted = {str(row["Table"]): int(row["Rows"]) for row in rows}
     return {
         table.name: counted.get(table.name, 0)
-        for table in copied_tables(borrowed=forking.borrowed)
+        for table in copied_tables(borrowed=forking.borrowed, graphed=forking.graphed)
     }
 
 
@@ -428,48 +473,22 @@ def _selected_items(items, no_item: bool, workspace: Workspace) -> tuple[str, ..
     return (items,) if isinstance(items, str) else tuple(items)
 
 
-def _prove_source(plan: MirrorPlan, *, session) -> bool:
-    """Validate the source catalogue and report whether it holds ``_.Mirror``."""
+def _prove_source(plan: MirrorPlan, connection):
+    """Map the source catalogue onto this version's; it may be an older one."""
 
-    from ..catalogue.fork import FORKED_TABLES
-    from ..catalogue.tables import MIRROR
+    from ..catalogue.fork import project_source
+    from ..errors import WeaverError
 
-    found = _source_catalogue_tables(plan, session=session)
-    if not found:
+    try:
+        shape = connection.shape()
+    except WeaverError as exc:
+        raise CommandError(f"mirror could not read {plan.source}: {exc}") from exc
+    if not shape:
         raise CommandError(
             f"{plan.source} does not contain a Weaver catalogue. Name the "
             "Warehouse that holds the Weaver catalogue."
         )
-    missing = [
-        table.name for table in FORKED_TABLES if table.name.casefold() not in found
-    ]
-    if missing:
-        raise CommandError(
-            f"The catalogue in {plan.source} is not compatible with this Weaver "
-            "version. Build against it with this version before mirroring."
-        )
-    return MIRROR.name.casefold() in found
-
-
-def _source_catalogue_tables(plan: MirrorPlan, *, session) -> set[str]:
-    from ..catalogue.tables import CATALOGUE_SCHEMA
-    from ..errors import WeaverError
-    from ..targets import WarehouseTarget
-
-    try:
-        sql = session.sql_executor(
-            WarehouseTarget(plan.source.item), workspace=plan.workspace
-        )
-        rows = sql.query(
-            "select objects.name as name "
-            "from sys.objects as objects "
-            "where objects.is_ms_shipped = 0 "
-            "and objects.type = N'U' "
-            f"and schema_name(objects.schema_id) = N'{CATALOGUE_SCHEMA}'"
-        )
-    except WeaverError as exc:
-        raise CommandError(f"mirror could not read {plan.source}: {exc}") from exc
-    return {str(row["name"]).casefold() for row in rows}
+    return project_source(shape, source=str(plan.source))
 
 
 def _source_workspace(plan: MirrorPlan) -> Workspace:
@@ -634,7 +653,7 @@ def _refuse_unsafe(resolved: ResolvedMirror) -> None:
         )
 
 
-def _count_statement(*, borrowed: bool) -> str:
+def _count_statement(*, borrowed: bool, graphed: bool = True) -> str:
     """Count all copied tables with one Warehouse query."""
 
     from ..catalogue.fork import copied_tables
@@ -644,7 +663,7 @@ def _count_statement(*, borrowed: bool) -> str:
     return "\nunion all\n".join(
         f"select {literal(table.name)} as [Table], count(*) as [Rows] "
         f"from {identifier(CATALOGUE_SCHEMA)}.{identifier(table.name)}"
-        for table in copied_tables(borrowed=borrowed)
+        for table in copied_tables(borrowed=borrowed, graphed=graphed)
     )
 
 

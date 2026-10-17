@@ -34,6 +34,7 @@ from .tables import (
     BUILD_DATETIME,
     CURRENT_STATE_TABLES,
     INSTALLATION,
+    LINEAGE_TABLES,
     LOAD_STATUS,
     MIRROR,
     OBJECT_ROLES,
@@ -637,6 +638,7 @@ INTRODUCED_TABLES = frozenset(
         TEST_STATUS.name,
         SEMANTIC_MODEL_TEST.name,
         *(table.name for table in SEMANTIC_TABLES),
+        *(table.name for table in LINEAGE_TABLES),
     }
 )
 

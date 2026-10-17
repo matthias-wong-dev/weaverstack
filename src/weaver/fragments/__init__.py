@@ -1,15 +1,16 @@
 """The repository content Weaver itself contributes, as checked-in files.
 
-Two fragments, both item-relative so one reader composes either into an item:
-
 .. code-block:: text
 
     catalogue/            the Warehouse/_weaver catalogue declaration
     standard/<ItemType>/  what every normal item of that type receives
+    dashboard/            the Catalogue Dashboard's Power BI project
 
-A fragment is read by :func:`weaver.declaration.repository.read_repository_fragment`
-through the same declaration readers as an authored tree, so what a build
-composes is what is reviewed here.
+The first two are item-relative and read by
+:func:`weaver.declaration.repository.read_repository_fragment`; ``dashboard`` is
+project-relative and read by the Power BI project readers. Each goes through
+the same readers as an authored tree, so what a build composes is what is
+reviewed here.
 """
 
 from __future__ import annotations
@@ -18,6 +19,8 @@ from importlib.resources import files as resource_files
 
 #: The fragment holding Weaver's catalogue declaration.
 CATALOGUE = "catalogue"
+#: The fragment holding the Catalogue Dashboard's Power BI project.
+DASHBOARD = "dashboard"
 
 
 def fragment_files(name: str) -> dict[str, bytes]:
@@ -45,4 +48,4 @@ def standard_fragment(item_type: str) -> dict[str, bytes]:
     return fragment_files(f"standard/{item_type}")
 
 
-__all__ = ["CATALOGUE", "fragment_files", "standard_fragment"]
+__all__ = ["DASHBOARD", "CATALOGUE", "fragment_files", "standard_fragment"]

@@ -15,6 +15,7 @@ from typing import Any
 from .declaration.model import LAKEHOUSE, REPORT, SEMANTIC_MODEL, WAREHOUSE
 from .errors import WeaverError
 from .onboarding import (
+    WORKFLOW_FILE,
     WORKSPACE_CONFIG_FILE,
     ProjectRequest,
     build_commands,
@@ -77,6 +78,8 @@ class InitialiseReport:
     environment_definition: str = "written"
     builds: tuple[str, ...] = ("build",)
     catalogue_configured: bool = True
+    #: What the project's existing files need for the items added this run.
+    guidance: tuple[str, ...] = ()
 
     @property
     def created(self) -> tuple[str, ...]:
@@ -111,6 +114,7 @@ class InitialiseReport:
             "environment_definition": self.environment_definition,
             "dry_run": self.dry_run,
             "next_commands": list(self.next_commands),
+            "guidance": list(self.guidance),
         }
 
 
@@ -156,8 +160,13 @@ def initialise(
 
     configured, state_record = read_project(destination)
     if configured is not None:
+        inherited = getattr(getattr(session, "workspace", None), "workspace", None)
         for field, supplied, existing in (
-            ("workspace", workspace, configured.workspace),
+            (
+                "workspace",
+                workspace if workspace is not None else inherited,
+                configured.workspace,
+            ),
             (
                 "catalogue",
                 catalogue,
@@ -221,22 +230,7 @@ def initialise(
         source_items=source_items,
         adopted_items=_sources(adopted),
     )
-    wanted_items = _requested(request)
-    if configured is not None:
-        from dataclasses import replace
-
-        from .declaration.model import WeaverItemId
-
-        wanted_items = tuple(
-            replace(
-                item,
-                name=configured.targets[WeaverItemId(item.role, item.name)].physical,
-            )
-            if item.role in {LAKEHOUSE, WAREHOUSE}
-            and WeaverItemId(item.role, item.name) in configured.targets
-            else item
-            for item in wanted_items
-        )
+    wanted_items = _requested(request, configured)
 
     from .sessions.host import use_or_create_session
 
@@ -315,6 +309,11 @@ def initialise(
                 )
                 if source_items:
                     files = _with_source_targets(files, source_items)
+                guidance = (
+                    _workflow_guidance(files[WORKFLOW_FILE], request, configured)
+                    if configured is not None and WORKFLOW_FILE in files
+                    else ()
+                )
                 _check_destination_paths(destination, files)
                 configured = _parse_generated(files, request, destination=destination)
 
@@ -334,6 +333,7 @@ def initialise(
                     environment_definition=definition_status,
                     builds=build_commands(request),
                     catalogue_configured=bool(request.catalogue),
+                    guidance=guidance,
                 )
 
             resources.extend(
@@ -404,6 +404,7 @@ def initialise(
         dry_run=False,
         builds=build_commands(request),
         catalogue_configured=bool(request.catalogue),
+        guidance=guidance,
     )
 
 
@@ -426,6 +427,39 @@ def _sources(items) -> tuple[str, ...]:
             for item in items
             if item.item_type in {LAKEHOUSE, WAREHOUSE} and item != BUILTIN_ITEM
         )
+    )
+
+
+def _workflow_guidance(
+    workflow, request: ProjectRequest, configured
+) -> tuple[str, ...]:
+    """The Build steps an existing ``workflow.yml`` lacks for item kinds new this run.
+
+    The workflow is the user's: initialise names what it needs and changes nothing.
+    """
+
+    import yaml
+
+    kinds = {item.item_type for item in configured.configured_items} | {
+        item.split("/", 1)[0] for item in request.source_items
+    }
+    added = {item.split("/", 1)[0] for item in request.items} - kinds
+    if not added:
+        return ()
+    text = workflow.decode("utf-8") if isinstance(workflow, bytes) else workflow
+    try:
+        steps = (yaml.safe_load(text) or {}).get("workflows", {}).get("full") or []
+    except yaml.YAMLError:
+        steps = []
+    present = {str(step).strip() for step in steps}
+    missing = [build for build in build_commands(request) if build not in present]
+    if not missing:
+        return ()
+    listed = ", ".join(f"weaver {build}" for build in missing)
+    return (
+        f"{WORKFLOW_FILE} does not run {listed}, which this project now needs for "
+        f"{', '.join(sorted(added))}. Add {'it' if len(missing) == 1 else 'them'} to "
+        "its full and build-only workflows.",
     )
 
 
@@ -586,10 +620,24 @@ class _Requested:
     item_type: str
 
 
-def _requested(request: ProjectRequest) -> tuple[_Requested, ...]:
+def _requested(request: ProjectRequest, configured=None) -> tuple[_Requested, ...]:
+    """The Fabric items setup ensures exist.
+
+    A project's ``targets:`` bind its Lakehouses and Warehouses to physical
+    items, and each one is wanted under its physical name, as is a requested
+    item the targets already bind.
+    """
+
+    from .declaration.model import WeaverItemId
     from .fabric.resources import ENVIRONMENT
     from .fabric.resources import LAKEHOUSE as LAKEHOUSE_ITEM
     from .fabric.resources import WAREHOUSE as WAREHOUSE_ITEM
+
+    targets = configured.targets if configured is not None else {}
+
+    def physical(kind, name):
+        bound = targets.get(WeaverItemId.parse(f"{kind}/{name}"))
+        return bound.physical if bound is not None else name
 
     wanted = (
         [_Requested(CATALOGUE_ROLE, request.catalogue, WAREHOUSE_ITEM)]
@@ -597,12 +645,32 @@ def _requested(request: ProjectRequest) -> tuple[_Requested, ...]:
         else []
     )
     if request.lakehouse:
-        wanted.append(_Requested(LAKEHOUSE, request.lakehouse, LAKEHOUSE_ITEM))
+        wanted.append(
+            _Requested(
+                LAKEHOUSE, physical(LAKEHOUSE, request.lakehouse), LAKEHOUSE_ITEM
+            )
+        )
     if request.warehouse:
-        wanted.append(_Requested(WAREHOUSE, request.warehouse, WAREHOUSE_ITEM))
+        wanted.append(
+            _Requested(
+                WAREHOUSE, physical(WAREHOUSE, request.warehouse), WAREHOUSE_ITEM
+            )
+        )
+    kinds = {LAKEHOUSE: LAKEHOUSE_ITEM, WAREHOUSE: WAREHOUSE_ITEM}
+    for item, declaration in sorted(targets.items(), key=lambda pair: str(pair[0])):
+        if item.item_type in kinds:
+            wanted.append(
+                _Requested(item.item_type, declaration.physical, kinds[item.item_type])
+            )
     if request.environment:
         wanted.append(_Requested(ENVIRONMENT_ROLE, request.environment, ENVIRONMENT))
-    return tuple(wanted)
+    # One physical item is wanted once, under the first role that names it.
+    seen, unique = set(), []
+    for one in wanted:
+        if (one.item_type, one.name) not in seen:
+            seen.add((one.item_type, one.name))
+            unique.append(one)
+    return tuple(unique)
 
 
 def _read_the_workspace(
@@ -630,7 +698,7 @@ def _read_the_workspace(
     for item in held:
         by_name.setdefault(item.name, set()).add(item.type)
 
-    found: dict[str, bool] = {}
+    found: dict[_Requested, bool] = {}
     for wanted in wanted_items if wanted_items is not None else _requested(request):
         types = by_name.get(wanted.name, set())
         if types and wanted.item_type not in types:
@@ -640,7 +708,7 @@ def _read_the_workspace(
                 f"{_article(other)} {other}. Choose another name for the "
                 f"{wanted.role}, or use an existing {wanted.item_type}."
             )
-        found[wanted.role] = bool(types)
+        found[wanted] = bool(types)
     if request.example_model:
         for identity in request.items:
             kind, _, name = identity.partition("/")
@@ -666,7 +734,7 @@ def _read_the_workspace(
 
 
 def _planned(
-    request: ProjectRequest, found: dict[str, bool], *, wanted_items=None
+    request: ProjectRequest, found: dict[_Requested, bool], *, wanted_items=None
 ) -> tuple[FabricItemOutcome, ...]:
     """Report dry-run items in the same order as a real run."""
 
@@ -674,7 +742,7 @@ def _planned(
         FabricItemOutcome(
             role=wanted.role,
             name=wanted.name,
-            status=EXISTING if found[wanted.role] else PLANNED,
+            status=EXISTING if found[wanted] else PLANNED,
         )
         for wanted in (
             wanted_items if wanted_items is not None else _requested(request)
@@ -684,7 +752,7 @@ def _planned(
 
 def _create_missing(
     request: ProjectRequest,
-    found: dict[str, bool],
+    found: dict[_Requested, bool],
     *,
     physical,
     session,
@@ -698,7 +766,7 @@ def _create_missing(
     for wanted in wanted_items if wanted_items is not None else _requested(request):
         if wanted.role == ENVIRONMENT_ROLE:
             continue
-        if found[wanted.role]:
+        if found[wanted]:
             made.append(FabricItemOutcome(wanted.role, wanted.name, EXISTING))
             continue
         create = (

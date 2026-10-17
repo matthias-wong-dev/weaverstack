@@ -24,6 +24,8 @@ from weaver.catalogue.tables import (
     CATALOGUE_TABLES,
     HISTORY_TABLES,
     INSTALLATION,
+    LINEAGE_EDGE,
+    LINEAGE_NODE,
     LOAD_STATISTIC,
     LOG,
     MIRROR,
@@ -63,6 +65,24 @@ def test_installed_state_and_how_far_it_has_run_both_move():
     copied = set(forked_table_names())
 
     assert {INSTALLATION.name, REGISTRY.name, BOOKMARK.name} <= copied
+
+
+@weaver_test()
+def test_a_mirror_carries_the_lineage_rows_of_the_items_it_copies():
+    """They describe logical identity, so they hold in the destination too."""
+
+    copied = set(forked_table_names())
+
+    assert {LINEAGE_NODE.name, LINEAGE_EDGE.name} <= copied
+
+
+@weaver_test()
+def test_a_source_without_the_graph_tables_forks_the_rest():
+    copied = set(forked_table_names(graphed=False))
+    body = "\n".join(fork_statements(source_catalogue="Weaver", graphed=False))
+
+    assert copied == set(forked_table_names()) - {LINEAGE_NODE.name, LINEAGE_EDGE.name}
+    assert "LineageNode" not in body and "LineageEdge" not in body
 
 
 # --- how the statements are spelled -------------------------------------------

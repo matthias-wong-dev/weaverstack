@@ -151,6 +151,10 @@ FIXED_ITEMS = {
     # Where a mirrored item is built, one per kind. Emptied by every mirror.
     "warehouse_mirror": "PYTEST_WH_MIRROR",
     "lakehouse_mirror": "PYTEST_LH_MIRROR",
+    # An estate a previous Weaver release installs, for a mirror to upgrade. The
+    # Warehouse is its catalogue and its Warehouse target.
+    "previous_catalogue": "PYTEST_WEAVER_PREVIOUS",
+    "previous_lakehouse": "PYTEST_LH_PREVIOUS",
 }
 
 
@@ -303,6 +307,22 @@ def fabric_mirror_warehouse(fabric_workspace_item, fabric_client):
         )
     except Exception:
         return create_warehouse(fabric_workspace_item, name, client=fabric_client)
+
+
+@pytest.fixture(scope="session")
+def fabric_previous_catalogue(fabric_workspace_item, fabric_client):
+    """The fixed Warehouse a previous Weaver release installs its estate into."""
+
+    return _ensure_catalogue_warehouse(
+        fabric_client, fabric_workspace_item, "previous_catalogue"
+    )
+
+
+@pytest.fixture(scope="session")
+def fabric_previous_lakehouse(fabric_workspace_item, fabric_client):
+    """The fixed Lakehouse a previous Weaver release installs into."""
+
+    return _ensure_lakehouse(fabric_client, fabric_workspace_item, "previous_lakehouse")
 
 
 @pytest.fixture(scope="session")
