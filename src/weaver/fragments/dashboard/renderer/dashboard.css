@@ -278,6 +278,10 @@ body { background: #f7f7f6; }
 /* --- ER, Gantt, trend -------------------------------------------------------- */
 
 .wd-er-drawing { position: absolute; inset: 0; }
+.wd-er-box.wd-dragging { cursor: grabbing; }
+/* Short enough that the dictionary below shows its heading and filter. */
+.wd-page-entities .wd-workspace:not(.wd-maximised) .wd-graph { height: clamp(340px, calc(100vh - 360px), 760px); }
+.wd-page-entities .wd-workspace:not(.wd-maximised) .wd-side { max-height: clamp(340px, calc(100vh - 360px), 760px); }
 .wd-er-svg { display: block; width: 100%; height: 100%; touch-action: pan-y; cursor: grab; }
 .wd-er-box rect { fill: var(--surface); stroke: var(--line-strong); }
 .wd-er-box .wd-er-head { fill: var(--paper-deep); stroke: none; }

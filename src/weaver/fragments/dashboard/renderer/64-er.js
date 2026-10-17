@@ -158,6 +158,7 @@ function erWorkspace(body, m, s, options) {
   s.expanded = (s.expanded || []).filter(function (id) { return g.nodes.has(id); });
   if (s.up === undefined) s.up = 1;
   if (s.down === undefined) s.down = 1;
+  s.moved = s.moved || {};
   var f = workspaceFrame(s, function () {}), drawing = el("div", { "class": "wd-er-drawing" }), zoom = null, notice = null;
   function focus() { return s.selection[s.selection.length - 1] || null; }
   /* A plain choice replaces the selection; Shift, Ctrl or ⌘ adds or removes. */
@@ -167,7 +168,7 @@ function erWorkspace(body, m, s, options) {
       var at = s.selection.indexOf(id);
       if (at >= 0) s.selection.splice(at, 1); else s.selection.push(id);
     } else s.selection = [id];
-    s.expanded = []; s.view = null; notice = null;
+    s.expanded = []; s.moved = {}; s.view = null; notice = null;
     draw();
     saveState();
   }
@@ -197,6 +198,28 @@ function erWorkspace(body, m, s, options) {
     selectionChips(f.chips, s.selection, focus(), function (id) { var n = g.nodes.get(id); return { kind: n.owner ? n.owner.kind : "Table", label: n.label, title: n.item + " · " + n.label }; },
       function (id) { if (options.onPick) options.onPick(id); if (zoom) zoom.fitBoxes([id]); }, function (id, adding) { select(id, adding); if (id && options.onPick && s.selection.indexOf(id) >= 0) options.onPick(id); });
   }
+  /* An edge's path and its two cardinality marks, from where its boxes are now. */
+  function route(e, boxes) {
+    var a = boxes.get(e.from), b = boxes.get(e.to), ax, ay, bx, by;
+    if (e.from === e.to) {
+      // A table referencing itself: a loop off its right side.
+      ax = a.x + ER.BOX; ay = a.y + ER.HEAD;
+      return { d: "M" + ax + " " + ay + "C" + (ax + 44) + " " + (ay - 10) + " " + (ax + 44) + " " + (ay + 36) + " " + ax + " " + (ay + 26) };
+    }
+    ax = a.x + ER.BOX / 2; bx = b.x + ER.BOX / 2;
+    if (Math.abs(a.y - b.y) < 1) {
+      // Same row: arc over the boxes between them.
+      ay = a.y; by = b.y;
+      var lift = Math.min(90, 30 + Math.abs(bx - ax) / 6);
+      return { d: "M" + ax + " " + ay + "C" + ax + " " + (ay - lift) + " " + bx + " " + (by - lift) + " " + bx + " " + by,
+        from: [ax + 6, ay - 8], to: [bx + 6, by - 8] };
+    }
+    var down = a.y < b.y;
+    ay = down ? a.y + a.h : a.y; by = down ? b.y : b.y + b.h;
+    var c = Math.max(30, Math.abs(by - ay) / 2) * (down ? 1 : -1);
+    return { d: "M" + ax + " " + ay + "C" + ax + " " + (ay + c) + " " + bx + " " + (by - c) + " " + bx + " " + by,
+      from: [ax + 6, ay + (down ? 12 : -5)], to: [bx + 6, by + (down ? -5 : 12)] };
+  }
   /* Draw the window; given pin, keep that table where it was on screen. */
   function draw(pin, screen) {
     drawing.textContent = "";
@@ -205,34 +228,28 @@ function erWorkspace(body, m, s, options) {
     renderChips();
     if (!w) { drawing.appendChild(empty("Search for a table, or select one, to draw its relationships.")); zoom = null; return; }
     var lay = erLayout(g, w), boxes = lay.boxes, current = focus();
-    var svg = sv("svg", { "class": "wd-er-svg", role: "img", "aria-label": "Relationship diagram" }), stage = sv("g");
+    Object.keys(s.moved).forEach(function (id) { var b = boxes.get(id); if (b) { b.x = s.moved[id].x; b.y = s.moved[id].y; } });
+    var svg = sv("svg", { "class": "wd-er-svg", role: "img", "aria-label": "Relationship diagram" }), stage = sv("g"), lines = sv("g");
     svg.appendChild(stage);
-    w.edges.forEach(function (e) {
-      var a = boxes.get(e.from), b = boxes.get(e.to), path, ax, ay, bx, by;
-      if (e.from === e.to) {
-        // A table referencing itself: a loop off its right side.
-        ax = a.x + ER.BOX; ay = a.y + ER.HEAD; bx = ax; by = ay + 26;
-        path = "M" + ax + " " + ay + "C" + (ax + 44) + " " + (ay - 10) + " " + (bx + 44) + " " + (by + 10) + " " + bx + " " + by;
-      } else if (a.y === b.y) {
-        // Same row: arc over the boxes between them.
-        ax = a.x + ER.BOX / 2; bx = b.x + ER.BOX / 2; ay = a.y; by = b.y;
-        var lift = Math.min(90, 30 + Math.abs(bx - ax) / 6);
-        path = "M" + ax + " " + ay + "C" + ax + " " + (ay - lift) + " " + bx + " " + (by - lift) + " " + bx + " " + by;
-      } else {
-        var down = a.y < b.y;
-        ax = a.x + ER.BOX / 2; bx = b.x + ER.BOX / 2;
-        ay = down ? a.y + a.h : a.y; by = down ? b.y : b.y + b.h;
-        var c = Math.max(30, Math.abs(by - ay) / 2) * (down ? 1 : -1);
-        path = "M" + ax + " " + ay + "C" + ax + " " + (ay + c) + " " + bx + " " + (by - c) + " " + bx + " " + by;
-      }
-      var lit = w.seeds.has(e.from) || w.seeds.has(e.to);
-      stage.appendChild(sv("path", { "class": "wd-er-edge" + (e.active ? "" : " wd-er-inactive") + (lit ? " wd-er-focus" : ""), d: path },
+    stage.appendChild(lines);
+    var drawn = w.edges.map(function (e) {
+      var r = route(e, boxes), lit = w.seeds.has(e.from) || w.seeds.has(e.to), d = { e: e };
+      d.path = lines.appendChild(sv("path", { "class": "wd-er-edge" + (e.active ? "" : " wd-er-inactive") + (lit ? " wd-er-focus" : ""), d: r.d },
         [sv("title", {}, [(e.label ? e.label + ": " : "") + g.nodes.get(e.from).label + " (" + e.fromColumns.join(", ") + ") → " + g.nodes.get(e.to).label + " (" + e.toColumns.join(", ") + ")" + (e.active ? "" : " · inactive")])]));
-      if (e.from === e.to) return;
-      var dy = a.y === b.y ? -8 : ay < by ? 12 : -5, ey = a.y === b.y ? -8 : ay < by ? -5 : 12;
-      stage.appendChild(sv("text", { "class": "wd-er-card", x: ax + 6, y: ay + dy }, [e.many === false ? "1" : "*"]));
-      stage.appendChild(sv("text", { "class": "wd-er-card", x: bx + 6, y: by + ey }, [e.one === false ? "*" : "1"]));
+      if (r.from) {
+        d.many = lines.appendChild(sv("text", { "class": "wd-er-card", x: r.from[0], y: r.from[1] }, [e.many === false ? "1" : "*"]));
+        d.one = lines.appendChild(sv("text", { "class": "wd-er-card", x: r.to[0], y: r.to[1] }, [e.one === false ? "*" : "1"]));
+      }
+      return d;
     });
+    function reroute(id) {
+      drawn.forEach(function (d) {
+        if (d.e.from !== id && d.e.to !== id) return;
+        var r = route(d.e, boxes);
+        d.path.setAttribute("d", r.d);
+        if (d.many) { d.many.setAttribute("x", r.from[0]); d.many.setAttribute("y", r.from[1]); d.one.setAttribute("x", r.to[0]); d.one.setAttribute("y", r.to[1]); }
+      });
+    }
     boxes.forEach(function (box, id) {
       var n = g.nodes.get(id), seed = w.seeds.has(id);
       var group = sv("g", { "class": "wd-er-box" + (seed ? " wd-er-box-focus" : "") + (id === current ? " wd-er-box-current" : ""), transform: "translate(" + box.x + " " + box.y + ")", tabindex: "0", role: "button", "aria-label": n.label });
@@ -245,27 +262,57 @@ function erWorkspace(body, m, s, options) {
           [(r.mark === "key" ? "⚿ " : r.mark === "fk" ? "↗ " : "   ") + clipText(r.name, 30)]));
       });
       if (box.hidden) group.appendChild(sv("text", { "class": "wd-er-col wd-er-hidden", x: 12, y: ER.HEAD + box.rows.length * ER.ROW + 13 }, [box.hidden + " more described columns"]));
-      group.addEventListener("click", function (ev) { pickBox(id, ev.shiftKey || ev.metaKey || ev.ctrlKey); });
+      // Parents left out above the box, children below; they move with it.
+      var more = w.more.get(id);
+      if (more && more.up.length) group.appendChild(marker(box, id, "up", more.up.length));
+      if (more && more.down.length) group.appendChild(marker(box, id, "down", more.down.length));
+      draggable(group, box, id, reroute);
       group.addEventListener("keydown", function (ev) { if (ev.key === "Enter") pickBox(id, ev.shiftKey || ev.metaKey || ev.ctrlKey); });
       stage.appendChild(group);
-      var more = w.more.get(id);
-      if (more) {
-        // Parents left out above the box, children below.
-        if (more.up.length) stage.appendChild(marker(box, id, "up", more.up.length));
-        if (more.down.length) stage.appendChild(marker(box, id, "down", more.down.length));
-      }
     });
     drawing.appendChild(svg);
     zoom = panZoom(svg, stage, s, lay.bounds, boxes);
     if (pin && screen) zoom.pin(pin, screen);
   }
+  /* A mouse or pen drag moves a box and the edges meeting it; a press that
+     does not move selects it. */
+  function draggable(group, box, id, reroute) {
+    var drag = null;
+    group.addEventListener("pointerdown", function (ev) {
+      if (ev.button !== 0 || (ev.target.closest && ev.target.closest(".wd-er-more"))) return;
+      drag = { x: ev.clientX, y: ev.clientY, from: { x: box.x, y: box.y }, moved: false, touch: ev.pointerType === "touch" };
+      if (!drag.touch) group.setPointerCapture(ev.pointerId);
+    });
+    group.addEventListener("pointermove", function (ev) {
+      if (!drag || drag.touch) return;
+      var dx = ev.clientX - drag.x, dy = ev.clientY - drag.y, k = s.view ? s.view.k : 1;
+      if (!drag.moved && Math.hypot(dx, dy) < 4) return;
+      drag.moved = true;
+      box.x = drag.from.x + dx / k; box.y = drag.from.y + dy / k;
+      group.setAttribute("transform", "translate(" + box.x + " " + box.y + ")");
+      group.classList.add("wd-dragging");
+      reroute(id);
+    });
+    function end(ev) {
+      if (!drag) return;
+      var was = drag;
+      drag = null;
+      group.classList.remove("wd-dragging");
+      if (ev.type !== "pointerup") return;
+      if (was.moved) { s.moved[id] = { x: box.x, y: box.y }; saveState(); }
+      else pickBox(id, ev.shiftKey || ev.metaKey || ev.ctrlKey);
+    }
+    group.addEventListener("pointerup", end);
+    group.addEventListener("pointercancel", end);
+  }
   function marker(box, id, side, count) {
     var text = (side === "up" ? "↑ " : "↓ ") + count, w = 12 + text.length * 6.4;
-    var badge = sv("g", { "class": "wd-er-more", tabindex: "0", role: "button", transform: "translate(" + (box.x + ER.BOX - w - 10) + " " + (side === "up" ? box.y - 9 : box.y + box.h - 8) + ")" },
+    var badge = sv("g", { "class": "wd-er-more", tabindex: "0", role: "button", transform: "translate(" + (ER.BOX - w - 10) + " " + (side === "up" ? -9 : box.h - 8) + ")" },
       [sv("rect", { width: w, height: 17, rx: 8.5 }), sv("text", { x: w / 2, y: 12 }, [text]),
         sv("title", {}, [count + (side === "up" ? (count === 1 ? " parent table" : " parent tables") : (count === 1 ? " child table" : " child tables")) + " not shown. Select to show " + (count > BUDGET.REVEAL ? "the first " + BUDGET.REVEAL : count === 1 ? "it" : "them") + "."])]);
+    badge.addEventListener("pointerdown", function (ev) { ev.stopPropagation(); });
     badge.addEventListener("click", function (ev) { ev.stopPropagation(); expand(id, side); });
-    badge.addEventListener("keydown", function (ev) { if (ev.key === "Enter") expand(id, side); });
+    badge.addEventListener("keydown", function (ev) { ev.stopPropagation(); if (ev.key === "Enter") expand(id, side); });
     return badge;
   }
   function pickBox(id, adding) {
@@ -273,8 +320,8 @@ function erWorkspace(body, m, s, options) {
     if (options.onPick && s.selection.indexOf(id) >= 0) options.onPick(id);
   }
   f.mount(body, (options.tools || []).concat([
-    segmented("Parents", DEPTHS, s.up, function (d) { s.up = d; s.expanded = []; s.view = null; draw(); saveState(); }, depthLabel),
-    segmented("Children", DEPTHS, s.down, function (d) { s.down = d; s.expanded = []; s.view = null; draw(); saveState(); }, depthLabel),
+    segmented("Parents", DEPTHS, s.up, function (d) { s.up = d; s.expanded = []; s.moved = {}; s.view = null; draw(); saveState(); }, depthLabel),
+    segmented("Children", DEPTHS, s.down, function (d) { s.down = d; s.expanded = []; s.moved = {}; s.view = null; draw(); saveState(); }, depthLabel),
     el("span", { "class": "wd-grow" }),
     el("div", { "class": "wd-zoom" }, [
       el("button", { "class": "wd-icon", type: "button", title: "Zoom out", "aria-label": "Zoom out", onclick: function () { if (zoom) zoom.zoomBy(0.8); } }, ["−"]),

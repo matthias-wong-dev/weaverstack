@@ -261,6 +261,22 @@ test("Health reports Weaver's codes for the catalogue's own state", () => {
   assert.deepEqual(codes(health.build), ["Warehouse/Curated Sales.Ghost:not_installed"]);
 });
 
+test("Health lists what each area finds nothing about as green, apart from the findings", () => {
+  const m = model(estate());
+  const health = D.assessHealth(m);
+  const flagged = new Set(health.all.map((f) => f.area + ":" + (f.node ? f.node.key : f.label)));
+  health.green.forEach((f) => {
+    assert.equal(f.severity, "green");
+    assert.ok(!flagged.has(f.area + ":" + f.node.key), f.area + " " + f.node.key);
+  });
+  const greens = (area) => health.green.filter((f) => f.area === area).map((f) => f.node.key).sort();
+  // Every load subject is either a finding or green, and every object is in Build.
+  const subjects = (list) => new Set(list.filter((f) => f.node).map((f) => f.node.key)).size;
+  assert.equal(greens("load").length + subjects(health.load), health.counts.load.subjects);
+  assert.equal(greens("build").length + subjects(health.build), m.nodes.size);
+  assert.ok(!health.all.some((f) => f.severity === "green"));
+});
+
 test("a validation that passed before its subject loaded again is stale", () => {
   const tests = [["Warehouse/Curated", "Sales", "ByRegionValid", "Succeeded", "w0", AT - 40 * H, AT - 40 * H, 0]];
   const m = model(estate({ tests }));

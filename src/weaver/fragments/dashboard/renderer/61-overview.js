@@ -94,17 +94,17 @@ function healthPage(body, m) {
     details(side, m, key, { onOpen: open, health: health });
     if (key) side.insertBefore(el("button", { "class": "wd-icon wd-close", type: "button", "aria-label": "Close", onclick: function () { open(null); } }, ["×"]), side.firstChild);
   }
-  function sectionTile(label, list, subjects) {
+  function sectionTile(label, area, list, subjects) {
     var red = list.filter(function (f) { return f.severity === RED; }).length, amber = list.filter(function (f) { return f.severity === AMBER && !f.unobserved; }).length;
-    var unobserved = list.filter(function (f) { return f.unobserved; }).length;
+    var unobserved = list.filter(function (f) { return f.unobserved; }).length, green = health.green.filter(function (f) { return f.area === area; }).length;
     var worst = red ? "bad" : amber ? "wait" : "ok";
     return tile(label, red ? red + " red" : amber ? amber + " amber" : "Green",
-      fmt(subjects) + " subjects · " + amber + " amber" + (unobserved ? " · " + unobserved + " unobserved" : ""), worst);
+      fmt(subjects) + " subjects · " + fmt(green) + " green · " + amber + " amber" + (unobserved ? " · " + unobserved + " unobserved" : ""), worst);
   }
   body.appendChild(el("div", { "class": "wd-tiles" }, [
-    sectionTile("Load", health.load, health.counts.load.subjects),
-    sectionTile("Tests", health.tests, health.counts.tests.subjects),
-    sectionTile("Build", health.build, health.counts.build.subjects)
+    sectionTile("Load", "load", health.load, health.counts.load.subjects),
+    sectionTile("Tests", "tests", health.tests, health.counts.tests.subjects),
+    sectionTile("Build", "build", health.build, health.counts.build.subjects)
   ]));
   body.appendChild(el("p", { "class": "wd-note" }, [
     "Assessed as of " + stamp(health.asOf) + ", 24 hours before the query. Build here checks what the catalogue records about itself: certification and installed validations. ",
@@ -113,7 +113,7 @@ function healthPage(body, m) {
   var tableHost = el("div");
   function render() {
     tableHost.textContent = "";
-    var rows = health.all.filter(function (f) {
+    var rows = health.all.concat(health.green).filter(function (f) {
       return (s.area === "all" || f.area === s.area) && (s.severity === "all" || (s.severity === "unobserved" ? f.unobserved : f.severity === s.severity && !f.unobserved));
     });
     tableHost.appendChild(dataTable([
@@ -128,7 +128,7 @@ function healthPage(body, m) {
   }
   body.appendChild(el("div", { "class": "wd-toolbar" }, [
     segmented("Area", ["all", "load", "tests", "build"], s.area, function (v) { s.area = v; render(); saveState(); }, function (v) { return { all: "All", load: "Load", tests: "Tests", build: "Build" }[v]; }),
-    segmented("Severity", ["all", "red", "amber", "unobserved"], s.severity, function (v) { s.severity = v; render(); saveState(); }, function (v) { return { all: "All", red: "Red", amber: "Amber", unobserved: "Unobserved" }[v]; })
+    segmented("Severity", ["all", "red", "amber", "green", "unobserved"], s.severity, function (v) { s.severity = v; render(); saveState(); }, function (v) { return { all: "All", red: "Red", amber: "Amber", green: "Green", unobserved: "Unobserved" }[v]; })
   ]));
   render();
   body.appendChild(el("div", { "class": "wd-overview" }, [el("div", { "class": "wd-overview-main" }, [tableHost]), side]));
