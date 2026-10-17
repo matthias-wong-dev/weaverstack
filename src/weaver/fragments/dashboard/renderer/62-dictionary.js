@@ -118,8 +118,9 @@ function searchEntries(entries, query, kind) {
     if (kind && kind !== "All" && e.kind !== kind) return;
     var score = 0;
     for (var i = 0; i < terms.length; i++) {
-      var term = terms[i], s = 0;
-      if (e.lower === term || e.nameLower === term) s = 100;
+      var term = terms[i], s = 0, w = wildcard(term);
+      if (w) s = w.test(e.lower) || w.test(e.nameLower) ? 70 : 0;
+      else if (e.lower === term || e.nameLower === term) s = 100;
       else if (e.lower.indexOf(term) === 0 || e.nameLower.indexOf(term) === 0) s = 80;
       else if ((" " + e.lower.replace(/[._/\-]/g, " ")).indexOf(" " + term) >= 0) s = 60;
       else if (e.lower.indexOf(term) >= 0) s = 40;
@@ -164,7 +165,7 @@ function entitiesPage(body, m) {
     return el("option", { value: it.label, selected: it.label === s.item ? "selected" : null, text: it.type + " · " + it.name });
   })));
   var search = searchBox({
-    placeholder: "Search " + fmt(entries.length) + " tables, views, folders and columns · Shift adds to the selection",
+    placeholder: "Search " + fmt(entries.length) + " tables, views, folders and columns · * matches any text · Shift adds",
     find: function (q) {
       return q.trim() ? searchEntries(entries, q, "All").slice(0, 12).map(function (e) { return { kind: e.kind, label: e.label, meta: e.meta, desc: e.desc, entry: e }; }) : [];
     },
@@ -179,7 +180,7 @@ function entitiesPage(body, m) {
   } });
 
   var facets = el("div", { "class": "wd-facets", role: "radiogroup", "aria-label": "Entry kind" });
-  var input = el("input", { "class": "wd-search wd-search-wide", type: "search", value: s.query, placeholder: "Filter " + fmt(entries.length) + " entries by name, kind or description", "aria-label": "Filter the dictionary", autocomplete: "off", spellcheck: "false" });
+  var input = el("input", { "class": "wd-search wd-search-wide", type: "search", value: s.query, placeholder: "Filter " + fmt(entries.length) + " entries by name, kind or description · * matches any text", "aria-label": "Filter the dictionary", autocomplete: "off", spellcheck: "false" });
   var list = el("div", { "class": "wd-entry-list", role: "listbox" }), detail = el("div", { "class": "wd-entry-detail" }), note = el("div", { "class": "wd-status-line" });
   body.appendChild(section("Dictionary", [el("div", { "class": "wd-toolbar" }, [input]), facets, note, el("div", { "class": "wd-dictionary" }, [list, detail])]));
   function tableEntry(id) { return entries.filter(function (e) { return e.ref && e.ref.key && e.ref.id === id; })[0] || null; }

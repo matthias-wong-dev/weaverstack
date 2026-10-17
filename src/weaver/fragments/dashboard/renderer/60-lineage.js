@@ -160,8 +160,8 @@ function legend(mode) {
     ["swatch wd-ok", "Last load succeeded"], ["swatch wd-bad", "Failed, error or blocked"], ["swatch wd-warn", "Rejected rows or pending"],
     ["swatch wd-none", "Nothing settled, or loaded elsewhere"], ["ring wd-next", "Ready: dependencies settled"], ["ring wd-wait", "Waiting on a dependency"]
   ] : [
-    ["kind wd-kind-table", "Table"], ["kind wd-kind-view", "View"], ["kind wd-kind-folder", "Folder"], ["kind wd-kind-shortcut", "Shortcut"],
-    ["kind wd-kind-test", "Test"], ["kind wd-kind-assumption", "Assumption"], ["kind wd-kind-semantic-model", "Semantic model"], ["kind wd-kind-report", "Report"],
+    ["kind wd-kind wd-kind-table", "Table"], ["kind wd-kind wd-kind-view", "View"], ["kind wd-kind wd-kind-folder", "Folder"], ["kind wd-kind wd-kind-shortcut", "Shortcut"],
+    ["kind wd-kind wd-kind-test", "Test"], ["kind wd-kind wd-kind-assumption", "Assumption"], ["kind wd-kind wd-kind-semantic-model", "Semantic model"], ["kind wd-kind wd-kind-report", "Report"],
     ["line wd-up", "Upstream"], ["line wd-down", "Downstream"], ["dot wd-bad", "Needs attention"]
   ];
   return el("div", { "class": "wd-legend" }, entries.map(function (e) {

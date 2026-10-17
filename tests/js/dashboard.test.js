@@ -420,6 +420,21 @@ test("every second column of an item sits half a row lower", () => {
   ["n0", "n1", "n2", "n3"].forEach((k) => assert.ok(lay.pos.get(k).y < band.y + band.height));
 });
 
+test("a * in a search term matches any run of characters across the whole name", () => {
+  const m = model(estate());
+  const labels = (q) => D.searchNodes(m, q, 20).map((n) => n.label).sort();
+  assert.deepEqual(labels("sales.by*"), ["Sales.ByRegion", "Sales.ByRegionValid"]);
+  assert.deepEqual(labels("*region"), ["Sales.ByRegion", "Sales.Region"]);
+  assert.deepEqual(labels("*by*valid"), ["Sales.ByRegionValid"]);
+  // Anchored: without a trailing *, a name must end where the term does.
+  assert.deepEqual(labels("sales.by"), ["Sales.ByRegion", "Sales.ByRegionValid"]);
+  assert.deepEqual(labels("by*"), ["Sales.ByRegion", "Sales.ByRegionValid"]);
+  assert.deepEqual(labels("reg*n"), ["Sales.Region"]);
+  const entries = D.dictionaryEntries(m);
+  assert.deepEqual(D.searchEntries(entries, "*customer*", "All").map((e) => e.label).sort(),
+    ["Sales.Customer", "Sales.Customer", "Sales/Customers"]);
+});
+
 test("dictionary search ranks names before descriptions and finds columns", () => {
   const extra = table("columns", ["item", "schema", "object", "column", "description", "identity"], [
     ["Warehouse/Curated", "Sales", "Region", "Region ID", "The region's key.", ""]]) + SEMANTIC;

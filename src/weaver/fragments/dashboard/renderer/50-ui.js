@@ -169,6 +169,13 @@ function empty(text) { return el("div", { "class": "wd-empty", text: text }); }
 
 /* ---- search ----------------------------------------------------------------- */
 
+/* A term holding * matches a whole name, each * standing for any run of
+   characters: dim* starts with dim, *fact* contains fact. Null without one. */
+function wildcard(term) {
+  if (term.indexOf("*") < 0) return null;
+  return new RegExp("^" + term.split("*").map(function (part) { return part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }).join(".*") + "$");
+}
+
 function searchNodes(m, query, limit) {
   var terms = String(query || "").toLowerCase().split(/\s+/).filter(Boolean);
   if (!terms.length) return [];
@@ -177,8 +184,9 @@ function searchNodes(m, query, limit) {
     var label = n.label.toLowerCase(), item = n.item.toLowerCase(), desc = n.desc.toLowerCase(),
       full = (n.schema + "." + n.object).toLowerCase(), score = 0;
     for (var i = 0; i < terms.length; i++) {
-      var t = terms[i], s = 0;
-      if (label === t || n.object && n.object.toLowerCase() === t) s = 100;
+      var t = terms[i], s = 0, w = wildcard(t);
+      if (w) s = w.test(label) || w.test((n.object || "").toLowerCase()) || w.test(full) ? 70 : 0;
+      else if (label === t || n.object && n.object.toLowerCase() === t) s = 100;
       else if (label.indexOf(t) === 0 || (n.object || "").toLowerCase().indexOf(t) === 0) s = 80;
       else if ((" " + label.replace(/[._/\-]/g, " ")).indexOf(" " + t) >= 0) s = 60;
       else if (label.indexOf(t) >= 0 || full.indexOf(t) >= 0) s = 40;
@@ -225,7 +233,7 @@ function searchBox(options) {
 
 function nodeSearch(m, onPick) {
   return searchBox({
-    placeholder: "Search " + fmt(m.nodes.size) + " objects · Shift adds to the selection",
+    placeholder: "Search " + fmt(m.nodes.size) + " objects · * matches any text · Shift adds",
     find: function (q) {
       return searchNodes(m, q, 12).map(function (n) { return { key: n.key, kind: n.kind, label: n.label, meta: n.kind + " · " + n.item, desc: n.desc }; });
     },
