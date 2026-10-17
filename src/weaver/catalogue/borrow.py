@@ -15,7 +15,13 @@ from ..declaration.metadata import AUDIT_LIVE_DELETE_DATETIME
 from ..declaration.model import LAKEHOUSE, WeaverDocumentId
 from .claims import catalogue_columns, stored_area
 from .fork import create_statement, local_relation
-from .tables import CATALOGUE_SCHEMA, MIRROR, ROLE_DATA, STANDARD_SURFACE_TABLES
+from .tables import (
+    CATALOGUE_SCHEMA,
+    LINEAGE_NODE,
+    MIRROR,
+    ROLE_DATA,
+    STANDARD_SURFACE_TABLES,
+)
 from .tsql import identifier, literal
 
 #: A Warehouse borrows both tables and views through a view.
@@ -348,12 +354,37 @@ def _insert(rows: Sequence[Mapping[str, str]]) -> str:
 _AUDIT = ("Row insert datetime", "Row update datetime", "Row delete datetime")
 
 
+def lineage_statement() -> str:
+    """Mark every object ``_.Mirror`` records as mirrored in ``_.LineageNode``.
+
+    Lineage is projected from an item's declarations, which do not say what the
+    catalogue borrows. A borrowed object's data belongs to its source, so it is
+    mirrored and cannot load here; nothing else in its lineage differs.
+    """
+
+    def column(name: str) -> str:
+        return identifier(LINEAGE_NODE.public_name_of(name))
+
+    keys = " and ".join(
+        f"[m].{column(name)} = [n].{column(name)}"
+        for name in ("item_type", "item_name", "schema_name", "object_name")
+    )
+    mirrored, can_load = column("is_mirrored"), column("can_load")
+    return (
+        f"update [n] set {mirrored} = 1, {can_load} = 0\n"
+        f"from {local_relation(LINEAGE_NODE)} as [n]\n"
+        f"join {local_relation(MIRROR)} as [m] on {keys}\n"
+        f"where [n].{mirrored} = 0 or [n].{can_load} = 1;"
+    )
+
+
 __all__ = [
     "BORROWED_TYPE",
     "POINTER_TYPES",
     "PROCEDURE_TYPE",
     "Borrowed",
     "borrow_statements",
+    "lineage_statement",
     "borrowable",
     "catalogue_schema_statements",
     "executable",

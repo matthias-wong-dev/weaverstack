@@ -83,6 +83,9 @@ def read_semantic_sources(
                     raise BuildError(
                         f"Semantic source {reference}: configured target {configured!r} is not the installed target {target_name!r}. Build {identity.item} first."
                     )
+        elif not workspace.catalogue and identity.item in workspace.configured_items:
+            # Nothing is installed without a catalogue; the configured target is it.
+            target_name = physical_item(workspace.target_for(identity.item)).name
         else:
             raise BuildError(
                 f"Semantic source {reference}: no installed target. Build {identity.item} first."

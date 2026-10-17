@@ -31,6 +31,8 @@ class SemanticContribution:
 
     #: Bind data sources to their connections once the definition is deployed.
     bind_data_sources: bool = False
+    #: Refresh once deployed. A Direct Lake model answers no query until framed.
+    refresh_after_deploy: bool = False
     #: The annotation classes this contribution compiles with; not desired state.
     annotations: object = field(default=None, compare=False, repr=False)
     compilation: object = field(default=None, compare=False, repr=False)

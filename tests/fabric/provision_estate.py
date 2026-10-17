@@ -19,6 +19,8 @@ Optional environment variables:
     WEAVER_PYTEST_WEAVER
     WEAVER_PYTEST_WEAVER_FORK
     WEAVER_PYTEST_WAREHOUSE_MIRROR
+    WEAVER_PYTEST_PREVIOUS_CATALOGUE
+    WEAVER_PYTEST_PREVIOUS_LAKEHOUSE
     WEAVER_PYTEST_TARGET
     WEAVER_PYTEST_PRODUCER
     WEAVER_PYTEST_CONSUMER
@@ -67,6 +69,8 @@ LAKEHOUSE_ROLES = {
     "warehouse_producer": "PYTEST_HOUSE",
     # Where a mirrored Lakehouse item is built. Emptied by every mirror.
     "lakehouse_mirror": "PYTEST_LH_MIRROR",
+    # Where a previous Weaver release installs a Lakehouse item.
+    "previous_lakehouse": "PYTEST_LH_PREVIOUS",
     **performance_estate.LAKEHOUSE_ROLES,
 }
 
@@ -80,6 +84,8 @@ WAREHOUSE_ROLES = {
     "warehouse": "PYTEST_WH_1",
     # Where a mirrored Warehouse item is built. Emptied by every mirror.
     "warehouse_mirror": "PYTEST_WH_MIRROR",
+    # A previous Weaver release's catalogue, and its Warehouse target.
+    "previous_catalogue": "PYTEST_WEAVER_PREVIOUS",
     **performance_estate.WAREHOUSE_ROLES,
 }
 

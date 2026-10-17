@@ -184,3 +184,41 @@ def test_an_unrequested_object_in_an_owned_model_fails():
     actual = {"model": {"tables": [{"name": "Sales"}, {"name": "Removed"}]}}
     with pytest.raises(InstallError, match="/model/tables"):
         verify_requested({"tables": [{"name": "Sales"}]}, actual, owned=("/model",))
+
+
+@weaver_test()
+@pytest.mark.parametrize(
+    "partition,found,accepted",
+    [
+        (
+            {"type": "calculated", "expression": 'ROW("Depth", "0")'},
+            "calculatedTableColumn",
+            True,
+        ),
+        ({"type": "m", "expression": "Source"}, "calculatedTableColumn", False),
+    ],
+    ids=["calculated table", "data table"],
+)
+def test_a_declared_column_takes_its_tables_native_column_type(
+    partition, found, accepted
+):
+    """TMDL cannot write a column's type; a calculated table's are calculated."""
+
+    requested = {
+        "tables": [
+            {
+                "name": "Depth",
+                "columns": [
+                    {"name": "Depth", "dataType": "string", "sourceColumn": "[Depth]"}
+                ],
+                "partitions": [{"name": "Depth", "source": partition}],
+            }
+        ]
+    }
+    actual = {"model": deepcopy(requested)}
+    actual["model"]["tables"][0]["columns"][0]["type"] = found
+    if accepted:
+        assert verify_requested(requested, actual, owned=("/model",)) == ()
+    else:
+        with pytest.raises(InstallError, match="Depth/columns/Depth/type"):
+            verify_requested(requested, actual, owned=("/model",))

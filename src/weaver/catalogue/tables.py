@@ -98,6 +98,30 @@ TARGET_TYPE_VOCABULARY = {"logical": "Logical", "physical": "Physical"}
 
 TEST_TYPE_VOCABULARY = {ROLE_TEST: "Test", ROLE_ASSUMPTION: "Assumption"}
 
+#: What a node of the installed graph is, as a dashboard presents it.
+NODE_KIND_VOCABULARY = {
+    "table": "Table",
+    "view": "View",
+    "folder": "Folder",
+    ROLE_SHORTCUT: "Shortcut",
+    ROLE_TEST: "Test",
+    ROLE_ASSUMPTION: "Assumption",
+    "semantic_model": "Semantic model",
+    "report": "Report",
+}
+
+#: Why an edge exists. External names a read the graph does not resolve.
+EDGE_DEPENDENCY = "dependency"
+EDGE_SHORTCUT = "shortcut"
+EDGE_VALIDATION = "validation"
+EDGE_EXTERNAL = "external"
+EDGE_KIND_VOCABULARY = {
+    EDGE_DEPENDENCY: "Dependency",
+    EDGE_SHORTCUT: "Shortcut",
+    EDGE_VALIDATION: "Validation",
+    EDGE_EXTERNAL: "External",
+}
+
 STRING = "string"
 BOOLEAN = "boolean"
 TIMESTAMP = "timestamp"
@@ -114,6 +138,8 @@ WAREHOUSE_TYPES = {
 #: Wide enough for prose an author wrote, and for a comma-separated column set.
 PROSE_TYPE = "varchar(4000)"
 LIST_TYPE = "varchar(1000)"
+#: A lineage node key: twelve hexadecimal digits of the node ID's SHA-256.
+NODE_KEY_TYPE = "varchar(12)"
 
 #: Unbounded, for a column set an author may declare over a wide table. Any
 #: bound here would make the catalogue, not the platform, the thing that refuses
@@ -965,6 +991,157 @@ SEMANTIC_TABLES = (
 )
 
 
+LINEAGE_NODE = CatalogueTable(
+    name="LineageNode",
+    description=(
+        "One row per node of the installed graph, scoped to its item, so a "
+        "report can draw lineage without resolving references."
+    ),
+    key=(SCOPE_ITEM_TYPE, SCOPE_ITEM_NAME, "schema_name", "object_name"),
+    columns=(
+        *_scope(),
+        *_object(),
+        CatalogueColumn(
+            "node_id",
+            not_null=True,
+            sql_type=LIST_TYPE,
+            description="The node's installed identity, as LineageEdge names it.",
+        ),
+        CatalogueColumn(
+            "node_key",
+            not_null=True,
+            sql_type=NODE_KEY_TYPE,
+            description="A short hash of the node ID, as LineageEdge's keys name it.",
+        ),
+        CatalogueColumn(
+            "node_kind",
+            not_null=True,
+            vocabulary=NODE_KIND_VOCABULARY,
+            description="What the node is.",
+        ),
+        CatalogueColumn(
+            "label",
+            not_null=True,
+            sql_type=LIST_TYPE,
+            description="The node's display name.",
+        ),
+        CatalogueColumn(
+            "item_label",
+            not_null=True,
+            sql_type=LIST_TYPE,
+            description="The node's item, as Type/Name.",
+        ),
+        CatalogueColumn(
+            "description",
+            sql_type=PROSE_TYPE,
+            description="The declared description, if any.",
+        ),
+        CatalogueColumn(
+            "search_text",
+            not_null=True,
+            sql_type=PROSE_TYPE,
+            description="Label, item and description in lower case, for search.",
+        ),
+        CatalogueColumn(
+            "is_internal",
+            BOOLEAN,
+            not_null=True,
+            description="Whether the node is part of the Weaver catalogue.",
+        ),
+        CatalogueColumn(
+            "can_load",
+            BOOLEAN,
+            not_null=True,
+            description="Whether Weaver loads the node in this estate.",
+        ),
+        CatalogueColumn(
+            "is_static",
+            BOOLEAN,
+            not_null=True,
+            description="Whether the node is loaded once rather than refreshed.",
+        ),
+        CatalogueColumn(
+            "is_mirrored",
+            BOOLEAN,
+            not_null=True,
+            description="Whether another catalogue's estate supplies the node's data.",
+        ),
+        CatalogueColumn(
+            "is_installed",
+            BOOLEAN,
+            not_null=True,
+            description="Whether the node's runnable artefact or definition is installed.",
+        ),
+        _signature("the node's row"),
+    ),
+)
+
+LINEAGE_EDGE = CatalogueTable(
+    name="LineageEdge",
+    description=(
+        "One row per edge of the installed graph, scoped to the downstream "
+        "node's item, with both ends as LineageNode IDs."
+    ),
+    key=(
+        SCOPE_ITEM_TYPE,
+        SCOPE_ITEM_NAME,
+        "downstream_node_id",
+        "upstream_node_id",
+        "edge_kind",
+    ),
+    columns=(
+        *_scope(),
+        CatalogueColumn(
+            "downstream_node_id",
+            not_null=True,
+            sql_type=LIST_TYPE,
+            description="The node that reads.",
+        ),
+        CatalogueColumn(
+            "upstream_node_id",
+            not_null=True,
+            sql_type=LIST_TYPE,
+            description=(
+                "The node read. For an External edge, the reference as its "
+                "author wrote it."
+            ),
+        ),
+        CatalogueColumn(
+            "edge_kind",
+            not_null=True,
+            vocabulary=EDGE_KIND_VOCABULARY,
+            description="Dependency, Shortcut, Validation or External.",
+        ),
+        CatalogueColumn(
+            "through_node_id",
+            sql_type=LIST_TYPE,
+            description="The shortcut the read passed through, if any.",
+        ),
+        CatalogueColumn(
+            "downstream_node_key",
+            not_null=True,
+            sql_type=NODE_KEY_TYPE,
+            description="The downstream node's key.",
+        ),
+        CatalogueColumn(
+            "upstream_node_key",
+            not_null=True,
+            sql_type=NODE_KEY_TYPE,
+            description="The upstream node's key, or the hash of an External reference.",
+        ),
+        CatalogueColumn(
+            "through_node_key",
+            sql_type=NODE_KEY_TYPE,
+            description="The key of the shortcut the read passed through, if any.",
+        ),
+        _signature("the edge's row"),
+    ),
+)
+
+#: The installed graph, projected per item for reports that cannot resolve it.
+LINEAGE_TABLES = (LINEAGE_NODE, LINEAGE_EDGE)
+
+
 #: Dictionary reconciliation order, kept stable for payloads and reports.
 DICTIONARY_TABLES = (
     SCHEMA_DICTIONARY,
@@ -978,6 +1155,7 @@ DICTIONARY_TABLES = (
     DEPENDENCY,
     SHORTCUT,
     *SEMANTIC_TABLES,
+    *LINEAGE_TABLES,
 )
 
 #: Reconciliation order: descriptions, binding, then certification.
@@ -1445,8 +1623,13 @@ BORROWED_TABLES = (MIRROR,)
 CATALOGUE_TABLES = PROJECTED_TABLES + RUNTIME_TABLES
 
 #: Projected state, borrowed nodes and bookmarks read by a run. Status tables are
-#: written by runs but only read by builds; see ``state.READ_FOR_BUILD``.
-READABLE_TABLES = PROJECTED_TABLES + BORROWED_TABLES + (BOOKMARK,)
+#: written by runs but only read by builds; see ``state.READ_FOR_BUILD``. The
+#: lineage tables restate the graph a run derives from the rest.
+READABLE_TABLES = (
+    tuple(table for table in PROJECTED_TABLES if table not in LINEAGE_TABLES)
+    + BORROWED_TABLES
+    + (BOOKMARK,)
+)
 
 TABLES_BY_NAME = {table.name: table for table in CATALOGUE_TABLES + BORROWED_TABLES}
 
