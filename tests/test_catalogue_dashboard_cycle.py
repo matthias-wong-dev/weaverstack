@@ -518,6 +518,15 @@ def test_without_a_name_the_feature_stays_off():
 
 
 @weaver_test()
+def test_a_warehouse_that_is_no_catalogue_is_refused():
+    session, model, _report = dashboard_session(tables=set())
+
+    with pytest.raises(CommandError, match="holds no Weaver catalogue"):
+        weaver.deploy_catalogue_dashboard(session=session)
+    assert not model.calls
+
+
+@weaver_test()
 def test_a_catalogue_without_the_dashboards_tables_is_refused():
     session, model, _report = dashboard_session(
         tables=set(required_tables()) - {"LineageNode", "LineageEdge"}

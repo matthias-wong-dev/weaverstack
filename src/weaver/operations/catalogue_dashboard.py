@@ -242,6 +242,10 @@ def _require_source(opened, base, source: str, reference: str) -> tuple[str, ...
     present = {str(row.get("name")) for row in rows}
     wanted = required_tables()
     missing = [table for table in wanted if table not in present]
+    if len(missing) == len(wanted):
+        raise CommandError(
+            f"{reference} holds no Weaver catalogue. Build a project into it first."
+        )
     if missing:
         listed = ", ".join(f"_.{table}" for table in missing)
         raise CommandError(
