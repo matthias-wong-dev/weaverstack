@@ -151,6 +151,14 @@ function onAnyScroll(node, f) {
   document.addEventListener("scroll", listener, { capture: true, passive: true });
 }
 
+/* Canvas pixels per CSS pixel. The Power BI Service fits a page to its window
+   by scaling the visual's frame, which enlarges a canvas drawn at the device
+   ratio alone, so a canvas draws at least twice over, within a pixel budget. */
+function canvasRatio(width, height) {
+  var device = root.devicePixelRatio || 1, wanted = Math.min(3, Math.max(2, device * 1.5));
+  return Math.max(device, Math.min(wanted, Math.sqrt(12e6 / Math.max(1, width * height))));
+}
+
 function redraw() { if (root.__WD_REDRAW) root.__WD_REDRAW(); }
 
 function section(title, children, attrs) {
@@ -161,6 +169,13 @@ function empty(text) { return el("div", { "class": "wd-empty", text: text }); }
 
 /* ---- search ----------------------------------------------------------------- */
 
+/* A term holding * matches a whole name, each * standing for any run of
+   characters: dim* starts with dim, *fact* contains fact. Null without one. */
+function wildcard(term) {
+  if (term.indexOf("*") < 0) return null;
+  return new RegExp("^" + term.split("*").map(function (part) { return part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }).join(".*") + "$");
+}
+
 function searchNodes(m, query, limit) {
   var terms = String(query || "").toLowerCase().split(/\s+/).filter(Boolean);
   if (!terms.length) return [];
@@ -169,8 +184,9 @@ function searchNodes(m, query, limit) {
     var label = n.label.toLowerCase(), item = n.item.toLowerCase(), desc = n.desc.toLowerCase(),
       full = (n.schema + "." + n.object).toLowerCase(), score = 0;
     for (var i = 0; i < terms.length; i++) {
-      var t = terms[i], s = 0;
-      if (label === t || n.object && n.object.toLowerCase() === t) s = 100;
+      var t = terms[i], s = 0, w = wildcard(t);
+      if (w) s = w.test(label) || w.test((n.object || "").toLowerCase()) || w.test(full) ? 70 : 0;
+      else if (label === t || n.object && n.object.toLowerCase() === t) s = 100;
       else if (label.indexOf(t) === 0 || (n.object || "").toLowerCase().indexOf(t) === 0) s = 80;
       else if ((" " + label.replace(/[._/\-]/g, " ")).indexOf(" " + t) >= 0) s = 60;
       else if (label.indexOf(t) >= 0 || full.indexOf(t) >= 0) s = 40;
@@ -202,8 +218,17 @@ function searchBox(options) {
           r.desc ? el("span", { "class": "wd-result-desc", text: r.desc }) : null]));
     });
   }
-  function choose(r, adding) { input.value = ""; results = []; render(); input.blur(); options.onPick(r, adding); }
-  input.addEventListener("input", function () { results = options.find(input.value); active = 0; render(); });
+  function choose(r, adding) {
+    input.value = ""; results = []; render(); input.blur();
+    if (r.pattern) options.onPattern(r.pattern); else options.onPick(r, adding);
+  }
+  // A wildcard term offers, first, to select every match.
+  input.addEventListener("input", function () {
+    var q = input.value.trim();
+    results = options.find(input.value);
+    if (options.onPattern && q.indexOf("*") >= 0) results = [{ pattern: q, label: "Select every match for " + q, meta: "Adds them to the selection" }].concat(results);
+    active = 0; render();
+  });
   input.addEventListener("keydown", function (e) {
     if (e.key === "ArrowDown") { active = Math.min(results.length - 1, active + 1); render(); e.preventDefault(); }
     else if (e.key === "ArrowUp") { active = Math.max(0, active - 1); render(); e.preventDefault(); }
@@ -215,13 +240,17 @@ function searchBox(options) {
   return el("div", { "class": "wd-searchbox" }, [input, list]);
 }
 
-function nodeSearch(m, onPick) {
+/* Every object a search matches, for a wildcard term in the selection. */
+function nodeMatches(m, query) { return searchNodes(m, query, Infinity).map(function (n) { return n.key; }); }
+
+function nodeSearch(m, onPick, onPattern) {
   return searchBox({
-    placeholder: "Search " + fmt(m.nodes.size) + " objects · Shift adds to the selection",
+    placeholder: "Search " + fmt(m.nodes.size) + " objects · * matches any text · Shift adds",
     find: function (q) {
       return searchNodes(m, q, 12).map(function (n) { return { key: n.key, kind: n.kind, label: n.label, meta: n.kind + " · " + n.item, desc: n.desc }; });
     },
-    onPick: function (r, adding) { onPick(r.key, adding); }
+    onPick: function (r, adding) { onPick(r.key, adding); },
+    onPattern: onPattern
   });
 }
 

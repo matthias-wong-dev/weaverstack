@@ -29,6 +29,7 @@ PAGES = {
 
 EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
 LOG_BUDGET = 20000
+HISTORY = timedelta(days=7)
 
 
 def _aware(value):
@@ -227,9 +228,17 @@ def build(rows, at) -> str:
     )
 
 
-def _workflows(rows):
+def _workflows(rows, at):
+    """Each workflow that completed a record in the 7 days to at, over all its records."""
+    recent = {
+        r["workflow_id"]
+        for r in _rows(rows, "Log")
+        if (_aware(r.get("completed_datetime")) or EPOCH) >= at - HISTORY
+    }
     found = {}
     for r in _rows(rows, "Log"):
+        if r["workflow_id"] not in recent:
+            continue
         w = found.setdefault(
             r["workflow_id"],
             {"start": None, "end": None, "records": 0, "failed": 0, "tasks": set()},
@@ -256,7 +265,7 @@ def _latest(found, count):
 
 
 def workflow(rows, at) -> str:
-    found = _workflows(rows)
+    found = _workflows(rows, at)
     return table("workflowcount", ("count",), [(str(len(found)),)]) + table(
         "workflows",
         ("workflow", "started", "completed", "records", "failed", "tasks"),
@@ -275,7 +284,7 @@ def workflow(rows, at) -> str:
 
 
 def log(rows, at) -> str:
-    found = _workflows(rows)
+    found = _workflows(rows, at)
     taken, budget, records, index = [], LOG_BUDGET, {}, {}
     for r in _rows(rows, "Log"):
         records.setdefault(r["workflow_id"], []).append(r)
@@ -444,7 +453,7 @@ def statistic(rows, at) -> str:
         r
         for r in stats
         if _aware(r.get("completed_datetime"))
-        and _aware(r["completed_datetime"]) >= at - timedelta(days=7)
+        and _aware(r["completed_datetime"]) >= at - HISTORY
     ]
 
     def single(r):
@@ -505,6 +514,7 @@ def statistic(rows, at) -> str:
     )[:50]
     return (
         table("perfday", header, window(1))
+        + table("perfweek", header, window(7))
         + table("perfmonth", header, window(30))
         + table(
             "perftrend",

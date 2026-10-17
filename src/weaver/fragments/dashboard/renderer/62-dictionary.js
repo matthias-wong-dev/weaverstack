@@ -118,8 +118,9 @@ function searchEntries(entries, query, kind) {
     if (kind && kind !== "All" && e.kind !== kind) return;
     var score = 0;
     for (var i = 0; i < terms.length; i++) {
-      var term = terms[i], s = 0;
-      if (e.lower === term || e.nameLower === term) s = 100;
+      var term = terms[i], s = 0, w = wildcard(term);
+      if (w) s = w.test(e.lower) || w.test(e.nameLower) ? 70 : 0;
+      else if (e.lower === term || e.nameLower === term) s = 100;
       else if (e.lower.indexOf(term) === 0 || e.nameLower.indexOf(term) === 0) s = 80;
       else if ((" " + e.lower.replace(/[._/\-]/g, " ")).indexOf(" " + term) >= 0) s = 60;
       else if (e.lower.indexOf(term) >= 0) s = 40;
@@ -158,23 +159,41 @@ function entitiesPage(body, m) {
   });
   var counts = {};
   entries.forEach(function (e) { counts[e.kind] = (counts[e.kind] || 0) + 1; });
-  var picker = el("select", { "class": "wd-select", "aria-label": "Item", onchange: function () { s.item = this.value; s.selected = null; s.er = {}; saveState(); redraw(); } },
-    [el("option", { value: "all", text: "Every Lakehouse and Warehouse" })].concat(items.map(function (it) {
-      return el("option", { value: it.label, selected: it.label === s.item ? "selected" : null, text: it.type + " · " + it.name });
-    })));
-  var input = el("input", { "class": "wd-search wd-search-wide", type: "search", value: s.query, placeholder: "Search " + fmt(entries.length) + " entries: tables, views, folders, columns and descriptions", "aria-label": "Search the dictionary", autocomplete: "off", spellcheck: "false" });
-  body.appendChild(el("div", { "class": "wd-toolbar" }, [picker, input]));
+  var picker = el("select", { "class": "wd-select", "aria-label": "Item", onchange: function () {
+    s.item = this.value; s.selected = null; s.er = { up: s.er.up, down: s.er.down, maximised: s.er.maximised }; saveState(); redraw();
+  } }, [el("option", { value: "all", text: "Every Lakehouse and Warehouse" })].concat(items.map(function (it) {
+    return el("option", { value: it.label, selected: it.label === s.item ? "selected" : null, text: it.type + " · " + it.name });
+  })));
+  var search = searchBox({
+    placeholder: "Search " + fmt(entries.length) + " tables, views, folders and columns · * matches any text · Shift adds",
+    find: function (q) {
+      return q.trim() ? searchEntries(entries, q, "All").slice(0, 12).map(function (e) { return { kind: e.kind, label: e.label, meta: e.meta, desc: e.desc, entry: e }; }) : [];
+    },
+    onPick: function (r, adding) { choose(r.entry, adding); },
+    onPattern: function (q) { er.addPattern(q); }
+  });
 
-  var erHost = el("div");
-  body.appendChild(section("Relationships", [erHost]));
-  var er = erDiagram(erHost, m, s.er, { item: s.item, onPick: function (id) {
-    var entry = entries.filter(function (e) { return e.ref && e.ref.id === id; })[0];
-    if (entry) choose(entry, false);
+  var er = erWorkspace(body, m, s.er, { item: s.item, tools: [search, picker], describe: renderSide,
+    // A wildcard term selects the objects it names; a column's table joins only by name.
+    matches: function (q) { return searchEntries(entries, q, "All").filter(function (e) { return e.ref && e.ref.key; }).map(function (e) { return e.ref.id; }); },
+    onPick: function (id) {
+    var entry = tableEntry(id);
+    s.selected = entry ? entryId(entry) : null;
+    renderSide(); renderList(); renderDetail();
+    saveState();
   } });
 
   var facets = el("div", { "class": "wd-facets", role: "radiogroup", "aria-label": "Entry kind" });
+  var input = el("input", { "class": "wd-search wd-search-wide", type: "search", value: s.query, placeholder: "Filter " + fmt(entries.length) + " entries by name, kind or description · * matches any text", "aria-label": "Filter the dictionary", autocomplete: "off", spellcheck: "false" });
   var list = el("div", { "class": "wd-entry-list", role: "listbox" }), detail = el("div", { "class": "wd-entry-detail" }), note = el("div", { "class": "wd-status-line" });
-  body.appendChild(section("Dictionary", [facets, note, el("div", { "class": "wd-dictionary" }, [list, detail])]));
+  body.appendChild(section("Dictionary", [el("div", { "class": "wd-toolbar" }, [input]), facets, note, el("div", { "class": "wd-dictionary" }, [list, detail])]));
+  function tableEntry(id) { return entries.filter(function (e) { return e.ref && e.ref.key && e.ref.id === id; })[0] || null; }
+  function tableOf(e) {
+    if (e.ref && e.ref.key) return e.ref.id;
+    if (e.kind === "Column") return identityKey(e.ref.item, e.ref.schema, e.ref.object);
+    return null;
+  }
+  function current() { return entries.filter(function (e) { return entryId(e) === s.selected; })[0] || null; }
   function renderFacets() {
     facets.textContent = "";
     ENTITY_KINDS.forEach(function (k) {
@@ -187,10 +206,10 @@ function entitiesPage(body, m) {
   function renderList() {
     var found = searchEntries(entries, s.query, s.kind), shown = found.slice(0, 100);
     list.textContent = "";
-    note.textContent = found.length > 100 ? "Showing the first 100 of " + fmt(found.length) + " matches. Refine the search to narrow them." : fmt(found.length) + (found.length === 1 ? " match" : " matches");
+    note.textContent = found.length > 100 ? "Showing the first 100 of " + fmt(found.length) + " matches. Refine the filter to narrow them." : fmt(found.length) + (found.length === 1 ? " match" : " matches");
     shown.forEach(function (e) {
       list.appendChild(el("button", { type: "button", role: "option", "class": "wd-entry", "aria-selected": String(s.selected === entryId(e)),
-        onclick: function () { choose(e, true); } }, [
+        onclick: function () { choose(e, false); } }, [
         el("span", { "class": "wd-entry-label" }, [kindMark(e.kind), e.label]),
         el("span", { "class": "wd-entry-meta", text: e.meta }),
         e.desc ? el("span", { "class": "wd-entry-desc", text: e.desc }) : null
@@ -198,20 +217,29 @@ function entitiesPage(body, m) {
     });
     if (!shown.length) list.appendChild(empty("Nothing matches. Try fewer words, or another kind."));
   }
-  /* An entry chosen here shows in the diagram too, when it has relationships. */
-  function choose(e, focusDiagram) {
+  /* An entry chosen anywhere on the page shows in both details panels, and its
+     table in the diagram when the table has relationships. */
+  function choose(e, adding) {
     s.selected = entryId(e);
-    renderList();
-    renderDetail(e);
-    if (focusDiagram && e.ref && e.ref.id && er.has && er.has(e.ref.id)) er.focus(e.ref.id);
+    var id = tableOf(e);
+    if (id && er.has(id)) er.select(id, adding);
+    else if (id) er.say(e.label + " is not a declared table" + (s.item !== "all" ? " in " + itemName(s.item) : ""));
+    renderSide(); renderList(); renderDetail();
     saveState();
   }
-  function renderDetail(e) { entryDetail(detail, m, md, e, function (other) { choose(other, true); }); }
-  input.addEventListener("input", function () { s.query = input.value; renderList(); });
-  renderFacets(); renderList();
-  var current = entries.filter(function (e) { return entryId(e) === s.selected; })[0];
-  if (current) renderDetail(current);
-  else detail.appendChild(empty("Select an entry to see its definition, keys, columns and lineage."));
+  function renderSide(panel) {
+    panel = panel || er.side;
+    var e = current();
+    if (e) entryDetail(panel, m, md, e, function (other) { choose(other, false); });
+    else { panel.textContent = ""; panel.appendChild(empty("Search for a table, or select one in the diagram, to see its definition, keys and columns.")); }
+  }
+  function renderDetail() {
+    var e = current();
+    if (e) entryDetail(detail, m, md, e, function (other) { choose(other, false); });
+    else { detail.textContent = ""; detail.appendChild(empty("Select an entry to see its definition, keys, columns and lineage.")); }
+  }
+  input.addEventListener("input", function () { s.query = input.value; renderList(); saveState(); });
+  renderFacets(); renderList(); renderDetail();
 }
 
 function entryId(e) {

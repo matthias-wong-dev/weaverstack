@@ -261,6 +261,22 @@ test("Health reports Weaver's codes for the catalogue's own state", () => {
   assert.deepEqual(codes(health.build), ["Warehouse/Curated Sales.Ghost:not_installed"]);
 });
 
+test("Health lists what each area finds nothing about as green, apart from the findings", () => {
+  const m = model(estate());
+  const health = D.assessHealth(m);
+  const flagged = new Set(health.all.map((f) => f.area + ":" + (f.node ? f.node.key : f.label)));
+  health.green.forEach((f) => {
+    assert.equal(f.severity, "green");
+    assert.ok(!flagged.has(f.area + ":" + f.node.key), f.area + " " + f.node.key);
+  });
+  const greens = (area) => health.green.filter((f) => f.area === area).map((f) => f.node.key).sort();
+  // Every load subject is either a finding or green, and every object is in Build.
+  const subjects = (list) => new Set(list.filter((f) => f.node).map((f) => f.node.key)).size;
+  assert.equal(greens("load").length + subjects(health.load), health.counts.load.subjects);
+  assert.equal(greens("build").length + subjects(health.build), m.nodes.size);
+  assert.ok(!health.all.some((f) => f.severity === "green"));
+});
+
 test("a validation that passed before its subject loaded again is stale", () => {
   const tests = [["Warehouse/Curated", "Sales", "ByRegionValid", "Succeeded", "w0", AT - 40 * H, AT - 40 * H, 0]];
   const m = model(estate({ tests }));
@@ -335,12 +351,92 @@ test("the ER diagram walks declared foreign keys through a cycle without repeati
       [W, "Sales", "Region", "Table", "", "", "Region ID", "", "", "", "", ""]]);
   const m = model(estate({ extra }));
   const all = D.erGraph(m, "all");
-  const win = D.erWindow(all, W + "|Sales|Region", -1);
-  assert.deepEqual(Array.from(win.kept.keys()).sort(), [W + "|Sales|ByRegion", W + "|Sales|Manager", W + "|Sales|Region", L + "|Tables/Sales|Customer"].sort());
-  assert.equal(win.kept.get(W + "|Sales|Region"), 0);
+  const win = D.erWindow(all, [W + "|Sales|Region"], -1, -1, []);
+  assert.deepEqual(Array.from(win.rank.keys()).sort(), [W + "|Sales|ByRegion", W + "|Sales|Manager", W + "|Sales|Region", L + "|Tables/Sales|Customer"].sort());
+  assert.equal(win.rank.get(W + "|Sales|Region"), 0);
+  assert.equal(win.rank.get(W + "|Sales|Manager"), -1);
+  assert.equal(win.rank.get(W + "|Sales|ByRegion"), 1);
   assert.deepEqual(all.nodes.get(W + "|Sales|Region").keys[0], { type: "Primary key", columns: ["Region ID"] });
   // Within one item, a relationship belongs when either end is there.
   assert.equal(D.erGraph(m, L).edges.length, 1);
+});
+
+test("the ER diagram walks parents and children to their own depths", () => {
+  const FK = ["item", "schema", "object", "columns", "primaryitem", "primaryschema", "primaryobject", "primarycolumns"];
+  const W = "Warehouse/Curated", id = (name) => W + "|Sales|" + name;
+  // Line references Order, Order references Customer, Customer references Region.
+  const extra = table("foreignkeys", FK, [
+    [W, "Sales", "Line", "Order ID", W, "Sales", "Order", "Order ID"],
+    [W, "Sales", "Order", "Customer ID", W, "Sales", "Customer", "Customer ID"],
+    [W, "Sales", "Customer", "Region ID", W, "Sales", "Region", "Region ID"]]);
+  const g = D.erGraph(model(estate({ extra })), "all");
+  const alone = D.erWindow(g, [id("Order")], 0, 0, []);
+  assert.deepEqual(Array.from(alone.rank.keys()), [id("Order")]);
+  assert.deepEqual(alone.more.get(id("Order")), { up: [id("Customer")], down: [id("Line")] });
+  const parents = D.erWindow(g, [id("Order")], -1, 0, []);
+  assert.deepEqual([parents.rank.get(id("Customer")), parents.rank.get(id("Region"))], [-1, -2]);
+  assert.ok(!parents.rank.has(id("Line")));
+  const children = D.erWindow(g, [id("Customer")], 0, 2, []);
+  assert.deepEqual([children.rank.get(id("Order")), children.rank.get(id("Line"))], [1, 2]);
+  assert.deepEqual(children.more.get(id("Customer")).up, [id("Region")]);
+  // An expanded parent sits a row above the table it hangs from.
+  const grown = D.erWindow(g, [id("Customer")], 0, 0, [id("Region")]);
+  assert.equal(grown.rank.get(id("Region")), -1);
+  assert.deepEqual(Array.from(grown.expanded), [id("Region")]);
+  // With nothing selected, the whole graph ranks by its chain of references.
+  const whole = D.erWindow(g, [], 1, 1, []);
+  assert.deepEqual(["Region", "Customer", "Order", "Line"].map((n) => whole.rank.get(id(n))), [0, 1, 2, 3]);
+  const lay = D.erLayout(g, whole);
+  assert.ok(lay.boxes.get(id("Region")).y < lay.boxes.get(id("Customer")).y);
+});
+
+test("the ER diagram keeps a table with no relationship, and caps the unselected window", () => {
+  const TABLES = ["item", "schema", "object", "type", "description", "lineage", "primarykey", "notnull", "identity", "incremental", "static", "prohibitrebuild"];
+  const W = "Warehouse/Curated", rows = [];
+  for (let i = 0; i < 100; i++) rows.push([W, "Sales", "Lone" + String(i).padStart(3, "0"), "table", "", "", "", "", "", "", "", ""]);
+  const g = D.erGraph(model(estate({ extra: table("tables", TABLES, rows) })), "all");
+  const lone = W + "|Sales|Lone007";
+  assert.ok(g.nodes.has(lone));
+  const alone = D.erWindow(g, [lone], -1, -1, []);
+  assert.deepEqual(Array.from(alone.rank.keys()), [lone]);
+  assert.ok(!alone.more.size && !alone.truncated);
+  const whole = D.erWindow(g, [], 1, 1, []);
+  assert.equal(whole.rank.size, D.ER.NODES);
+  assert.ok(whole.truncated && whole.reach === 100);
+  // A wide rank wraps rather than running on.
+  const rowsUsed = new Set(Array.from(D.erLayout(g, whole).boxes.values()).map((b) => b.y));
+  assert.equal(rowsUsed.size, Math.ceil(D.ER.NODES / D.ER.WRAP));
+});
+
+test("every second column of an item sits half a row lower", () => {
+  const nodes = [], edgeRows = [];
+  for (let i = 0; i < 4; i++) nodes.push(["n" + i, "Warehouse/Chain", "S", "T" + i, "Table", "S.T" + i, 9, ""]);
+  for (let i = 1; i < 4; i++) edgeRows.push(["n" + i, "n" + (i - 1), "Dependency", "", ""]);
+  const text = table("page", ["name"], [["lineage"]]) + table("meta", ["at", "format"], [[AT, 1]]) + table("nodes", NODE, nodes) + table("edges", EDGE, edgeRows);
+  const lay = D.layoutEstate(model(text), D.WINDOW_GEOMETRY);
+  const ys = ["n0", "n1", "n2", "n3"].map((k) => lay.pos.get(k).y);
+  assert.deepEqual(ys.map((y) => y - ys[0]), [0, D.WINDOW_GEOMETRY.ROW / 2, 0, D.WINDOW_GEOMETRY.ROW / 2]);
+  const band = lay.bands[0];
+  ["n0", "n1", "n2", "n3"].forEach((k) => assert.ok(lay.pos.get(k).y < band.y + band.height));
+});
+
+test("a * in a search term matches any run of characters across the whole name", () => {
+  const m = model(estate());
+  const labels = (q) => D.searchNodes(m, q, 20).map((n) => n.label).sort();
+  assert.deepEqual(labels("sales.by*"), ["Sales.ByRegion", "Sales.ByRegionValid"]);
+  assert.deepEqual(labels("*region"), ["Sales.ByRegion", "Sales.Region"]);
+  assert.deepEqual(labels("*by*valid"), ["Sales.ByRegionValid"]);
+  // Anchored: without a trailing *, a name must end where the term does.
+  assert.deepEqual(labels("sales.by"), ["Sales.ByRegion", "Sales.ByRegionValid"]);
+  assert.deepEqual(labels("by*"), ["Sales.ByRegion", "Sales.ByRegionValid"]);
+  assert.deepEqual(labels("reg*n"), ["Sales.Region"]);
+  // As a selection term, a wildcard selects every match, not the first twelve.
+  assert.deepEqual(D.nodeMatches(m, "sales.*").sort(), ["b", "c", "r", "s", "v"]);
+  const win = D.focusWindow(m, D.nodeMatches(m, "sales.by*"), 0, 0, []);
+  assert.deepEqual(Array.from(win.seeds).sort(), ["b", "v"]);
+  const entries = D.dictionaryEntries(m);
+  assert.deepEqual(D.searchEntries(entries, "*customer*", "All").map((e) => e.label).sort(),
+    ["Sales.Customer", "Sales.Customer", "Sales/Customers"]);
 });
 
 test("dictionary search ranks names before descriptions and finds columns", () => {
@@ -373,11 +469,11 @@ test("the Gantt summary measures elapsed span, summed work and peak concurrency"
 test("the catalogue never appears as part of the estate", () => {
   const PERF = ["item", "schema", "object", "loads", "duration", "longest", "read", "inserted", "updated", "deleted", "rejected", "reloads", "skips", "timedread", "timedduration", "last"];
   const perf = (item, schema, object) => [item, schema, object, 1, 1000, 1000, 10, 1, 0, 0, 0, 0, 0, 10, 1000, AT];
-  const extra = table("perfmonth", PERF, [
+  const extra = table("perfweek", PERF, [
     perf("Warehouse/_weaver", "_", "LineageNode"), perf("Warehouse/Curated", "_", "Load"),
     perf("Warehouse/Curated", "Sales", "Region")]);
   const m = model(estate({ extra }));
-  assert.deepEqual(D.perfRows(m, "perfmonth").map((r) => r.item + " " + r.object), ["Warehouse/Curated Region"]);
+  assert.deepEqual(D.perfRows(m, "perfweek").map((r) => r.item + " " + r.object), ["Warehouse/Curated Region"]);
 });
 
 test("a selection of several objects shows the union of their lineage", () => {

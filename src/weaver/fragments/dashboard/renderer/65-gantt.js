@@ -40,7 +40,7 @@ function ganttSummary(rows) {
 function ganttPage(body, m) {
   var s = pageState("gantt"), all = logRows(m), flows = m.workflows || [];
   var included = new Map((m.tables.logflows || []).map(function (r) { return [r.workflow, { records: num(r.records), included: num(r.included) }]; }));
-  if (!flows.length) { body.appendChild(empty("No workflow has settled a record yet. Run weaver load to see its timeline.")); return; }
+  if (!flows.length) { body.appendChild(empty("No workflow has settled a record in the last 7 days. Run weaver load to see its timeline.")); return; }
   if (!s.workflow || !flows.some(function (w) { return w.id === s.workflow; }) || s.follow !== false) s.workflow = flows[0].id;
   s.scope = s.scope || "objects";
   var select = el("select", { "class": "wd-select", "aria-label": "Workflow", onchange: function () {
@@ -90,8 +90,9 @@ function ganttChart(rows, sum, s, m) {
   var P = null, width = 0, height = 0, ratio = 1, top = 0;
   function measure() {
     var box = wrap.getBoundingClientRect(), clip = clipRect(wrap);
-    width = Math.max(320, box.width); ratio = root.devicePixelRatio || 1;
+    width = Math.max(320, box.width);
     top = Math.max(0, clip.top - box.top); height = Math.min(box.height, clip.bottom - box.top) - top;
+    ratio = canvasRatio(width, height);
     canvas.style.top = top + "px"; canvas.style.width = width + "px"; canvas.style.height = Math.max(0, height) + "px";
     canvas.width = Math.round(width * ratio); canvas.height = Math.round(Math.max(1, height) * ratio);
   }

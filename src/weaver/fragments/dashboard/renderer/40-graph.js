@@ -3,7 +3,7 @@
 // mouse drags and two-finger gestures move the graph. A mouse or pen drag that
 // starts on a node moves the node instead.
 
-var CELL = 64;
+var CELL = 64, LABEL_DROP = 20;
 
 function GraphView(host, m, lay, options) {
   var self = this;
@@ -36,8 +36,9 @@ GraphView.prototype.index = function (lay) {
 };
 
 GraphView.prototype.resize = function () {
-  var box = this.host.getBoundingClientRect(), ratio = root.devicePixelRatio || 1;
+  var box = this.host.getBoundingClientRect();
   this.width = Math.max(1, box.width); this.height = Math.max(1, box.height);
+  var ratio = canvasRatio(this.width, this.height);
   this.canvas.width = Math.round(this.width * ratio); this.canvas.height = Math.round(this.height * ratio);
   this.canvas.style.width = this.width + "px"; this.canvas.style.height = this.height + "px";
   this.ratio = ratio;
@@ -147,12 +148,12 @@ GraphView.prototype.paint = function () {
     ctx.fillStyle = P.band; ctx.fill(); ctx.lineWidth = 1 / k; ctx.strokeStyle = P["band-line"]; ctx.stroke();
     b.columns.forEach(function (c) {
       if (c.kind === "objects") return;
-      ctx.beginPath(); roundRect(ctx, c.x - 12, b.y + GEOMETRY.HEAD - 13, c.width - 6, b.height - GEOMETRY.HEAD + 5, 9);
+      ctx.beginPath(); roundRect(ctx, c.x - 12, b.y + lay.geometry.HEAD - 13, c.width - 6, b.height - lay.geometry.HEAD + 5, 9);
       ctx.fillStyle = c.kind === "shortcuts" ? P["amber-soft"] : P["violet-soft"]; ctx.fill();
       if (k > 0.45) {
         ctx.fillStyle = c.kind === "shortcuts" ? P.amber : P.violet;
         ctx.font = "700 9px " + mono;
-        ctx.fillText(c.kind === "shortcuts" ? "SHORTCUTS" : "TESTS", c.x - 4, b.y + GEOMETRY.HEAD - 2);
+        ctx.fillText(c.kind === "shortcuts" ? "SHORTCUTS" : "TESTS", c.x - 4, b.y + lay.geometry.HEAD - 2);
       }
     });
     // The header stays readable at any zoom: below 0.9 it grows as the view zooms out.
@@ -208,7 +209,7 @@ GraphView.prototype.paint = function () {
 
   // Nodes.
   var font = "11px " + sans, fontStrong = "600 11px " + sans;
-  this.labelEnds = new Map();
+  this.labels = new Map();
   m.nodes.forEach(function (n) {
     var p = lay.pos.get(n.key);
     if (!p || !inView(p.x, p.y)) return;
@@ -221,13 +222,15 @@ GraphView.prototype.paint = function () {
     self.marks(ctx, n, p, P);
     if (labels || (win && k > 0.3)) {
       var seed = win && win.seeds.has(n.key);
-      var text = clip(ctx, n.label, GEOMETRY.SUB - 30, seed ? fontStrong : font);
+      var text = clip(ctx, n.label, lay.geometry.LABEL, seed ? fontStrong : font);
       ctx.font = seed ? fontStrong : font;
-      // A halo in the background colour keeps labels legible over edges.
-      ctx.lineJoin = "round"; ctx.lineWidth = 3; ctx.strokeStyle = P.band; ctx.strokeText(text, p.x + 11, p.y + 4);
+      // Centred under the node, clear of the edges meeting it; a halo in the
+      // background colour keeps it legible over edges passing beneath.
+      var half = ctx.measureText(text).width / 2;
+      ctx.lineJoin = "round"; ctx.lineWidth = 3; ctx.strokeStyle = P.band; ctx.strokeText(text, p.x - half, p.y + LABEL_DROP);
       ctx.fillStyle = P.ink;
-      ctx.fillText(text, p.x + 11, p.y + 4);
-      self.labelEnds.set(n.key, p.x + 11 + ctx.measureText(text).width);
+      ctx.fillText(text, p.x - half, p.y + LABEL_DROP);
+      self.labels.set(n.key, { x0: p.x - half, x1: p.x + half });
     }
   });
 
@@ -238,11 +241,10 @@ GraphView.prototype.paint = function () {
     win.more.forEach(function (more, key) {
       var p = lay.pos.get(key);
       if (!inView(p.x, p.y)) return;
-      if (more.up.length) self.marker(ctx, P, key, "up", more.up, p.x - 46, p.y, p.x - 8);
-      if (more.down.length) {
-        var end = self.labelEnds.get(key) || p.x + 10;
-        self.marker(ctx, P, key, "down", more.down, end + 16, p.y, end + 4);
-      }
+      // On the label's line, either side of it.
+      var label = self.labels.get(key) || { x0: p.x - 8, x1: p.x + 8 }, y = p.y + LABEL_DROP - 4;
+      if (more.up.length) self.marker(ctx, P, key, "up", more.up, label.x0 - 6, y);
+      if (more.down.length) self.marker(ctx, P, key, "down", more.down, label.x1 + 6, y);
     });
   }
 };
@@ -273,13 +275,12 @@ GraphView.prototype.marks = function (ctx, n, p, P) {
   }
 };
 
-/* An expansion marker: ‹‹ N for upstream neighbours left out, N ›› downstream. */
-GraphView.prototype.marker = function (ctx, P, key, side, keys, x, y, join) {
-  var text = side === "up" ? "‹‹ " + keys.length : keys.length + " ››", w = ctx.measureText(text).width + 12, left = side === "up" ? x - w / 2 + 14 : x;
-  ctx.beginPath(); ctx.setLineDash([2, 2]);
-  if (side === "up") { ctx.moveTo(left + w, y); ctx.lineTo(join, y); } else { ctx.moveTo(join, y); ctx.lineTo(left, y); }
-  ctx.strokeStyle = P["line-strong"]; ctx.lineWidth = 1; ctx.stroke(); ctx.setLineDash([]);
+/* An expansion marker: ‹‹ N for upstream neighbours left out, ending at x, or
+   N ›› downstream, starting at x. */
+GraphView.prototype.marker = function (ctx, P, key, side, keys, x, y) {
+  var text = side === "up" ? "‹‹ " + keys.length : keys.length + " ››", w = ctx.measureText(text).width + 12, left = side === "up" ? x - w : x;
   ctx.beginPath(); roundRect(ctx, left, y - 7.5, w, 15, 7.5);
+  ctx.lineWidth = 1;
   ctx.fillStyle = P["paper-deep"]; ctx.fill(); ctx.strokeStyle = P["line-strong"]; ctx.stroke();
   ctx.fillStyle = P.muted; ctx.fillText(text, left + 6, y + 3.4);
   this.markers.push({ key: key, side: side, keys: keys, x: left, y: y - 7.5, w: w, h: 15 });
@@ -334,7 +335,7 @@ GraphView.prototype.fitKeys = function (keys, animate) {
   var x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity, lay = this.lay;
   keys.forEach(function (key) {
     var p = lay.pos.get(key);
-    x0 = Math.min(x0, p.x - 60); y0 = Math.min(y0, p.y - 20); x1 = Math.max(x1, p.x + 190); y1 = Math.max(y1, p.y + 20);
+    x0 = Math.min(x0, p.x - lay.geometry.LABEL / 2 - 50); y0 = Math.min(y0, p.y - 20); x1 = Math.max(x1, p.x + lay.geometry.LABEL / 2 + 50); y1 = Math.max(y1, p.y + LABEL_DROP + 12);
   });
   var rect = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 }, k = Math.min(1.15, Math.min(this.width / (rect.w + 160), this.height / (rect.h + 120)));
   if (k < 0.2 && this.win && this.win.focus) {
@@ -346,10 +347,12 @@ GraphView.prototype.fitKeys = function (keys, animate) {
 };
 
 GraphView.prototype.go = function (target, animate) {
-  var self = this, from = this.s.view;
+  // A later change of view supersedes an animation still running.
+  var self = this, from = this.s.view, run = this.run = (this.run || 0) + 1;
   if (!animate || !from || !root.requestAnimationFrame) { this.s.view = target; this.draw(); return; }
   var start = null;
   function frame(now) {
+    if (run !== self.run) return;
     if (start === null) start = now;
     var t = Math.min(1, (now - start) / 380), e = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
     self.s.view = { k: from.k + (target.k - from.k) * e, x: from.x + (target.x - from.x) * e, y: from.y + (target.y - from.y) * e };
@@ -360,12 +363,14 @@ GraphView.prototype.go = function (target, animate) {
 };
 
 GraphView.prototype.zoomAt = function (factor, px, py) {
+  this.run = (this.run || 0) + 1;
   var v = this.s.view, k = Math.min(3, Math.max(0.04, v.k * factor)), f = k / v.k;
   this.s.view = { k: k, x: px - (px - v.x) * f, y: py - (py - v.y) * f };
   this.draw();
 };
 
 GraphView.prototype.panBy = function (dx, dy) {
+  this.run = (this.run || 0) + 1;
   var v = this.s.view;
   this.s.view = { k: v.k, x: v.x + dx, y: v.y + dy };
   this.draw();
@@ -385,11 +390,11 @@ GraphView.prototype.hit = function (cx, cy) {
     if (w.x >= mk.x - slop && w.x <= mk.x + mk.w + slop && w.y >= mk.y - slop && w.y <= mk.y + mk.h + slop) return { marker: mk };
   }
   var gx = Math.floor(w.x / CELL), gy = Math.floor(w.y / CELL);
-  for (var dx = -4; dx <= 1; dx++) for (var dy = -1; dy <= 1; dy++) {
+  for (var dx = -3; dx <= 3; dx++) for (var dy = -1; dy <= 1; dy++) {
     (self.grid.get((gx + dx) + "|" + (gy + dy)) || []).forEach(function (key) {
-      var p = self.lay.pos.get(key), end = self.labelEnds && self.labelEnds.get(key);
+      var p = self.lay.pos.get(key), label = self.labels && self.labels.get(key);
       var near = Math.hypot(w.x - p.x, w.y - p.y);
-      var onLabel = end && w.x >= p.x && w.x <= end && Math.abs(w.y - p.y) <= 8;
+      var onLabel = label && w.x >= label.x0 && w.x <= label.x1 && w.y >= p.y + 8 && w.y <= p.y + LABEL_DROP + 5;
       var d = onLabel ? 0.5 : near;
       if ((near <= 9 + slop || onLabel) && d < bestD) { best = key; bestD = d; }
     });

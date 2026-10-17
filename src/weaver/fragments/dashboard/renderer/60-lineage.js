@@ -17,26 +17,42 @@ function graphWorkspace(body, m, options) {
   if (s.item && !m.items.has(s.item)) s.item = null;
   s.expanded = (s.expanded || []).filter(function (k) { return m.nodes.has(k); });
   s.moved = s.moved || {};
+  s.patterns = s.patterns || [];
+  var matched = new Map();
+  function matches(q) { if (!matched.has(q)) matched.set(q, nodeMatches(m, q)); return matched.get(q); }
+  /* The selected objects and every match of each wildcard term. */
+  function seeds() {
+    var out = s.selection.slice(), seen = new Set(out);
+    s.patterns.forEach(function (q) { matches(q).forEach(function (k) { if (!seen.has(k)) { seen.add(k); out.push(k); } }); });
+    return out;
+  }
   var health = options.health ? assessHealth(m) : null;
   s.mode = s.mode || options.mode;
-  var above = options.above || null, legendHost = el("div");
-
-  var host = el("div", { "class": "wd-graph" }), side = el("aside", { "class": "wd-side" }), line = el("div", { "class": "wd-status-line" });
-  var chips = el("div", { "class": "wd-chips", "aria-label": "Selected objects" });
-  var frame = el("div", { "class": "wd-workspace" });
-  var view;
+  var view, f = workspaceFrame(s, function () { if (view) view.resize(); });
+  var host = f.host, side = f.side, line = f.line, legendHost = f.legend;
   function within() {
     return s.item ? new Set(m.items.get(s.item).nodes.map(function (n) { return n.key; })) : null;
   }
   /* A plain choice replaces the selection; Shift, Ctrl or ⌘ adds or removes. */
   function select(key, adding) {
-    if (!key) s.selection = [];
+    if (!key) { s.selection = []; s.patterns = []; }
     else if (adding) {
       var at = s.selection.indexOf(key);
       if (at >= 0) s.selection.splice(at, 1); else s.selection.push(key);
     } else s.selection = [key];
     if (key && s.item && m.nodes.get(key).item !== s.item) { s.item = null; itemPicker.value = ""; }
     s.focus = key && s.selection.indexOf(key) >= 0 ? key : s.selection[s.selection.length - 1] || null;
+    s.expanded = []; s.moved = {};
+    apply(true);
+  }
+  /* A wildcard term joins the selection, whatever else is selected. */
+  function addPattern(q) {
+    if (s.patterns.indexOf(q) < 0) s.patterns.push(q);
+    s.expanded = []; s.moved = {};
+    apply(true);
+  }
+  function removePattern(q) {
+    s.patterns = s.patterns.filter(function (p) { return p !== q; });
     s.expanded = []; s.moved = {};
     apply(true);
   }
@@ -50,7 +66,7 @@ function graphWorkspace(body, m, options) {
   function moved(key, p) { s.moved[key] = { x: p.x, y: p.y }; saveState(); }
   function apply(refit) {
     var only = within();
-    var win = s.selection.length || only ? focusWindow(m, s.selection, s.up, s.down, s.expanded, only) : null;
+    var seed = seeds(), win = seed.length || only ? focusWindow(m, seed, s.up, s.down, s.expanded, only) : null;
     var lay = win ? layoutEstate(subModel(m, win.shown), WINDOW_GEOMETRY) : layoutEstate(m);
     Object.keys(s.moved).forEach(function (k) { var p = lay.pos.get(k); if (p) { p.x = s.moved[k].x; p.y = s.moved[k].y; } });
     view.setWindow(win, lay);
@@ -61,17 +77,9 @@ function graphWorkspace(body, m, options) {
     saveState();
   }
   function renderChips() {
-    chips.textContent = "";
-    chips.hidden = !s.selection.length;
-    s.selection.forEach(function (key) {
-      var n = m.nodes.get(key);
-      chips.appendChild(el("span", { "class": "wd-chip-select" + (key === s.focus ? " wd-current" : "") }, [
-        el("button", { type: "button", "class": "wd-chip-name", title: n.item + " · " + qualified(n), onclick: function () { s.focus = key; details(side, m, key, { onOpen: select, health: health }); renderChips(); view.fitKeys([key], true); } },
-          [kindMark(n.kind), n.label]),
-        el("button", { type: "button", "class": "wd-chip-remove", "aria-label": "Remove " + n.label, onclick: function () { select(key, true); } }, ["×"])
-      ]));
-    });
-    if (s.selection.length > 1) chips.appendChild(el("button", { type: "button", "class": "wd-text-btn wd-chip-clear", onclick: function () { select(null); } }, ["Clear"]));
+    selectionChips(f.chips, s.selection, s.focus, function (key) { var n = m.nodes.get(key); return { kind: n.kind, label: n.label, title: n.item + " · " + qualified(n) }; },
+      function (key) { s.focus = key; details(side, m, key, { onOpen: select, health: health }); renderChips(); view.fitKeys([key], true); }, select,
+      { list: s.patterns, count: function (q) { return matches(q).length; }, remove: removePattern });
   }
   function status(win) {
     line.textContent = "";
@@ -94,8 +102,9 @@ function graphWorkspace(body, m, options) {
   } }, [el("option", { value: "", text: "Every item" })].concat(estate.bands.map(function (b) {
     return el("option", { value: b.item.label, selected: b.item.label === s.item ? "selected" : null, text: b.item.label });
   })));
-  var bar = el("div", { "class": "wd-toolbar" }, [
-    nodeSearch(m, select),
+  if (options.above) body.appendChild(options.above);
+  f.mount(body, [
+    nodeSearch(m, select, addPattern),
     itemPicker,
     segmented("Up", DEPTHS, s.up, function (d) { s.up = d; s.expanded = []; s.moved = {}; apply(true); }, depthLabel),
     segmented("Down", DEPTHS, s.down, function (d) { s.down = d; s.expanded = []; s.moved = {}; apply(true); }, depthLabel),
@@ -112,34 +121,68 @@ function graphWorkspace(body, m, options) {
       } }, ["Estate"])
     ])
   ]);
-  var maximise = el("button", { "class": "wd-icon wd-maximise", type: "button" });
-  function setMaximised(on) {
-    s.maximised = on;
-    frame.classList.toggle("wd-maximised", on);
-    maximise.textContent = on ? "⤡" : "⤢";
-    maximise.title = on ? "Restore (Esc)" : "Fill the page";
-    maximise.setAttribute("aria-label", maximise.title);
-    if (view) view.resize();
-    saveState();
-  }
-  maximise.addEventListener("click", function () { setMaximised(!s.maximised); });
-  document.addEventListener("keydown", function (e) { if (e.key === "Escape" && s.maximised && frame.isConnected) setMaximised(false); });
-  host.appendChild(maximise);
-  if (above) body.appendChild(above);
-  frame.appendChild(bar);
-  frame.appendChild(chips);
-  frame.appendChild(line);
   legendHost.appendChild(legend(s.mode));
-  frame.appendChild(el("div", { "class": "wd-split" }, [el("div", { "class": "wd-graph-col" }, [host, legendHost]), side]));
-  body.appendChild(frame);
-  setMaximised(!!s.maximised);
   if (!m.nodes.size) { host.appendChild(empty("The catalogue records no installed objects yet. Build a project to see its graph.")); return; }
   var fresh = !s.view;
   view = new GraphView(host, m, estate, { state: s, mode: s.mode, onSelect: select, onReveal: expand, onMove: moved, label: options.label });
   apply(false);
   // A remembered viewport is kept unless it no longer shows the focus or the estate.
-  if (fresh || !view.showing(s.focus)) { if (s.selection.length || s.item) view.fitWindow(false); else view.fitAll(false); }
+  if (fresh || !view.showing(s.focus)) { if (s.selection.length || s.patterns.length || s.item) view.fitWindow(false); else view.fitAll(false); }
   return { select: select };
+}
+
+/* The frame both graph pages share: a toolbar, the selection as chips, a status
+   line, and the drawing beside its details, with a control that fills the page
+   with the drawing alone. */
+function workspaceFrame(s, onResize) {
+  var f = { frame: el("div", { "class": "wd-workspace" }), bar: el("div", { "class": "wd-toolbar" }),
+    chips: el("div", { "class": "wd-chips", "aria-label": "Selection" }), line: el("div", { "class": "wd-status-line" }),
+    host: el("div", { "class": "wd-graph" }), legend: el("div"), side: el("aside", { "class": "wd-side" }) };
+  var maximise = el("button", { "class": "wd-icon wd-maximise", type: "button" });
+  function set(on) {
+    s.maximised = on;
+    f.frame.classList.toggle("wd-maximised", on);
+    maximise.textContent = on ? "⤡" : "⤢";
+    maximise.title = on ? "Restore (Esc)" : "Fill the page";
+    maximise.setAttribute("aria-label", maximise.title);
+    onResize();
+    saveState();
+  }
+  maximise.addEventListener("click", function () { set(!s.maximised); });
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape" && s.maximised && f.frame.isConnected) set(false); });
+  f.mount = function (body, tools) {
+    tools.forEach(function (t) { if (t) f.bar.appendChild(t); });
+    f.host.appendChild(maximise);
+    [f.bar, f.chips, f.line, el("div", { "class": "wd-split" }, [el("div", { "class": "wd-graph-col" }, [f.host, f.legend]), f.side])]
+      .forEach(function (c) { f.frame.appendChild(c); });
+    body.appendChild(f.frame);
+    set(!!s.maximised);
+  };
+  return f;
+}
+
+/* The selection as chips: a name focuses its object, × removes it. select is
+   the page's select(key, adding). Each wildcard term in patterns is a chip of
+   its own, counting what it matches. */
+function selectionChips(chips, selection, focus, describe, onFocus, select, patterns) {
+  var terms = patterns ? patterns.list : [];
+  chips.textContent = "";
+  chips.hidden = !selection.length && !terms.length;
+  terms.forEach(function (q) {
+    var count = patterns.count(q);
+    chips.appendChild(el("span", { "class": "wd-chip-select wd-chip-pattern" }, [
+      el("span", { "class": "wd-chip-name", title: "Every match for " + q, text: q + " · " + fmt(count) }),
+      el("button", { type: "button", "class": "wd-chip-remove", "aria-label": "Remove " + q, onclick: function () { patterns.remove(q); } }, ["×"])
+    ]));
+  });
+  selection.forEach(function (key) {
+    var d = describe(key);
+    chips.appendChild(el("span", { "class": "wd-chip-select" + (key === focus ? " wd-current" : "") }, [
+      el("button", { type: "button", "class": "wd-chip-name", title: d.title, onclick: function () { onFocus(key); } }, [kindMark(d.kind), d.label]),
+      el("button", { type: "button", "class": "wd-chip-remove", "aria-label": "Remove " + d.label, onclick: function () { select(key, true); } }, ["×"])
+    ]));
+  });
+  if (selection.length + terms.length > 1) chips.appendChild(el("button", { type: "button", "class": "wd-text-btn wd-chip-clear", onclick: function () { select(null); } }, ["Clear"]));
 }
 
 function legend(mode) {
@@ -147,8 +190,8 @@ function legend(mode) {
     ["swatch wd-ok", "Last load succeeded"], ["swatch wd-bad", "Failed, error or blocked"], ["swatch wd-warn", "Rejected rows or pending"],
     ["swatch wd-none", "Nothing settled, or loaded elsewhere"], ["ring wd-next", "Ready: dependencies settled"], ["ring wd-wait", "Waiting on a dependency"]
   ] : [
-    ["kind wd-kind-table", "Table"], ["kind wd-kind-view", "View"], ["kind wd-kind-folder", "Folder"], ["kind wd-kind-shortcut", "Shortcut"],
-    ["kind wd-kind-test", "Test"], ["kind wd-kind-assumption", "Assumption"], ["kind wd-kind-semantic-model", "Semantic model"], ["kind wd-kind-report", "Report"],
+    ["kind wd-kind wd-kind-table", "Table"], ["kind wd-kind wd-kind-view", "View"], ["kind wd-kind wd-kind-folder", "Folder"], ["kind wd-kind wd-kind-shortcut", "Shortcut"],
+    ["kind wd-kind wd-kind-test", "Test"], ["kind wd-kind wd-kind-assumption", "Assumption"], ["kind wd-kind wd-kind-semantic-model", "Semantic model"], ["kind wd-kind wd-kind-report", "Report"],
     ["line wd-up", "Upstream"], ["line wd-down", "Downstream"], ["dot wd-bad", "Needs attention"]
   ];
   return el("div", { "class": "wd-legend" }, entries.map(function (e) {

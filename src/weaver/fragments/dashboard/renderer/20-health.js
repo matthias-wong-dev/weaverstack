@@ -87,16 +87,25 @@ function finding(area, code, severity, node, result, message, s) {
 function assessHealth(m, options) {
   options = options || {};
   var asOf = options.asOf !== undefined ? options.asOf : m.at - DEFAULT_AGE_MS;
-  var anc = ancestry(m), load = [], tests = [], build = [];
+  // green holds each subject an area finds nothing about, apart from the findings.
+  var anc = ancestry(m), load = [], tests = [], build = [], green = [];
   var counts = { load: { subjects: 0 }, tests: { subjects: 0 }, build: { subjects: 0 } };
   m.nodes.forEach(function (n) {
     counts.build.subjects += 1;
-    if (isLoadSubject(n)) { counts.load.subjects += 1; load.push.apply(load, loadFindings(m, n, anc, asOf)); }
+    if (isLoadSubject(n)) {
+      counts.load.subjects += 1;
+      var lf = loadFindings(m, n, anc, asOf), s = effectiveLoad(n);
+      load.push.apply(load, lf);
+      if (!lf.length) green.push(finding("load", "load_current", GREEN, n, s.result, "the last load " + s.result + (n.isStatic ? "; loaded once" : "; current with its dependencies"), s));
+    }
     if (isValidation(n)) {
       counts.tests.subjects += 1;
-      tests.push.apply(tests, testFindings(m, n, anc));
+      var tf = testFindings(m, n, anc);
+      tests.push.apply(tests, tf);
+      if (!tf.length) green.push(finding("tests", "test_current", GREEN, n, n.test.result, "the last run " + n.test.result + "; current with its dependencies", n.test));
       if (!n.isInstalled) build.push(finding("build", "missing_validation_artefact", RED, n, null, "its definition or artefact is not installed; build the item again"));
-    }
+      else green.push(finding("build", "build_installed", GREEN, n, null, "installed and current"));
+    } else green.push(finding("build", "build_installed", GREEN, n, null, "installed and current"));
   });
   (m.tables.uncertified || []).forEach(function (r) {
     if (!m.items.has(r.item) || m.items.get(r.item).internal || !m.items.get(r.item).target) return;
@@ -106,7 +115,7 @@ function assessHealth(m, options) {
   });
   [load, tests, build].forEach(function (list) { list.sort(byFinding); });
   return { asOf: asOf, at: m.at, load: load, tests: tests, build: build, counts: counts,
-    all: load.concat(tests, build).sort(byFinding) };
+    all: load.concat(tests, build).sort(byFinding), green: green.sort(byFinding) };
 }
 
 function byFinding(a, b) {
