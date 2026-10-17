@@ -180,6 +180,66 @@ def test_a_new_item_adds_its_target_to_an_existing_configuration(tmp_path, fabri
     assert "Lakehouse/Landing: Landing" in text and "Warehouse/Curated: Curated" in text
 
 
+def _bound_project(path):
+    (path / "workspace-config.yml").write_text(
+        "workspace: Analytics\n"
+        "environment: Weaver\n"
+        "catalogue: Warehouse/Catalogue\n"
+        "targets:\n"
+        "  Lakehouse/Landing: LandingDev\n"
+        "  Warehouse/Curated: CuratedDev\n"
+    )
+
+
+@weaver_test()
+def test_an_adopted_project_gets_the_items_its_targets_name(tmp_path, fabric):
+    _bound_project(tmp_path)
+    first = weaver.initialise(tmp_path, workspace="Analytics", session=fabric.session)
+    assert fabric.created == [
+        "Warehouse/Catalogue",
+        "Lakehouse/LandingDev",
+        "Warehouse/CuratedDev",
+        "Environment/Weaver",
+    ]
+    assert [(r.role, r.name, r.status) for r in first.resources] == [
+        ("Catalogue", "Catalogue", "created"),
+        ("Environment", "Weaver", "created"),
+        ("Lakehouse", "LandingDev", "created"),
+        ("Warehouse", "CuratedDev", "created"),
+    ]
+    again = weaver.initialise(tmp_path, workspace="Analytics", session=fabric.session)
+    assert all(r.status == "existing" for r in again.resources)
+    assert len(fabric.created) == 4
+
+
+@weaver_test()
+def test_a_named_item_the_targets_bind_is_created_under_its_physical_name(
+    tmp_path, fabric
+):
+    _bound_project(tmp_path)
+    weaver.initialise(
+        tmp_path, workspace="Analytics", lakehouse="Landing", session=fabric.session
+    )
+    assert "Lakehouse/LandingDev" in fabric.created
+    assert "Lakehouse/Landing" not in fabric.created
+    assert (
+        "Lakehouse/Landing: LandingDev"
+        in (tmp_path / "workspace-config.yml").read_text()
+    )
+
+
+@weaver_test()
+def test_a_dry_run_plans_the_items_the_targets_name(tmp_path, fabric):
+    _bound_project(tmp_path)
+    report = weaver.initialise(
+        tmp_path, workspace="Analytics", dry_run=True, session=fabric.session
+    )
+    assert ("Lakehouse", "LandingDev", "planned") in [
+        (r.role, r.name, r.status) for r in report.resources
+    ]
+    assert not fabric.created
+
+
 @weaver_test()
 def test_an_unreadable_configuration_stops_a_rerun_before_creation(tmp_path, fabric):
     setup(tmp_path, fabric)

@@ -185,7 +185,7 @@ def initialise(
         source_items=source_items,
         adopted_items=_sources(adopted),
     )
-    wanted_items = _requested(request)
+    wanted_items = _requested(request, configured)
     rerun = configured is not None
 
     from .sessions.host import use_or_create_session
@@ -590,22 +590,56 @@ class _Requested:
     item_type: str
 
 
-def _requested(request: ProjectRequest) -> tuple[_Requested, ...]:
+def _requested(request: ProjectRequest, configured=None) -> tuple[_Requested, ...]:
+    """The Fabric items setup ensures exist.
+
+    A project's ``targets:`` bind its Lakehouses and Warehouses to physical
+    items, and each one is wanted under its physical name, as is a requested
+    item the targets already bind.
+    """
+
+    from .declaration.model import WeaverItemId
     from .fabric.resources import ENVIRONMENT
     from .fabric.resources import LAKEHOUSE as LAKEHOUSE_ITEM
     from .fabric.resources import WAREHOUSE as WAREHOUSE_ITEM
 
+    targets = configured.targets if configured is not None else {}
+
+    def physical(kind, name):
+        bound = targets.get(WeaverItemId.parse(f"{kind}/{name}"))
+        return bound.physical if bound is not None else name
+
     wanted = [_Requested(CATALOGUE_ROLE, request.catalogue, WAREHOUSE_ITEM)]
     if request.lakehouse:
-        wanted.append(_Requested(LAKEHOUSE, request.lakehouse, LAKEHOUSE_ITEM))
+        wanted.append(
+            _Requested(
+                LAKEHOUSE, physical(LAKEHOUSE, request.lakehouse), LAKEHOUSE_ITEM
+            )
+        )
     if request.warehouse:
-        wanted.append(_Requested(WAREHOUSE, request.warehouse, WAREHOUSE_ITEM))
+        wanted.append(
+            _Requested(
+                WAREHOUSE, physical(WAREHOUSE, request.warehouse), WAREHOUSE_ITEM
+            )
+        )
+    kinds = {LAKEHOUSE: LAKEHOUSE_ITEM, WAREHOUSE: WAREHOUSE_ITEM}
+    for item, declaration in sorted(targets.items(), key=lambda pair: str(pair[0])):
+        if item.item_type in kinds:
+            wanted.append(
+                _Requested(item.item_type, declaration.physical, kinds[item.item_type])
+            )
     wanted.append(_Requested(ENVIRONMENT_ROLE, request.environment, ENVIRONMENT))
-    return tuple(wanted)
+    # One physical item is wanted once, under the first role that names it.
+    seen, unique = set(), []
+    for one in wanted:
+        if (one.item_type, one.name) not in seen:
+            seen.add((one.item_type, one.name))
+            unique.append(one)
+    return tuple(unique)
 
 
 def _read_the_workspace(
-    request: ProjectRequest, *, client, wanted_items=None, example_written=False
+    request: ProjectRequest, *, client, wanted_items, example_written=False
 ):
     """Read all requested item identities from one workspace listing.
 
@@ -629,8 +663,8 @@ def _read_the_workspace(
     for item in held:
         by_name.setdefault(item.name, set()).add(item.type)
 
-    found: dict[str, bool] = {}
-    for wanted in wanted_items if wanted_items is not None else _requested(request):
+    found: dict[_Requested, bool] = {}
+    for wanted in wanted_items:
         types = by_name.get(wanted.name, set())
         if types and wanted.item_type not in types:
             other = ", ".join(sorted(types))
@@ -639,7 +673,7 @@ def _read_the_workspace(
                 f"{_article(other)} {other}. Choose another name for the "
                 f"{wanted.role}, or use an existing {wanted.item_type}."
             )
-        found[wanted.role] = bool(types)
+        found[wanted] = bool(types)
     name = request.example_model
     if name is not None and not example_written:
         if taken := sorted(by_name.get(name, set()) & {SEMANTIC_MODEL, REPORT}):
@@ -661,7 +695,7 @@ def _read_the_workspace(
 
 
 def _planned(
-    request: ProjectRequest, found: dict[str, bool], *, wanted_items=None
+    request: ProjectRequest, found: dict[_Requested, bool], *, wanted_items
 ) -> tuple[FabricItemOutcome, ...]:
     """Report dry-run items in the same order as a real run."""
 
@@ -669,31 +703,29 @@ def _planned(
         FabricItemOutcome(
             role=wanted.role,
             name=wanted.name,
-            status=EXISTING if found[wanted.role] else PLANNED,
+            status=EXISTING if found[wanted] else PLANNED,
         )
-        for wanted in (
-            wanted_items if wanted_items is not None else _requested(request)
-        )
+        for wanted in wanted_items
     )
 
 
 def _create_missing(
     request: ProjectRequest,
-    found: dict[str, bool],
+    found: dict[_Requested, bool],
     *,
     physical,
     session,
     client,
-    wanted_items=None,
+    wanted_items,
 ) -> tuple[FabricItemOutcome, ...]:
     from .fabric.resources import LAKEHOUSE as LAKEHOUSE_ITEM
     from .fabric.resources import create_lakehouse, create_warehouse
 
     made = []
-    for wanted in wanted_items if wanted_items is not None else _requested(request):
+    for wanted in wanted_items:
         if wanted.role == ENVIRONMENT_ROLE:
             continue
-        if found[wanted.role]:
+        if found[wanted]:
             made.append(FabricItemOutcome(wanted.role, wanted.name, EXISTING))
             continue
         create = (
