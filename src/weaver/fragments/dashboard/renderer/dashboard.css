@@ -277,13 +277,14 @@ body { background: #f7f7f6; }
 
 /* --- ER, Gantt, trend -------------------------------------------------------- */
 
-.wd-er { position: relative; height: clamp(420px, calc(100vh - 240px), 980px); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--paper); }
-.wd-er-embedded { height: clamp(360px, 52vh, 620px); }
-.wd-er-svg { width: 100%; height: 100%; touch-action: pan-y; cursor: grab; }
+.wd-er-drawing { position: absolute; inset: 0; }
+.wd-er-svg { display: block; width: 100%; height: 100%; touch-action: pan-y; cursor: grab; }
 .wd-er-box rect { fill: var(--surface); stroke: var(--line-strong); }
 .wd-er-box .wd-er-head { fill: var(--paper-deep); stroke: none; }
 .wd-er-box { cursor: pointer; }
 .wd-er-box:hover rect:first-child, .wd-er-box-focus rect:first-child { stroke: var(--blue); stroke-width: 1.6; }
+.wd-er-box-focus rect:first-child { fill: var(--blue-soft); }
+.wd-er-box-current rect:first-child { stroke: var(--ink); stroke-width: 2; }
 .wd-er-title { fill: var(--ink); font: 700 12.5px var(--sans); }
 .wd-er-item { fill: var(--muted); font: 10px var(--mono); }
 .wd-er-col { fill: var(--ink-soft); font: 11px var(--mono); }
@@ -294,7 +295,9 @@ body { background: #f7f7f6; }
 .wd-er-edge.wd-er-focus { stroke: var(--up); stroke-width: 1.8; }
 .wd-er-inactive { stroke-dasharray: 5 4; }
 .wd-er-card { fill: var(--muted); font: 700 11px var(--mono); }
+.wd-er-more { cursor: pointer; }
 .wd-er-more rect { fill: var(--paper-deep); stroke: var(--line-strong); }
+.wd-er-more:hover rect { stroke: var(--blue); }
 .wd-er-more text { fill: var(--muted); font: 600 9.5px var(--mono); text-anchor: middle; }
 .wd-gantt { position: relative; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
 .wd-gantt-canvas { position: absolute; left: 0; display: block; }
@@ -308,7 +311,7 @@ body { background: #f7f7f6; }
 @media (max-width: 980px) {
   .wd-split, .wd-dictionary, .wd-semantics, .wd-semantic-grid, .wd-model-head, .wd-overview:has(.wd-drawer:not([hidden])) { grid-template-columns: minmax(0, 1fr); }
   .wd-side, .wd-drawer, .wd-entry-detail, .wd-model-nav { position: static; max-height: none; }
-  .wd-graph, .wd-er { height: 62vh; min-height: 360px; }
+  .wd-graph { height: 62vh; min-height: 360px; }
   .wd-times { display: none; }
 }
 @media (max-width: 620px) {

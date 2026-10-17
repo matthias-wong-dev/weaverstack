@@ -4,10 +4,10 @@
 // right. A selection is laid out the same way over its own nodes alone, so it
 // fills the view instead of sitting scattered across the estate.
 
-var GEOMETRY = { COL: 214, SUB: 196, ROW: 24, HEAD: 50, PAD: 18, GAP: 30 };
-/* A selection's columns leave room after each label for its expansion marker
-   and the edge leaving it. */
-var WINDOW_GEOMETRY = { COL: 300, SUB: 280, ROW: 26, HEAD: 50, PAD: 18, GAP: 30 };
+/* LABEL is the widest a node's label is drawn; each column leaves room after it
+   for the edges leaving it, and a selection's columns for its expansion marker. */
+var GEOMETRY = { COL: 290, SUB: 260, ROW: 34, HEAD: 54, PAD: 22, GAP: 40, LABEL: 200 };
+var WINDOW_GEOMETRY = { COL: 390, SUB: 360, ROW: 46, HEAD: 54, PAD: 22, GAP: 48, LABEL: 240 };
 var BUDGET = { NODES: 600, EDGES: 3000, REVEAL: 40, EXPANDED: 600 };
 
 function itemLevels(m, items) {
@@ -164,7 +164,7 @@ function layoutEstate(m, geometry) {
     });
     b.columns.forEach(function (c) { c.x += b.x + G.PAD; });
   });
-  return { bands: bands, pos: pos, width: width, height: height };
+  return { bands: bands, pos: pos, width: width, height: height, geometry: G };
 }
 
 /* The estate restricted to keys: the same items and nodes, with neighbour lists

@@ -147,12 +147,12 @@ GraphView.prototype.paint = function () {
     ctx.fillStyle = P.band; ctx.fill(); ctx.lineWidth = 1 / k; ctx.strokeStyle = P["band-line"]; ctx.stroke();
     b.columns.forEach(function (c) {
       if (c.kind === "objects") return;
-      ctx.beginPath(); roundRect(ctx, c.x - 12, b.y + GEOMETRY.HEAD - 13, c.width - 6, b.height - GEOMETRY.HEAD + 5, 9);
+      ctx.beginPath(); roundRect(ctx, c.x - 12, b.y + lay.geometry.HEAD - 13, c.width - 6, b.height - lay.geometry.HEAD + 5, 9);
       ctx.fillStyle = c.kind === "shortcuts" ? P["amber-soft"] : P["violet-soft"]; ctx.fill();
       if (k > 0.45) {
         ctx.fillStyle = c.kind === "shortcuts" ? P.amber : P.violet;
         ctx.font = "700 9px " + mono;
-        ctx.fillText(c.kind === "shortcuts" ? "SHORTCUTS" : "TESTS", c.x - 4, b.y + GEOMETRY.HEAD - 2);
+        ctx.fillText(c.kind === "shortcuts" ? "SHORTCUTS" : "TESTS", c.x - 4, b.y + lay.geometry.HEAD - 2);
       }
     });
     // The header stays readable at any zoom: below 0.9 it grows as the view zooms out.
@@ -221,7 +221,7 @@ GraphView.prototype.paint = function () {
     self.marks(ctx, n, p, P);
     if (labels || (win && k > 0.3)) {
       var seed = win && win.seeds.has(n.key);
-      var text = clip(ctx, n.label, GEOMETRY.SUB - 30, seed ? fontStrong : font);
+      var text = clip(ctx, n.label, lay.geometry.LABEL, seed ? fontStrong : font);
       ctx.font = seed ? fontStrong : font;
       // A halo in the background colour keeps labels legible over edges.
       ctx.lineJoin = "round"; ctx.lineWidth = 3; ctx.strokeStyle = P.band; ctx.strokeText(text, p.x + 11, p.y + 4);
@@ -334,7 +334,7 @@ GraphView.prototype.fitKeys = function (keys, animate) {
   var x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity, lay = this.lay;
   keys.forEach(function (key) {
     var p = lay.pos.get(key);
-    x0 = Math.min(x0, p.x - 60); y0 = Math.min(y0, p.y - 20); x1 = Math.max(x1, p.x + 190); y1 = Math.max(y1, p.y + 20);
+    x0 = Math.min(x0, p.x - 60); y0 = Math.min(y0, p.y - 20); x1 = Math.max(x1, p.x + lay.geometry.LABEL + 50); y1 = Math.max(y1, p.y + 20);
   });
   var rect = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 }, k = Math.min(1.15, Math.min(this.width / (rect.w + 160), this.height / (rect.h + 120)));
   if (k < 0.2 && this.win && this.win.focus) {
@@ -346,10 +346,12 @@ GraphView.prototype.fitKeys = function (keys, animate) {
 };
 
 GraphView.prototype.go = function (target, animate) {
-  var self = this, from = this.s.view;
+  // A later change of view supersedes an animation still running.
+  var self = this, from = this.s.view, run = this.run = (this.run || 0) + 1;
   if (!animate || !from || !root.requestAnimationFrame) { this.s.view = target; this.draw(); return; }
   var start = null;
   function frame(now) {
+    if (run !== self.run) return;
     if (start === null) start = now;
     var t = Math.min(1, (now - start) / 380), e = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
     self.s.view = { k: from.k + (target.k - from.k) * e, x: from.x + (target.x - from.x) * e, y: from.y + (target.y - from.y) * e };
@@ -360,12 +362,14 @@ GraphView.prototype.go = function (target, animate) {
 };
 
 GraphView.prototype.zoomAt = function (factor, px, py) {
+  this.run = (this.run || 0) + 1;
   var v = this.s.view, k = Math.min(3, Math.max(0.04, v.k * factor)), f = k / v.k;
   this.s.view = { k: k, x: px - (px - v.x) * f, y: py - (py - v.y) * f };
   this.draw();
 };
 
 GraphView.prototype.panBy = function (dx, dy) {
+  this.run = (this.run || 0) + 1;
   var v = this.s.view;
   this.s.view = { k: v.k, x: v.x + dx, y: v.y + dy };
   this.draw();
@@ -385,7 +389,7 @@ GraphView.prototype.hit = function (cx, cy) {
     if (w.x >= mk.x - slop && w.x <= mk.x + mk.w + slop && w.y >= mk.y - slop && w.y <= mk.y + mk.h + slop) return { marker: mk };
   }
   var gx = Math.floor(w.x / CELL), gy = Math.floor(w.y / CELL);
-  for (var dx = -4; dx <= 1; dx++) for (var dy = -1; dy <= 1; dy++) {
+  for (var dx = -5; dx <= 1; dx++) for (var dy = -1; dy <= 1; dy++) {
     (self.grid.get((gx + dx) + "|" + (gy + dy)) || []).forEach(function (key) {
       var p = self.lay.pos.get(key), end = self.labelEnds && self.labelEnds.get(key);
       var near = Math.hypot(w.x - p.x, w.y - p.y);

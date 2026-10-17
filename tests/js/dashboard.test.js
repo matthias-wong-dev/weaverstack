@@ -335,12 +335,43 @@ test("the ER diagram walks declared foreign keys through a cycle without repeati
       [W, "Sales", "Region", "Table", "", "", "Region ID", "", "", "", "", ""]]);
   const m = model(estate({ extra }));
   const all = D.erGraph(m, "all");
-  const win = D.erWindow(all, W + "|Sales|Region", -1);
-  assert.deepEqual(Array.from(win.kept.keys()).sort(), [W + "|Sales|ByRegion", W + "|Sales|Manager", W + "|Sales|Region", L + "|Tables/Sales|Customer"].sort());
-  assert.equal(win.kept.get(W + "|Sales|Region"), 0);
+  const win = D.erWindow(all, [W + "|Sales|Region"], -1, -1, []);
+  assert.deepEqual(Array.from(win.rank.keys()).sort(), [W + "|Sales|ByRegion", W + "|Sales|Manager", W + "|Sales|Region", L + "|Tables/Sales|Customer"].sort());
+  assert.equal(win.rank.get(W + "|Sales|Region"), 0);
+  assert.equal(win.rank.get(W + "|Sales|Manager"), -1);
+  assert.equal(win.rank.get(W + "|Sales|ByRegion"), 1);
   assert.deepEqual(all.nodes.get(W + "|Sales|Region").keys[0], { type: "Primary key", columns: ["Region ID"] });
   // Within one item, a relationship belongs when either end is there.
   assert.equal(D.erGraph(m, L).edges.length, 1);
+});
+
+test("the ER diagram walks parents and children to their own depths", () => {
+  const FK = ["item", "schema", "object", "columns", "primaryitem", "primaryschema", "primaryobject", "primarycolumns"];
+  const W = "Warehouse/Curated", id = (name) => W + "|Sales|" + name;
+  // Line references Order, Order references Customer, Customer references Region.
+  const extra = table("foreignkeys", FK, [
+    [W, "Sales", "Line", "Order ID", W, "Sales", "Order", "Order ID"],
+    [W, "Sales", "Order", "Customer ID", W, "Sales", "Customer", "Customer ID"],
+    [W, "Sales", "Customer", "Region ID", W, "Sales", "Region", "Region ID"]]);
+  const g = D.erGraph(model(estate({ extra })), "all");
+  const alone = D.erWindow(g, [id("Order")], 0, 0, []);
+  assert.deepEqual(Array.from(alone.rank.keys()), [id("Order")]);
+  assert.deepEqual(alone.more.get(id("Order")), { up: [id("Customer")], down: [id("Line")] });
+  const parents = D.erWindow(g, [id("Order")], -1, 0, []);
+  assert.deepEqual([parents.rank.get(id("Customer")), parents.rank.get(id("Region"))], [-1, -2]);
+  assert.ok(!parents.rank.has(id("Line")));
+  const children = D.erWindow(g, [id("Customer")], 0, 2, []);
+  assert.deepEqual([children.rank.get(id("Order")), children.rank.get(id("Line"))], [1, 2]);
+  assert.deepEqual(children.more.get(id("Customer")).up, [id("Region")]);
+  // An expanded parent sits a row above the table it hangs from.
+  const grown = D.erWindow(g, [id("Customer")], 0, 0, [id("Region")]);
+  assert.equal(grown.rank.get(id("Region")), -1);
+  assert.deepEqual(Array.from(grown.expanded), [id("Region")]);
+  // With nothing selected, the whole graph ranks by its chain of references.
+  const whole = D.erWindow(g, [], 1, 1, []);
+  assert.deepEqual(["Region", "Customer", "Order", "Line"].map((n) => whole.rank.get(id(n))), [0, 1, 2, 3]);
+  const lay = D.erLayout(g, whole);
+  assert.ok(lay.boxes.get(id("Region")).y < lay.boxes.get(id("Customer")).y);
 });
 
 test("dictionary search ranks names before descriptions and finds columns", () => {

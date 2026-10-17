@@ -19,12 +19,8 @@ function graphWorkspace(body, m, options) {
   s.moved = s.moved || {};
   var health = options.health ? assessHealth(m) : null;
   s.mode = s.mode || options.mode;
-  var above = options.above || null, legendHost = el("div");
-
-  var host = el("div", { "class": "wd-graph" }), side = el("aside", { "class": "wd-side" }), line = el("div", { "class": "wd-status-line" });
-  var chips = el("div", { "class": "wd-chips", "aria-label": "Selected objects" });
-  var frame = el("div", { "class": "wd-workspace" });
-  var view;
+  var view, f = workspaceFrame(s, function () { if (view) view.resize(); });
+  var host = f.host, side = f.side, line = f.line, legendHost = f.legend;
   function within() {
     return s.item ? new Set(m.items.get(s.item).nodes.map(function (n) { return n.key; })) : null;
   }
@@ -61,17 +57,8 @@ function graphWorkspace(body, m, options) {
     saveState();
   }
   function renderChips() {
-    chips.textContent = "";
-    chips.hidden = !s.selection.length;
-    s.selection.forEach(function (key) {
-      var n = m.nodes.get(key);
-      chips.appendChild(el("span", { "class": "wd-chip-select" + (key === s.focus ? " wd-current" : "") }, [
-        el("button", { type: "button", "class": "wd-chip-name", title: n.item + " · " + qualified(n), onclick: function () { s.focus = key; details(side, m, key, { onOpen: select, health: health }); renderChips(); view.fitKeys([key], true); } },
-          [kindMark(n.kind), n.label]),
-        el("button", { type: "button", "class": "wd-chip-remove", "aria-label": "Remove " + n.label, onclick: function () { select(key, true); } }, ["×"])
-      ]));
-    });
-    if (s.selection.length > 1) chips.appendChild(el("button", { type: "button", "class": "wd-text-btn wd-chip-clear", onclick: function () { select(null); } }, ["Clear"]));
+    selectionChips(f.chips, s.selection, s.focus, function (key) { var n = m.nodes.get(key); return { kind: n.kind, label: n.label, title: n.item + " · " + qualified(n) }; },
+      function (key) { s.focus = key; details(side, m, key, { onOpen: select, health: health }); renderChips(); view.fitKeys([key], true); }, select);
   }
   function status(win) {
     line.textContent = "";
@@ -94,7 +81,8 @@ function graphWorkspace(body, m, options) {
   } }, [el("option", { value: "", text: "Every item" })].concat(estate.bands.map(function (b) {
     return el("option", { value: b.item.label, selected: b.item.label === s.item ? "selected" : null, text: b.item.label });
   })));
-  var bar = el("div", { "class": "wd-toolbar" }, [
+  if (options.above) body.appendChild(options.above);
+  f.mount(body, [
     nodeSearch(m, select),
     itemPicker,
     segmented("Up", DEPTHS, s.up, function (d) { s.up = d; s.expanded = []; s.moved = {}; apply(true); }, depthLabel),
@@ -112,27 +100,7 @@ function graphWorkspace(body, m, options) {
       } }, ["Estate"])
     ])
   ]);
-  var maximise = el("button", { "class": "wd-icon wd-maximise", type: "button" });
-  function setMaximised(on) {
-    s.maximised = on;
-    frame.classList.toggle("wd-maximised", on);
-    maximise.textContent = on ? "⤡" : "⤢";
-    maximise.title = on ? "Restore (Esc)" : "Fill the page";
-    maximise.setAttribute("aria-label", maximise.title);
-    if (view) view.resize();
-    saveState();
-  }
-  maximise.addEventListener("click", function () { setMaximised(!s.maximised); });
-  document.addEventListener("keydown", function (e) { if (e.key === "Escape" && s.maximised && frame.isConnected) setMaximised(false); });
-  host.appendChild(maximise);
-  if (above) body.appendChild(above);
-  frame.appendChild(bar);
-  frame.appendChild(chips);
-  frame.appendChild(line);
   legendHost.appendChild(legend(s.mode));
-  frame.appendChild(el("div", { "class": "wd-split" }, [el("div", { "class": "wd-graph-col" }, [host, legendHost]), side]));
-  body.appendChild(frame);
-  setMaximised(!!s.maximised);
   if (!m.nodes.size) { host.appendChild(empty("The catalogue records no installed objects yet. Build a project to see its graph.")); return; }
   var fresh = !s.view;
   view = new GraphView(host, m, estate, { state: s, mode: s.mode, onSelect: select, onReveal: expand, onMove: moved, label: options.label });
@@ -140,6 +108,51 @@ function graphWorkspace(body, m, options) {
   // A remembered viewport is kept unless it no longer shows the focus or the estate.
   if (fresh || !view.showing(s.focus)) { if (s.selection.length || s.item) view.fitWindow(false); else view.fitAll(false); }
   return { select: select };
+}
+
+/* The frame both graph pages share: a toolbar, the selection as chips, a status
+   line, and the drawing beside its details, with a control that fills the page
+   with the drawing alone. */
+function workspaceFrame(s, onResize) {
+  var f = { frame: el("div", { "class": "wd-workspace" }), bar: el("div", { "class": "wd-toolbar" }),
+    chips: el("div", { "class": "wd-chips", "aria-label": "Selection" }), line: el("div", { "class": "wd-status-line" }),
+    host: el("div", { "class": "wd-graph" }), legend: el("div"), side: el("aside", { "class": "wd-side" }) };
+  var maximise = el("button", { "class": "wd-icon wd-maximise", type: "button" });
+  function set(on) {
+    s.maximised = on;
+    f.frame.classList.toggle("wd-maximised", on);
+    maximise.textContent = on ? "⤡" : "⤢";
+    maximise.title = on ? "Restore (Esc)" : "Fill the page";
+    maximise.setAttribute("aria-label", maximise.title);
+    onResize();
+    saveState();
+  }
+  maximise.addEventListener("click", function () { set(!s.maximised); });
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape" && s.maximised && f.frame.isConnected) set(false); });
+  f.mount = function (body, tools) {
+    tools.forEach(function (t) { if (t) f.bar.appendChild(t); });
+    f.host.appendChild(maximise);
+    [f.bar, f.chips, f.line, el("div", { "class": "wd-split" }, [el("div", { "class": "wd-graph-col" }, [f.host, f.legend]), f.side])]
+      .forEach(function (c) { f.frame.appendChild(c); });
+    body.appendChild(f.frame);
+    set(!!s.maximised);
+  };
+  return f;
+}
+
+/* The selection as chips: a name focuses its object, × removes it. select is
+   the page's select(key, adding). */
+function selectionChips(chips, selection, focus, describe, onFocus, select) {
+  chips.textContent = "";
+  chips.hidden = !selection.length;
+  selection.forEach(function (key) {
+    var d = describe(key);
+    chips.appendChild(el("span", { "class": "wd-chip-select" + (key === focus ? " wd-current" : "") }, [
+      el("button", { type: "button", "class": "wd-chip-name", title: d.title, onclick: function () { onFocus(key); } }, [kindMark(d.kind), d.label]),
+      el("button", { type: "button", "class": "wd-chip-remove", "aria-label": "Remove " + d.label, onclick: function () { select(key, true); } }, ["×"])
+    ]));
+  });
+  if (selection.length > 1) chips.appendChild(el("button", { type: "button", "class": "wd-text-btn wd-chip-clear", onclick: function () { select(null); } }, ["Clear"]));
 }
 
 function legend(mode) {
