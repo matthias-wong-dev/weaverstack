@@ -4,6 +4,7 @@
     "data-engineering": "Serious data engineering, already included",
     "power-bi": "Power BI, engineered for organisations",
     "operations": "An estate that knows what\u2019s happening",
+    "visibility": "Visibility, included",
     "advanced": "When your estate gets complicated"
   },
   "features": [
@@ -254,8 +255,35 @@
       ]
     },
     {
-      "id": "environments",
+      "id": "dashboard-deploy",
       "group": 5,
+      "title": "One command",
+      "description": "weaver catalogue-dashboard deploys the semantic model and Report beside the catalogue, and brings them up to date on the next run.",
+      "urls": [
+        "https://docs.weaverstack.dev/estate/catalogue-dashboard/#deploy-the-dashboard"
+      ]
+    },
+    {
+      "id": "dashboard-live",
+      "group": 5,
+      "title": "Live over Direct Lake",
+      "description": "The model reads the catalogue\u2019s tables over Direct Lake, so each page shows your Weaver-managed estate as work settles.",
+      "urls": [
+        "https://docs.weaverstack.dev/estate/catalogue-dashboard/#what-it-reads"
+      ]
+    },
+    {
+      "id": "dashboard-yours",
+      "group": 5,
+      "title": "Free to tweak",
+      "description": "It is an ordinary Power BI Report. Tweak it to fit your needs, or throw it away and build your own over the catalogue.",
+      "urls": [
+        "https://docs.weaverstack.dev/estate/catalogue-dashboard/"
+      ]
+    },
+    {
+      "id": "environments",
+      "group": 6,
       "title": "One project, multiple environments",
       "description": "Keep source files and logical identities while workspace configuration selects physical item and model destinations.",
       "urls": [
@@ -264,7 +292,7 @@
     },
     {
       "id": "mirror",
-      "group": 5,
+      "group": 6,
       "title": "Mirror: develop without copying everything",
       "description": "Borrow installed Lakehouse/Warehouse data through Shortcuts and Views, then materialise selected changed or affected work locally.",
       "urls": [
@@ -273,7 +301,7 @@
     },
     {
       "id": "incremental-build",
-      "group": 5,
+      "group": 6,
       "title": "Incremental Build",
       "description": "Reconcile changed source-data definitions and affected selected descendants, retaining certified unchanged source work.",
       "urls": [
@@ -282,7 +310,7 @@
     },
     {
       "id": "build-preview",
-      "group": 5,
+      "group": 6,
       "title": "Build previews",
       "description": "Inspect selected actions, physical targets and destructive effects through a read-only Build plan.",
       "urls": [
@@ -291,7 +319,7 @@
     },
     {
       "id": "bundles",
-      "group": 5,
+      "group": 6,
       "title": "Controlled deployment bundles",
       "description": "Review and hand off frozen, destination-specific installation plans without replanning during Install.",
       "urls": [
@@ -300,7 +328,7 @@
     },
     {
       "id": "publication-readiness",
-      "group": 5,
+      "group": 6,
       "title": "Cross-engine publication and readiness",
       "description": "Order supported OneLake publication and SQL endpoint-readiness barriers before dependent cross-engine consumers.",
       "urls": [
@@ -309,7 +337,7 @@
     },
     {
       "id": "data-protection",
-      "group": 5,
+      "group": 6,
       "title": "Protect important data",
       "description": "Keep irreplaceable sources outside managed targets and use Build replacement guards for protected owned objects.",
       "urls": [
@@ -321,6 +349,7 @@
     "cross-engine-dag",
     "generated-warehouse",
     "power-bi",
+    "catalogue-dashboard",
     "mirror"
   ]
 }
