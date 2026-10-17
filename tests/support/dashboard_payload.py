@@ -418,7 +418,7 @@ def statistic(rows, at) -> str:
     )
     today = at.replace(hour=0, minute=0, second=0, microsecond=0)
     trend = []
-    for back in range(HISTORY.days):
+    for back in range(30):
         day = today - timedelta(days=back)
         grouped = {}
         for r in stats:
@@ -514,7 +514,8 @@ def statistic(rows, at) -> str:
     )[:50]
     return (
         table("perfday", header, window(1))
-        + table("perfweek", header, window(HISTORY.days))
+        + table("perfweek", header, window(7))
+        + table("perfmonth", header, window(30))
         + table(
             "perftrend",
             ("day", "item", "loads", "duration", "read", "changed", "rejected"),
