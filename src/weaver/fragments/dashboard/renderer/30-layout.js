@@ -4,8 +4,9 @@
 // right. A selection is laid out the same way over its own nodes alone, so it
 // fills the view instead of sitting scattered across the estate.
 
-/* LABEL is the widest a node's label is drawn; each column leaves room after it
-   for the edges leaving it, and a selection's columns for its expansion marker. */
+/* A node sits mid-column with its label, at most LABEL wide, centred beneath
+   it; a selection's columns leave room either side of a label for its
+   expansion markers. */
 var GEOMETRY = { COL: 290, SUB: 260, ROW: 40, HEAD: 54, PAD: 22, GAP: 40, LABEL: 200 };
 var WINDOW_GEOMETRY = { COL: 390, SUB: 360, ROW: 58, HEAD: 54, PAD: 22, GAP: 48, LABEL: 240 };
 var BUDGET = { NODES: 600, EDGES: 3000, REVEAL: 40, EXPANDED: 600 };
@@ -122,7 +123,7 @@ function layoutEstate(m, geometry) {
         kind: layers.shortcuts && l === 0 ? "shortcuts" : layers.validations && l === layers.last ? "validations" : "objects" });
       list.forEach(function (n, i) {
         var sub = Math.floor(i / perSub), row = i - sub * perSub;
-        pos.set(n.key, { x: x + sub * G.SUB, y: row + ((drawn + sub) % 2) / 2, layer: l });
+        pos.set(n.key, { x: x + (subs > 1 ? sub * G.SUB + G.SUB / 2 : G.COL / 2), y: row + ((drawn + sub) % 2) / 2, layer: l });
       });
       drawn += subs;
       rows = Math.max(rows, Math.min(list.length, perSub) + (drawn > 1 ? 0.5 : 0));
@@ -161,8 +162,8 @@ function layoutEstate(m, geometry) {
   bands.forEach(function (b) {
     b.item.nodes.forEach(function (n) {
       var p = pos.get(n.key);
-      p.x = b.x + G.PAD + p.x + 8;
-      p.y = b.y + G.HEAD + p.y * G.ROW + G.ROW / 2;
+      p.x = b.x + G.PAD + p.x;
+      p.y = b.y + G.HEAD + p.y * G.ROW + G.ROW / 2 - 8;
       p.band = b;
     });
     b.columns.forEach(function (c) { c.x += b.x + G.PAD; });
