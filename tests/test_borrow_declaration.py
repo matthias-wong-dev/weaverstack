@@ -405,7 +405,7 @@ def test_recording_creates_the_table_before_it_writes_to_it():
     )
 
     assert "create table [_].[Mirror]" in statements[0]
-    assert statements[1].startswith("delete from [_].[Mirror]")
+    assert statements[1].startswith("delete [m] from [_].[Mirror]")
     assert statements[2].startswith("insert into [_].[Mirror]")
 
 
@@ -427,13 +427,16 @@ def test_a_rerun_replaces_rather_than_duplicates():
     """A mirror is reconstruction, so its rows are keyed and rewritten."""
 
     _create, delete, _insert = record_statements(
-        [_borrowed("Core", "Customer")],
+        [_borrowed("Core", "Customer"), _borrowed("Core", "Order")],
         source_workspace="Analytics",
         source_target="PROD",
     )
 
-    assert "[Item type] = N'Warehouse'" in delete
-    assert "[Object name] = N'Customer'" in delete
+    assert "(N'Warehouse', N'Model', N'Core', N'Customer')" in delete
+    assert "(N'Warehouse', N'Model', N'Core', N'Order')" in delete
+    assert "[m].[Object name] = [k].[Object name]" in delete
+    # Keys join as rows: an OR term per key took Fabric minutes to compile.
+    assert " or " not in delete
 
 
 @weaver_test()

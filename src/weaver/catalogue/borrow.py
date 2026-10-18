@@ -325,16 +325,23 @@ def _row(
     }
 
 
-def _key_predicate(row: Mapping[str, str]) -> str:
-    return " and ".join(
-        f"{identifier(column)} = {literal(row[column])}"
-        for column in ("Item type", "Item name", "Schema name", "Object name")
-    )
+_KEY = ("Item type", "Item name", "Schema name", "Object name")
 
 
 def _delete(rows: Sequence[Mapping[str, str]]) -> str:
-    predicates = " or ".join(f"({_key_predicate(row)})" for row in rows)
-    return f"delete from {local_relation(MIRROR)} where {predicates};"
+    # The keys join as rows, not as one OR term each: inside Mirror's final
+    # transaction Fabric took minutes to compile an 858-term OR predicate.
+    keys = ",\n       ".join(
+        "(" + ", ".join(literal(row[column]) for column in _KEY) + ")" for row in rows
+    )
+    named = ", ".join(identifier(column) for column in _KEY)
+    joined = " and ".join(
+        f"[m].{identifier(column)} = [k].{identifier(column)}" for column in _KEY
+    )
+    return (
+        f"delete [m] from {local_relation(MIRROR)} as [m]\n"
+        f"join (values {keys}) as [k] ({named})\non {joined};"
+    )
 
 
 def _insert(rows: Sequence[Mapping[str, str]]) -> str:
