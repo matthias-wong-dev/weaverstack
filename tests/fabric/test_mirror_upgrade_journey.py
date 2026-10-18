@@ -176,6 +176,12 @@ def previous_estate(
         "outcome": outcome,
         "catalogue": catalogue,
         "lakehouse": lakehouse,
+        # Resolved here, so a claim compares identities without a lookup that
+        # crosses REST only when nothing has cached it.
+        "items": {
+            "Warehouse": fabric_previous_catalogue,
+            "Lakehouse": fabric_previous_lakehouse,
+        },
         "estate": estate,
         "before": _snapshot(sql),
     }
@@ -453,7 +459,7 @@ def _registry_rows(sql):
 
 
 @pytest.mark.slow
-@weaver_test(remote=True, resources={"rest", "tds"})
+@weaver_test(remote=True, resources={"tds"})
 def test_the_catalogue_alone_upgrades_into_this_versions_shape(
     journey, previous_estate
 ):
@@ -472,13 +478,12 @@ def test_the_catalogue_alone_upgrades_into_this_versions_shape(
         (str(row["Item type"]), str(row["Item name"])): row
         for row in seen["installation"]
     }
-    resolver = journey.session.resolver(journey.workspace)
     for item, kind, target in (
         ("Reporting", "Warehouse", previous_estate["catalogue"]),
         ("Sales", "Lakehouse", previous_estate["lakehouse"]),
     ):
         row = installed[(kind, item)]
-        physical = resolver.resolve(ItemRef(target), item_type=kind)
+        physical = previous_estate["items"][kind]
         assert row["Target name"] == target
         assert str(row["Target item GUID"]).casefold() == physical.id.casefold()
         assert str(row["Workspace GUID"]).casefold() == physical.workspace_id.casefold()
