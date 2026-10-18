@@ -32,6 +32,7 @@ against this estate, at no extra Livy cost:
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime
 from decimal import Decimal
 
@@ -40,10 +41,11 @@ from support import external_estate, external_seed
 from support.acceptance import Acceptance
 from support.build_envs import ACCEPTANCE_FIXTURE
 from support.observation import observation_from, observe_body
-from support.weaver_test import weaver_test
+from support.weaver_test import register_session, weaver_test
 
 import weaver
 from weaver.errors import CommandError
+from weaver.sessions import ConsoleSession
 from weaver.sessions.program import FabricProgram
 
 #: What a scenario crosses, named for the operation it drives. A build reaches
@@ -72,6 +74,7 @@ NEIGHBOUR_VIEW = "OpenLedger"
 def acceptance(
     tmp_path_factory,
     weaver_session,
+    livy_session,
     fabric_workspace,
     fabric_external_workspace_item,
     fabric_external_lakehouse,
@@ -102,6 +105,11 @@ def acceptance(
     journey.estate = estate
     journey.repository = str(estate.path)
     journey.session = weaver_session
+    #: The same Workspace and Livy session with no ``targets:``, for a wipe the
+    #: catalogue alone decides.
+    journey.unconfigured = ConsoleSession(
+        workspace=replace(fabric_workspace, targets={}), livy=livy_session
+    )
     journey.workspace = fabric_workspace
     journey.external = fabric_external_workspace_item
     journey.external_lakehouse = fabric_external_lakehouse
@@ -130,6 +138,7 @@ def acceptance(
     finally:
         try:
             journey.close()
+            journey.unconfigured.close()
         finally:
             # Scenario J removes the shared catalogue, and later modules build
             # into it.
@@ -1700,13 +1709,14 @@ def test_the_whole_estate_comes_from_the_catalogue_and_goes_last(acceptance):
     with pytest.raises(CommandError, match="Name the physical items"):
         weaver.plan_wipe(session=acceptance.session)
 
-    # Named by workspace and catalogue alone, a wipe follows the catalogue.
+    # A session whose configuration names no targets follows the catalogue.
+    unconfigured = register_session(acceptance.unconfigured)
     acceptance.step(
         "estate-plan",
         lambda: weaver.plan_wipe(
             workspace=acceptance.workspace.workspace,
             catalogue=str(catalogue),
-            session=acceptance.session,
+            session=unconfigured,
         ),
     )
     acceptance.require("estate-plan")
@@ -1719,7 +1729,7 @@ def test_the_whole_estate_comes_from_the_catalogue_and_goes_last(acceptance):
 
     acceptance.step(
         "final-wipe",
-        lambda: weaver.wipe(plan=plan, session=acceptance.session),
+        lambda: weaver.wipe(plan=plan, session=unconfigured),
     )
     acceptance.require("final-wipe")
     emptied = acceptance["final-wipe"].result
