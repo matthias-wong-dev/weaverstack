@@ -161,10 +161,12 @@ class ShortcutExecutor:
         name directly.
         """
 
+        from ...physical_wipe import held
+
         elapsed = time.monotonic() - release["started"]
-        if elapsed < NAME_RELEASE_TIMEOUT and any(
-            context.store.exists(Location(value)) for value in release["locations"]
-        ):
+        # OneLake can refuse a path it is still releasing; Wipe waits on that too.
+        locations = [Location(value) for value in release["locations"]]
+        if elapsed < NAME_RELEASE_TIMEOUT and held(context.store, locations):
             return Waiting(release, NAME_RELEASE_POLL_INTERVAL)
         return {**release["details"], "released_after_seconds": round(elapsed, 1)}
 
