@@ -6,6 +6,7 @@ import json
 import time
 
 from ...errors import InstallError
+from ...physical_wipe import held
 from ...spark import FabricSparkTarget
 from ...targets import validate_name
 from .base import Waiting
@@ -95,10 +96,12 @@ class MaterialiseMirrorExecutor:
                 context.target.lakehouse, path=path, name=names["name"]
             )
             state = {"started": time.monotonic()}
-        if state is not None and context.store.exists(destination):
+        # OneLake can refuse a path it is still releasing; that is waited on too.
+        if state is not None and (reason := held(context.store, [destination])):
             if time.monotonic() - state["started"] >= NAME_RELEASE_TIMEOUT:
                 raise InstallError(
-                    f"removed shortcut {path}/{names['name']} still occupies its path"
+                    f"removed shortcut {path}/{names['name']} still occupies its "
+                    f"path: {reason}"
                 )
             return Waiting(state, NAME_RELEASE_POLL_INTERVAL)
         if kind == "folder":
