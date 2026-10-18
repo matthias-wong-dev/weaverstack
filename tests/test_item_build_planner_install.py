@@ -374,6 +374,31 @@ def test_warehouse_runtime_procedures_wait_for_the_items_catalogue_surface(tmp_p
 
 
 @weaver_test()
+def test_a_runtime_procedure_waits_for_the_catalogue_tables_behind_its_surface():
+    """Where the catalogue shares the Warehouse, ``[_].[Bookmark]`` is its table."""
+
+    from types import SimpleNamespace
+
+    from weaver.build_bundle.dependencies import object_key
+    from weaver.build_bundle.runtime import _runtime_requirements
+    from weaver.catalogue.builtin import BUILTIN_ITEM
+    from weaver.declaration.metadata import ObjectId
+    from weaver.declaration.model import WeaverDocumentId, WeaverItemId
+
+    item = WeaverItemId.parse("Warehouse/Reporting")
+    artefact = SimpleNamespace(
+        is_file=False,
+        identity=WeaverDocumentId(item, ObjectId("_", "Load")),
+        origin=None,
+    )
+
+    keys = _runtime_requirements(artefact, repository=None, target_id="reporting")
+
+    assert object_key(WeaverDocumentId(item, ObjectId("_", "Bookmark"))) in keys
+    assert object_key(WeaverDocumentId(BUILTIN_ITEM, ObjectId("_", "Bookmark"))) in keys
+
+
+@weaver_test()
 def test_a_physical_shortcut_can_feed_a_logical_warehouse_shortcut(tmp_path):
     root = _estate(tmp_path)
     (root / "Lakehouse/Raw/Tables/Sales__Customer.py").unlink()

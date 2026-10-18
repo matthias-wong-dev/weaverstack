@@ -206,7 +206,7 @@ def test_protected_mirrors_native_copy_and_shallow_clone_converge(
         )
         assert failed["succeeded"] is False and any(
             "Injected protected copy failure" in str(e) for e in failed["errors"]
-        )
+        ), failed
         held = resolver.onelake_shortcuts(ItemRef(target_name))
         assert "Files/Raw/CustomerCsv" not in {s.qualified for s in held}
         assert "Tables/DWG/Customer" in {s.qualified for s in held}
