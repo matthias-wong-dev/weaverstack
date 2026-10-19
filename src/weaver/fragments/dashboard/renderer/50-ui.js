@@ -153,10 +153,16 @@ function onAnyScroll(node, f) {
 
 /* Canvas pixels per CSS pixel. The Power BI Service fits a page to its window
    by scaling the visual's frame, which enlarges a canvas drawn at the device
-   ratio alone, so a canvas draws at least twice over, within a pixel budget. */
+   ratio alone. The frame scales up to the screen's size at most, and the
+   screen stays the same through full screen, so the canvas draws that many
+   times over, within a pixel budget. An expanded visual is not scaled and its
+   layout width is the screen's, so it draws near the device ratio. */
 function canvasRatio(width, height) {
-  var device = root.devicePixelRatio || 1, wanted = Math.min(3, Math.max(2, device * 1.5));
-  return Math.max(device, Math.min(wanted, Math.sqrt(12e6 / Math.max(1, width * height))));
+  var device = root.devicePixelRatio || 1, scr = root.screen || {};
+  var frame = Math.max(1, Math.min((scr.availWidth || 0) / Math.max(1, root.innerWidth || 0) || 1,
+    (scr.availHeight || 0) / Math.max(1, root.innerHeight || 0) || 1));
+  var wanted = Math.min(6, Math.max(2, device * 1.5, device * frame));
+  return Math.max(device, Math.min(wanted, Math.sqrt(20e6 / Math.max(1, width * height))));
 }
 
 function redraw() { if (root.__WD_REDRAW) root.__WD_REDRAW(); }
