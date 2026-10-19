@@ -34,7 +34,8 @@ function duration(ms) {
 
 function stamp(t) {
   if (t === null || t === undefined) return "—";
-  return new Date(t).toISOString().replace("T", " ").slice(0, 19) + " UTC";
+  var wall = wallOf(t);
+  return wallDate(wall) + " " + wallClock(wall) + " " + zoneLabel(t);
 }
 
 function ago(t, now) {
@@ -88,6 +89,7 @@ function shell(mount, m) {
       context ? el("div", { "class": "wd-context", text: context }) : null
     ])]),
     el("span", { "class": "wd-grow" }),
+    zoneControl(m),
     el("dl", { "class": "wd-times" }, [
       el("dt", { text: "Queried" }), el("dd", { text: stamp(m.at) }),
       processed === undefined ? null : el("dt", { text: "Last processed" }),
