@@ -23,11 +23,11 @@
                       "Entity": "Dashboard measures"
                     }
                   },
-                  "Property": "Load orchestration page"
+                  "Property": "Orchestration page"
                 }
               },
-              "queryRef": "Dashboard measures.Load orchestration page",
-              "nativeQueryRef": "Load orchestration page"
+              "queryRef": "Dashboard measures.Orchestration page",
+              "nativeQueryRef": "Orchestration page"
             }
           ]
         }

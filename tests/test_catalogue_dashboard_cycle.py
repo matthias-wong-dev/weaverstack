@@ -69,15 +69,15 @@ SOURCES = {
 PAGES = {
     "overview": "Overview page",
     "health": "Health page",
-    "orchestration": "Load orchestration page",
-    "gantt": "Gantt page",
+    "orchestration": "Orchestration page",
     "performance": "Performance page",
+    "gantt": "Gantt page",
     "entities": "Entity dictionary page",
     "semantic": "Semantic model page",
 }
 
 #: The pages that refresh themselves, because they show settling work.
-LIVE = {"overview", "health", "orchestration", "gantt"}
+LIVE = {"overview", "health", "orchestration", "performance", "gantt"}
 
 #: Every measure, by display folder.
 MEASURES = {
@@ -93,9 +93,11 @@ MEASURES = {
     "Data": {
         "Catalogue data",
         "Lineage data",
+        "Node data",
         "Status data",
         "Build data",
         "Workflow data",
+        "Run data",
         "Log data",
         "Statistic data",
         "Metadata data",

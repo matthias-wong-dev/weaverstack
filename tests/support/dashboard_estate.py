@@ -297,45 +297,66 @@ class _Estate:
                 },
             )
 
+    @staticmethod
+    def _record(flow, task, row, targets, begin, ms, result, message):
+        """One Log record; a row of None is the task's own record."""
+
+        return {
+            "log_sk": 0,
+            "workflow_id": flow,
+            "task_type": task,
+            "target_type": row["item_type"] if row else None,
+            "target_name": targets[row["item_label"]] if row else None,
+            "schema_name": row["schema_name"] if row else None,
+            "object_name": row["object_name"] if row else None,
+            "result": result,
+            "started_datetime": begin,
+            "completed_datetime": begin + timedelta(milliseconds=ms),
+            "duration_milliseconds": ms,
+            "message": message,
+            "details": json.dumps({"node_id": row["node_id"]}) if row else None,
+        }
+
     def history(self, workflows: int, days: int):
         r, sk, stat = self.random, 0, 0
         targets = {
             f"{row['item_type']}/{row['item_name']}": row["target_name"]
             for row in self.rows["Installation"]
         }
+        validations = [
+            row
+            for row in self.rows["LineageNode"]
+            if row["node_kind"] in ("Test", "Assumption") and not row["is_internal"]
+        ]
         for w in range(workflows):
+            # One composed run a night: the loads, then the Tests over them.
             flow = _guid(f"workflow{w}")
-            start = self.at - timedelta(hours=w * 6 + 1)
+            nominal = self.at - timedelta(days=w, hours=2, minutes=40)
+            nominal += timedelta(minutes=r.randint(-25, 30))
+            pace = 2.4 if w == 5 else r.uniform(0.7, 1.4)
             members = (
                 self.loadable
                 if w == 0
                 else r.sample(self.loadable, max(1, len(self.loadable) // (2 + w % 3)))
             )
-            clock = start
-            sk += 1
-            self.add(
-                "Log",
-                {
-                    "log_sk": sk,
-                    "workflow_id": flow,
-                    "task_type": "load",
-                    "target_type": None,
-                    "target_name": None,
-                    "schema_name": None,
-                    "object_name": None,
-                    "result": "Succeeded",
-                    "started_datetime": start,
-                    "completed_datetime": start + timedelta(seconds=2),
-                    "duration_milliseconds": 2000,
-                    "message": "load: planned " + str(len(members)) + " objects",
-                    "details": None,
-                },
-            )
+            checks = r.sample(validations, max(1, len(validations) * (6 + w % 3) // 10))
+            records = [
+                self._record(
+                    flow,
+                    "load",
+                    None,
+                    targets,
+                    nominal,
+                    2000,
+                    "Succeeded",
+                    f"load: planned {len(members)} objects",
+                )
+            ]
+            clock = nominal
             for index, row in enumerate(members):
                 begin = clock + timedelta(milliseconds=r.randint(0, 3000))
-                ms = r.randint(300, 40000)
-                clock = begin if index % 4 else clock + timedelta(milliseconds=ms // 3)
-                sk += 1
+                ms = int(r.randint(300, 40000) * pace * 6)
+                clock = begin if index % 4 else clock + timedelta(milliseconds=ms)
                 roll = r.random()
                 result = (
                     "Succeeded"
@@ -344,26 +365,66 @@ class _Estate:
                     if roll < 0.98
                     else "Rejected"
                 )
-                self.add(
-                    "Log",
-                    {
-                        "log_sk": sk,
-                        "workflow_id": flow,
-                        "task_type": "load",
-                        "target_type": row["item_type"],
-                        "target_name": targets[row["item_label"]],
-                        "schema_name": row["schema_name"],
-                        "object_name": row["object_name"],
-                        "result": result,
-                        "started_datetime": begin,
-                        "completed_datetime": begin + timedelta(milliseconds=ms),
-                        "duration_milliseconds": ms,
-                        "message": "Loaded"
+                records.append(
+                    self._record(
+                        flow,
+                        "load",
+                        row,
+                        targets,
+                        begin,
+                        ms,
+                        result,
+                        "Loaded"
                         if result == "Succeeded"
                         else "The load raised an error <check> the log",
-                        "details": json.dumps({"node_id": row["node_id"]}),
-                    },
+                    )
                 )
+            loaded = max(
+                x["completed_datetime"] for x in records if x["object_name"]
+            ) + timedelta(seconds=20)
+            records.append(
+                self._record(
+                    flow,
+                    "test",
+                    None,
+                    targets,
+                    loaded,
+                    1500,
+                    "Succeeded",
+                    f"test: planned {len(checks)} validations",
+                )
+            )
+            clock = loaded
+            for index, row in enumerate(checks):
+                begin = clock + timedelta(milliseconds=r.randint(0, 2000))
+                ms = int(r.randint(800, 9000) * pace * 30)
+                clock = begin if index % 2 else clock + timedelta(milliseconds=ms // 2)
+                result = "Succeeded" if r.random() < 0.93 else "Failed"
+                records.append(
+                    self._record(
+                        flow,
+                        "test",
+                        row,
+                        targets,
+                        begin,
+                        ms,
+                        result,
+                        "Passed"
+                        if result == "Succeeded"
+                        else "The validation returned rows <check> the log",
+                    )
+                )
+            # The latest run finishes before the dashboard is queried.
+            over = max(x["completed_datetime"] for x in records) - (
+                self.at - timedelta(minutes=12)
+            )
+            shift = over if w == 0 and over > timedelta(0) else timedelta(0)
+            for record in records:
+                sk += 1
+                record["log_sk"] = sk
+                record["started_datetime"] -= shift
+                record["completed_datetime"] -= shift
+                self.add("Log", record)
         # The catalogue's own work, which no page reports as the estate's.
         stat += 1
         self.add(
