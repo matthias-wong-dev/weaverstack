@@ -100,10 +100,9 @@ function taskSpan(run, task) {
   return v ? v.elapsed : null;
 }
 
-function clock(t) { return new Date(t).toISOString().slice(11, 16); }
-
 var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-function shortDate(t) { var d = new Date(t); return d.getUTCDate() + " " + MONTHS[d.getUTCMonth()]; }
+/* A day of a wall time, as "16 Oct". */
+function shortDate(wall) { var d = new Date(wall); return d.getUTCDate() + " " + MONTHS[d.getUTCMonth()]; }
 
 function median(values) {
   if (!values.length) return null;
@@ -112,19 +111,19 @@ function median(values) {
 }
 
 function crossesMidnight(views) {
-  return views.some(function (v) { return new Date(v.started).toISOString().slice(0, 10) !== new Date(v.completed).toISOString().slice(0, 10); });
+  return views.some(function (v) { return wallDate(wallOf(v.started)) !== wallDate(wallOf(v.completed)); });
 }
 
-/* The hour a day column starts at: midnight, unless a run crosses it, then the
-   middle of the longest stretch of the day no run touches, so each run sits in
-   one column. */
+/* The hour of the clock a day column starts at: midnight, unless a run crosses
+   it, then the middle of the longest stretch of the day no run touches, so each
+   run sits in one column. */
 function dayStartHour(views) {
   if (!views.length || !crossesMidnight(views)) return 0;
   var covered = [], h;
   for (h = 0; h < 24; h++) covered.push(false);
   views.forEach(function (v) {
     if (v.completed - v.started >= DAY) { for (var i = 0; i < 24; i++) covered[i] = true; return; }
-    for (var t = Math.floor(v.started / HOUR) * HOUR; t <= v.completed; t += HOUR) covered[new Date(t).getUTCHours()] = true;
+    for (var t = Math.floor(wallOf(v.started) / HOUR) * HOUR; t <= wallOf(v.completed); t += HOUR) covered[new Date(t).getUTCHours()] = true;
   });
   var best = 0, at = 0;
   for (h = 0; h < 24; h++) {
@@ -143,15 +142,18 @@ var WINDOW_DAYS = { day: 1, week: 7, month: 30 };
 function runChart(views, s, m, pick) {
   var W = 1800, H = 340, L = 64, R = 14, T = 12, B = 34, columns = WINDOW_DAYS[s.window] + (s.window === "day" ? 1 : 0);
   var cut = dayStartHour(views), cutMs = cut * HOUR, plotW = W - L - R, plotH = H - T - B, colW = plotW / columns;
-  var last = Math.floor((m.at - cutMs) / DAY), first = last - (columns - 1);
-  function cycle(v) { return Math.floor((v.started - cutMs) / DAY); }
-  function offset(v) { return v.started - (cycle(v) * DAY + cutMs); }
+  // Everything below is wall time, so a day is one DAY wide in any zone.
+  var last = Math.floor((wallOf(m.at) - cutMs) / DAY), first = last - (columns - 1);
+  function cycle(v) { return Math.floor((wallOf(v.started) - cutMs) / DAY); }
+  function base(v) { return cycle(v) * DAY + cutMs; }
+  function offset(v) { return wallOf(v.started) - base(v); }
+  function endOffset(v) { return wallOf(v.completed) - base(v); }
   var shown = views.filter(function (v) { return cycle(v) >= first && cycle(v) <= last; });
   var deadline = s.deadline === "" || s.deadline === undefined ? null : ((Number(s.deadline) * HOUR - cutMs) % DAY + DAY) % DAY;
   var lo = 0, hi = 24;
   if (s.axis !== "day" && shown.length) {
     lo = Math.floor(Math.min.apply(null, shown.map(offset)) / HOUR);
-    hi = Math.ceil(Math.max.apply(null, shown.map(function (v) { return offset(v) + v.elapsed; })) / HOUR);
+    hi = Math.ceil(Math.max.apply(null, shown.map(endOffset)) / HOUR);
     if (deadline !== null) { lo = Math.min(lo, Math.floor(deadline / HOUR)); hi = Math.max(hi, Math.ceil(deadline / HOUR)); }
     if (hi - lo < 2) hi = lo + 2;
     if (hi > lo + 24) hi = lo + 24;
@@ -178,7 +180,7 @@ function runChart(views, s, m, pick) {
     list.sort(function (a, b) { return a.started - b.started || compare(a.run.id, b.run.id); });
     var slot = Math.min(44, (colW - 8) / list.length), x0 = L + col * colW + (colW - slot * list.length) / 2;
     list.forEach(function (v, k) {
-      var top = y(offset(v)), bottom = y(offset(v) + v.elapsed), x = x0 + k * slot + 1.5, w = Math.max(2, slot - 3);
+      var top = y(offset(v)), bottom = y(endOffset(v)), x = x0 + k * slot + 1.5, w = Math.max(2, slot - 3);
       var failed = v.run.failed > 0, picked = v.run.id === s.run;
       var title = stamp(v.started) + " → " + stamp(v.completed).slice(11) + " · " + duration(v.elapsed) + " · " + fmt(v.run.records) + " records" +
         (failed ? " · " + v.run.failed + " failed" : "") + " · " + v.run.id.slice(0, 8);
@@ -187,7 +189,7 @@ function runChart(views, s, m, pick) {
       group.appendChild(sv("rect", { "class": "wd-run-hit", x: x - 1.5, y: top - 3, width: slot, height: Math.max(8, bottom - top + 6) }));
       group.appendChild(sv("rect", { "class": "wd-run-bar" + (failed ? " wd-run-failed" : ""), x: x, y: top, width: w, height: Math.max(3, bottom - top), rx: 2 }));
       v.tasks.slice().sort(function (a, b) { return a.started - b.started; }).forEach(function (task) {
-        var a = y(task.started - (cycle(v) * DAY + cutMs)), b = y(task.completed - (cycle(v) * DAY + cutMs));
+        var a = y(wallOf(task.started) - base(v)), b = y(wallOf(task.completed) - base(v));
         group.appendChild(sv("rect", { "class": "wd-run-task wd-run-" + (TASK_NAMES[task.task] ? task.task : "other"), x: x + 1, y: a, width: Math.max(1, w - 2), height: Math.max(2, b - a), rx: 1.5 }));
       });
       svg.appendChild(group);
@@ -197,11 +199,11 @@ function runChart(views, s, m, pick) {
     svg.appendChild(sv("line", { "class": "wd-deadline", x1: L, x2: W - R, y1: y(deadline), y2: y(deadline) }));
     svg.appendChild(sv("text", { "class": "wd-deadline-label", x: W - R - 4, y: y(deadline) - 5, "text-anchor": "end" }, ["Deadline " + (s.deadline < 10 ? "0" : "") + s.deadline + ":00"]));
   }
-  return { svg: svg, offset: offset, deadline: deadline, cut: cut, shown: shown };
+  return { svg: svg, endOffset: endOffset, deadline: deadline, cut: cut, shown: shown };
 }
 
 function performancePage(body, m) {
-  var s = pageState("performance");
+  var s = pageState("performance"), zone = zoneLabel(m.at);
   if (WINDOW_DAYS[s.window] === undefined) s.window = "week";
   if (["all", "load", "test"].indexOf(s.task) < 0) s.task = "all";
   if (["fit", "day"].indexOf(s.axis) < 0) s.axis = "fit";
@@ -219,7 +221,7 @@ function performancePage(body, m) {
     return all.concat((m.tables[name] || []).map(function (r) { return r.item || targetItem(m, r.targettype, r.target); }));
   }, []).filter(Boolean))).filter(function (it) { return !isInternal(m, it); }).sort(compare);
   var deadlines = [el("option", { value: "", selected: s.deadline === "" ? "selected" : null, text: "No deadline" })];
-  for (var h = 0; h < 24; h++) deadlines.push(el("option", { value: String(h), selected: s.deadline === String(h) ? "selected" : null, text: (h < 10 ? "0" : "") + h + ":00 UTC" }));
+  for (var h = 0; h < 24; h++) deadlines.push(el("option", { value: String(h), selected: s.deadline === String(h) ? "selected" : null, text: (h < 10 ? "0" : "") + h + ":00 " + zone }));
   body.appendChild(el("div", { "class": "wd-toolbar" }, [
     segmented("Window", ["day", "week", "month"], s.window, function (v) { s.window = v; render(); saveState(); }, function (v) { return { day: "Last 24 hours", week: "Last 7 days", month: "Last 30 days" }[v]; }),
     segmented("Task", ["all", "load", "test"], s.task, function (v) { s.task = v; render(); saveState(); }, function (v) { return { all: "All", load: "Load", test: "Test" }[v]; }),
@@ -238,19 +240,19 @@ function performancePage(body, m) {
     var longest = views.reduce(function (a, v) { return !a || v.elapsed > a.elapsed ? v : a; }, null);
     var typical = median(elapsed), failedRuns = views.filter(function (v) { return v.run.failed > 0; }).length;
     var chart = runChart(views, s, m, function (id) { s.run = id; render(); saveState(); });
-    var late = chart.deadline === null ? null : views.filter(function (v) { return chart.shown.indexOf(v) >= 0 && chart.offset(v) + v.elapsed > chart.deadline; }).length;
+    var late = chart.deadline === null ? null : views.filter(function (v) { return chart.shown.indexOf(v) >= 0 && chart.endOffset(v) > chart.deadline; }).length;
     host.appendChild(el("div", { "class": "wd-tiles" }, [
       tile("Runs", views.length, failedRuns ? failedRuns + " with failed records" : "none with failed records", failedRuns ? "bad" : "none"),
       tile("Latest run", latest ? duration(latest.elapsed) : "—", latest ? "ended " + ago(latest.completed, m.at) + " · " + stamp(latest.completed) : "none in this window", "none"),
       tile("Typical run", typical === null ? "—" : duration(typical), "median of the runs in this window", "none"),
       tile("Longest run", longest ? duration(longest.elapsed) : "—", longest ? stamp(longest.started) : "", "none"),
-      tile("Past the deadline", late === null ? "—" : late + " of " + chart.shown.length, late === null ? "set a deadline above" : "runs ending after " + (s.deadline < 10 ? "0" : "") + s.deadline + ":00 UTC", late ? "warn" : "none")
+      tile("Past the deadline", late === null ? "—" : late + " of " + chart.shown.length, late === null ? "set a deadline above" : "runs ending after " + (s.deadline < 10 ? "0" : "") + s.deadline + ":00 " + zone, late ? "warn" : "none")
     ]));
     var legend = el("div", { "class": "wd-legend" }, [
       el("span", {}, [el("i", { "class": "wd-swatch wd-swatch-load" }), "Load"]),
       el("span", {}, [el("i", { "class": "wd-swatch wd-swatch-test" }), "Test"]),
       el("span", {}, [el("i", { "class": "wd-swatch wd-swatch-failed" }), "A record failed"]),
-      el("span", { text: "Time of day, UTC" + (chart.cut ? ". Each column runs from " + (chart.cut < 10 ? "0" : "") + chart.cut + ":00 to the same time the next day." : ".") })
+      el("span", { text: "Time of day, " + zone + (chart.cut ? ". Each column runs from " + (chart.cut < 10 ? "0" : "") + chart.cut + ":00 to the same time the next day." : ".") })
     ]);
     host.appendChild(section("Runs", views.length ? [chart.svg, legend] : [empty("No workflow ran in this window.")]));
 

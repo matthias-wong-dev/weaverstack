@@ -4,7 +4,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const { load } = require("./renderer.js");
 
-const D = load();
+const D = load({ __WD_STATE: { utc: true } });
 const AT = Date.UTC(2026, 9, 16, 2, 0, 0);
 const H = 3600 * 1000;
 
@@ -591,4 +591,43 @@ test("a duration rounds to whole seconds before it splits into minutes", () => {
   assert.equal(D.duration(2699600), "45 min 0 s");
   assert.equal(D.duration(3 * 3600000 + 125000), "3 h 2 min");
   assert.equal(D.duration(null), "—");
+});
+
+// --- Time zones ------------------------------------------------------------------
+
+function inZone(zone, f) {
+  const previous = process.env.TZ;
+  process.env.TZ = zone;
+  try { return f(); } finally { if (previous === undefined) delete process.env.TZ; else process.env.TZ = previous; }
+}
+
+test("a stamp is in the viewer's zone, or in UTC when the viewer asks", () => {
+  const t = Date.UTC(2026, 9, 16, 2, 0, 0);
+  inZone("Australia/Sydney", () => {
+    assert.equal(load({}).stamp(t), "2026-10-16 13:00:00 AEDT");
+    assert.equal(load({ __WD_STATE: { utc: true } }).stamp(t), "2026-10-16 02:00:00 UTC");
+    // A winter instant takes the zone's other offset.
+    assert.equal(load({}).stamp(Date.UTC(2026, 6, 16, 2, 0, 0)), "2026-07-16 12:00:00 AEST");
+  });
+});
+
+test("clock ticks fall on the viewer's round times, through a daylight saving change", () => {
+  inZone("Australia/Sydney", () => {
+    const Z = load({});
+    // Sydney moves its clocks forward at 02:00 on 4 October 2026.
+    const a = Date.UTC(2026, 9, 3, 12, 0), b = Date.UTC(2026, 9, 4, 4, 0);
+    const ticks = Z.clockTicks(a, b, 1100);
+    assert.ok(ticks.length >= 3);
+    assert.ok(ticks.every((t, i) => i === 0 || t > ticks[i - 1]));
+    ticks.forEach((t) => assert.equal(Z.wallOf(t) % 3600000, 0, new Date(t).toISOString()));
+    assert.equal(Z.clockLabel(Date.UTC(2026, 9, 16, 13, 30), null), "2026-10-17 00:30:00");
+  });
+});
+
+test("a run that crosses local midnight starts the day column in the quiet hours", () => {
+  const run = (a, b) => ({ started: Date.UTC(2026, 9, 15, ...a), completed: Date.UTC(2026, 9, 15, ...b) });
+  // 12:30 to 14:30 UTC is 23:30 to 01:30 in Sydney.
+  const night = [run([12, 30], [14, 30])];
+  assert.equal(load({ __WD_STATE: { utc: true } }).dayStartHour(night), 0);
+  inZone("Australia/Sydney", () => assert.notEqual(load({}).dayStartHour(night), 0));
 });
