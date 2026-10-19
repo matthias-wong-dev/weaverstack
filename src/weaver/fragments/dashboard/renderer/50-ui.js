@@ -53,7 +53,7 @@ function severityChip(severity, unobserved) {
   return el("span", { "class": "wd-chip wd-" + ({ red: "bad", amber: "warn", green: "ok" }[severity]), text: { red: "Red", amber: "Amber", green: "Green" }[severity] });
 }
 
-function kindMark(kind) { return el("i", { "class": "wd-kind wd-kind-" + String(kind).toLowerCase().replace(/\s+/g, "-"), "aria-hidden": "true" }); }
+function kindMark(kind) { return el("i", { "class": "wd-kind wd-kind-" + String(kind).toLowerCase().replace(/\s+/g, "-"), title: String(kind), "aria-hidden": "true" }); }
 
 function state() {
   root.__WD_STATE = root.__WD_STATE || {};
@@ -72,13 +72,13 @@ var PAGE_TITLES = {
 
 /* The header every page shares: the catalogue's own name, where it lives, and
    the two times a reader needs apart, when this was queried and when work
-   last settled. */
+   last processed. */
 function shell(mount, m) {
   var s = state();
   var title = m.catalogue.name || "Weaver catalogue";
   var context = [m.catalogue.workspace ? "Workspace " + m.catalogue.workspace : null,
     m.catalogue.version ? "Weaver " + m.catalogue.version : null].filter(Boolean).join(" · ");
-  var settled = latestSettled(m);
+  var processed = latestProcessed(m);
   var head = el("header", { "class": "wd-top" }, [
     el("div", { "class": "wd-brand" }, [weaveMark(), el("div", {}, [
       el("div", { "class": "wd-eyebrow", text: "Catalogue · " + (PAGE_TITLES[m.page] || m.page) }),
@@ -88,8 +88,8 @@ function shell(mount, m) {
     el("span", { "class": "wd-grow" }),
     el("dl", { "class": "wd-times" }, [
       el("dt", { text: "Queried" }), el("dd", { text: stamp(m.at) }),
-      settled === undefined ? null : el("dt", { text: "Last settled" }),
-      settled === undefined ? null : el("dd", { text: settled ? stamp(settled) + " · " + ago(settled, m.at) : "nothing has settled" })
+      processed === undefined ? null : el("dt", { text: "Last processed" }),
+      processed === undefined ? null : el("dd", { text: processed ? stamp(processed) + " · " + ago(processed, m.at) : "nothing has been processed" })
     ])
   ]);
   mount.appendChild(head);
@@ -112,9 +112,9 @@ function shell(mount, m) {
   return body;
 }
 
-/* The latest settled load, test or workflow, or undefined when the page
+/* The latest processed load, test or workflow, or undefined when the page
    carries none of them. */
-function latestSettled(m) {
+function latestProcessed(m) {
   if (!m.tables.loads && !m.tables.tests && !m.tables.workflows) return undefined;
   var latest = null;
   m.nodes.forEach(function (n) {
@@ -153,10 +153,16 @@ function onAnyScroll(node, f) {
 
 /* Canvas pixels per CSS pixel. The Power BI Service fits a page to its window
    by scaling the visual's frame, which enlarges a canvas drawn at the device
-   ratio alone, so a canvas draws at least twice over, within a pixel budget. */
+   ratio alone. The frame scales up to the screen's size at most, and the
+   screen stays the same through full screen, so the canvas draws that many
+   times over, within a pixel budget. An expanded visual is not scaled and its
+   layout width is the screen's, so it draws near the device ratio. */
 function canvasRatio(width, height) {
-  var device = root.devicePixelRatio || 1, wanted = Math.min(3, Math.max(2, device * 1.5));
-  return Math.max(device, Math.min(wanted, Math.sqrt(12e6 / Math.max(1, width * height))));
+  var device = root.devicePixelRatio || 1, scr = root.screen || {};
+  var frame = Math.max(1, Math.min((scr.availWidth || 0) / Math.max(1, root.innerWidth || 0) || 1,
+    (scr.availHeight || 0) / Math.max(1, root.innerHeight || 0) || 1));
+  var wanted = Math.min(6, Math.max(2, device * 1.5, device * frame));
+  return Math.max(device, Math.min(wanted, Math.sqrt(20e6 / Math.max(1, width * height))));
 }
 
 function redraw() { if (root.__WD_REDRAW) root.__WD_REDRAW(); }
@@ -298,7 +304,7 @@ function details(panel, m, key, options) {
     if (s.duration !== null && s.duration !== undefined) fact("Duration", duration(s.duration));
     if (isValidation(n) && s.failures) fact("Failing rows", fmt(s.failures));
     if (s.workflow) fact("Workflow", el("span", { "class": "wd-mono", text: s.workflow }));
-  } else if (carries && (participates(n) || isValidation(n))) fact(isValidation(n) ? "Last run" : "Last load", el("span", { "class": "wd-muted", text: "Nothing has settled since it was built" }));
+  } else if (carries && (participates(n) || isValidation(n))) fact(isValidation(n) ? "Last run" : "Last load", el("span", { "class": "wd-muted", text: "Nothing has been processed since it was built" }));
   if (carries && isLoadSubject(n)) {
     var ready = readiness(m, n);
     fact("Readiness", el("span", {}, [el("span", { "class": "wd-chip wd-" + readinessTone(ready.state), text: ready.state }),

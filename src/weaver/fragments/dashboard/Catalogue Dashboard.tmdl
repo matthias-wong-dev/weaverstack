@@ -114,8 +114,8 @@ table 'Dashboard measures'
         formatString: #,##0
         displayFolder: Health
 
-    /// When the latest load or test settled, in UTC.
-    measure 'Latest settled completion' = ```
+    /// When the latest load or test was processed, in UTC.
+    measure 'Latest processed completion' = ```
         MAX(
             CALCULATE(MAX('Load status'[Completed datetime]), 'Load status'[Result] <> "Pending"),
             CALCULATE(MAX('Test status'[Completed datetime]), 'Test status'[Result] <> "Pending")
@@ -139,8 +139,8 @@ table 'Dashboard measures'
         formatString: #,##0
         displayFolder: Estate
 
-    /// Settled Log records.
-    measure 'Settled log records' = COUNTROWS('Log') + 0
+    /// Processed Log records.
+    measure 'Processed log records' = COUNTROWS('Log') + 0
         formatString: #,##0
         displayFolder: Estate
 
@@ -270,7 +270,7 @@ table 'Dashboard measures'
         displayFolder: Data
 
     /// The 40 latest workflows of the last 7 days, each summarised over every
-    /// record it settled, and how many the 7 days hold.
+    /// record it processed, and how many the 7 days hold.
     measure 'Workflow data' = ```
         VAR _f = UNICHAR(57345)
         VAR _r = UNICHAR(57346)

@@ -86,10 +86,10 @@ MEASURES = {
         "Rejected loads",
         "Pending loads",
         "Failed tests",
-        "Latest settled completion",
+        "Latest processed completion",
         "Observed at",
     },
-    "Estate": {"Items", "Installed objects", "Settled log records"},
+    "Estate": {"Items", "Installed objects", "Processed log records"},
     "Data": {
         "Catalogue data",
         "Lineage data",
