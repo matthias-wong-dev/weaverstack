@@ -188,7 +188,7 @@ function selectionChips(chips, selection, focus, describe, onFocus, select, patt
 function legend(mode) {
   var entries = mode === "load" ? [
     ["swatch wd-ok", "Last load succeeded"], ["swatch wd-bad", "Failed, error or blocked"], ["swatch wd-warn", "Rejected rows or pending"],
-    ["swatch wd-none", "Nothing settled, or loaded elsewhere"], ["ring wd-next", "Ready: dependencies settled"], ["ring wd-wait", "Waiting on a dependency"]
+    ["swatch wd-none", "Nothing processed, or loaded elsewhere"], ["ring wd-next", "Ready: dependencies processed"], ["ring wd-wait", "Waiting on a dependency"]
   ] : [
     ["kind wd-kind wd-kind-table", "Table"], ["kind wd-kind wd-kind-view", "View"], ["kind wd-kind wd-kind-folder", "Folder"], ["kind wd-kind wd-kind-shortcut", "Shortcut"],
     ["kind wd-kind wd-kind-test", "Test"], ["kind wd-kind wd-kind-assumption", "Assumption"], ["kind wd-kind wd-kind-semantic-model", "Semantic model"], ["kind wd-kind wd-kind-report", "Report"],
@@ -211,14 +211,14 @@ function orchestrationPage(body, m) {
   });
   var latest = (m.workflows || [])[0];
   var tiles = el("div", { "class": "wd-tiles" }, [
-    tile("Current", counts[READINESS.CURRENT] || 0, "settled after every dependency", "ok"),
-    tile("Ready", counts[READINESS.READY] || 0, "behind, with every dependency settled", "next"),
-    tile("Waiting", counts[READINESS.WAITING] || 0, "a dependency has not settled", "wait"),
+    tile("Current", counts[READINESS.CURRENT] || 0, "processed after every dependency", "ok"),
+    tile("Ready", counts[READINESS.READY] || 0, "behind, with every dependency processed", "next"),
+    tile("Waiting", counts[READINESS.WAITING] || 0, "a dependency has not been processed", "wait"),
     tile("Last outcome failed", failed.length, "Failed, Error or Blocked", failed.length ? "bad" : "ok"),
     tile("Loaded elsewhere", counts[READINESS.ELSEWHERE] || 0, "mirrored; not read here", "none"),
-    latest ? tile("Latest workflow", duration((latest.completed || 0) - (latest.started || 0)), fmt(latest.records) + " settled records · " + ago(latest.completed, m.at), latest.failed ? "bad" : "none") : null
+    latest ? tile("Latest workflow", duration((latest.completed || 0) - (latest.started || 0)), fmt(latest.records) + " processed records · " + ago(latest.completed, m.at), latest.failed ? "bad" : "none") : null
   ]);
-  var note = el("p", { "class": "wd-note", text: "Readiness is derived from the recorded state of each object's nearest loadable dependencies. It is not a queue: the catalogue records settled work only, so nothing here is shown as running." });
+  var note = el("p", { "class": "wd-note", text: "Readiness is derived from the recorded state of each object's nearest loadable dependencies. It is not a queue: the catalogue records processed work only, so nothing here is shown as running." });
   graphWorkspace(body, m, { page: "orchestration", mode: "load", health: true, label: "Load orchestration graph", above: el("div", { "class": "wd-summary" }, [tiles, note]),
     empty: "Search for an object, or select one in the graph, to follow its lineage, last outcome and readiness." });
   var lists = el("div", { "class": "wd-columns-2" }, [
@@ -229,7 +229,7 @@ function orchestrationPage(body, m) {
     ], ready, { limit: 100, sort: "object", desc: false, emptyText: "Nothing is ready to load." })]),
     section("Waiting · " + waiting.length, [dataTable([
       { key: "object", title: "Object", value: function (r) { return r.n.label; } },
-      { key: "on", title: "Waiting on", value: function (r) { return r.r.waitingOn[0].label + (r.r.unsettled > 1 ? " and " + (r.r.unsettled - 1) + " more" : ""); } },
+      { key: "on", title: "Waiting on", value: function (r) { return r.r.waitingOn[0].label + (r.r.unprocessed > 1 ? " and " + (r.r.unprocessed - 1) + " more" : ""); } },
       { key: "outcome", title: "Last outcome", render: function (r) { var s = effectiveLoad(r.n); return chip(s ? s.result : null, s ? null : "None"); }, value: function (r) { var s = effectiveLoad(r.n); return s ? s.result : ""; } }
     ], waiting, { limit: 100, sort: "object", desc: false, emptyText: "Nothing is waiting on a dependency." })])
   ]);

@@ -40,20 +40,20 @@ function topological(m) {
   return order;
 }
 
-/* Over each node's lifecycle ancestors: whether one has not settled, the
-   latest instant one settled, and the latest it settled or was built. */
+/* Over each node's lifecycle ancestors: whether one has not been processed,
+   the latest instant one was processed, and the latest it was processed or built. */
 function ancestry(m) {
   var out = new Map();
   topological(m).forEach(function (n) {
-    var a = { unsettled: false, latest: null, changed: null };
+    var a = { unprocessed: false, latest: null, changed: null };
     n.up.forEach(function (key) {
-      var p = m.nodes.get(key), pa = out.get(key) || { unsettled: false, latest: null, changed: null };
-      if (pa.unsettled) a.unsettled = true;
+      var p = m.nodes.get(key), pa = out.get(key) || { unprocessed: false, latest: null, changed: null };
+      if (pa.unprocessed) a.unprocessed = true;
       a.latest = later(a.latest, pa.latest);
       a.changed = later(a.changed, pa.changed);
       if (participates(p)) {
         var at = establishedAt(p);
-        if (at === null) a.unsettled = true;
+        if (at === null) a.unprocessed = true;
         a.latest = later(a.latest, at);
         a.changed = later(a.changed, later(at, p.built));
       }
@@ -128,7 +128,7 @@ function loadFindings(m, n, anc, asOf) {
   if (!s || s.result === "Pending") {
     var f = finding("load", "load_pending", AMBER, n, "Pending", n.isMirrored ?
       "loaded in the catalogue this one mirrors, which the Dashboard does not read" :
-      "no load has settled since this object was built", s);
+      "no load has processed this object since it was built", s);
     f.unobserved = n.isMirrored;
     return [f];
   }
@@ -137,10 +137,10 @@ function loadFindings(m, n, anc, asOf) {
   if (NO_DATA.indexOf(s.result) >= 0 || n.isStatic) return out;
   if (s.completed !== null && s.completed < asOf) out.push(finding("load", "load_stale_time", AMBER, n, s.result, "last loaded " + stamp(s.completed), s));
   var a = anc.get(n.key);
-  if (a.unsettled) {
+  if (a.unprocessed) {
     var behind = firstAncestor(m, n.key, function (p) { return establishedAt(p) === null; });
     out.push(finding("load", "load_ancestor_unestablished", AMBER, n, s.result,
-      (behind ? behind.label : "an upstream object") + " has no settled state for its current incarnation", s));
+      (behind ? behind.label : "an upstream object") + " has not been processed since it was built", s));
   }
   var loaded = establishedAt(n);
   if (loaded !== null && a.latest !== null && a.latest > loaded) {
@@ -190,13 +190,13 @@ var READINESS = { CURRENT: "Current", READY: "Ready", WAITING: "Waiting", ELSEWH
 /* Readiness keeps apart what happened (the outcome) and whether the recorded
    dependencies would let it run again now. */
 function readiness(m, n) {
-  if (n.isMirrored) return { state: READINESS.ELSEWHERE, waitingOn: [], unsettled: 0 };
-  if (!n.canLoad) return { state: READINESS.NONE, waitingOn: [], unsettled: 0 };
+  if (n.isMirrored) return { state: READINESS.ELSEWHERE, waitingOn: [], unprocessed: 0 };
+  if (!n.canLoad) return { state: READINESS.NONE, waitingOn: [], unprocessed: 0 };
   var ups = nearestStateful(m, n), waiting = ups.filter(function (p) { return establishedAt(p) === null; });
-  if (waiting.length) return { state: READINESS.WAITING, waitingOn: waiting, unsettled: waiting.length };
+  if (waiting.length) return { state: READINESS.WAITING, waitingOn: waiting, unprocessed: waiting.length };
   var loaded = establishedAt(n);
   var behind = loaded === null || ups.some(function (p) { return establishedAt(p) > loaded; });
-  return { state: behind ? READINESS.READY : READINESS.CURRENT, waitingOn: [], unsettled: 0 };
+  return { state: behind ? READINESS.READY : READINESS.CURRENT, waitingOn: [], unprocessed: 0 };
 }
 
 function tone(result) {

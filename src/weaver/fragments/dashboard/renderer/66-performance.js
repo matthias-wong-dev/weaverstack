@@ -73,7 +73,7 @@ function performancePage(body, m) {
     };
     var loadColumns = [
       { key: "label", title: "Object", value: function (r) { return r.label; } },
-      { key: "completed", title: "Settled", value: function (r) { return r.completed; }, render: function (r) { return stamp(r.completed); }, numeric: true },
+      { key: "completed", title: "Processed", value: function (r) { return r.completed; }, render: function (r) { return stamp(r.completed); }, numeric: true },
       { key: "duration", title: "Time", value: function (r) { return r.duration; }, render: function (r) { return duration(r.duration); }, numeric: true },
       { key: "changed", title: "Changed", value: changed, render: function (r) { return fmt(changed(r)); }, numeric: true },
       { key: "flags", title: "", value: function (r) { return (r.reload ? "reload " : "") + (r.skip ? "static skip" : ""); }, sortable: false }
