@@ -29,7 +29,7 @@ function overviewPage(body, m) {
     return el("li", {}, [severityChip(f.severity), f.node ? nodeLink(m, f.node.key, open) : el("span", { "class": "wd-mono", text: f.label }),
       el("span", { "class": "wd-muted", text: " " + f.message })]);
   }).concat(findings.length > 12 ? [el("li", { "class": "wd-muted", text: (findings.length - 12) + " more on the Health page" })] : []))
-    : el("div", { "class": "wd-allclear", text: "No findings. Every load and Test the catalogue records has settled, within the last 24 hours, after its dependencies." })]);
+    : el("div", { "class": "wd-allclear", text: "No findings. Every load and Test the catalogue records has been processed, within the last 24 hours, after its dependencies." })]);
   var activity = section("Recent workflows", [workflowTable(m, 8)]);
   body.appendChild(el("div", { "class": "wd-overview" }, [el("div", { "class": "wd-overview-main" }, [inventory, significant, activity]), side]));
   if (s.open && m.nodes.has(s.open)) open(s.open);
@@ -62,11 +62,11 @@ function itemInventory(m, open) {
         return el("button", { "class": "wd-inv-item", type: "button", onclick: function () { if (first) open(first.key); } }, [
           el("div", { "class": "wd-inv-head" }, [el("b", { text: it.name }), it.target && it.target !== it.name ? el("span", { "class": "wd-muted", text: " → " + it.target }) : null]),
           el("div", { "class": "wd-inv-kinds" }, KIND_ORDER.filter(function (k) { return byKind[k]; }).map(function (k) {
-            return el("span", { "class": "wd-inv-kind", title: k }, [kindMark(k), fmt(byKind[k])]);
+            return el("span", { "class": "wd-inv-kind" }, [kindMark(k), fmt(byKind[k]) + " " + k.toLowerCase() + (byKind[k] === 1 ? "" : "s")]);
           })),
-          total ? el("div", { "class": "wd-bar-stack", title: tones.ok + " succeeded · " + tones.bad + " failed · " + (tones.warn + tones.wait) + " pending or rejected · " + tones.none + " not settled" },
+          total ? el("div", { "class": "wd-bar-stack", title: tones.ok + " succeeded · " + tones.bad + " failed · " + (tones.warn + tones.wait) + " pending or rejected · " + tones.none + " not processed" },
             ["ok", "warn", "wait", "bad", "none"].map(function (t) { return tones[t] ? el("i", { "class": "wd-" + t, style: "flex:" + tones[t] }) : null; })) : null,
-          el("div", { "class": "wd-inv-meta", text: total ? "Last settled " + ago(latest, m.at) : it.nodes.length ? "Nothing to load" : "No objects" })
+          el("div", { "class": "wd-inv-meta", text: total ? "Last processed " + ago(latest, m.at) : it.nodes.length ? "Nothing to load" : "No objects" })
         ]);
       }))
     ]);
@@ -74,9 +74,9 @@ function itemInventory(m, open) {
 }
 
 function workflowTable(m, limit) {
-  if (!m.workflows.length) return empty("No workflow has settled a record in the last 7 days.");
+  if (!m.workflows.length) return empty("No workflow has processed a record in the last 7 days.");
   return dataTable([
-    { key: "completed", title: "Settled", value: function (w) { return w.completed; }, render: function (w) { return stamp(w.completed); }, numeric: true },
+    { key: "completed", title: "Processed", value: function (w) { return w.completed; }, render: function (w) { return stamp(w.completed); }, numeric: true },
     { key: "span", title: "Span", value: function (w) { return (w.completed || 0) - (w.started || 0); }, render: function (w) { return duration((w.completed || 0) - (w.started || 0)); }, numeric: true },
     { key: "tasks", title: "Work", value: function (w) { return w.tasks.join(", "); } },
     { key: "records", title: "Records", value: function (w) { return w.records; }, numeric: true },
@@ -123,7 +123,7 @@ function healthPage(body, m) {
       { key: "item", title: "Item", value: function (f) { return f.node ? f.node.item : ""; } },
       { key: "result", title: "Status", value: function (f) { return f.result || ""; }, render: function (f) { return f.result ? chip(f.result) : "—"; } },
       { key: "message", title: "Finding", value: function (f) { return f.message; } },
-      { key: "completed", title: "Settled", value: function (f) { return f.completed; }, render: function (f) { return f.completed ? stamp(f.completed) : "—"; }, numeric: true }
+      { key: "completed", title: "Processed", value: function (f) { return f.completed; }, render: function (f) { return f.completed ? stamp(f.completed) : "—"; }, numeric: true }
     ], rows, { limit: 500, sort: "severity", emptyText: "No findings match." }));
   }
   body.appendChild(el("div", { "class": "wd-toolbar" }, [

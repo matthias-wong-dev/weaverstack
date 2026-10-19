@@ -505,3 +505,18 @@ test("the Gantt axis reads clock time, with the date where the day changes", () 
   assert.equal(D.clockLabel(Date.UTC(2026, 9, 16, 23, 59), a), "23:59:00");
   assert.equal(D.clockLabel(Date.UTC(2026, 9, 17, 0, 0), Date.UTC(2026, 9, 16, 23, 59)), "2026-10-17 00:00:00");
 });
+
+test("a canvas draws at the scale the Service fits the page up to", () => {
+  const ratio = (root, w = 900, h = 560) => load(root).canvasRatio(w, h);
+  const screen = { availWidth: 2560, availHeight: 1440 };
+  // A 1280 x 720 page on a 2560 x 1440 screen can be scaled twice over, in a
+  // window or in full screen, which leave the layout and the screen alone.
+  assert.equal(ratio({ devicePixelRatio: 2, innerWidth: 1280, innerHeight: 720, screen }), 4);
+  // An expanded visual fills the screen unscaled.
+  assert.equal(ratio({ devicePixelRatio: 2, innerWidth: 2500, innerHeight: 1300, screen }), 3);
+  // A large canvas gives way to the pixel budget but never below the device ratio.
+  assert.ok(ratio({ devicePixelRatio: 2, innerWidth: 1280, innerHeight: 720, screen }, 4000, 2500) < 4);
+  assert.equal(ratio({ devicePixelRatio: 2, innerWidth: 1280, innerHeight: 720, screen }, 9000, 6000), 2);
+  // Without a screen it still draws twice over.
+  assert.equal(ratio({ devicePixelRatio: 1 }), 2);
+});

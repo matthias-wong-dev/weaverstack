@@ -1,4 +1,4 @@
-// The Gantt: the settled records of one workflow. A record appears when it
+// The Gantt: the processed records of one workflow. A record appears when it
 // settles; nothing is drawn for work the catalogue has not recorded.
 
 var GANTT = { LABEL: 280, ROW: 20, AXIS: 28 };
@@ -22,7 +22,7 @@ function logRows(m) {
   return m.logRows;
 }
 
-/* Elapsed span, summed task time and peak concurrency of settled records. */
+/* Elapsed span, summed task time and peak concurrency of processed records. */
 function ganttSummary(rows) {
   var t0 = Infinity, t1 = -Infinity, work = 0, events = [];
   rows.forEach(function (r) {
@@ -40,7 +40,7 @@ function ganttSummary(rows) {
 function ganttPage(body, m) {
   var s = pageState("gantt"), all = logRows(m), flows = m.workflows || [];
   var included = new Map((m.tables.logflows || []).map(function (r) { return [r.workflow, { records: num(r.records), included: num(r.included) }]; }));
-  if (!flows.length) { body.appendChild(empty("No workflow has settled a record in the last 7 days. Run weaver load to see its timeline.")); return; }
+  if (!flows.length) { body.appendChild(empty("No workflow has processed a record in the last 7 days. Run weaver load to see its timeline.")); return; }
   if (!s.workflow || !flows.some(function (w) { return w.id === s.workflow; }) || s.follow !== false) s.workflow = flows[0].id;
   s.scope = s.scope || "objects";
   var select = el("select", { "class": "wd-select", "aria-label": "Workflow", onchange: function () {
@@ -76,7 +76,7 @@ function ganttPage(body, m) {
     ]));
     var shown = rows.filter(function (r) { return s.scope === "all" || !r.envelope; }).filter(function (r) { return r.started !== null; });
     shown.sort(function (a, b) { return a.started - b.started || compare(a.label, b.label) || compare(a.id, b.id); });
-    if (!shown.length) { host.appendChild(empty("No object record has settled for this workflow.")); return; }
+    if (!shown.length) { host.appendChild(empty("No object record has been processed for this workflow.")); return; }
     host.appendChild(ganttChart(shown, sum, s, m));
   }
   render();
