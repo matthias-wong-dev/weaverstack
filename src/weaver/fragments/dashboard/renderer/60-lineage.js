@@ -1,4 +1,4 @@
-// Load orchestration: the estate graph, coloured by kind or by last outcome.
+// Orchestration: the estate graph, coloured by kind or by last outcome.
 
 var DEPTHS = [0, 1, 2, -1];
 
@@ -219,7 +219,7 @@ function orchestrationPage(body, m) {
     latest ? tile("Latest workflow", duration((latest.completed || 0) - (latest.started || 0)), fmt(latest.records) + " processed records · " + ago(latest.completed, m.at), latest.failed ? "bad" : "none") : null
   ]);
   var note = el("p", { "class": "wd-note", text: "Readiness is derived from the recorded state of each object's nearest loadable dependencies. It is not a queue: the catalogue records processed work only, so nothing here is shown as running." });
-  graphWorkspace(body, m, { page: "orchestration", mode: "load", health: true, label: "Load orchestration graph", above: el("div", { "class": "wd-summary" }, [tiles, note]),
+  graphWorkspace(body, m, { page: "orchestration", mode: "load", health: true, label: "Orchestration graph", above: el("div", { "class": "wd-summary" }, [tiles, note]),
     empty: "Search for an object, or select one in the graph, to follow its lineage, last outcome and readiness." });
   var lists = el("div", { "class": "wd-columns-2" }, [
     section("Ready · " + ready.length, [dataTable([

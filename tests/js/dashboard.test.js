@@ -520,3 +520,75 @@ test("a canvas draws at the scale the Service fits the page up to", () => {
   // Without a screen it still draws twice over.
   assert.equal(ratio({ devicePixelRatio: 1 }), 2);
 });
+
+// --- Performance -----------------------------------------------------------------
+
+const RUN = ["workflow", "started", "completed", "records", "failed"];
+const RUN_TASK = ["workflow", "task", "started", "completed", "records", "failed"];
+
+test("runs are newest first and each carries the span of every task type it ran", () => {
+  const m = model(estate({ extra:
+    table("runs", RUN, [["a", AT - 9 * H, AT - 8 * H, 4, 0], ["c", AT - 3 * H, AT - H, 9, 1], ["b", AT - 5 * H, AT - 4 * H, 2, 0], ["x", null, null, 1, 0]]) +
+    table("runtasks", RUN_TASK, [["c", "load", AT - 3 * H, AT - 2 * H, 6, 0], ["c", "test", AT - 2 * H, AT - H, 3, 1], ["a", "load", AT - 9 * H, AT - 8 * H, 4, 0]]) }));
+  const runs = D.runsOf(m);
+  assert.deepEqual(runs.map((r) => r.id), ["c", "b", "a"]);
+  assert.deepEqual(runs[0].tasks.map((t) => t.task), ["load", "test"]);
+  assert.equal(runs[1].tasks.length, 0);
+});
+
+test("a run's time is its span, and a task filter measures that task alone", () => {
+  const m = model(estate({ extra:
+    table("runs", RUN, [["c", AT - 3 * H, AT - H, 9, 1]]) +
+    table("runtasks", RUN_TASK, [["c", "load", AT - 3 * H, AT - 2 * H, 6, 0], ["c", "test", AT - 2.5 * H, AT - H, 3, 1]]) }));
+  const run = D.runsOf(m)[0];
+  assert.equal(D.runView(run, "all").elapsed, 2 * H);
+  // Overlapping tasks are one span, never two summed.
+  assert.equal(D.runView(run, "load").elapsed, H);
+  assert.equal(D.runView(run, "test").elapsed, 1.5 * H);
+  assert.equal(D.runView(run, "build"), null);
+});
+
+test("the day column starts at midnight unless a run crosses it, then in the quiet hours", () => {
+  const at = (day, hour) => Date.UTC(2026, 9, day, hour);
+  const view = (a, b) => ({ started: a, completed: b });
+  assert.equal(D.dayStartHour([view(at(15, 2), at(15, 5)), view(at(16, 2), at(16, 4))]), 0);
+  const night = D.dayStartHour([view(at(15, 23), at(16, 2)), view(at(16, 23), at(17, 3))]);
+  // No hour any run touches: 23:00 to 03:00 UTC.
+  assert.ok(night >= 4 && night <= 22, String(night));
+  assert.equal(D.dayStartHour([]), 0);
+});
+
+test("Tests resolve to their item and drop the catalogue's own", () => {
+  const T = ["targettype", "target", "schema", "object", "runs", "duration", "longest", "failed", "last"];
+  const m = model(estate({ extra: table("testweek", T, [
+    ["Warehouse", "Curated_WH", "Sales", "ByRegionValid", 3, 9000, 4000, 1, AT - H],
+    ["Warehouse", "Weaver", "_", "Internal", 1, 1, 1, 0, AT - H],
+  ]) }));
+  const rows = D.testRows(m, "testweek");
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].item, "Warehouse/Curated");
+  assert.equal(rows[0].node.key, "v");
+  assert.equal(rows[0].failed, 1);
+});
+
+test("a record carries its item, and a Test keeps its mark when the catalogue does not know the object", () => {
+  const L = ["index", "workflow", "records", "included"];
+  const R = ["id", "flow", "task", "targettype", "target", "schema", "object", "result", "started", "completed", "duration", "message"];
+  const m = model(estate({ extra: table("logflows", L, [[1, "w", 2, 2]]) + table("log", R, [
+    ["1", 1, "load", "Warehouse", "Curated_WH", "Sales", "Region", "Succeeded", AT - H, AT - H + 5, 5, ""],
+    ["2", 1, "test", "Warehouse", "Curated_WH", "Sales", "Gone", "Failed", AT - H, AT - H + 5, 5, "x"],
+  ]) }));
+  const rows = D.logRows(m);
+  assert.equal(rows[0].item, "Warehouse/Curated");
+  assert.equal(D.recordKind(rows[0].node, rows[0].task), "Table");
+  assert.equal(rows[1].node, null);
+  assert.equal(D.recordKind(rows[1].node, rows[1].task), "Test");
+});
+
+test("a duration rounds to whole seconds before it splits into minutes", () => {
+  assert.equal(D.duration(2600), "2.6 s");
+  assert.equal(D.duration(59600), "1 min 0 s");
+  assert.equal(D.duration(2699600), "45 min 0 s");
+  assert.equal(D.duration(3 * 3600000 + 125000), "3 h 2 min");
+  assert.equal(D.duration(null), "—");
+});

@@ -21,14 +21,14 @@ PAGES = {
     "overview": ("catalogue", "graph", "status", "workflow", "build"),
     "health": ("catalogue", "graph", "status", "workflow", "build"),
     "orchestration": ("catalogue", "graph", "status", "workflow"),
-    "gantt": ("catalogue", "workflow", "log"),
-    "performance": ("catalogue", "workflow", "statistic"),
+    "performance": ("catalogue", "node", "run", "statistic"),
+    "gantt": ("catalogue", "node", "workflow", "log"),
     "entities": ("catalogue", "graph", "metadata"),
     "semantic": ("catalogue", "graph", "status", "semantic"),
 }
 
 EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
-LOG_BUDGET = 20000
+LOG_BUDGET = 9000
 HISTORY = timedelta(days=7)
 
 
@@ -103,6 +103,40 @@ def catalogue(rows, at) -> str:
             for r in _rows(rows, "Installation")
         ],
     )
+
+
+def _flags(r) -> str:
+    return str(
+        int(bool(r["can_load"]))
+        + 2 * int(bool(r["is_static"]))
+        + 4 * int(bool(r["is_mirrored"]))
+        + 8 * int(bool(r["is_installed"]))
+    )
+
+
+def node(rows, at) -> str:
+    nodes = [r for r in _rows(rows, "LineageNode") if not r["is_internal"]]
+    visible = {r["item_label"] for r in nodes}
+    internal = sorted(
+        {r["item_label"] for r in _rows(rows, "LineageNode") if r["is_internal"]}
+        - visible
+    )
+    return table(
+        "nodes",
+        ("key", "item", "schema", "object", "kind", "label", "flags"),
+        [
+            (
+                r["node_key"],
+                r["item_label"],
+                text(r["schema_name"]),
+                text(r["object_name"]),
+                r["node_kind"],
+                r["label"],
+                _flags(r),
+            )
+            for r in nodes
+        ],
+    ) + table("internal", ("item",), [(label,) for label in internal])
 
 
 def graph(rows, at) -> str:
@@ -345,6 +379,185 @@ def log(rows, at) -> str:
     )
 
 
+FAILED = ("Failed", "Error", "Blocked")
+RUN_WINDOW = timedelta(days=30)
+
+
+def run(rows, at) -> str:
+    """The 300 latest workflows of 30 days with each task type's span, the 200
+    longest object records of the 8 latest, and the Tests' statistics."""
+
+    at = _aware(at)
+    log_rows = _rows(rows, "Log")
+    recent = {
+        r["workflow_id"]
+        for r in log_rows
+        if (_aware(r.get("completed_datetime")) or EPOCH) >= at - RUN_WINDOW
+    }
+    found = {}
+    for r in log_rows:
+        if r["workflow_id"] not in recent:
+            continue
+        w = found.setdefault(
+            r["workflow_id"],
+            {
+                "start": None,
+                "end": None,
+                "records": 0,
+                "objects": 0,
+                "failed": 0,
+                "tasks": {},
+            },
+        )
+        started, completed = (
+            _aware(r.get("started_datetime")),
+            _aware(r.get("completed_datetime")),
+        )
+        if started is not None and (w["start"] is None or started < w["start"]):
+            w["start"] = started
+        if completed is not None and (w["end"] is None or completed > w["end"]):
+            w["end"] = completed
+        w["records"] += 1
+        w["objects"] += bool(r.get("object_name"))
+        w["failed"] += r.get("result") in FAILED
+        t = w["tasks"].setdefault(
+            r.get("task_type"), {"start": None, "end": None, "records": 0, "failed": 0}
+        )
+        if started is not None and (t["start"] is None or started < t["start"]):
+            t["start"] = started
+        if completed is not None and (t["end"] is None or completed > t["end"]):
+            t["end"] = completed
+        t["records"] += 1
+        t["failed"] += r.get("result") in FAILED
+    latest = _latest(found, 300)
+
+    def durations(r):
+        return -(r.get("duration_milliseconds") or 0)
+
+    objects = []
+    for w in sorted(_latest(found, 8)):
+        mine = [r for r in log_rows if r["workflow_id"] == w and r.get("object_name")]
+        mine.sort(key=lambda r: (durations(r), r["log_sk"]))
+        objects.extend(mine[:200])
+
+    def tests(days):
+        grouped = {}
+        for r in log_rows:
+            completed = _aware(r.get("completed_datetime"))
+            if (
+                r.get("task_type") != "test"
+                or not r.get("object_name")
+                or completed is None
+                or completed < at - timedelta(days=days)
+            ):
+                continue
+            grouped.setdefault(
+                (
+                    r.get("target_type"),
+                    r.get("target_name"),
+                    r.get("schema_name"),
+                    r["object_name"],
+                ),
+                [],
+            ).append(r)
+        return [
+            (
+                text(key[0]),
+                text(key[1]),
+                text(key[2]),
+                text(key[3]),
+                str(len(group)),
+                str(sum(g.get("duration_milliseconds") or 0 for g in group)),
+                str(max(g.get("duration_milliseconds") or 0 for g in group)),
+                str(sum(g.get("result") in FAILED for g in group)),
+                ms(max(_aware(g["completed_datetime"]) for g in group)),
+            )
+            for key, group in grouped.items()
+        ]
+
+    header = (
+        "targettype",
+        "target",
+        "schema",
+        "object",
+        "runs",
+        "duration",
+        "longest",
+        "failed",
+        "last",
+    )
+    return (
+        table(
+            "runs",
+            ("workflow", "started", "completed", "records", "objects", "failed"),
+            [
+                (
+                    w,
+                    ms(found[w]["start"]),
+                    ms(found[w]["end"]),
+                    str(found[w]["records"]),
+                    str(found[w]["objects"]),
+                    str(found[w]["failed"]),
+                )
+                for w in latest
+            ],
+        )
+        + table(
+            "runtasks",
+            ("workflow", "task", "started", "completed", "records", "failed"),
+            [
+                (
+                    w,
+                    text(task),
+                    ms(t["start"]),
+                    ms(t["end"]),
+                    str(t["records"]),
+                    str(t["failed"]),
+                )
+                for w in sorted(latest)
+                for task, t in sorted(
+                    found[w]["tasks"].items(), key=lambda kv: text(kv[0])
+                )
+            ],
+        )
+        + table(
+            "runobjects",
+            (
+                "workflow",
+                "task",
+                "targettype",
+                "target",
+                "schema",
+                "object",
+                "result",
+                "started",
+                "completed",
+                "message",
+            ),
+            [
+                (
+                    r["workflow_id"],
+                    text(r.get("task_type")),
+                    text(r.get("target_type")),
+                    text(r.get("target_name")),
+                    text(r.get("schema_name")),
+                    text(r.get("object_name")),
+                    text(r.get("result")),
+                    ms(r.get("started_datetime")),
+                    ms(r.get("completed_datetime")),
+                    text(r.get("message"))[:160]
+                    if r.get("result") != "Succeeded"
+                    else "",
+                )
+                for r in objects
+            ],
+        )
+        + table("testday", header, tests(1))
+        + table("testweek", header, tests(7))
+        + table("testmonth", header, tests(30))
+    )
+
+
 def statistic(rows, at) -> str:
     at = _aware(at)
     stats = _rows(rows, "LoadStatistic")
@@ -416,39 +629,6 @@ def statistic(rows, at) -> str:
         "timedduration",
         "last",
     )
-    today = at.replace(hour=0, minute=0, second=0, microsecond=0)
-    trend = []
-    for back in range(30):
-        day = today - timedelta(days=back)
-        grouped = {}
-        for r in stats:
-            completed = _aware(r.get("completed_datetime"))
-            if completed is not None and day <= completed < day + timedelta(days=1):
-                grouped.setdefault(item(r), []).append(r)
-        for label, group in grouped.items():
-
-            def total(column, of=group):
-                values = [g[column] for g in of if g.get(column) is not None]
-                return str(sum(values)) if values else ""
-
-            changed = [
-                sum(
-                    g.get(c) or 0
-                    for c in ("rows_inserted", "rows_updated", "rows_deleted")
-                )
-                for g in group
-            ]
-            trend.append(
-                (
-                    ms(day),
-                    label,
-                    str(len(group)),
-                    total("duration_milliseconds"),
-                    total("rows_read"),
-                    str(sum(changed)),
-                    total("rows_rejected"),
-                )
-            )
     week = [
         r
         for r in stats
@@ -492,10 +672,6 @@ def statistic(rows, at) -> str:
         "reload",
         "skip",
     )
-    slowest = sorted(
-        week,
-        key=lambda r: (-(r.get("duration_milliseconds") or 0), r["load_statistic_sk"]),
-    )[:50]
     largest = sorted(
         (
             r
@@ -516,12 +692,6 @@ def statistic(rows, at) -> str:
         table("perfday", header, window(1))
         + table("perfweek", header, window(7))
         + table("perfmonth", header, window(30))
-        + table(
-            "perftrend",
-            ("day", "item", "loads", "duration", "read", "changed", "rejected"),
-            trend,
-        )
-        + table("slowest", columns, [single(r) for r in slowest])
         + table("largest", columns, [single(r) for r in largest])
     )
 
@@ -790,7 +960,9 @@ BLOCKS = {
     "catalogue": catalogue,
     "graph": graph,
     "status": status,
+    "node": node,
     "workflow": workflow,
+    "run": run,
     "log": log,
     "statistic": statistic,
     "metadata": metadata,
