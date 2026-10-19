@@ -66,7 +66,7 @@ function pageState(name) { var s = state(); s[name] = s[name] || {}; return s[na
 function weaveMark() { return el("span", { "class": "wd-mark", "aria-hidden": "true" }, [el("i"), el("i"), el("i"), el("i")]); }
 
 var PAGE_TITLES = {
-  overview: "Overview", health: "Health", orchestration: "Load orchestration", gantt: "Gantt",
+  overview: "Overview", health: "Health", orchestration: "Orchestration", gantt: "Gantt",
   performance: "Performance", entities: "Entity dictionary", semantic: "Semantic model"
 };
 
@@ -292,7 +292,7 @@ function details(panel, m, key, options) {
   panel.appendChild(el("div", { "class": "wd-eyebrow" }, [kindMark(n.kind), " " + n.kind]));
   panel.appendChild(el("h2", { "class": "wd-detail-title", text: n.label }));
   panel.appendChild(el("div", { "class": "wd-mono wd-muted", text: n.item + " · " + qualified(n) }));
-  panel.appendChild(el("p", { "class": n.desc ? "wd-desc" : "wd-desc wd-muted", text: n.desc || "No description is declared." }));
+  if (options.describe !== false) panel.appendChild(el("p", { "class": n.desc ? "wd-desc" : "wd-desc wd-muted", text: n.desc || "No description is declared." }));
 
   var s = isValidation(n) ? n.test : effectiveLoad(n), carries = !!m.tables.loads;
   var facts = el("dl", { "class": "wd-facts" });
