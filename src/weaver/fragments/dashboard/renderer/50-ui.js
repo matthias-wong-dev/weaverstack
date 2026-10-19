@@ -23,9 +23,11 @@ function fmt(n) { return n === null || n === undefined ? "—" : Number(n).toLoc
 function duration(ms) {
   if (ms === null || ms === undefined) return "—";
   var s = ms / 1000;
-  if (s < 60) return (s < 10 ? s.toFixed(1) : Math.round(s)) + " s";
-  var mins = Math.floor(s / 60);
-  if (mins < 60) return mins + " min " + Math.round(s % 60) + " s";
+  if (s < 10) return s.toFixed(1) + " s";
+  var whole = Math.round(s);
+  if (whole < 60) return whole + " s";
+  var mins = Math.floor(whole / 60);
+  if (mins < 60) return mins + " min " + (whole % 60) + " s";
   var h = Math.floor(mins / 60);
   return h < 48 ? h + " h " + (mins % 60) + " min" : Math.floor(h / 24) + " d " + (h % 24) + " h";
 }

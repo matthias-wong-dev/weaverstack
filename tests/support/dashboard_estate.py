@@ -397,8 +397,8 @@ class _Estate:
             clock = loaded
             for index, row in enumerate(checks):
                 begin = clock + timedelta(milliseconds=r.randint(0, 2000))
-                ms = int(r.randint(800, 9000) * pace * 3)
-                clock = begin if index % 5 else clock + timedelta(milliseconds=ms // 2)
+                ms = int(r.randint(800, 9000) * pace * 30)
+                clock = begin if index % 2 else clock + timedelta(milliseconds=ms // 2)
                 result = "Succeeded" if r.random() < 0.93 else "Failed"
                 records.append(
                     self._record(

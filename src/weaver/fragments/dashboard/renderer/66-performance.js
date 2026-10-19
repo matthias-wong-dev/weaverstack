@@ -176,7 +176,7 @@ function runChart(views, s, m, pick) {
   shown.forEach(function (v) { addTo(byColumn, cycle(v) - first, v); });
   byColumn.forEach(function (list, col) {
     list.sort(function (a, b) { return a.started - b.started || compare(a.run.id, b.run.id); });
-    var slot = Math.min(26, (colW - 8) / list.length), x0 = L + col * colW + (colW - slot * list.length) / 2;
+    var slot = Math.min(44, (colW - 8) / list.length), x0 = L + col * colW + (colW - slot * list.length) / 2;
     list.forEach(function (v, k) {
       var top = y(offset(v)), bottom = y(offset(v) + v.elapsed), x = x0 + k * slot + 1.5, w = Math.max(2, slot - 3);
       var failed = v.run.failed > 0, picked = v.run.id === s.run;

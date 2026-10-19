@@ -584,3 +584,11 @@ test("a record carries its item, and a Test keeps its mark when the catalogue do
   assert.equal(rows[1].node, null);
   assert.equal(D.recordKind(rows[1].node, rows[1].task), "Test");
 });
+
+test("a duration rounds to whole seconds before it splits into minutes", () => {
+  assert.equal(D.duration(2600), "2.6 s");
+  assert.equal(D.duration(59600), "1 min 0 s");
+  assert.equal(D.duration(2699600), "45 min 0 s");
+  assert.equal(D.duration(3 * 3600000 + 125000), "3 h 2 min");
+  assert.equal(D.duration(null), "—");
+});
