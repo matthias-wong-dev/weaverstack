@@ -131,7 +131,7 @@ weaver health                              <span class="c-dim"># Inspect the who
 <th scope="row" colspan="3">Fabric projects</th>
 </tr>
                 <tr>
-                  <th scope="row">One project containing both a Fabric Lakehouse and Warehouse</th>
+                  <th scope="row">Manage Lakehouse and Warehouse work in one project</th>
                   <td class="v-yes">
 <span class="mark yes">✓</span>
 </td>
@@ -140,7 +140,7 @@ weaver health                              <span class="c-dim"># Inspect the who
 </td>
                 </tr>
                 <tr>
-                  <th scope="row">Fabric shortcuts represented as dependencies</th>
+                  <th scope="row">Include Fabric shortcuts in the dependency graph</th>
                   <td class="v-yes">
 <span class="mark yes">✓</span>
 </td>
@@ -149,7 +149,7 @@ weaver health                              <span class="c-dim"># Inspect the who
 </td>
                 </tr>
                 <tr>
-                  <th scope="row">Same project files used with different development and production items</th>
+                  <th scope="row">Use the same project files in development and production</th>
                   <td class="v-yes">
 <span class="mark yes">✓</span>
 </td>
@@ -158,7 +158,7 @@ weaver health                              <span class="c-dim"># Inspect the who
 </td>
                 </tr>
                 <tr>
-                  <th scope="row">Create a development branch of Fabric data with Mirror</th>
+                  <th scope="row">Develop using existing Fabric data without full copies</th>
                   <td class="v-yes">
 <span class="mark yes">✓</span>
 </td>
@@ -171,7 +171,7 @@ weaver health                              <span class="c-dim"># Inspect the who
 <th scope="row" colspan="3">Authoring</th>
 </tr>
                 <tr>
-                  <th scope="row">Ordinary SQL references, without dependency templating</th>
+                  <th scope="row">Write SQL without dependency macros</th>
                   <td class="v-yes">
 <span class="mark yes">✓</span>
 </td>
@@ -181,7 +181,7 @@ weaver health                              <span class="c-dim"># Inspect the who
 </td>
                 </tr>
                 <tr>
-                  <th scope="row">Dependencies read from Python imports</th>
+                  <th scope="row">Recognise dependencies from Python imports</th>
                   <td class="v-yes">
 <span class="mark yes">✓</span>
 </td>
@@ -205,7 +205,7 @@ weaver health                              <span class="c-dim"># Inspect the who
 <span class="mark yes">✓</span>
 </td>
                   <td class="v-no">
-<span class="mark no">✕</span> <span class="note">no documented model configuration</span>
+<span class="mark no">✕</span> <span class="note">not provided as a model setting</span>
 </td>
                 </tr>
 
@@ -213,7 +213,7 @@ weaver health                              <span class="c-dim"># Inspect the who
 <th scope="row" colspan="3">Build and runs</th>
 </tr>
                 <tr>
-                  <th scope="row">Deploy physical structure without loading data</th>
+                  <th scope="row">Create tables and loading code without running a data load</th>
                   <td class="v-yes">
 <span class="mark yes">✓</span>
 </td>
@@ -222,7 +222,7 @@ weaver health                              <span class="c-dim"># Inspect the who
 </td>
                 </tr>
                 <tr>
-                  <th scope="row">Build and run results kept in Fabric for later commands</th>
+                  <th scope="row">Keep deployment and run history in Fabric</th>
                   <td class="v-yes">
 <span class="mark yes">✓</span>
 </td>
@@ -231,7 +231,7 @@ weaver health                              <span class="c-dim"># Inspect the who
 </td>
                 </tr>
                 <tr>
-                  <th scope="row">Remember where each incremental load should continue</th>
+                  <th scope="row">Track where each table should resume loading</th>
                   <td class="v-yes">
 <span class="mark yes">✓</span> <span class="note">bookmarks</span>
 </td>
@@ -240,16 +240,16 @@ weaver health                              <span class="c-dim"># Inspect the who
 </td>
                 </tr>
                 <tr>
-                  <th scope="row">Report what is current, stale, failed, blocked or missing</th>
+                  <th scope="row">See what is up to date or needs attention</th>
                   <td class="v-yes">
 <span class="mark yes">✓</span>
 </td>
                   <td class="v-part">
-<span class="mark part">◐</span> <span class="note">source freshness covers declared sources</span>
+<span class="mark part">◐</span> <span class="note">source checks and run artifacts are separate</span>
 </td>
                 </tr>
                 <tr>
-                  <th scope="row">Independent branches continue after a failure</th>
+                  <th scope="row">Keep unrelated work running after a failure</th>
                   <td class="v-yes">
 <span class="mark yes">✓</span> <span class="note">with fault-tolerant loading</span>
 </td>
@@ -262,7 +262,7 @@ weaver health                              <span class="c-dim"># Inspect the who
 <th scope="row" colspan="3">Loading data</th>
 </tr>
                 <tr>
-                  <th scope="row">Work out inserts, updates and deletes before writing</th>
+                  <th scope="row">Identify inserts, updates and deletes before applying them</th>
                   <td class="v-yes">
 <span class="mark yes">✓</span>
 </td>
@@ -271,16 +271,16 @@ weaver health                              <span class="c-dim"># Inspect the who
 </td>
                 </tr>
                 <tr>
-                  <th scope="row">Invalid incoming rows refused and retained with a reason</th>
+                  <th scope="row">Reject invalid input rows and keep the reason</th>
                   <td class="v-yes">
 <span class="mark yes">✓</span>
 </td>
                   <td class="v-no">
-<span class="mark no">✕</span> <span class="note">tests detect invalid target rows after loading</span>
+<span class="mark no">✕</span> <span class="note">no built-in rejected-row quarantine</span>
 </td>
                 </tr>
                 <tr>
-                  <th scope="row">Threshold stops an unusually large change before writing</th>
+                  <th scope="row">Stop unexpectedly large data changes before applying them</th>
                   <td class="v-yes">
 <span class="mark yes">✓</span>
 </td>
@@ -288,7 +288,7 @@ weaver health                              <span class="c-dim"># Inspect the who
 <span class="mark no">✕</span> <span class="note">not a built-in model policy</span>
 </td>
                 </tr>
-<tr class="group"><th scope="row" colspan="3">Power BI semantic models and Reports</th></tr><tr><th scope="row">Deploy native PBIP/TMDL models and Reports</th><td class="v-yes"><span class="mark yes">✓</span></td><td class="v-no"><span class="mark no">✕</span><span class="note">not part of dbt-fabric deployment</span></td></tr><tr><th scope="row">Apply native TMDL modelling rules and compose model variants</th><td class="v-yes"><span class="mark yes">✓</span></td><td class="v-no"><span class="mark no">✕</span><span class="note">dbt semantic models define its own metrics layer</span></td></tr><tr><th scope="row">Validate DAX against Lakehouse or Warehouse SQL</th><td class="v-yes"><span class="mark yes">✓</span></td><td class="v-no"><span class="mark no">✕</span><span class="note">not a dbt-fabric validation target</span></td></tr><tr><th scope="row">Order model refreshes with managed source loads</th><td class="v-yes"><span class="mark yes">✓</span></td><td class="v-no"><span class="mark no">✕</span><span class="note">Power BI refresh is outside the adapter run</span></td></tr>              </tbody>
+<tr class="group"><th scope="row" colspan="3">Power BI semantic models and Reports</th></tr><tr><th scope="row">Deploy native Power BI models and Reports</th><td class="v-yes"><span class="mark yes">✓</span></td><td class="v-no"><span class="mark no">✕</span><span class="note">not part of dbt-fabric deployment</span></td></tr><tr><th scope="row">Apply shared Power BI rules and reuse models</th><td class="v-yes"><span class="mark yes">✓</span></td><td class="v-no"><span class="mark no">✕</span><span class="note">dbt semantic models define its own metrics layer</span></td></tr><tr><th scope="row">Unit test DAX measures against SQL results</th><td class="v-yes"><span class="mark yes">✓</span></td><td class="v-no"><span class="mark no">✕</span><span class="note">not a dbt-fabric validation target</span></td></tr><tr><th scope="row">Refresh Power BI models after source data loads</th><td class="v-yes"><span class="mark yes">✓</span></td><td class="v-no"><span class="mark no">✕</span><span class="note">Power BI refresh is outside the adapter run</span></td></tr>              </tbody>
             </table>
           </div>
         </div>
