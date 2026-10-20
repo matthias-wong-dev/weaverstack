@@ -181,6 +181,56 @@ class KustoClient:
             raise TelemetryError("KQL query returned no primary result.")
         return primary
 
+    def query_pages(
+        self,
+        query: str,
+        *,
+        page_size: int = 5_000,
+        ingested_before: datetime | None = None,
+        max_attempts: int = 3,
+    ) -> list[dict[str, Any]]:
+        if page_size < 1:
+            raise ValueError("page_size must be positive.")
+        if max_attempts < 1:
+            raise ValueError("max_attempts must be positive.")
+        ingested_before = ingested_before or datetime.now(timezone.utc)
+        frozen = (
+            query + "\n| where EventProcessedUtcTime <= "
+            f"datetime({_kusto_time(ingested_before)})"
+        )
+        for _attempt in range(max_attempts):
+            expected = self._query_count(frozen)
+            rows: list[dict[str, Any]] = []
+            offset = 0
+            while offset < expected:
+                page = self.query(
+                    frozen + "\n| order by EventTime asc, EventProcessedUtcTime asc, "
+                    "EventEnqueuedUtcTime asc, PartitionId asc, id asc"
+                    "\n| serialize _TelemetryRow = row_number()"
+                    f"\n| where _TelemetryRow between ({offset + 1} .. "
+                    f"{min(offset + page_size, expected)})"
+                    "\n| project-away _TelemetryRow"
+                )
+                rows.extend(page)
+                if not page:
+                    break
+                offset += len(page)
+            observed = self._query_count(frozen)
+            if len(rows) == expected == observed:
+                return rows
+        raise TelemetryError(
+            "KQL result changed during pagination or returned an incomplete page."
+        )
+
+    def _query_count(self, query: str) -> int:
+        rows = self.query(query + "\n| count")
+        if len(rows) != 1 or set(rows[0]) != {"Count"}:
+            raise TelemetryError("KQL count query returned an invalid response.")
+        count = rows[0]["Count"]
+        if not isinstance(count, int) or count < 0:
+            raise TelemetryError("KQL count query returned an invalid count.")
+        return count
+
 
 def _kusto_time(value: datetime) -> str:
     if value.tzinfo is None:
@@ -368,6 +418,7 @@ class TelemetryCapture:
         )
         rows = {}
         errors: list[dict[str, str]] = []
+        ingested_before = datetime.now(timezone.utc)
         for name, table in (
             ("overview", self.config.overview_table),
             ("operations", self.config.operation_table),
@@ -379,11 +430,10 @@ class TelemetryCapture:
                 f"(datetime({_kusto_time(started_at)}) .. "
                 f"datetime({_kusto_time(finished_at)}))\n"
                 "| where tolower(tostring(data.capacityId)) == "
-                f"'{self.config.capacity_id}'\n"
-                "| order by EventTime asc"
+                f"'{self.config.capacity_id}'"
             )
             try:
-                rows[name] = client.query(query)
+                rows[name] = client.query_pages(query, ingested_before=ingested_before)
             except Exception as exc:  # query the other required capacity table
                 rows[name] = []
                 errors.append({"layer": name, "error": _exception_text(exc)})

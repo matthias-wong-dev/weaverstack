@@ -304,6 +304,129 @@ def test_kusto_query_returns_named_rows_for_the_utc_window():
 
 
 @weaver_test()
+def test_kusto_query_pages_retains_large_ordered_results():
+    telemetry = _telemetry()
+    queries = []
+    data = [
+        ["2026-10-20T05:00:00Z", "a"],
+        ["2026-10-20T05:00:01Z", "b"],
+        ["2026-10-20T05:00:02Z", "c"],
+        ["2026-10-20T05:00:03Z", "d"],
+        ["2026-10-20T05:00:04Z", "e"],
+    ]
+
+    class Credential:
+        def get_token(self, _scope):
+            return SimpleNamespace(token="secret")
+
+    class Response:
+        status_code = 200
+
+        def __init__(self, columns, rows):
+            self.columns = columns
+            self.rows = rows
+
+        def json(self):
+            return [
+                {
+                    "TableKind": "PrimaryResult",
+                    "Columns": [{"ColumnName": column} for column in self.columns],
+                    "Rows": self.rows,
+                }
+            ]
+
+    def request(_method, _url, **kwargs):
+        query = kwargs["json"]["csl"]
+        queries.append(query)
+        if query.endswith("| count"):
+            return Response(["Count"], [[len(data)]])
+        for lower, upper in ((1, 2), (3, 4), (5, 5)):
+            if f"between ({lower} .. {upper})" in query:
+                return Response(["EventTime", "id"], data[lower - 1 : upper])
+        raise AssertionError(query)
+
+    client = telemetry.KustoClient(
+        query_service_uri="https://cluster.kusto.fabric.microsoft.com",
+        database="WeaverStressTelemetry",
+        credential=Credential(),
+        request=request,
+    )
+    rows = client.query_pages(
+        "CapacityOperationEvents\n| extend EventTime=todatetime(['time'])",
+        page_size=2,
+        ingested_before=datetime(2026, 10, 20, 6, 0, tzinfo=timezone.utc),
+    )
+
+    assert [row["id"] for row in rows] == ["a", "b", "c", "d", "e"]
+    page_queries = [query for query in queries if not query.endswith("| count")]
+    assert "between (1 .. 2)" in page_queries[0]
+    assert "between (3 .. 4)" in page_queries[1]
+    assert "between (5 .. 5)" in page_queries[2]
+    assert all("project-away _TelemetryRow" in query for query in page_queries)
+    assert all(
+        "EventProcessedUtcTime <= datetime(2026-10-20T06:00:00Z)" in query
+        for query in queries
+    )
+
+
+@weaver_test()
+def test_kusto_query_pages_retries_when_late_ingestion_changes_the_count():
+    telemetry = _telemetry()
+    data = [["a"], ["b"], ["c"], ["d"]]
+    count_calls = 0
+
+    class Credential:
+        def get_token(self, _scope):
+            return SimpleNamespace(token="secret")
+
+    class Response:
+        status_code = 200
+
+        def __init__(self, columns, rows):
+            self.columns = columns
+            self.rows = rows
+
+        def json(self):
+            return [
+                {
+                    "TableKind": "PrimaryResult",
+                    "Columns": [{"ColumnName": column} for column in self.columns],
+                    "Rows": self.rows,
+                }
+            ]
+
+    def request(_method, _url, **kwargs):
+        nonlocal count_calls
+        query = kwargs["json"]["csl"]
+        if query.endswith("| count"):
+            count_calls += 1
+            if count_calls == 2:
+                data.insert(0, ["late"])
+            return Response(["Count"], [[len(data)]])
+        if "between (1 .. 2)" in query:
+            return Response(["id"], data[:2])
+        if "between (3 .. 4)" in query:
+            return Response(["id"], data[2:4])
+        if "between (5 .. 5)" in query:
+            return Response(["id"], data[4:5])
+        raise AssertionError(query)
+
+    client = telemetry.KustoClient(
+        query_service_uri="https://cluster.kusto.fabric.microsoft.com",
+        database="WeaverStressTelemetry",
+        credential=Credential(),
+        request=request,
+    )
+    rows = client.query_pages(
+        "CapacityOperationEvents\n| extend EventTime=todatetime(['time'])",
+        page_size=2,
+    )
+
+    assert [row["id"] for row in rows] == ["late", "a", "b", "c", "d"]
+    assert count_calls == 4
+
+
+@weaver_test()
 def test_spark_capture_retains_session_resource_usage_and_history(tmp_path):
     telemetry = _telemetry()
     config = telemetry.TelemetryConfig.from_mapping(
@@ -491,10 +614,19 @@ def test_capacity_capture_writes_overview_and_operation_jsonl(tmp_path):
     class Response:
         status_code = 200
 
-        def __init__(self, event_type):
+        def __init__(self, event_type, *, count=False):
             self.event_type = event_type
+            self.count = count
 
         def json(self):
+            if self.count:
+                return [
+                    {
+                        "TableKind": "PrimaryResult",
+                        "Columns": [{"ColumnName": "Count"}],
+                        "Rows": [[1]],
+                    }
+                ]
             return [
                 {
                     "TableKind": "PrimaryResult",
@@ -513,7 +645,7 @@ def test_capacity_capture_writes_overview_and_operation_jsonl(tmp_path):
             if "CapacityOverviewEvents" in query
             else "Microsoft.Fabric.CapacityOperationEvents.Operation"
         )
-        return Response(event_type)
+        return Response(event_type, count=query.endswith("| count"))
 
     evidence = telemetry.EvidenceRun(tmp_path, run_id="hero")
     evidence.start(command="measure", options={}, identity={})
