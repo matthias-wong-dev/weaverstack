@@ -553,7 +553,7 @@ table.matrix .note code { padding: 1px 4px; font-size: 12px; }
   border-bottom: 1px solid var(--line);
   transform: rotate(-45deg);
 }
-.homepage .persona-speech p {
+.homepage .persona-speech > p:first-child {
   margin: 0; max-width: none;
   color: var(--ink);
   font-size: clamp(18px, 1.8vw, 22px);
@@ -562,8 +562,10 @@ table.matrix .note code { padding: 1px 4px; font-size: 12px; }
   letter-spacing: -.018em;
 }
 .homepage .persona-context {
-  margin: 0;
+  margin: 18px 0 0;
+  padding-top: 16px;
   max-width: none;
+  border-top: 1px solid var(--line);
   color: var(--muted);
   font-size: 15.5px;
   line-height: 1.65;
@@ -584,7 +586,7 @@ table.matrix .note code { padding: 1px 4px; font-size: 12px; }
 .homepage .weaver-promise .button { margin-top: 12px; }
 @media (max-width: 900px) {
   .homepage .persona-grid { grid-template-columns: 1fr; gap: 30px; }
-  .homepage .persona-speech p { font-size: 20px; }
+  .homepage .persona-speech > p:first-child { font-size: 20px; }
 }
 
 /* --- Product-page examples: real commands ------------------------------ */
