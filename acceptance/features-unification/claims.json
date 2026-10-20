@@ -68,7 +68,7 @@
   {
     "id": "portable",
     "group": 1,
-    "title": "Desktop, Fabric Notebooks, or both",
+    "title": "Windows, macOS, Linux, or just Fabric Notebooks",
     "brief_copy": "Build and operate the same project through the desktop CLI/Python API or an attached Fabric notebook.",
     "urls": [
       "https://docs.weaverstack.dev/advanced/portable-execution-between-desktop-and-fabric/"
@@ -76,7 +76,7 @@
     "sources": [
       "docs/advanced/portable-execution-between-desktop-and-fabric.md"
     ],
-    "description": "Build and operate the same project from desktop Python or the CLI, an attached Fabric Notebook, or both.",
+    "description": "Develop and operate Weaver projects on Windows, macOS or Linux, or work entirely inside Fabric Notebooks. Build and deploy native Power BI models and Reports without Power BI Desktop or a Windows computer.",
     "qualification": "",
     "evidence": [
       {
@@ -88,24 +88,24 @@
     ]
   },
   {
-    "id": "pip",
+    "id": "agents",
     "group": 1,
-    "title": "Install with pip",
-    "brief_copy": "Open source, no separate Weaver server, runtime platform or Weaver software licence.",
+    "title": "Built for developers and AI agents",
+    "brief_copy": "Readable terminal output and structured --json results, with previews, validation and explicit outcomes, for developers and AI agents.",
     "urls": [
-      "https://docs.weaverstack.dev/getting-started/installation/"
+      "https://docs.weaverstack.dev/reference/machine-readable-output/"
     ],
     "sources": [
-      "docs/getting-started/installation.md"
+      "docs/reference/machine-readable-output.md"
     ],
-    "description": "Install the open-source Python package with pip, without another Weaver server, orchestration service or software licence.",
+    "description": "Readable terminal output for developers, and structured `--json` results for AI agents from Check, Build, Load, Test and Health. Preview, build, load, test and inspect in a repeatable cycle, with explicit outcomes for what ran and what needs attention.",
     "qualification": "",
     "evidence": [
       {
         "repository": "matthias-wong-dev/weaverstack-docs",
-        "revision": "df5e266ffe5c6b893ef7a6291ba7b23ab0ed2b45",
-        "path": "docs/getting-started/installation.md",
-        "sha256": "aad40ae256e9ce82b18c0bba16c19c9f4e5ac42edc2ce4e987b3543eafa82bf0"
+        "revision": "8bf0ca500b70bbdc8dee3b420ace042e09f6f270",
+        "path": "docs/reference/machine-readable-output.md",
+        "sha256": "eacc32d53e5825f3d353eb97cc103f3c2f44dac1962583047651455d580d67d8"
       }
     ]
   },

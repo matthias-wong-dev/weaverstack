@@ -38,19 +38,19 @@
     {
       "id": "portable",
       "group": 1,
-      "title": "Desktop, Fabric Notebooks, or both",
-      "description": "Build and operate the same project from desktop Python or the CLI, an attached Fabric Notebook, or both.",
+      "title": "Windows, macOS, Linux, or just Fabric Notebooks",
+      "description": "Develop and operate Weaver projects on Windows, macOS or Linux, or work entirely inside Fabric Notebooks. Build and deploy native Power BI models and Reports without Power BI Desktop or a Windows computer.",
       "urls": [
         "https://docs.weaverstack.dev/advanced/portable-execution-between-desktop-and-fabric/"
       ]
     },
     {
-      "id": "pip",
+      "id": "agents",
       "group": 1,
-      "title": "Install with pip",
-      "description": "Install the open-source Python package with pip, without another Weaver server, orchestration service or software licence.",
+      "title": "Built for developers and AI agents",
+      "description": "Readable terminal output for developers, and structured `--json` results for AI agents from Check, Build, Load, Test and Health. Preview, build, load, test and inspect in a repeatable cycle, with explicit outcomes for what ran and what needs attention.",
       "urls": [
-        "https://docs.weaverstack.dev/getting-started/installation/"
+        "https://docs.weaverstack.dev/reference/machine-readable-output/"
       ]
     },
     {

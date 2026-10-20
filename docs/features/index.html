@@ -20,7 +20,7 @@
 <link rel="icon" type="image/png" href="/favicon.png">
 <link rel="manifest" href="/site.webmanifest">
 <link rel="sitemap" type="application/xml" href="/sitemap.xml">
-<link rel="stylesheet" href="/assets/site.css">
+<link rel="stylesheet" href="/assets/site.css?v=2cc8d84c4f">
 <meta property="og:image:type" content="image/png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
@@ -35,7 +35,7 @@
 <header class="site-header">
 <nav class="nav wrap" aria-label="Primary">
 <a class="brand" href="/" aria-label="Weaver home">
-<img class="weaver-mark" src="/assets/brand/weaver-mark-light-134.png" width="134" height="77" alt="" aria-hidden="true">Weaver</a>
+<img class="weaver-mark" src="/assets/brand/weaver-mark-light-134.png" width="30" height="17" alt="" aria-hidden="true">Weaver</a>
 <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="nav-links" hidden>Menu</button>
 <div class="nav-links" id="nav-links">
 <a href="/features/" aria-current="page">Features</a>
@@ -61,8 +61,8 @@
 <div class="feature-row" data-feature="python-spark"><h3><a href="https://docs.weaverstack.dev/lakehouse/spark-sql/">Python and Spark SQL, together</a></h3><p>Use Python and Spark SQL together for Lakehouse Files and Delta Tables in the same dependency model.</p></div>
 <div class="feature-row" data-feature="tsql"><h3><a href="https://docs.weaverstack.dev/warehouse/first-project/">Ordinary T-SQL</a></h3><p>Keep ordinary SELECTs, without a proprietary modelling language or macros.</p></div>
 <div class="feature-row" data-feature="native-powerbi"><h3><a href="https://docs.weaverstack.dev/semantic-models/native-tmdl/">Native Power BI</a></h3><p>Keep PBIP, TMDL and native Report definitions rather than converting to a Weaver-only format.</p></div>
-<div class="feature-row" data-feature="portable"><h3><a href="https://docs.weaverstack.dev/advanced/portable-execution-between-desktop-and-fabric/">Desktop, Fabric Notebooks, or both</a></h3><p>Build and operate the same project from desktop Python or the CLI, an attached Fabric Notebook, or both.</p></div>
-<div class="feature-row" data-feature="pip"><h3><a href="https://docs.weaverstack.dev/getting-started/installation/">Install with pip</a></h3><p>Install the open-source Python package with pip, without another Weaver server, orchestration service or software licence.</p></div>
+<div class="feature-row" data-feature="portable"><h3><a href="https://docs.weaverstack.dev/advanced/portable-execution-between-desktop-and-fabric/">Windows, macOS, Linux, or just Fabric Notebooks</a></h3><p>Develop and operate Weaver projects on Windows, macOS or Linux, or work entirely inside Fabric Notebooks. Build and deploy native Power BI models and Reports without Power BI Desktop or a Windows computer.</p></div>
+<div class="feature-row" data-feature="agents"><h3><a href="https://docs.weaverstack.dev/reference/machine-readable-output/">Built for developers and AI agents</a></h3><p>Readable terminal output for developers, and structured <code>--json</code> results for AI agents from Check, Build, Load, Test and Health. Preview, build, load, test and inspect in a repeatable cycle, with explicit outcomes for what ran and what needs attention.</p></div>
 </div>
 <p class="scope-note">Existing Fabric services, compute and workspace permissions still apply. Lakehouse processing uses Fabric’s Spark runtime, not a separate Weaver orchestration service.</p>
 <p class="group-docs"><a href="https://docs.weaverstack.dev/lakehouse/python/">First Python pipeline</a><span aria-hidden="true"> · </span><a href="https://docs.weaverstack.dev/reference/weaver-documents/overview/">Native document reference</a></p></div></section>
@@ -135,7 +135,7 @@
 <figure class="feature-spotlight dashboard-spotlight" data-spotlight="catalogue-dashboard" aria-labelledby="dashboard-title">
 <h3 id="dashboard-title">The whole estate, at a glance.</h3>
 <div class="dashboard-gallery"><a href="https://docs.weaverstack.dev/estate/catalogue-dashboard/#overview"><img src="/assets/images/catalogue-dashboard/overview.webp" width="1440" height="900" loading="lazy" alt="Overview: installed items and Health."><span>Overview</span></a><a href="https://docs.weaverstack.dev/estate/catalogue-dashboard/#orchestration"><img src="/assets/images/catalogue-dashboard/orchestration.webp" width="1440" height="900" loading="lazy" alt="Orchestration: one table's lineage, readiness and last outcome."><span>Orchestration</span></a><a href="https://docs.weaverstack.dev/estate/catalogue-dashboard/#performance"><img src="/assets/images/catalogue-dashboard/performance.webp" width="1440" height="900" loading="lazy" alt="Performance: each run as a bar from its start to its finish by time of day, and one load's own row counts beside the loads around it."><span>Performance</span></a><a href="https://docs.weaverstack.dev/estate/catalogue-dashboard/#gantt"><img src="/assets/images/catalogue-dashboard/gantt.webp" width="1440" height="900" loading="lazy" alt="Gantt: one workflow's loads and Tests on a timeline."><span>Gantt</span></a><a href="https://docs.weaverstack.dev/estate/catalogue-dashboard/#entity-dictionary"><img src="/assets/images/catalogue-dashboard/entities.webp" width="1440" height="900" loading="lazy" alt="Entity dictionary: an ER diagram from declared keys."><span>Entity dictionary</span></a></div>
-<figcaption>Health, the Orchestration graph, when each run started and finished, a Gantt of each workflow, an ER diagram with a metadata browser, and a bus matrix for every semantic model.</figcaption>
+<figcaption>Seven pages: Overview, Health, the Orchestration graph, Performance by time of day, a Gantt of each workflow, an ER diagram with a metadata browser, and a bus matrix for every semantic model.</figcaption>
 <p class="spotlight-docs"><a href="https://docs.weaverstack.dev/estate/catalogue-dashboard/#the-pages">Try every page in the browser</a><span aria-hidden="true"> · </span><a href="https://docs.weaverstack.dev/estate/catalogue-dashboard/#deploy-the-dashboard">Deploy the Catalogue Dashboard</a></p>
 </figure><div class="feature-list">
 <div class="feature-row" data-feature="dashboard-deploy"><h3><a href="https://docs.weaverstack.dev/estate/catalogue-dashboard/#deploy-the-dashboard">One command</a></h3><p><code>weaver catalogue-dashboard</code> deploys the semantic model and Report beside the catalogue, and brings them up to date on the next run.</p></div>
@@ -169,7 +169,7 @@
 <div class="wrap footer-grid">
 <div class="footer-note">
 <span class="brand">
-<img class="weaver-mark" src="/assets/brand/weaver-mark-light-134.png" width="134" height="77" alt="" aria-hidden="true">Weaver</span>
+<img class="weaver-mark" src="/assets/brand/weaver-mark-light-134.png" width="30" height="17" alt="" aria-hidden="true">Weaver</span>
 <p>Build, load, test and inspect your Microsoft Fabric estate.</p>
 <p>Free and open source under the <a href="https://github.com/matthias-wong-dev/weaverstack/blob/main/LICENSE">Mozilla Public License 2.0</a>.</p>
 </div>
@@ -233,5 +233,5 @@
 </ul>
 </div>
 </div>
-</footer><script src="/assets/site.js" defer></script></body>
+</footer><script src="/assets/site.js?v=858d1659f7" defer></script></body>
 </html>

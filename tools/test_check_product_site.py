@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from check_product_site import run
+from check_product_site import run, stamp_assets
 
 ROOT = Path(__file__).resolve().parents[1] / "docs"
 
@@ -32,6 +32,14 @@ class ProductMigration(unittest.TestCase):
     def test_accepts_canonical_pages_and_noindex_pointers(self):
         self.check()
 
+    def test_rejects_a_stylesheet_link_not_versioned_to_its_content(self):
+        css = self.site / "assets" / "site.css"
+        css.write_text(css.read_text() + "\n.changed { color: red; }\n")
+        with self.assertRaisesRegex(AssertionError, "not versioned"):
+            self.check()
+        stamp_assets(self.site)
+        self.check()
+
     def test_rejects_the_retired_feature_dropdown(self):
         self.mutate(
             "features",
@@ -42,12 +50,12 @@ class ProductMigration(unittest.TestCase):
             self.check()
 
     def test_rejects_missing_capability(self):
-        self.mutate("features", 'data-feature="pip"', 'data-former-feature="pip"')
+        self.mutate("features", 'data-feature="agents"', 'data-former-feature="agents"')
         with self.assertRaisesRegex(AssertionError, "Feature inventory missing"):
             self.check()
 
     def test_rejects_duplicate_capability(self):
-        self.mutate("features", 'data-feature="pip"', 'data-feature="tsql"')
+        self.mutate("features", 'data-feature="agents"', 'data-feature="tsql"')
         with self.assertRaisesRegex(AssertionError, "Feature inventory missing"):
             self.check()
 
@@ -75,8 +83,8 @@ class ProductMigration(unittest.TestCase):
     def test_accepts_editorial_changes_without_exact_sentence_lock(self):
         self.mutate(
             "features",
-            "Install the open-source Python package with pip, without another Weaver server, orchestration service or software licence.",
-            "Install Weaver through pip rather than provisioning another server or orchestration service.",
+            "Develop and operate Weaver projects on Windows, macOS or Linux, or work entirely inside Fabric Notebooks.",
+            "Work on Windows, macOS or Linux, or entirely inside Fabric Notebooks.",
         )
         self.check()
 
