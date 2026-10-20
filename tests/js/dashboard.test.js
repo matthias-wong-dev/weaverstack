@@ -631,3 +631,159 @@ test("a run that crosses local midnight starts the day column in the quiet hours
   assert.equal(load({ __WD_STATE: { utc: true } }).dayStartHour(night), 0);
   inZone("Australia/Sydney", () => assert.notEqual(load({}).dayStartHour(night), 0));
 });
+
+// --- Performance card ------------------------------------------------------------
+
+const PERF = ["item", "schema", "object", "loads", "duration", "longest", "read", "inserted", "updated", "deleted", "rejected", "reloads", "skips", "timedread", "timedduration", "last"];
+const TESTS = ["targettype", "target", "schema", "object", "runs", "duration", "longest", "failed", "last"];
+const OBJECTS = ["workflow", "task", "targettype", "target", "schema", "object", "result", "started", "completed", "message"];
+const LARGEST = ["id", "item", "schema", "object", "workflow", "started", "completed", "duration", "read", "inserted", "updated", "deleted", "rejected", "reload", "skip"];
+
+function cardEstate() {
+  return model(estate({ extra:
+    table("perfweek", PERF, [
+      ["Warehouse/Curated", "Sales", "Region", 4, 8000, 5000, 400, 10, 0, 2, 0, 1, 2, 400, 8000, AT - H],
+      ["Warehouse/Curated", "Sales", "Orphan", 2, 3000, 2000, null, null, null, null, null, 0, 0, null, null, AT - 2 * H]]) +
+    table("perfmonth", PERF, [["Warehouse/Curated", "Sales", "Region", 20, 50000, 9000, 2000, 50, 5, 5, 3, 4, 6, 2000, 50000, AT - H]]) +
+    table("testweek", TESTS, [["Warehouse", "Curated_WH", "Sales", "ByRegionValid", 3, 9000, 4000, 1, AT - H]]) +
+    table("runobjects", OBJECTS, [
+      ["w1", "load", "Warehouse", "Curated_WH", "Sales", "Region", "Succeeded", AT - 3 * H, AT - 3 * H + 1000, ""],
+      ["w1", "load", "Warehouse", "Curated_WH", "Sales", "ByRegion", "Failed", AT - 2 * H, AT - 2 * H + 4000, ""],
+      ["w1", "test", "Warehouse", "Curated_WH", "Sales", "ByRegionValid", "Failed", AT - H, AT - H + 9000, "3 rows failed"]]) +
+    table("largest", LARGEST, [
+      ["7", "Warehouse/Curated", "Sales", "Region", "w1", AT - 3 * H, AT - 3 * H + 1000, 1000, null, 10, 0, 2, null, "1", ""]]) }));
+}
+
+const facts = (section) => Object.fromEntries(section.facts);
+
+test("Loads come before Tests in a run, each group ordered by the column", () => {
+  const rows = [
+    { task: "test", time: 90 }, { task: "load", time: 5 }, { task: "test", time: 10 }, { task: "load", time: 40 }];
+  const columns = [{ key: "time", title: "Time", value: (r) => r.time }];
+  const shown = (desc) => D.sortRows(columns, rows, "time", desc, (r) => D.taskRank(r.task)).map((r) => r.task + r.time);
+  assert.deepEqual(shown(true), ["load40", "load5", "test90", "test10"]);
+  assert.deepEqual(shown(false), ["load5", "load40", "test10", "test90"]);
+  assert.deepEqual(D.sortRows(columns, rows, "time", true).map((r) => r.time), [90, 40, 10, 5]);
+});
+
+test("a Load row's card gives the totals of the selected window, and follows the window", () => {
+  const m = cardEstate(), pick = { kind: "load", item: "Warehouse/Curated", schema: "Sales", object: "Region" };
+  const week = D.performanceCard(m, pick, "week"), f = facts(week.sections[0]);
+  assert.equal(week.title, "Sales.Region");
+  assert.equal(week.eyebrow, "Table");
+  assert.match(week.line, /Warehouse\/Curated/);
+  assert.match(week.sections[0].heading, /last 7 days/);
+  assert.equal(f.Loads, "4");
+  assert.equal(f["Total time"], "8.0 s");
+  assert.equal(f["Average time"], "2.0 s");
+  assert.equal(f.Longest, "5.0 s");
+  assert.equal(f["Rows read"], "400");
+  assert.equal(f.Inserted, "10");
+  assert.equal(f.Updated, "0");
+  assert.equal(f.Deleted, "2");
+  assert.equal(f.Rejected, "0");
+  assert.equal(f["Rows per second"], "50");
+  assert.equal(f.Reloads, "1");
+  assert.equal(f["Static skips"], "2");
+  assert.match(f["Last load"], /ago$/);
+  const month = D.performanceCard(m, pick, "month");
+  assert.match(month.sections[0].heading, /last 30 days/);
+  assert.equal(facts(month.sections[0]).Loads, "20");
+  assert.equal(facts(month.sections[0]).Rejected, "3");
+});
+
+test("a count the catalogue did not record is unknown, never zero", () => {
+  const m = cardEstate();
+  const card = D.performanceCard(m, { kind: "load", item: "Warehouse/Curated", schema: "Sales", object: "Orphan" }, "week");
+  const f = facts(card.sections[0]);
+  assert.equal(f["Rows read"], "Not recorded");
+  assert.equal(f.Inserted, "Not recorded");
+  assert.equal(f.Rejected, "Not recorded");
+  assert.equal(f["Rows per second"], "Not recorded");
+  assert.equal(f.Reloads, "0");
+  assert.equal(f["Static skips"], "0");
+});
+
+test("an object with no lineage node is still inspectable, and says so", () => {
+  const m = cardEstate();
+  const card = D.performanceCard(m, { kind: "load", item: "Warehouse/Curated", schema: "Sales", object: "Orphan" }, "week");
+  assert.equal(card.detached, true);
+  assert.equal(card.title, "Sales.Orphan");
+  assert.equal(card.eyebrow, "Load");
+  assert.equal(facts(card.sections[0]).Loads, "2");
+});
+
+test("a Load with nothing recorded in the window says so rather than show zeros", () => {
+  const m = cardEstate();
+  const card = D.performanceCard(m, { kind: "load", item: "Warehouse/Curated", schema: "Sales", object: "Orphan" }, "month");
+  assert.deepEqual(card.sections[0].facts, []);
+  assert.match(card.sections[0].note, /No load statistic/);
+});
+
+test("a Test row's card gives its executions in the window", () => {
+  const m = cardEstate();
+  const card = D.performanceCard(m, { kind: "test", item: "Warehouse/Curated", schema: "Sales", object: "ByRegionValid" }, "week");
+  const f = facts(card.sections[0]);
+  assert.equal(card.eyebrow, "Assumption");
+  assert.match(card.sections[0].heading, /^Tests/);
+  assert.equal(f.Executions, "3");
+  assert.equal(f.Failed, "1");
+  assert.equal(f["Total time"], "9.0 s");
+  assert.equal(f["Average time"], "3.0 s");
+  assert.equal(f.Longest, "4.0 s");
+  assert.match(f["Last test"], /ago$/);
+  assert.deepEqual(D.performanceCard(m, { kind: "test", item: "Warehouse/Curated", schema: "Sales", object: "ByRegionValid" }, "day").sections[0].facts, []);
+});
+
+test("a run's object leads with that execution, then the totals over the window", () => {
+  const m = cardEstate();
+  const pick = { kind: "record", workflow: "w1", task: "test", started: AT - H, item: "Warehouse/Curated", schema: "Sales", object: "ByRegionValid" };
+  const card = D.performanceCard(m, pick, "week");
+  assert.equal(card.sections[0].heading, "This execution");
+  const one = facts(card.sections[0]);
+  assert.deepEqual(one.Workflow, { mono: "w1" });
+  assert.equal(one.Task, "Test");
+  assert.deepEqual(one.Result, { chip: "Failed" });
+  assert.equal(one.Time, "9.0 s");
+  assert.deepEqual(one.Message, { text: "3 rows failed" });
+  assert.match(card.scope, /^One test execution/);
+  assert.match(card.sections[1].heading, /^Tests · last 7 days/);
+  assert.equal(facts(card.sections[1]).Executions, "3");
+  // The window changes the totals and leaves the execution alone.
+  const month = D.performanceCard(m, pick, "month");
+  assert.deepEqual(month.sections[0], card.sections[0]);
+  assert.deepEqual(month.sections[1].facts, []);
+});
+
+test("a failed record without a message says none was recorded", () => {
+  const m = cardEstate();
+  const card = D.performanceCard(m, { kind: "record", workflow: "w1", task: "load", started: AT - 2 * H, item: "Warehouse/Curated", schema: "Sales", object: "ByRegion" }, "week");
+  assert.equal(facts(card.sections[0]).Message, "Not recorded");
+  assert.match(card.sections[1].note, /No load statistic/);
+});
+
+test("a record no longer carried is said to be gone, with the totals still given", () => {
+  const m = cardEstate();
+  const card = D.performanceCard(m, { kind: "record", workflow: "w9", task: "load", started: 1, item: "Warehouse/Curated", schema: "Sales", object: "Region" }, "week");
+  assert.deepEqual(card.sections[0].facts, []);
+  assert.match(card.sections[0].note, /no longer/);
+  assert.equal(facts(card.sections[1]).Loads, "4");
+});
+
+test("a largest change keeps its own counts, with unknowns apart from zeros", () => {
+  const m = cardEstate();
+  const card = D.performanceCard(m, { kind: "change", id: "7", item: "Warehouse/Curated", schema: "Sales", object: "Region" }, "week");
+  assert.equal(card.sections[0].heading, "This load");
+  const f = facts(card.sections[0]);
+  assert.deepEqual(f.Workflow, { mono: "w1" });
+  assert.equal(f["Rows read"], "Not recorded");
+  assert.equal(f.Inserted, "10");
+  assert.equal(f.Updated, "0");
+  assert.equal(f.Deleted, "2");
+  assert.equal(f.Rejected, "Not recorded");
+  assert.equal(f.Reload, "Yes");
+  assert.equal(f["Static skip"], "No");
+  // The aggregate beneath is the window's, and says so.
+  assert.equal(facts(card.sections[1]).Loads, "4");
+  assert.notEqual(card.sections[0].facts.length, card.sections[1].facts.length);
+});

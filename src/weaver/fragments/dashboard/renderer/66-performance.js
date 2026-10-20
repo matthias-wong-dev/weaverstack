@@ -64,6 +64,144 @@ function changed(r) {
 
 function throughput(read, ms) { return read === null || !ms ? null : read / (ms / 1000); }
 
+var WINDOW_LABEL = { day: "last 24 hours", week: "last 7 days", month: "last 30 days" };
+var UNKNOWN = "Not recorded";
+
+/* The 50 largest single loads of the last 7 days, each with the record's own
+   counts. A count the catalogue left blank stays null. */
+function largestRows(m) {
+  return (m.tables.largest || []).filter(function (r) { return !isInternal(m, r.item, r.schema); }).map(function (r) {
+    var node = m.byIdentity.get(identityKey(r.item, r.schema, r.object)) || null;
+    return { id: r.id, item: r.item, schema: r.schema, object: r.object, node: node, label: node ? node.label : r.schema + "." + r.object,
+      workflow: r.workflow, started: num(r.started), completed: num(r.completed), duration: num(r.duration), read: num(r.read),
+      inserted: num(r.inserted), updated: num(r.updated), deleted: num(r.deleted), rejected: num(r.rejected), reload: r.reload === "1", skip: r.skip === "1" };
+  });
+}
+
+/* Load rank of a task, so Loads come before Tests wherever both are listed. */
+function taskRank(task) { return task === "load" ? 0 : task === "test" ? 1 : 2; }
+
+function known(value, show) { return value === null || value === undefined ? UNKNOWN : show ? show(value) : fmt(value); }
+function average(total, count) { return total === null || !count ? null : total / count; }
+function rate(read, ms) { var v = throughput(read, ms); return v === null ? null : v < 10 ? v.toFixed(1) : fmt(Math.round(v)); }
+function plural(n, word) { return fmt(n) + " " + word + (n === 1 ? "" : "s"); }
+function sameObject(a, b) { return a.item === b.item && (a.schema || "") === (b.schema || "") && (a.object || "") === (b.object || ""); }
+
+/* One section of the card: the totals of an object's Loads over the selected
+   window. They describe every load in it, never one. */
+function loadTotals(m, win, r) {
+  var heading = "Loads · " + WINDOW_LABEL[win];
+  if (!r) return { heading: heading, note: "No load statistic was recorded for this object in this window.", facts: [] };
+  return { heading: heading, note: "Totals over " + plural(r.loads, "load") + ". Row counts add up the loads that recorded them.", facts: [
+    ["Loads", fmt(r.loads)],
+    ["Total time", known(r.duration, duration)],
+    ["Average time", known(average(r.duration, r.loads), duration)],
+    ["Longest", known(r.longest, duration)],
+    ["Last load", r.last === null ? UNKNOWN : stamp(r.last) + " · " + ago(r.last, m.at)],
+    ["Rows read", known(r.read)],
+    ["Inserted", known(r.inserted)],
+    ["Updated", known(r.updated)],
+    ["Deleted", known(r.deleted)],
+    ["Rejected", known(r.rejected)],
+    ["Rows per second", rate(r.timedRead, r.timedDuration) || UNKNOWN],
+    ["Reloads", fmt(r.reloads)],
+    ["Static skips", fmt(r.skips)]
+  ] };
+}
+
+/* The same for Tests: executions over the window. */
+function testTotals(m, win, r) {
+  var heading = "Tests · " + WINDOW_LABEL[win];
+  if (!r) return { heading: heading, note: "No Test was recorded for this object in this window.", facts: [] };
+  return { heading: heading, note: "Totals over " + plural(r.runs, "execution") + ".", facts: [
+    ["Executions", fmt(r.runs)],
+    ["Failed", fmt(r.failed)],
+    ["Total time", known(r.duration, duration)],
+    ["Average time", known(average(r.duration, r.runs), duration)],
+    ["Longest", known(r.longest, duration)],
+    ["Last test", r.last === null ? UNKNOWN : stamp(r.last) + " · " + ago(r.last, m.at)]
+  ] };
+}
+
+function flag(value) { return value ? "Yes" : "No"; }
+
+/* What the Performance card says about the record a row stands for. The row is
+   named by `pick`: its kind (load or test totals, one run's record, or one of
+   the largest changes) and the identity that finds it again after a window
+   change or a refresh. Everything comes from data the page already carries,
+   so an object the catalogue holds no lineage for is as inspectable as any. */
+function performanceCard(m, pick, win) {
+  var node = m.byIdentity.get(identityKey(pick.item, pick.schema, pick.object)) || null;
+  var task = pick.kind === "test" ? "test" : pick.kind === "record" ? pick.task : "load", kind = recordKind(node, task);
+  var label = node ? node.label : (pick.schema ? pick.schema + "." : "") + pick.object;
+  var sections = [], scope, row, facts;
+  function totals() {
+    return task === "test" ? testTotals(m, win, testRows(m, "test" + win).filter(function (r) { return sameObject(r, pick); })[0])
+      : loadTotals(m, win, perfRows(m, "perf" + win).filter(function (r) { return sameObject(r, pick); })[0]);
+  }
+  if (pick.kind === "load" || pick.kind === "test") {
+    scope = "Totals over every " + task + " of this object in the " + WINDOW_LABEL[win] + ".";
+    sections.push(totals());
+  } else if (pick.kind === "record") {
+    scope = "One " + task + " execution, then the totals for this object in the " + WINDOW_LABEL[win] + ".";
+    row = runObjectRows(m).filter(function (r) {
+      return r.workflow === pick.workflow && r.task === pick.task && r.started === pick.started && sameObject(r, pick);
+    })[0];
+    facts = row ? [
+      ["Workflow", { mono: row.workflow }],
+      ["Task", taskName(row.task)],
+      ["Result", { chip: row.result }],
+      ["Started", stamp(row.started)],
+      ["Finished", stamp(row.completed)],
+      ["Time", duration(row.completed - row.started)]
+    ].concat(row.message ? [["Message", { text: row.message }]] : row.result && row.result !== "Succeeded" ? [["Message", UNKNOWN]] : []) : [];
+    sections.push({ heading: "This execution", note: row ? null : "This record is no longer among the longest records of the runs listed.", facts: facts });
+    sections.push(totals());
+  } else {
+    scope = "One load, then the totals for this object in the " + WINDOW_LABEL[win] + ".";
+    row = largestRows(m).filter(function (r) { return r.id === pick.id; })[0];
+    sections.push({ heading: "This load", note: row ? null : "This load is no longer among the 50 largest of the last 7 days.", facts: row ? [
+      ["Workflow", row.workflow ? { mono: row.workflow } : UNKNOWN],
+      ["Started", known(row.started, stamp)],
+      ["Finished", known(row.completed, stamp)],
+      ["Time", known(row.duration, duration)],
+      ["Rows read", known(row.read)],
+      ["Inserted", known(row.inserted)],
+      ["Updated", known(row.updated)],
+      ["Deleted", known(row.deleted)],
+      ["Rejected", known(row.rejected)],
+      ["Reload", flag(row.reload)],
+      ["Static skip", flag(row.skip)]
+    ] : [] });
+    sections.push(totals());
+  }
+  return { kind: kind, eyebrow: kind || taskName(task), title: label, line: [pick.item, node ? qualified(node) : null].filter(Boolean).join(" · "),
+    detached: !node, scope: scope, sections: sections };
+}
+
+function drawPerformanceCard(panel, card, onClose) {
+  panel.textContent = "";
+  panel.appendChild(el("button", { "class": "wd-icon wd-close", type: "button", "aria-label": "Close", onclick: onClose }, ["×"]));
+  panel.appendChild(el("div", { "class": "wd-eyebrow" }, [card.kind ? kindMark(card.kind) : null, (card.kind ? " " : "") + card.eyebrow]));
+  panel.appendChild(el("h2", { "class": "wd-detail-title", text: card.title }));
+  if (card.line) panel.appendChild(el("div", { "class": "wd-mono wd-muted", text: card.line }));
+  if (card.detached) panel.appendChild(el("p", { "class": "wd-muted", text: "The catalogue holds no lineage for this object." }));
+  panel.appendChild(el("p", { "class": "wd-desc", text: card.scope }));
+  card.sections.forEach(function (section) {
+    panel.appendChild(el("h3", { "class": "wd-h3", text: section.heading }));
+    if (section.note) panel.appendChild(el("p", { "class": "wd-muted", text: section.note }));
+    if (!section.facts.length) return;
+    var list = el("dl", { "class": "wd-facts" });
+    section.facts.forEach(function (f) {
+      var v = f[1];
+      list.appendChild(el("dt", { text: f[0] }));
+      list.appendChild(el("dd", {}, [typeof v === "string" ? (v === UNKNOWN ? el("span", { "class": "wd-muted", text: v }) : v)
+        : v.chip !== undefined ? chip(v.chip) : el("span", { "class": v.mono ? "wd-mono" : "wd-tip-message", text: v.mono || v.text })]));
+    });
+    panel.appendChild(list);
+  });
+}
+
 /* Every workflow of the last 30 days, newest first, with the span each task
    type of it occupied. */
 function runsOf(m) {
@@ -209,13 +347,15 @@ function performancePage(body, m) {
   if (["fit", "day"].indexOf(s.axis) < 0) s.axis = "fit";
   if (s.deadline === undefined || s.deadline === null) s.deadline = "";
   s.item = s.item || "all";
+  if (!s.card || typeof s.card.kind !== "string") s.card = null;
   var side = el("aside", { "class": "wd-drawer", hidden: "hidden" });
-  function open(key) {
-    s.open = key;
-    side.hidden = !key;
-    details(side, m, key, { onOpen: open, describe: false });
-    if (key) side.insertBefore(el("button", { "class": "wd-icon wd-close", type: "button", "aria-label": "Close", onclick: function () { open(null); } }, ["×"]), side.firstChild);
+  /* The card follows the window, so it is drawn again whenever the page is. */
+  function card() {
+    side.hidden = !s.card;
+    if (!s.card) { side.textContent = ""; return; }
+    drawPerformanceCard(side, performanceCard(m, s.card, s.window), function () { pick(null); });
   }
+  function pick(choice) { s.card = choice; card(); saveState(); }
   var host = el("div", { "class": "wd-overview-main" });
   var allItems = Array.from(new Set(["perfmonth", "testmonth"].reduce(function (all, name) {
     return all.concat((m.tables[name] || []).map(function (r) { return r.item || targetItem(m, r.targettype, r.target); }));
@@ -272,7 +412,7 @@ function performancePage(body, m) {
     function itemFilter(r) { return s.item === "all" || r.item === s.item; }
     if (s.task !== "test") {
       var loads = perfRows(m, "perf" + s.window).filter(itemFilter);
-      host.appendChild(section("Loads · " + fmt(loads.length) + " objects, " + { day: "last 24 hours", week: "last 7 days", month: "last 30 days" }[s.window], [dataTable([
+      host.appendChild(section("Loads · " + fmt(loads.length) + " objects, " + WINDOW_LABEL[s.window], [dataTable([
         { key: "object", title: "Object", value: function (r) { return r.label; }, render: function (r) { return objectCell(r.node, r.label, "load"); } },
         { key: "item", title: "Item", value: function (r) { return r.item; } },
         { key: "loads", title: "Loads", value: function (r) { return r.loads; }, numeric: true },
@@ -283,11 +423,11 @@ function performancePage(body, m) {
         { key: "rejected", title: "Rejected", value: function (r) { return r.rejected; }, render: function (r) { return fmt(r.rejected); }, numeric: true },
         { key: "throughput", title: "Rows/s", value: function (r) { return throughput(r.timedRead, r.timedDuration); }, render: function (r) { var v = throughput(r.timedRead, r.timedDuration); return v === null ? "—" : fmt(Math.round(v)); }, numeric: true },
         { key: "last", title: "Last", value: function (r) { return r.last; }, render: function (r) { return ago(r.last, m.at); }, numeric: true }
-      ], loads, { limit: 200, sort: "duration", onRow: openNode, emptyText: "No load statistic was recorded in this window." })]));
+      ], loads, { limit: 200, sort: "duration", onRow: function (r) { pick({ kind: "load", item: r.item, schema: r.schema, object: r.object }); }, emptyText: "No load statistic was recorded in this window." })]));
     }
     if (s.task !== "load") {
       var tests = testRows(m, "test" + s.window).filter(itemFilter);
-      host.appendChild(section("Tests · " + fmt(tests.length) + " objects, " + { day: "last 24 hours", week: "last 7 days", month: "last 30 days" }[s.window], [dataTable([
+      host.appendChild(section("Tests · " + fmt(tests.length) + " objects, " + WINDOW_LABEL[s.window], [dataTable([
         { key: "object", title: "Object", value: function (r) { return r.label; }, render: function (r) { return objectCell(r.node, r.label, "test"); } },
         { key: "item", title: "Item", value: function (r) { return r.item; } },
         { key: "runs", title: "Runs", value: function (r) { return r.runs; }, numeric: true },
@@ -295,14 +435,10 @@ function performancePage(body, m) {
         { key: "longest", title: "Longest", value: function (r) { return r.longest; }, render: function (r) { return duration(r.longest); }, numeric: true },
         { key: "failed", title: "Failed", value: function (r) { return r.failed; }, render: function (r) { return r.failed ? chip("Failed", fmt(r.failed)) : "0"; }, numeric: true },
         { key: "last", title: "Last", value: function (r) { return r.last; }, render: function (r) { return ago(r.last, m.at); }, numeric: true }
-      ], tests, { limit: 200, sort: "duration", onRow: openNode, emptyText: "No Test was recorded in this window." })]));
+      ], tests, { limit: 200, sort: "duration", onRow: function (r) { pick({ kind: "test", item: r.item, schema: r.schema, object: r.object }); }, emptyText: "No Test was recorded in this window." })]));
     }
     if (s.task !== "test") {
-      var largest = (m.tables.largest || []).filter(function (r) { return !isInternal(m, r.item, r.schema) && itemFilter(r); }).map(function (r) {
-        var node = m.byIdentity.get(identityKey(r.item, r.schema, r.object)) || null;
-        return { label: node ? node.label : r.schema + "." + r.object, node: node, item: r.item, completed: num(r.completed), duration: num(r.duration),
-          inserted: num(r.inserted), updated: num(r.updated), deleted: num(r.deleted), workflow: r.workflow };
-      });
+      var largest = largestRows(m).filter(itemFilter);
       host.appendChild(section("Largest changes, last 7 days", [dataTable([
         { key: "object", title: "Object", value: function (r) { return r.label; }, render: function (r) { return objectCell(r.node, r.label, "load"); } },
         { key: "item", title: "Item", value: function (r) { return r.item; } },
@@ -310,10 +446,10 @@ function performancePage(body, m) {
         { key: "duration", title: "Time", value: function (r) { return r.duration; }, render: function (r) { return duration(r.duration); }, numeric: true },
         { key: "changed", title: "Changed", value: changed, render: function (r) { return fmt(changed(r)); }, numeric: true },
         { key: "workflow", title: "Run", value: function (r) { return r.workflow; }, render: function (r) { return r.workflow ? String(r.workflow).slice(0, 8) : "—"; }, mono: true }
-      ], largest, { limit: 50, sort: "changed", onRow: openNode, emptyText: "No recorded row change in the last 7 days." })]));
+      ], largest, { limit: 50, sort: "changed", onRow: function (r) { pick({ kind: "change", id: r.id, item: r.item, schema: r.schema, object: r.object }); }, emptyText: "No recorded row change in the last 7 days." })]));
     }
+    card();
   }
-  function openNode(r) { if (r.node) open(r.node.key); }
   /* The object cell every table shares: the object's mark, then its name. */
   function objectCell(node, label, task) {
     var kind = recordKind(node, task);
@@ -334,7 +470,8 @@ function performancePage(body, m) {
       { key: "message", title: "Message", value: function (r) { return r.message || ""; } }
     ];
     var note = v.run.objects > carried.length ? el("div", { "class": "wd-banner wd-banner-warn", text: "The " + fmt(carried.length) + " longest of this run's " + fmt(v.run.objects) + " object records. The Gantt has them all." }) : null;
-    return section(title + " · " + fmt(rows.length), [note, dataTable(columns, rows, { limit: 200, sort: "duration", onRow: openNode, emptyText: "No object record matches." })]);
+    return section(title + " · " + fmt(rows.length), [note, dataTable(columns, rows, { limit: 200, sort: "duration", group: function (r) { return taskRank(r.task); },
+      onRow: function (r) { pick({ kind: "record", workflow: r.workflow, task: r.task, started: r.started, item: r.item, schema: r.schema, object: r.object }); }, emptyText: "No object record matches." })]);
   }
   render();
 }

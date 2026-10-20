@@ -367,22 +367,28 @@ function readinessTone(state) {
   return { Current: "ok", Ready: "next", Waiting: "wait", "Loaded elsewhere": "none", "Not loaded here": "none" }[state] || "none";
 }
 
-/* A table for a list of records, with optional sorting and a row limit. */
+/* Rows in table order: grouped first when a group rank is given, then by the
+   sorted column. Records the column leaves tied keep their order. */
+function sortRows(columns, rows, sortBy, desc, group) {
+  var sorted = rows.slice(), col = sortBy ? columns.filter(function (c) { return c.key === sortBy; })[0] : null;
+  if (!col && !group) return sorted;
+  return sorted.sort(function (a, b) {
+    var g = group ? group(a) - group(b) : 0;
+    if (g || !col) return g;
+    var x = col.sort ? col.sort(a) : col.value(a), y = col.sort ? col.sort(b) : col.value(b);
+    var r = typeof x === "number" || typeof y === "number" ? (x === null ? -Infinity : x) - (y === null ? -Infinity : y) : compare(x, y);
+    return desc ? -r : r;
+  });
+}
+
+/* A table for a list of records, with optional sorting, grouping and a row limit. */
 function dataTable(columns, rows, options) {
   options = options || {};
   var limit = options.limit || 200, sortBy = options.sort || null, desc = options.desc !== false;
   var wrap = el("div", { "class": "wd-table-wrap" });
   function render() {
     wrap.textContent = "";
-    var sorted = rows.slice();
-    if (sortBy) {
-      var col = columns.filter(function (c) { return c.key === sortBy; })[0];
-      sorted.sort(function (a, b) {
-        var x = col.sort ? col.sort(a) : col.value(a), y = col.sort ? col.sort(b) : col.value(b);
-        var r = typeof x === "number" || typeof y === "number" ? (x === null ? -Infinity : x) - (y === null ? -Infinity : y) : compare(x, y);
-        return desc ? -r : r;
-      });
-    }
+    var sorted = sortRows(columns, rows, sortBy, desc, options.group);
     var table = el("table", { "class": "wd-table" }, [
       el("thead", {}, [el("tr", {}, columns.map(function (c) {
         return el("th", { "class": c.numeric ? "wd-num" : null, scope: "col", "aria-sort": c.key === sortBy ? (desc ? "descending" : "ascending") : null },
