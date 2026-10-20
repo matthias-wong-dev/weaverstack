@@ -46,6 +46,7 @@ from .catalogue.tables import (
 )
 from .declaration.model import WeaverDocumentId, WeaverItemId
 from .installed import InstalledDag, InstalledNode, stored_identity
+from .representation import ReportAlias
 from .targets import PhysicalTargetRef
 
 #: Severity vocabulary, ordered from best to worst.
@@ -250,7 +251,7 @@ def _row_identity(
 
 
 @dataclass(frozen=True)
-class HealthFinding:
+class HealthFinding(ReportAlias):
     """``severity`` is the health vocabulary and ``status`` the runtime one, so a
     consumer reads how bad it is and what actually happened without either word
     standing in for the other.
@@ -296,7 +297,7 @@ class HealthFinding:
 
 
 @dataclass(frozen=True)
-class HealthSection:
+class HealthSection(ReportAlias):
     area: str
     findings: tuple[HealthFinding, ...] = ()
     counts: Mapping[str, int] = field(default_factory=dict)
@@ -317,7 +318,7 @@ class HealthSection:
 
 
 @dataclass(frozen=True)
-class LoadActivity:
+class LoadActivity(ReportAlias):
     object_id: str
     target: str | None
     workflow_id: str
@@ -380,7 +381,7 @@ class CurrentLoad:
 
 
 @dataclass(frozen=True)
-class HealthReport:
+class HealthReport(ReportAlias):
     generated_at: datetime
     as_of: datetime
     load: HealthSection

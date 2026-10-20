@@ -39,12 +39,14 @@ def qualified_sessions(fabric_workspace, livy_session):
     """Sessions at the qualified concurrency.
 
     Lakehouse work borrows the suite's one Livy session, as ``weaver_session``
-    does, so qualification starts no session of its own.
+    does, so qualification starts no session of its own. Every run binds its
+    own items, so the sessions configure no ``targets:`` and the estate Wipe
+    follows its catalogue.
     """
 
     from weaver.sessions import ConsoleSession
 
-    workspace = replace(fabric_workspace, execution=qualified_execution())
+    workspace = replace(fabric_workspace, execution=qualified_execution(), targets={})
     with (
         ConsoleSession(workspace=workspace, progress=False) as warehouse,
         ConsoleSession(workspace=workspace, livy=livy_session) as lakehouse,
