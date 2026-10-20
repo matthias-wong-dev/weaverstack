@@ -658,3 +658,34 @@ table.matrix .note code { padding: 1px 4px; font-size: 12px; }
   .features-showcase .command-spotlight { padding: 20px 16px; }
   .features-showcase .command-panel pre { font-size: 11.5px; }
 }
+
+
+/* --- dbt page: let the existing Catalogue Dashboard demonstrate itself --- */
+.dbt-dashboard-gallery {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: 22px;
+  margin: 26px 0;
+}
+.dbt-dashboard-gallery figure { margin: 0; min-width: 0; }
+.dbt-dashboard-gallery a { display: block; }
+.dbt-dashboard-gallery img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--white);
+  box-shadow: var(--shadow);
+}
+.dbt-dashboard-gallery a:hover img { border-color: var(--line-strong); }
+.dbt-dashboard-gallery figcaption {
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 600;
+}
+@media (max-width: 720px) {
+  .dbt-dashboard-gallery { grid-template-columns: 1fr; gap: 25px; }
+}
