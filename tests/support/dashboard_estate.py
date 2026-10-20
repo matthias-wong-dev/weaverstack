@@ -317,6 +317,35 @@ class _Estate:
             "details": json.dumps({"node_id": row["node_id"]}) if row else None,
         }
 
+    def _statistic(self, stat, record, source):
+        """What one load did, in the run and at the moment its Log record has.
+
+        A load that did not succeed counts nothing, and some that did leave
+        their counts unrecorded.
+        """
+
+        r = random.Random(f"{record['workflow_id']}{stat}")
+        counted = record["result"] == "Succeeded" and r.random() < 0.92
+        read = r.randint(100, 2_000_000) if counted else None
+        return {
+            "load_statistic_sk": stat,
+            "item_type": source["item_type"],
+            "item_name": source["item_name"],
+            "schema_name": source["schema_name"],
+            "object_name": source["object_name"],
+            "workflow_id": record["workflow_id"],
+            "started_datetime": record["started_datetime"],
+            "completed_datetime": record["completed_datetime"],
+            "duration_milliseconds": record["duration_milliseconds"],
+            "rows_read": read,
+            "rows_inserted": r.randint(0, read // 10) if counted else None,
+            "rows_updated": r.randint(0, 500) if counted else None,
+            "rows_deleted": r.randint(0, 50) if counted else None,
+            "rows_rejected": r.choice([0, 0, 0, 0, 3]) if counted else None,
+            "is_reload": r.random() < 0.02,
+            "is_static_skip": source["is_static"],
+        }
+
     def history(self, workflows: int, days: int):
         r, sk, stat = self.random, 0, 0
         targets = {
@@ -378,6 +407,7 @@ class _Estate:
                         if result == "Succeeded"
                         else "The load raised an error <check> the log",
                     )
+                    | {"source": row}
                 )
             loaded = max(
                 x["completed_datetime"] for x in records if x["object_name"]
@@ -421,10 +451,14 @@ class _Estate:
             shift = over if w == 0 and over > timedelta(0) else timedelta(0)
             for record in records:
                 sk += 1
+                source = record.pop("source", None)
                 record["log_sk"] = sk
                 record["started_datetime"] -= shift
                 record["completed_datetime"] -= shift
                 self.add("Log", record)
+                if source is not None:
+                    stat += 1
+                    self.add("LoadStatistic", self._statistic(stat, record, source))
         # The catalogue's own work, which no page reports as the estate's.
         stat += 1
         self.add(
@@ -450,36 +484,6 @@ class _Estate:
                 "is_static_skip": False,
             },
         )
-        for day in range(days):
-            for row in self.loadable:
-                if r.random() < 0.25:
-                    continue
-                stat += 1
-                completed = self.at - timedelta(days=day, minutes=r.randint(0, 1200))
-                ms = r.randint(300, 120000)
-                known = r.random() < 0.92
-                read = r.randint(100, 2_000_000) if known else None
-                self.add(
-                    "LoadStatistic",
-                    {
-                        "load_statistic_sk": stat,
-                        "item_type": row["item_type"],
-                        "item_name": row["item_name"],
-                        "schema_name": row["schema_name"],
-                        "object_name": row["object_name"],
-                        "workflow_id": _guid(f"day{day}"),
-                        "started_datetime": completed - timedelta(milliseconds=ms),
-                        "completed_datetime": completed,
-                        "duration_milliseconds": ms,
-                        "rows_read": read,
-                        "rows_inserted": r.randint(0, read // 10) if known else None,
-                        "rows_updated": r.randint(0, 500) if known else None,
-                        "rows_deleted": r.randint(0, 50) if known else None,
-                        "rows_rejected": r.choice([0, 0, 0, 0, 3]) if known else None,
-                        "is_reload": r.random() < 0.02,
-                        "is_static_skip": row["is_static"],
-                    },
-                )
 
 
 def _guid(text: str) -> str:
