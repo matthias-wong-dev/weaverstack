@@ -20,7 +20,7 @@
 <link rel="icon" type="image/png" href="/favicon.png">
 <link rel="manifest" href="/site.webmanifest">
 <link rel="sitemap" type="application/xml" href="/sitemap.xml">
-<link rel="stylesheet" href="/assets/site.css?v=5d47c0a6f1">
+<link rel="stylesheet" href="/assets/site.css?v=29510fd735">
 <meta property="og:image:type" content="image/png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
@@ -59,7 +59,7 @@
 <div class="feature-list">
 <div class="feature-row" data-feature="python-spark"><h3><a href="https://docs.weaverstack.dev/lakehouse/spark-sql/">Python and Spark SQL, together</a></h3><p>Use Python and Spark SQL together for Lakehouse Files and Delta Tables in the same dependency model.</p></div>
 <div class="feature-row" data-feature="tsql"><h3><a href="https://docs.weaverstack.dev/warehouse/first-project/">Ordinary T-SQL</a></h3><p>Keep ordinary SELECTs, without a proprietary modelling language or macros.</p></div>
-<div class="feature-row" data-feature="native-powerbi"><h3><a href="https://docs.weaverstack.dev/semantic-models/native-tmdl/">Native Power BI</a></h3><p>Keep PBIP, TMDL and native Report definitions rather than converting to a Weaver-only format.</p></div>
+<div class="feature-row" data-feature="native-powerbi"><h3><a href="https://docs.weaverstack.dev/semantic-models/native-tmdl/">Native Power BI</a></h3><p>Add enterprise power to your Power BI models and reports, while keeping to native PBIP, TMDL and native Report definitions.</p></div>
 <div class="feature-row" data-feature="portable"><h3><a href="https://docs.weaverstack.dev/advanced/portable-execution-between-desktop-and-fabric/">Windows, macOS, Linux, or just Fabric Notebooks</a></h3><p>Develop and operate Weaver projects on Windows, macOS or Linux, or work entirely inside Fabric Notebooks. Build and deploy native Power BI models and Reports without Power BI Desktop or a Windows computer.</p></div>
 <div class="feature-row" data-feature="agents"><h3><a href="https://docs.weaverstack.dev/reference/machine-readable-output/">Built for developers and AI agents</a></h3><p>Readable terminal output for developers, and structured <code>--json</code> results for AI agents from Check, Build, Load, Test and Health. Preview, build, load, test and inspect in a repeatable cycle, with explicit outcomes for what ran and what needs attention.</p></div>
 </div>
@@ -73,9 +73,9 @@
 <li data-dag-node="python-table" data-dag-edge="python-table:spark-table"><strong>Delta Table</strong><span>Python</span></li>
 <li data-dag-node="spark-table"><strong>Delta Table</strong><span>Spark SQL</span></li>
 </ol></div>
-<div class="dag-connection" data-dag-edge="spark-table:warehouse-table" data-boundary="Lakehouse:Warehouse"><span aria-hidden="true">→</span><small>Logical Shortcut<br>SQL endpoint readiness</small></div>
+<div class="dag-connection" data-dag-edge="spark-table:warehouse-table" data-boundary="Lakehouse:Warehouse"><span aria-hidden="true">→</span></div>
 <div class="dag-engine warehouse-engine"><h4>Warehouse</h4><div data-dag-node="warehouse-table"><strong>Table</strong><span>T-SQL</span></div></div>
-<div class="dag-connection" data-dag-edge="warehouse-table:model-refresh"><span aria-hidden="true">→</span><small>Managed model source</small></div>
+<div class="dag-connection" data-dag-edge="warehouse-table:model-refresh"><span aria-hidden="true">→</span></div>
 <div class="dag-engine model-engine"><h4>Power BI</h4><div data-dag-node="model-refresh"><strong>Semantic Model</strong><span>Refresh</span></div></div>
 </div>
 <figcaption>One managed Load/refresh graph orders the selected work across engines, with supported publication and endpoint-readiness barriers—not a separate pipeline joining engine jobs.</figcaption>
@@ -98,15 +98,17 @@
 </figure><p class="group-docs"><a href="https://docs.weaverstack.dev/warehouse/first-project/">First Warehouse pipeline</a><span aria-hidden="true"> · </span><a href="https://docs.weaverstack.dev/reference/operation-behaviour/load/">Load behaviour</a></p></div></section>
 <section class="section feature-group" id="power-bi" data-feature-group="3"><div class="wrap"><h2>Power BI, engineered for organisations</h2>
 <figure class="feature-spotlight powerbi-spotlight" data-spotlight="power-bi" aria-labelledby="powerbi-title">
-<h3 id="powerbi-title">One modelling foundation. Different audiences. Consistent standards.</h3>
-<div class="model-foundation"><strong>Native TMDL foundation</strong><span>+ shared policy</span></div>
-<div class="model-variants">
-<div><h4>Operations model</h4><p>Native variant + independent DAX checks</p><span class="variant-arrow" aria-hidden="true">↓</span><strong>Operations Report</strong><span>Verified model binding</span></div>
-<div><h4>Executive model</h4><p>Native variant + independent DAX checks</p><span class="variant-arrow" aria-hidden="true">↓</span><strong>Executive Report</strong><span>Verified model binding</span></div>
-</div>
-<figcaption>Compose native model sources, apply shared standards, validate calculations and deploy each Report against its intended model.</figcaption>
+<h3 id="powerbi-title">Drop a policy.tmdl on top, and every semantic model obeys your organisation’s standards.</h3>
+<pre class="policy-tree" aria-label="A PowerBI folder with policy.tmdl at its root, above two models and their Reports"><code>PowerBI/
+├── <b>policy.tmdl</b>   <i>← organisation-wide modelling standards</i>
+├── Sales/
+│   ├── Sales.SemanticModel/
+│   └── Sales.Report/
+└── Finance/
+    ├── Finance.tmdl
+    └── Finance.Report/</code></pre>
+<figcaption>Weaver applies the policy to every semantic model beneath it, then each model’s own definition. Reports deploy against their intended model.</figcaption>
 </figure><div class="feature-list">
-<div class="feature-row" data-feature="model-deployment"><h3><a href="https://docs.weaverstack.dev/semantic-models/native-tmdl/">Native Semantic Model deployment</a></h3><p>Deploy the PBIP/TMDL model you already author while preserving its native source files.</p></div>
 <div class="feature-row" data-feature="shared-policy"><h3><a href="https://docs.weaverstack.dev/semantic-models/shared-policy/">Organisation-wide modelling standards</a></h3><p>Apply shared native TMDL policy across Semantic Models instead of repeating formats and conventions.</p></div>
 <div class="feature-row" data-feature="builtin-annotations"><h3><a href="https://docs.weaverstack.dev/reference/power-bi/annotations/">Built-in modelling annotations</a></h3><p>Hide foreign keys, generate measure selectors and apply supported model rules through native TMDL annotations.</p></div>
 <div class="feature-row" data-feature="custom-annotations"><h3><a href="https://docs.weaverstack.dev/semantic-models/custom-annotations/">Custom Python annotations</a></h3><p>Implement project-specific modelling conventions in trusted Python when native policy and built-ins are not enough.</p></div>
@@ -124,7 +126,6 @@
 <div class="feature-row" data-feature="recovery"><h3><a href="https://docs.weaverstack.dev/estate/recovery/">Fault-tolerant execution</a></h3><p>Retain completed effects, record failures and blocked work, and optionally continue independent Load branches.</p></div>
 <div class="feature-row" data-feature="selection"><h3><a href="https://docs.weaverstack.dev/estate/selective-runs/">Selective execution</a></h3><p>Select installed Load work by whole-name regex, deliberately add ancestors/descendants and preview the selection.</p></div>
 <div class="feature-row" data-feature="concurrency"><h3><a href="https://docs.weaverstack.dev/estate/concurrency/">Controlled concurrency</a></h3><p>Cap one invocation or tune per-resource limits while scheduling independent work in dependency order.</p></div>
-<div class="feature-row" data-feature="workflows"><h3><a href="https://docs.weaverstack.dev/estate/automation-and-deployment/">Sessions and workflows</a></h3><p>Reuse execution context and automate sequences of the same operations used interactively.</p></div>
 </div>
 <p class="group-docs"><a href="https://docs.weaverstack.dev/estate/operate/">Run and inspect an estate</a><span aria-hidden="true"> · </span><a href="https://docs.weaverstack.dev/reference/operation-behaviour/">Operation boundaries</a></p></div></section>
 <section class="section feature-group" id="scale" data-feature-group="7"><div class="wrap"><h2>Built for scale</h2>
@@ -168,7 +169,11 @@
 <ol class="mirror-flow"><li><strong>Existing source estate</strong><span>Source-owned data</span></li><li><strong>Borrowed development data</strong><span>Warehouse Views · Lakehouse Shortcuts</span></li><li><strong>Selected changed work</strong><span>Materialised locally by Build</span></li></ol>
 <figcaption>Mirror lets you make targeted development changes against your full data, without loading your estate from scratch.</figcaption>
 <p class="spotlight-docs"><a href="https://docs.weaverstack.dev/estate/mirror/">Develop using Mirror</a><span aria-hidden="true"> · </span><a href="https://docs.weaverstack.dev/reference/operation-behaviour/mirror/">Scope and reset boundaries</a></p>
-</figure></div></section></main>
+</figure></div></section>
+<section class="section feature-cta"><div class="wrap"><h2>Start with one item.</h2>
+<p>Begin with a Lakehouse, a Warehouse or a Power BI model, and connect more as you need them.</p>
+<div class="actions"><a class="button blue" href="/get-started/">Get started →</a><a class="button ghost" href="https://docs.weaverstack.dev">Read the documentation →</a></div>
+</div></section></main>
 <footer class="site-footer">
 <div class="wrap footer-grid">
 <div class="footer-note">

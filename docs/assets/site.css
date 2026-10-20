@@ -467,16 +467,6 @@ table.matrix .note code { padding: 1px 4px; font-size: 12px; }
 .features-showcase .engineering-arrow { font-size: 30px; text-align: center; color: var(--blue-dark); }
 .features-showcase .generated-work ul { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 20px; list-style: none; padding: 0; margin: 0; }
 .features-showcase .generated-work li { margin: 0; font-size: 16px; }
-.features-showcase .model-foundation { max-width: 760px; border-top: 2px solid var(--blue); padding: 16px 0; }
-.features-showcase .model-foundation strong { font-size: 18px; }
-.features-showcase .model-foundation > span { margin-left: 12px; font-size: 15px; color: var(--ink-soft); }
-.features-showcase .model-variants { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); max-width: 760px; gap: 32px; }
-.features-showcase .model-variants > div { border-left: 2px solid var(--line-strong); padding: 4px 0 4px 18px; }
-.features-showcase .model-variants h4 { margin: 0 0 8px; font-size: 18px; }
-.features-showcase .model-variants p { font-size: 15px; margin: 0; }
-.features-showcase .model-variants > div > strong, .features-showcase .model-variants > div > span { display: block; }
-.features-showcase .model-variants > div > span { font-size: 14px; color: var(--ink-soft); margin-top: 6px; }
-.features-showcase .model-variants > div > .variant-arrow { color: var(--blue-dark); font-size: 26px; margin: 8px 0; }
 .features-showcase .scale-flow { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 30px; list-style: none; padding: 0; margin: 0; }
 .features-showcase .scale-flow li { position: relative; max-width: none; margin: 0; padding: 18px 18px 22px; border-top: 2px solid var(--line-strong); border-radius: 0 0 var(--radius) var(--radius); background: var(--white); }
 .features-showcase .scale-flow li:nth-child(2) { background: color-mix(in srgb, var(--blue-soft) 18%, var(--white)); }
@@ -490,7 +480,7 @@ table.matrix .note code { padding: 1px 4px; font-size: 12px; }
 .features-showcase .mirror-flow li:not(:last-child)::after { content: '→'; position: absolute; top: 16px; right: -24px; color: var(--blue-dark); font-size: 24px; }
 .features-showcase .mirror-flow strong { display: block; font-size: 18px; line-height: 1.35; }
 .features-showcase .mirror-flow span { display: block; font-size: 15px; color: var(--ink-soft); margin-top: 10px; }
-.features-showcase .feature-scale { background: var(--paper-deep); }
+.features-showcase .feature-cta { background: var(--paper-deep); }
 @media (max-width: 1000px) {
  .features-showcase [data-feature-group="6"] .feature-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
  .features-showcase .fabric-dag { display: flex; flex-direction: column; align-items: stretch; gap: 16px; }
@@ -506,7 +496,7 @@ table.matrix .note code { padding: 1px 4px; font-size: 12px; }
  .features-showcase .dag-engine ol { grid-template-columns: 1fr; gap: 24px; }
  .features-showcase .dag-engine li:not(:last-child)::after { content: '↓'; right: auto; top: auto; bottom: -24px; }
  .features-showcase .warehouse-spotlight { padding: 22px 18px; }
- .features-showcase .select-engineering, .features-showcase .model-variants, .features-showcase .mirror-flow, .features-showcase .scale-flow, .features-showcase .dashboard-gallery { grid-template-columns: 1fr; }
+ .features-showcase .select-engineering, .features-showcase .mirror-flow, .features-showcase .scale-flow, .features-showcase .dashboard-gallery { grid-template-columns: 1fr; }
  .features-showcase .dashboard-gallery a:last-child:nth-child(odd) { width: auto; }
  .features-showcase .generated-work ul { grid-template-columns: 1fr; }
  .features-showcase .engineering-arrow { font-size: 0; }
@@ -515,3 +505,9 @@ table.matrix .note code { padding: 1px 4px; font-size: 12px; }
 }
 
 .forwarding-page main { padding-top: 80px; padding-bottom: 80px; }
+
+.heart { color: var(--red); }
+.features-showcase .policy-tree { margin: 0; padding: 20px 24px; max-width: 640px; overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); background: var(--white); box-shadow: var(--shadow); font: 15px/1.7 var(--mono); color: var(--ink-soft); }
+.features-showcase .policy-tree code { font: inherit; }
+.features-showcase .policy-tree b { color: var(--blue); }
+.features-showcase .policy-tree i { font-style: normal; color: var(--blue-dark); }
