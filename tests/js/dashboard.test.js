@@ -631,3 +631,172 @@ test("a run that crosses local midnight starts the day column in the quiet hours
   assert.equal(load({ __WD_STATE: { utc: true } }).dayStartHour(night), 0);
   inZone("Australia/Sydney", () => assert.notEqual(load({}).dayStartHour(night), 0));
 });
+
+// --- Performance card ------------------------------------------------------------
+
+const PERF = ["item", "schema", "object", "loads", "duration", "longest", "read", "inserted", "updated", "deleted", "rejected", "reloads", "skips", "timedread", "timedduration", "last"];
+const TESTS = ["targettype", "target", "schema", "object", "runs", "duration", "longest", "failed", "last"];
+const OBJECTS = ["workflow", "task", "targettype", "target", "schema", "object", "result", "started", "completed", "message"];
+const STATS = ["workflow", "item", "schema", "object", "started", "completed", "duration", "read", "inserted", "updated", "deleted", "rejected", "reload", "skip"];
+const LARGEST = ["id", "item", "schema", "object", "workflow", "started", "completed", "duration", "read", "inserted", "updated", "deleted", "rejected", "reload", "skip"];
+const REGION = ["Warehouse/Curated", "Sales", "Region"];
+
+// Region loaded in three runs, w3 oldest. Orphan has no lineage node.
+function cardEstate() {
+  const day = 24 * H;
+  return model(estate({ extra:
+    table("perfweek", PERF, [
+      [...REGION, 3, 8000, 5000, 400, 10, 0, 2, 0, 1, 2, 400, 8000, AT - H],
+      ["Warehouse/Curated", "Sales", "Orphan", 2, 3000, 2000, null, null, null, null, null, 0, 0, null, null, AT - 2 * H]]) +
+    table("perfmonth", PERF, [[...REGION, 20, 50000, 9000, 2000, 50, 5, 5, 3, 4, 6, 2000, 50000, AT - H]]) +
+    table("testweek", TESTS, [["Warehouse", "Curated_WH", "Sales", "ByRegionValid", 3, 9000, 4000, 1, AT - H]]) +
+    table("runobjects", OBJECTS, [
+      ["w1", "load", "Warehouse", "Curated_WH", "Sales", "Region", "Succeeded", AT - 3 * H, AT - 3 * H + 1000, ""],
+      ["w1", "load", "Warehouse", "Curated_WH", "Sales", "ByRegion", "Failed", AT - 2 * H, AT - 2 * H + 4000, ""],
+      ["w1", "test", "Warehouse", "Curated_WH", "Sales", "ByRegionValid", "Failed", AT - H, AT - H + 9000, "3 rows failed"],
+      ["w2", "test", "Warehouse", "Curated_WH", "Sales", "ByRegionValid", "Succeeded", AT - day - H, AT - day - H + 3000, ""],
+      ["w3", "test", "Warehouse", "Curated_WH", "Sales", "ByRegionValid", "Succeeded", AT - 2 * day - H, AT - 2 * day - H + 2000, ""]]) +
+    table("runstats", STATS, [
+      ["w1", ...REGION, AT - 3 * H, AT - 3 * H + 1000, 1000, 400, 10, 0, 2, null, "1", ""],
+      ["w2", ...REGION, AT - day - 3 * H, AT - day - 3 * H + 900, 900, 380, 8, 1, 0, 0, "", ""],
+      ["w3", ...REGION, AT - 2 * day - 3 * H, AT - 2 * day - 3 * H + 800, 800, null, null, null, null, null, "", ""],
+      ["w1", "Warehouse/Curated", "Sales", "Orphan", AT - 2 * H, AT - 2 * H + 500, 500, null, null, null, null, null, "", ""]]) +
+    table("largest", LARGEST, [
+      ["7", ...REGION, "w1", AT - 3 * H, AT - 3 * H + 1000, 1000, null, 10, 0, 2, null, "1", ""]]) }));
+}
+
+const facts = (section) => Object.fromEntries(section.facts);
+const headed = (card, heading) => card.sections.find((s) => s.heading.startsWith(heading));
+const SUM_WORDS = /total|average|rows per second|changed/i;
+
+test("Loads come before Tests in a run, each group ordered by the column", () => {
+  const rows = [
+    { task: "test", time: 90 }, { task: "load", time: 5 }, { task: "test", time: 10 }, { task: "load", time: 40 }];
+  const columns = [{ key: "time", title: "Time", value: (r) => r.time }];
+  const shown = (desc) => D.sortRows(columns, rows, "time", desc, (r) => D.taskRank(r.task)).map((r) => r.task + r.time);
+  assert.deepEqual(shown(true), ["load40", "load5", "test90", "test10"]);
+  assert.deepEqual(shown(false), ["load5", "load40", "test10", "test90"]);
+  assert.deepEqual(D.sortRows(columns, rows, "time", true).map((r) => r.time), [90, 40, 10, 5]);
+});
+
+test("a load in a run shows that load's own counts, with the loads around it, and adds nothing up", () => {
+  const pick = { kind: "record", workflow: "w2", task: "load", started: AT - 24 * H - 3 * H, item: REGION[0], schema: REGION[1], object: REGION[2] };
+  const withStat = model(estate({ extra:
+    table("runobjects", OBJECTS, [["w2", "load", "Warehouse", "Curated_WH", "Sales", "Region", "Succeeded", AT - 27 * H, AT - 27 * H + 900, ""]]) +
+    table("runstats", STATS, [
+      ["w1", ...REGION, AT - 3 * H, AT - 3 * H + 1000, 1000, 400, 10, 0, 2, null, "1", ""],
+      ["w2", ...REGION, AT - 27 * H, AT - 27 * H + 900, 900, 380, 8, 1, 0, 0, "", ""],
+      ["w3", ...REGION, AT - 51 * H, AT - 51 * H + 800, 800, null, null, null, null, null, "", ""]]) }));
+  const card = D.performanceCard(withStat, pick, "week");
+  assert.equal(card.title, "Sales.Region");
+  assert.equal(card.eyebrow, "Table");
+  assert.match(card.scope, /^One load of this object in this run/);
+  const own = facts(headed(card, "Row counts"));
+  assert.deepEqual([own["Rows read"], own.Inserted, own.Updated, own.Deleted, own.Rejected], ["380", "8", "1", "0", "0"]);
+  assert.equal(own.Reload, "No");
+  // The loads around it are rows of their own, the focused one marked.
+  const around = headed(card, "Loads around it").table;
+  assert.equal(around.rows.length, 3);
+  assert.deepEqual(around.rows.map((r) => r.current), [false, true, false]);
+  assert.deepEqual(around.rows[0].cells.slice(1), ["400", "10", "0", "2", "—"]);
+  assert.deepEqual(around.rows[2].cells.slice(1), ["—", "—", "—", "—", "—"]);
+  // Nothing on the card is a total or an average.
+  const labels = card.sections.flatMap((s) => s.facts.map((f) => f[0]));
+  assert.ok(!labels.some((l) => SUM_WORDS.test(l)), labels.join());
+});
+
+test("a count the catalogue did not record is unknown, never zero", () => {
+  const pick = { kind: "record", workflow: "w3", task: "load", started: AT - 51 * H, item: REGION[0], schema: REGION[1], object: REGION[2] };
+  const w3 = model(estate({ extra:
+    table("runobjects", OBJECTS, [["w3", "load", "Warehouse", "Curated_WH", "Sales", "Region", "Succeeded", AT - 51 * H, AT - 51 * H + 800, ""]]) +
+    table("runstats", STATS, [["w3", ...REGION, AT - 51 * H, AT - 51 * H + 800, 800, null, null, null, 0, null, "", ""]]) }));
+  const own = facts(headed(D.performanceCard(w3, pick, "week"), "Row counts"));
+  assert.equal(own["Rows read"], "Not recorded");
+  assert.equal(own.Inserted, "Not recorded");
+  assert.equal(own.Deleted, "0");
+  assert.equal(own.Rejected, "Not recorded");
+});
+
+test("a load with no statistic says no counts were recorded", () => {
+  const m = cardEstate();
+  const card = D.performanceCard(m, { kind: "record", workflow: "w1", task: "load", started: AT - 2 * H, item: "Warehouse/Curated", schema: "Sales", object: "ByRegion" }, "week");
+  assert.match(headed(card, "Row counts").note, /No row counts/);
+  assert.deepEqual(headed(card, "Row counts").facts, []);
+  assert.equal(facts(headed(card, "This execution")).Message, "Not recorded");
+});
+
+test("an object with no lineage node is still inspectable, and says so", () => {
+  const m = cardEstate();
+  const card = D.performanceCard(m, { kind: "load", item: "Warehouse/Curated", schema: "Sales", object: "Orphan" }, "week");
+  assert.equal(card.detached, true);
+  assert.equal(card.title, "Sales.Orphan");
+  assert.equal(card.eyebrow, "Load");
+  assert.equal(headed(card, "Latest loads").table.rows.length, 1);
+});
+
+test("a Load row gives the count of loads in the window and each recent load apart", () => {
+  const m = cardEstate(), pick = { kind: "load", item: REGION[0], schema: REGION[1], object: REGION[2] };
+  const week = D.performanceCard(m, pick, "week");
+  const f = facts(headed(week, "Loads ·"));
+  assert.match(headed(week, "Loads ·").heading, /last 7 days/);
+  assert.equal(f.Loads, "3");
+  assert.equal(f.Longest, "5.0 s");
+  assert.equal(f.Reloads, "1");
+  assert.equal(f["Static skips"], "2");
+  assert.deepEqual(Object.keys(f), ["Loads", "Longest", "Last load", "Reloads", "Static skips"]);
+  assert.equal(headed(week, "Latest loads").table.rows.length, 3);
+  assert.ok(headed(week, "Latest loads").table.rows.every((r) => !r.current));
+  const month = D.performanceCard(m, pick, "month");
+  assert.equal(facts(headed(month, "Loads ·")).Loads, "20");
+  assert.deepEqual(headed(D.performanceCard(m, { ...pick, object: "Orphan" }, "month"), "Loads ·").facts, []);
+});
+
+test("a Test row gives its executions in the window and the latest one by one", () => {
+  const m = cardEstate(), pick = { kind: "test", item: "Warehouse/Curated", schema: "Sales", object: "ByRegionValid" };
+  const card = D.performanceCard(m, pick, "week");
+  const f = facts(headed(card, "Tests ·"));
+  assert.equal(card.eyebrow, "Assumption");
+  assert.equal(f.Executions, "3");
+  assert.equal(f.Failed, "1");
+  assert.equal(f.Longest, "4.0 s");
+  const rows = headed(card, "Latest executions").table.rows;
+  assert.deepEqual(rows.map((r) => r.cells[1]), ["Failed", "Succeeded", "Succeeded"]);
+  assert.deepEqual(headed(D.performanceCard(m, pick, "day"), "Tests ·").facts, []);
+});
+
+test("a Test in a run leads with that execution, then the ones around it", () => {
+  const m = cardEstate();
+  const pick = { kind: "record", workflow: "w2", task: "test", started: AT - 24 * H - H, item: "Warehouse/Curated", schema: "Sales", object: "ByRegionValid" };
+  const card = D.performanceCard(m, pick, "week");
+  const one = facts(headed(card, "This execution"));
+  assert.equal(one.Task, "Test");
+  assert.deepEqual(one.Result, { chip: "Succeeded" });
+  assert.equal(one.Time, "3.0 s");
+  assert.match(card.scope, /^One Test execution/);
+  assert.deepEqual(headed(card, "Executions around it").table.rows.map((r) => r.current), [false, true, false]);
+  const failed = D.performanceCard(m, { ...pick, workflow: "w1", started: AT - H }, "week");
+  assert.deepEqual(facts(headed(failed, "This execution")).Message, { text: "3 rows failed" });
+});
+
+test("a record no longer carried is said to be gone", () => {
+  const m = cardEstate();
+  const card = D.performanceCard(m, { kind: "record", workflow: "w9", task: "load", started: 1, item: REGION[0], schema: REGION[1], object: REGION[2] }, "week");
+  assert.deepEqual(headed(card, "This execution").facts, []);
+  assert.match(headed(card, "This execution").note, /no longer/);
+});
+
+test("a largest change keeps its own counts, with the loads around it", () => {
+  const m = cardEstate();
+  const card = D.performanceCard(m, { kind: "change", id: "7", item: REGION[0], schema: REGION[1], object: REGION[2] }, "week");
+  const f = facts(headed(card, "This load"));
+  assert.deepEqual(f.Workflow, { mono: "w1" });
+  assert.equal(f["Rows read"], "Not recorded");
+  assert.equal(f.Inserted, "10");
+  assert.equal(f.Updated, "0");
+  assert.equal(f.Deleted, "2");
+  assert.equal(f.Rejected, "Not recorded");
+  assert.equal(f.Reload, "Yes");
+  const around = headed(card, "Loads around it").table.rows;
+  assert.equal(around.filter((r) => r.current).length, 1);
+  assert.equal(around.find((r) => r.current).title, "w1");
+});

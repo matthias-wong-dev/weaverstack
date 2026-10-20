@@ -334,7 +334,8 @@ table 'Dashboard measures'
 
     /// The 300 latest workflows of the last 30 days with the span each task type
     /// of each occupied, the 200 longest object records of the 8 latest of them,
-    /// and the Tests' statistics per object over the last day, 7 days and 30 days.
+    /// each load of those runs with its own counts (the 200 longest per run), and
+    /// the Tests' statistics per object over the last day, 7 days and 30 days.
     measure 'Run data' = ```
         VAR _f = UNICHAR(57345)
         VAR _r = UNICHAR(57346)
@@ -353,6 +354,11 @@ table 'Dashboard measures'
             SELECTCOLUMNS(TOPN(8, _recent, [@end], DESC, 'Log'[Workflow ID], ASC), "@owner", 'Log'[Workflow ID]),
             VAR _o = [@owner]
             RETURN TOPN(200, CALCULATETABLE('Log', 'Log'[Workflow ID] = _o, NOT ISBLANK('Log'[Object name])), 'Log'[Duration milliseconds], DESC, 'Log'[Log SK], ASC)
+        )
+        VAR _stats = GENERATE(
+            SELECTCOLUMNS(TOPN(8, _recent, [@end], DESC, 'Log'[Workflow ID], ASC), "@owner", 'Log'[Workflow ID]),
+            VAR _o = [@owner]
+            RETURN TOPN(200, CALCULATETABLE('Load statistic', 'Load statistic'[Workflow ID] = _o), 'Load statistic'[Duration milliseconds], DESC, 'Load statistic'[Load statistic SK], ASC)
         )
         VAR _spans = GENERATE(
             SELECTCOLUMNS(_recent, "@workflow", 'Log'[Workflow ID]),
@@ -452,6 +458,23 @@ table 'Dashboard measures'
                 [@owner], ASC,
                 'Log'[Duration milliseconds], DESC,
                 'Log'[Log SK], ASC
+            )
+            & _t & "runstats" & _f & "workflow" & _f & "item" & _f & "schema" & _f & "object" & _f & "started" & _f & "completed" & _f & "duration" & _f & "read" & _f & "inserted" & _f & "updated" & _f & "deleted" & _f & "rejected" & _f & "reload" & _f & "skip"
+            & CONCATENATEX(
+                _stats,
+                _r & [@owner]
+                    & _f & 'Load statistic'[Item type] & "/" & 'Load statistic'[Item name]
+                    & _f & 'Load statistic'[Schema name]
+                    & _f & 'Load statistic'[Object name]
+                    & _f & IF(ISBLANK('Load statistic'[Started datetime]), "", FORMAT(('Load statistic'[Started datetime] - DATE(1970, 1, 1)) * 86400000, "0"))
+                    & _f & IF(ISBLANK('Load statistic'[Completed datetime]), "", FORMAT(('Load statistic'[Completed datetime] - DATE(1970, 1, 1)) * 86400000, "0"))
+                    & _f & 'Load statistic'[Duration milliseconds]
+                    & _f & 'Load statistic'[Rows read] & _f & 'Load statistic'[Rows inserted] & _f & 'Load statistic'[Rows updated] & _f & 'Load statistic'[Rows deleted] & _f & 'Load statistic'[Rows rejected]
+                    & _f & IF('Load statistic'[Is reload], "1") & _f & IF('Load statistic'[Is static skip], "1"),
+                "",
+                [@owner], ASC,
+                'Load statistic'[Duration milliseconds], DESC,
+                'Load statistic'[Load statistic SK], ASC
             )
             & _t & "testday" & _testheader
             & CONCATENATEX(

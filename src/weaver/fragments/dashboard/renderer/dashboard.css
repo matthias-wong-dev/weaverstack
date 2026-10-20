@@ -345,3 +345,8 @@ body { background: #f7f7f6; }
 @media (prefers-reduced-motion: reduce) {
   .wd *, .wd *::before, .wd *::after { transition-duration: .01ms !important; }
 }
+.wd-mini { width: 100%; margin: 6px 0 0; border-collapse: collapse; font: 11px var(--mono); }
+.wd-mini th { padding: 3px 4px; color: var(--muted); font-size: 9px; font-weight: 700; letter-spacing: .05em; text-align: right; text-transform: uppercase; }
+.wd-mini td { padding: 4px; border-top: 1px solid var(--line); text-align: right; }
+.wd-mini th:first-child, .wd-mini td:first-child { text-align: left; }
+.wd-mini .wd-current td { background: var(--blue-soft); font-weight: 700; }

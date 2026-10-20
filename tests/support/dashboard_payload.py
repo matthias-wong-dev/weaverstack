@@ -385,7 +385,8 @@ RUN_WINDOW = timedelta(days=30)
 
 def run(rows, at) -> str:
     """The 300 latest workflows of 30 days with each task type's span, the 200
-    longest object records of the 8 latest, and the Tests' statistics."""
+    longest object records of the 8 latest, each load of those runs with its own
+    counts, and the Tests' statistics."""
 
     at = _aware(at)
     log_rows = _rows(rows, "Log")
@@ -439,6 +440,17 @@ def run(rows, at) -> str:
         mine = [r for r in log_rows if r["workflow_id"] == w and r.get("object_name")]
         mine.sort(key=lambda r: (durations(r), r["log_sk"]))
         objects.extend(mine[:200])
+
+    stats = []
+    for w in sorted(_latest(found, 8)):
+        mine = [r for r in _rows(rows, "LoadStatistic") if r["workflow_id"] == w]
+        mine.sort(
+            key=lambda r: (
+                -(r.get("duration_milliseconds") or 0),
+                r["load_statistic_sk"],
+            )
+        )
+        stats.extend(mine[:200])
 
     def tests(days):
         grouped = {}
@@ -550,6 +562,44 @@ def run(rows, at) -> str:
                     else "",
                 )
                 for r in objects
+            ],
+        )
+        + table(
+            "runstats",
+            (
+                "workflow",
+                "item",
+                "schema",
+                "object",
+                "started",
+                "completed",
+                "duration",
+                "read",
+                "inserted",
+                "updated",
+                "deleted",
+                "rejected",
+                "reload",
+                "skip",
+            ),
+            [
+                (
+                    r["workflow_id"],
+                    item(r),
+                    text(r["schema_name"]),
+                    text(r["object_name"]),
+                    ms(r.get("started_datetime")),
+                    ms(r.get("completed_datetime")),
+                    text(r.get("duration_milliseconds")),
+                    text(r.get("rows_read")),
+                    text(r.get("rows_inserted")),
+                    text(r.get("rows_updated")),
+                    text(r.get("rows_deleted")),
+                    text(r.get("rows_rejected")),
+                    flag(r.get("is_reload")),
+                    flag(r.get("is_static_skip")),
+                )
+                for r in stats
             ],
         )
         + table("testday", header, tests(1))
