@@ -292,15 +292,6 @@
       ]
     },
     {
-      "id": "mirror",
-      "group": 6,
-      "title": "Mirror: develop without copying everything",
-      "description": "Borrow installed Lakehouse/Warehouse data through Shortcuts and Views, then materialise selected changed or affected work locally.",
-      "urls": [
-        "https://docs.weaverstack.dev/estate/mirror/"
-      ]
-    },
-    {
       "id": "incremental-build",
       "group": 6,
       "title": "Incremental Build",
