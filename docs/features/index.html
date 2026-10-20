@@ -98,22 +98,26 @@
 </figure><p class="group-docs"><a href="https://docs.weaverstack.dev/warehouse/first-project/">First Warehouse pipeline</a><span aria-hidden="true"> · </span><a href="https://docs.weaverstack.dev/reference/operation-behaviour/load/">Load behaviour</a></p></div></section>
 <section class="section feature-group" id="power-bi" data-feature-group="3"><div class="wrap"><h2>Power BI, engineered for organisations</h2>
 <figure class="feature-spotlight powerbi-spotlight" data-spotlight="power-bi" aria-labelledby="powerbi-title">
-<h3 id="powerbi-title">Drop a policy.tmdl on top, and every semantic model obeys your organisation’s standards.</h3>
-<pre class="policy-tree" aria-label="A PowerBI folder with policy.tmdl at its root, above two models and their Reports"><code>PowerBI/
-├── <b>policy.tmdl</b>   <i>← organisation-wide modelling standards</i>
+<h3 id="powerbi-title">Keep native Power BI. Add shared standards, model-specific rules and unit tests.</h3>
+<pre class="policy-tree" aria-label="Power BI project with organisation-wide policy, Sales-specific TMDL rules, native models and Reports, and semantic-model unit tests"><code>PowerBI/
+├── <b>policy.tmdl</b>          <i>← organisation-wide policies</i>
 ├── Sales/
+│   ├── <b>Sales.tmdl</b>       <i>← Sales-specific policies</i>
 │   ├── Sales.SemanticModel/
-│   └── Sales.Report/
+│   ├── Sales.Report/
+│   └── <b>tests/</b>           <i>← unit testing for Semantic Models</i>
+│       └── Sales/
+│           └── Sales.RevenueMatches.dax
 └── Finance/
     ├── Finance.tmdl
     └── Finance.Report/</code></pre>
-<figcaption>Weaver applies the policy to every semantic model beneath it, then each model’s own definition. Reports deploy against their intended model.</figcaption>
+<figcaption>Weaver combines shared policies and model-specific TMDL with native Semantic Models. Write unit tests against independent expected results, and deploy Reports against their intended models.</figcaption>
 </figure><div class="feature-list">
 <div class="feature-row" data-feature="shared-policy"><h3><a href="https://docs.weaverstack.dev/semantic-models/shared-policy/">Organisation-wide modelling standards</a></h3><p>Apply shared native TMDL policy across Semantic Models instead of repeating formats and conventions.</p></div>
 <div class="feature-row" data-feature="builtin-annotations"><h3><a href="https://docs.weaverstack.dev/reference/power-bi/annotations/">Built-in modelling annotations</a></h3><p>Hide foreign keys, generate measure selectors and apply supported model rules through native TMDL annotations.</p></div>
 <div class="feature-row" data-feature="custom-annotations"><h3><a href="https://docs.weaverstack.dev/semantic-models/custom-annotations/">Custom Python annotations</a></h3><p>Implement project-specific modelling conventions in trusted Python when native policy and built-ins are not enough.</p></div>
 <div class="feature-row" data-feature="composition"><h3><a href="https://docs.weaverstack.dev/semantic-models/composition/">Semantic Model composition</a></h3><p>Reuse a native model foundation to produce audience variants without maintaining complete copies.</p></div>
-<div class="feature-row" data-feature="dax-reconciliation"><h3><a href="https://docs.weaverstack.dev/semantic-models/validation/">DAX validation and SQL reconciliation</a></h3><p>Check DAX measures against independent expectations, including SQL calculations over managed Lakehouse or Warehouse sources.</p></div>
+<div class="feature-row" data-feature="dax-reconciliation"><h3><a href="https://docs.weaverstack.dev/semantic-models/validation/">Unit testing for Semantic Models</a></h3><p>Unit test DAX measures against independent expected results, including SQL calculations over managed Lakehouse or Warehouse sources.</p></div>
 <div class="feature-row" data-feature="report-binding"><h3><a href="https://docs.weaverstack.dev/reports/environments/">Verified Report deployment</a></h3><p>Deploy the same authored Report to different destinations, resolving and verifying its intended model and workspace binding.</p></div>
 </div>
 <p class="scope-note">Supported native model/Report deployment also works in an appropriately licensed <a href="https://docs.weaverstack.dev/reference/power-bi/requirements-and-compatibility/">Power BI service workspace</a>, without Lakehouse/Warehouse work or a Weaver Catalogue.</p>
