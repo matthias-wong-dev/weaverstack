@@ -511,3 +511,85 @@ table.matrix .note code { padding: 1px 4px; font-size: 12px; }
 .features-showcase .policy-tree code { font: inherit; }
 .features-showcase .policy-tree b { color: var(--blue); }
 .features-showcase .policy-tree i { font-style: normal; color: var(--blue-dark); }
+
+
+/* --- Product-page examples: recognizable problems and real commands ---- */
+.homepage .problem-stage {
+  margin: 0 0 11px;
+  color: var(--blue-dark);
+  font: 700 12px/1.4 var(--mono);
+  letter-spacing: .035em;
+}
+.homepage #why-weaver .card { display: flex; flex-direction: column; gap: 10px; }
+.homepage #why-weaver .card h3 { margin: 0; line-height: 1.35; font-size: 19px; }
+.homepage #why-weaver .card p { margin: 0; }
+.homepage #why-weaver .card p:last-child { margin-top: auto; padding-top: 8px; }
+
+.features-showcase .command-spotlight {
+  padding: 26px 28px;
+  border-radius: var(--radius);
+  background: var(--paper-deep);
+}
+.features-showcase .command-spotlight > h3 { max-width: 46ch; margin-bottom: 20px; }
+.features-showcase .command-spotlight > .example-intro {
+  max-width: var(--measure);
+  margin: -7px 0 22px;
+  font-size: 16px;
+}
+.features-showcase .health-examples,
+.features-showcase .workspace-examples { display: grid; gap: 18px; align-items: start; }
+.features-showcase .health-examples { grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); }
+.features-showcase .workspace-examples { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.features-showcase .command-panel {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--white);
+}
+.features-showcase .command-panel-heading {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--line);
+  font-size: 14px;
+  color: var(--ink-soft);
+}
+.features-showcase .command-panel-heading strong { color: var(--ink); }
+.features-showcase .command-panel-heading span { font-size: 12px; color: var(--muted); }
+.features-showcase .command-panel .output-heading { border-top: 1px solid var(--line); }
+.features-showcase .command-panel pre {
+  max-width: 100%;
+  margin: 0;
+  padding: 16px;
+  overflow-x: auto;
+  font: 12.5px/1.65 var(--mono);
+  white-space: pre;
+  color: var(--ink);
+}
+.features-showcase .command-panel .health-report-output { background: var(--paper); font-size: 12px; }
+.features-showcase .command-panel .health-green { color: var(--green); font-weight: 700; }
+.features-showcase .command-panel .terminal-prompt { color: var(--blue); }
+.features-showcase .command-panel-note {
+  padding: 14px 16px; margin: 0;
+  font-size: 15px;
+  line-height: 1.55;
+}
+.features-showcase .workspace-destination {
+  display: flex; align-items: center; gap: 12px;
+  padding: 11px 16px;
+  background: var(--blue-soft);
+  color: var(--blue-dark);
+  font-size: 15px;
+  font-weight: 700;
+}
+.features-showcase .workspace-destination span { font-size: 18px; }
+.features-showcase .command-spotlight figcaption { max-width: none; margin-top: 18px; }
+
+@media (max-width: 850px) {
+  .features-showcase .health-examples,
+  .features-showcase .workspace-examples { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 600px) {
+  .features-showcase .command-spotlight { padding: 20px 16px; }
+  .features-showcase .command-panel pre { font-size: 11.5px; }
+}
