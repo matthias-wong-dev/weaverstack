@@ -123,6 +123,46 @@
 <p class="scope-note">Supported native model/Report deployment also works in an appropriately licensed <a href="https://docs.weaverstack.dev/reference/power-bi/requirements-and-compatibility/">Power BI service workspace</a>, without Lakehouse/Warehouse work or a Weaver Catalogue.</p>
 <p class="group-docs"><a href="https://docs.weaverstack.dev/semantic-models/native-tmdl/">Deploy a native model</a><span aria-hidden="true"> · </span><a href="https://docs.weaverstack.dev/reference/power-bi/">Power BI reference</a></p></div></section>
 <section class="section feature-group" id="operations" data-feature-group="4"><div class="wrap"><h2>Know what is happening across your projects</h2>
+<figure class="feature-spotlight command-spotlight health-spotlight" aria-labelledby="health-example-title">
+<h3 id="health-example-title">One view across your Fabric work — from Lakehouse and Warehouse to Power BI models and tests.</h3>
+<div class="health-examples">
+<div class="command-panel">
+<div class="command-panel-heading"><strong>Terminal</strong><span>CLI</span></div>
+<pre class="command-input"><code><span class="terminal-prompt">$</span> weaver health \
+  --workspace-config workspace-development.yml</code></pre>
+<div class="command-panel-heading output-heading"><strong>Health report</strong><span>Example output</span></div>
+<pre class="health-report-output"><code>Health
+  Read catalogue                   2.6s
+  Check installed items            0.1s
+  Read installed objects           3.0s
+<span class="health-green">✓ Health                            5.8s</span>
+
+<span class="health-green">Weaver Health  Green</span>
+
+<span class="health-green">Load    Green</span>
+  Last load activity   0h 3m ago
+<span class="health-green">  8 succeeded</span>
+
+<span class="health-green">Tests   Green</span>
+<span class="health-green">  4 succeeded</span>
+
+<span class="health-green">Build   Green</span>
+  Installed work consistent (29 objects)</code></pre>
+</div>
+<div class="command-panel">
+<div class="command-panel-heading"><strong>Fabric Notebook</strong><span>Python</span></div>
+<pre class="command-input"><code>import weaver
+
+health = weaver.health(
+    workspace="Parcel Development",
+    catalogue="Warehouse/Catalogue",
+)
+health.report()</code></pre>
+<p class="command-panel-note">Run the same check from Python inside Fabric. The result can also be used in your own code.</p>
+</div>
+</div>
+<figcaption>An excerpt from the <a href="https://docs.weaverstack.dev/estate/catalogue-and-health/">documented Parcel Health example</a>. Without an item filter, Health checks the whole installed project. It reads results without rerunning loads or tests.</figcaption>
+</figure>
 <div class="feature-list">
 <div class="feature-row" data-feature="catalogue"><h3><a href="https://docs.weaverstack.dev/core-concepts/catalogue/">See all your work in one place</a></h3><p>Weaver keeps its Catalogue of deployed items, dependencies and run results in an ordinary Fabric Warehouse.</p></div>
 <div class="feature-row" data-feature="health"><h3><a href="https://docs.weaverstack.dev/estate/catalogue-and-health/">See what is up to date or needs attention</a></h3><p>See what is up to date, waiting, failed or inconsistent across your managed Fabric work.</p></div>
@@ -160,6 +200,27 @@
 </div>
 </div></section>
 <section class="section feature-group" id="advanced" data-feature-group="6"><div class="wrap"><h2>When your projects get more complex</h2>
+<figure class="feature-spotlight command-spotlight workspace-spotlight" aria-labelledby="workspace-example-title">
+<h3 id="workspace-example-title">Same code. Different workspaces. No rewrites.</h3>
+<p class="example-intro">Keep one set of Python, SQL and Power BI files. Choose where to deploy by changing the workspace configuration file.</p>
+<div class="workspace-examples">
+<div class="command-panel">
+<div class="command-panel-heading"><strong>Development</strong><span>Same project files</span></div>
+<pre class="command-input"><code>weaver build \
+  --item Warehouse/Operations \
+  --workspace-config workspace-development.yml</code></pre>
+<div class="workspace-destination"><span aria-hidden="true">↓</span> Parcel Development</div>
+</div>
+<div class="command-panel">
+<div class="command-panel-heading"><strong>Production</strong><span>Same project files</span></div>
+<pre class="command-input"><code>weaver build \
+  --item Warehouse/Operations \
+  --workspace-config workspace-production.yml</code></pre>
+<div class="workspace-destination"><span aria-hidden="true">↓</span> Parcel Production</div>
+</div>
+</div>
+<figcaption>The command and source stay the same; the selected configuration decides the destination. <a href="https://docs.weaverstack.dev/estate/environments/">See workspace configuration</a>. You can also preview changes before deploying.</figcaption>
+</figure>
 <div class="feature-list">
 <div class="feature-row" data-feature="environments"><h3><a href="https://docs.weaverstack.dev/estate/environments/">One project, multiple environments</a></h3><p>Use the same files in development and production. A configuration file sets which workspaces, Fabric items and Power BI models they belong to.</p></div>
 <div class="feature-row" data-feature="incremental-build"><h3><a href="https://docs.weaverstack.dev/advanced/incremental-build-selection/">Update only what changed</a></h3><p>Update changed source definitions and the work that depends on them, while leaving unchanged parts in place.</p></div>
