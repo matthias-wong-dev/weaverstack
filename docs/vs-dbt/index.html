@@ -80,8 +80,8 @@
               <p>Mirror can use existing Warehouse and Lakehouse data through views and OneLake shortcuts. Make local changes to the parts you're working on without copying every table into development.</p>
             </div>
             <div class="card">
-              <h3>Know what ran, what changed and what failed</h3>
-              <p>Weaver keeps definitions, dependencies, load results, tests and progress together in a Fabric Warehouse. Run <code>weaver health</code> to see what's up to date and what needs attention.</p>
+              <h3>A Power BI dashboard for your Fabric estate</h3>
+              <p>Weaver keeps dependencies, loads and tests in queryable Fabric Warehouse tables. Deploy its Catalogue Dashboard to explore Health, performance, run timelines, an ER diagram and Power BI model bus matrices. <a href="https://docs.weaverstack.dev/estate/catalogue-dashboard/#the-pages">Explore the dashboard →</a></p>
             </div>
             <div class="card">
               <h3>Take native Power BI all the way to deployment</h3>
@@ -109,7 +109,7 @@ weaver health                              <span class="c-dim"># Inspect the who
       <section class="section">
         <div class="wrap">
           <h2>The differences, side by side</h2>
-          <p>Here is what each tool handles directly in Fabric. The dbt column describes the Fabric Warehouse and Spark adapters, rather than every integration available in the wider dbt ecosystem.</p>
+          <p>This compares Weaver with dbt jobs and the Warehouse and Spark adapters available in Fabric. The wider dbt platform has additional features, including Catalog and lineage tools.</p>
           <p class="small muted">
 <span class="mark yes">✓</span> included &nbsp; <span class="mark part">◐</span> partial support &nbsp; <span class="mark no">✕</span> not built into the adapter</p>
           <div class="table-scroll">
@@ -122,7 +122,7 @@ weaver health                              <span class="c-dim"># Inspect the who
 <img class="weaver-mark" src="/assets/brand/weaver-mark-dark-134.png" width="30" height="17" alt="" aria-hidden="true">Weaver</span>
 </th>
 <th scope="col">
-<span class="who dbt">dbt Fabric adapters</span>
+<span class="who dbt">dbt on Fabric</span>
 </th>
 </tr>
               </thead>
@@ -166,6 +166,7 @@ weaver health                              <span class="c-dim"># Inspect the who
 <span class="mark part">◐</span> <span class="note">table clone is documented within a Warehouse</span>
 </td>
                 </tr>
+                <tr><th scope="row">Refresh Lakehouse SQL endpoints when downstream work needs them</th><td class="v-yes"><span class="mark yes">✓</span> <span class="note">Load coordinates required metadata refresh and downstream readiness</span></td><td class="v-part"><span class="mark part">◐</span> <span class="note">Fabric syncs SQL endpoint metadata automatically; readiness is not a dbt-managed dependency step</span></td></tr>
 
                 <tr class="group">
 <th scope="row" colspan="3">Authoring</th>
@@ -221,15 +222,7 @@ weaver health                              <span class="c-dim"># Inspect the who
 <span class="mark no">✕</span> <span class="note">model materialisation creates and populates the relation</span>
 </td>
                 </tr>
-                <tr>
-                  <th scope="row">Keep deployment and run history in Fabric</th>
-                  <td class="v-yes">
-<span class="mark yes">✓</span>
-</td>
-                  <td class="v-part">
-<span class="mark part">◐</span> <span class="note">dbt Core carries state in run files</span>
-</td>
-                </tr>
+                <tr><th scope="row">Query deployment, load and test state in Fabric Warehouse tables</th><td class="v-yes"><span class="mark yes">✓</span> <span class="note">Catalogue includes definitions, dependencies, outcomes and history</span></td><td class="v-part"><span class="mark part">◐</span> <span class="note">Fabric dbt jobs show run, test and lineage views; detailed logs and generated artifacts are in OneLake, not a comparable built-in SQL catalogue</span></td></tr>
                 <tr>
                   <th scope="row">Track where each table should resume loading</th>
                   <td class="v-yes">
@@ -239,15 +232,7 @@ weaver health                              <span class="c-dim"># Inspect the who
 <span class="mark part">◐</span> <span class="note">incremental models usually query the target</span>
 </td>
                 </tr>
-                <tr>
-                  <th scope="row">See what is up to date or needs attention</th>
-                  <td class="v-yes">
-<span class="mark yes">✓</span>
-</td>
-                  <td class="v-part">
-<span class="mark part">◐</span> <span class="note">source checks and run artifacts are separate</span>
-</td>
-                </tr>
+                <tr><th scope="row">Assess current, stale, failed and blocked work together</th><td class="v-yes"><span class="mark yes">✓</span> <span class="note">Health combines installed definitions, loads and validations</span></td><td class="v-part"><span class="mark part">◐</span> <span class="note">Fabric dbt jobs show run and test outcomes; no equivalent cross-workload Health report</span></td></tr>
                 <tr>
                   <th scope="row">Keep unrelated work running after a failure</th>
                   <td class="v-yes">
@@ -261,15 +246,7 @@ weaver health                              <span class="c-dim"># Inspect the who
                 <tr class="group">
 <th scope="row" colspan="3">Loading data</th>
 </tr>
-                <tr>
-                  <th scope="row">Identify inserts, updates and deletes before applying them</th>
-                  <td class="v-yes">
-<span class="mark yes">✓</span>
-</td>
-                  <td class="v-part">
-<span class="mark part">◐</span> <span class="note">depends on incremental strategy</span>
-</td>
-                </tr>
+                <tr><th scope="row">Support incremental changes from multiple sources, including inserts, updates and deletes</th><td class="v-yes"><span class="mark yes">✓</span> <span class="note">Custom Python or SQL chooses candidates and delete keys; Weaver handles staging, applying changes and per-consumer progress</span></td><td class="v-yes"><span class="mark yes">✓</span> <span class="note">Multi-source models, merge and delete strategies are available; exact behaviour depends on adapter and configuration</span></td></tr>
                 <tr>
                   <th scope="row">Reject invalid input rows and keep the reason</th>
                   <td class="v-yes">
@@ -288,6 +265,10 @@ weaver health                              <span class="c-dim"># Inspect the who
 <span class="mark no">✕</span> <span class="note">not a built-in model policy</span>
 </td>
                 </tr>
+<tr class="group"><th scope="row" colspan="3">Catalogue Dashboard and visual exploration</th></tr>
+<tr><th scope="row">Deploy a Power BI dashboard for Health, performance, Gantt and orchestration</th><td class="v-yes"><span class="mark yes">✓</span> <span class="note">Ready to deploy over queryable Catalogue tables</span></td><td class="v-part"><span class="mark part">◐</span> <span class="note">Fabric dbt jobs show run, test and lineage views, not a bundled Power BI estate dashboard</span></td></tr>
+<tr><th scope="row">Explore table relationships with an ER diagram</th><td class="v-yes"><span class="mark yes">✓</span> <span class="note">Uses declared Lakehouse and Warehouse primary/foreign keys</span></td><td class="v-part"><span class="mark part">◐</span> <span class="note">dbt provides lineage graphs; a key-based ER diagram is not a built-in Fabric dbt job view</span></td></tr>
+<tr><th scope="row">See fact/dimension relationships in a Power BI model bus matrix</th><td class="v-yes"><span class="mark yes">✓</span> <span class="note">Shows semantic-model table relationships and their properties</span></td><td class="v-no"><span class="mark no">✕</span> <span class="note">Not provided as a built-in Fabric dbt job view</span></td></tr>
 <tr class="group"><th scope="row" colspan="3">Power BI semantic models and Reports</th></tr><tr><th scope="row">Deploy native Power BI models and Reports</th><td class="v-yes"><span class="mark yes">✓</span></td><td class="v-no"><span class="mark no">✕</span><span class="note">not part of dbt-fabric deployment</span></td></tr><tr><th scope="row">Apply shared Power BI rules and reuse models</th><td class="v-yes"><span class="mark yes">✓</span></td><td class="v-no"><span class="mark no">✕</span><span class="note">dbt semantic models define its own metrics layer</span></td></tr><tr><th scope="row">Unit test DAX measures against SQL results</th><td class="v-yes"><span class="mark yes">✓</span></td><td class="v-no"><span class="mark no">✕</span><span class="note">not a dbt-fabric validation target</span></td></tr><tr><th scope="row">Refresh Power BI models after source data loads</th><td class="v-yes"><span class="mark yes">✓</span></td><td class="v-no"><span class="mark no">✕</span><span class="note">Power BI refresh is outside the adapter run</span></td></tr>              </tbody>
             </table>
           </div>
@@ -311,7 +292,7 @@ weaver health                              <span class="c-dim"># Inspect the who
             </a>
           </div>
           <p class="small muted">The Power BI comparison is about deploying and testing native PBIP/TMDL models and Reports. dbt's <a href="https://docs.getdbt.com/docs/platform-integrations/semantic-layer/power-bi">Power BI Semantic Layer integration</a> is a different workflow.</p>
-          <p class="small muted">Comparison sources: <a href="https://docs.getdbt.com/reference/resource-configs/fabric-configs">dbt-fabric</a>, <a href="https://docs.getdbt.com/reference/resource-configs/fabricspark-configs">dbt-fabricspark</a> and <a href="https://learn.microsoft.com/en-us/fabric/data-warehouse/identity">Microsoft Fabric</a> documentation.</p>
+          <p class="small muted">Comparison sources: <a href="https://learn.microsoft.com/en-us/fabric/data-factory/dbt-job-how-to">Fabric dbt job UI</a>, <a href="https://learn.microsoft.com/en-us/fabric/data-factory/dbt-job-onelake-logs">OneLake job logs</a>, <a href="https://learn.microsoft.com/en-us/fabric/data-engineering/sql-analytics-endpoint-metadata-sync">SQL endpoint metadata sync</a>, <a href="https://docs.getdbt.com/docs/build/incremental-models">dbt incremental models</a>, <a href="https://github.com/microsoft/dbt-fabric/blob/main/CHANGELOG.md">dbt-fabric changes</a>, <a href="https://github.com/microsoft/dbt-fabricspark">dbt-fabricspark</a> and <a href="https://docs.getdbt.com/docs/explore/explore-projects">dbt Catalog</a>.</p>
         </div>
       </section>
     </main>
