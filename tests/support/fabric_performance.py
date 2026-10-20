@@ -45,8 +45,10 @@ THRESHOLDS = {
     1_000: {
         WAREHOUSE: {"build": 420, "noop": 30, "wipe": 60, "mirror": 105},
         # The Build completes once its endpoint refreshes are current, about
-        # 140s after publication.
-        LAKEHOUSE: {"build": 540, "noop": 45, "wipe": 60, "mirror": 270},
+        # 140s after publication. A Mirror publishes its catalogue once each
+        # reconstructed endpoint's refresh is current, about 200s; it measured
+        # 384s on 18 October 2026.
+        LAKEHOUSE: {"build": 540, "noop": 45, "wipe": 60, "mirror": 480},
     },
 }
 
