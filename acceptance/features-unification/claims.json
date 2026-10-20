@@ -640,28 +640,6 @@
     ]
   },
   {
-    "id": "mirror",
-    "group": 5,
-    "title": "Mirror: develop without copying everything",
-    "brief_copy": "Borrow installed Lakehouse/Warehouse data through OneLake shortcuts and Warehouse Views; materialise changed work locally.",
-    "urls": [
-      "https://docs.weaverstack.dev/estate/mirror/"
-    ],
-    "sources": [
-      "docs/estate/mirror.md"
-    ],
-    "description": "Borrow installed Lakehouse/Warehouse data through Shortcuts and Views, then materialise selected changed or affected work locally.",
-    "qualification": "",
-    "evidence": [
-      {
-        "repository": "matthias-wong-dev/weaverstack-docs",
-        "revision": "df5e266ffe5c6b893ef7a6291ba7b23ab0ed2b45",
-        "path": "docs/estate/mirror.md",
-        "sha256": "5168b9e9d0f6e57f061e8cc614fe4f4be1804fd7be4093053df7f0e2ab80951d"
-      }
-    ]
-  },
-  {
     "id": "incremental-build",
     "group": 5,
     "title": "Incremental Build",

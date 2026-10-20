@@ -20,7 +20,7 @@
 <link rel="icon" type="image/png" href="/favicon.png">
 <link rel="manifest" href="/site.webmanifest">
 <link rel="sitemap" type="application/xml" href="/sitemap.xml">
-<link rel="stylesheet" href="/assets/site.css?v=2cc8d84c4f">
+<link rel="stylesheet" href="/assets/site.css?v=5d47c0a6f1">
 <meta property="og:image:type" content="image/png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
@@ -41,7 +41,6 @@
 <a href="/features/" aria-current="page">Features</a>
 <a href="/how-it-works/">How it works</a>
 <a href="/get-started/">Get started</a>
-<a href="/scale/">Built for scale</a>
 <a href="/vs-dbt/">Weaver vs dbt</a>
 <a href="/story/">The story</a>
 <a href="https://docs.weaverstack.dev/">Documentation</a>
@@ -54,7 +53,7 @@
 <section class="page-head"><div class="wrap">
 <h1>Engineering across the Fabric estate.</h1>
 <p class="lead">Explore how Weaver handles Lakehouse pipelines, Warehouse SQL, native Power BI and the operational work that connects them.</p>
-<nav class="feature-jumps" aria-label="Feature sections"><a href="#start-simple">Start simple</a><a href="#data-engineering">Data engineering</a><a href="#power-bi">Power BI</a><a href="#operations">Operations</a><a href="#visibility">Dashboard</a><a href="#advanced">Advanced</a></nav>
+<nav class="feature-jumps" aria-label="Feature sections"><a href="#start-simple">Start simple</a><a href="#data-engineering">Data engineering</a><a href="#power-bi">Power BI</a><a href="#operations">Operations</a><a href="#scale">Scale</a><a href="#visibility">Dashboard</a><a href="#advanced">Advanced</a></nav>
 </div></section>
 <section class="section feature-group" id="start-simple" data-feature-group="1"><div class="wrap"><h2>Start with what you know</h2>
 <div class="feature-list">
@@ -128,6 +127,20 @@
 <div class="feature-row" data-feature="workflows"><h3><a href="https://docs.weaverstack.dev/estate/automation-and-deployment/">Sessions and workflows</a></h3><p>Reuse execution context and automate sequences of the same operations used interactively.</p></div>
 </div>
 <p class="group-docs"><a href="https://docs.weaverstack.dev/estate/operate/">Run and inspect an estate</a><span aria-hidden="true"> · </span><a href="https://docs.weaverstack.dev/reference/operation-behaviour/">Operation boundaries</a></p></div></section>
+<section class="section feature-group" id="scale" data-feature-group="7"><div class="wrap"><h2>Built for scale</h2>
+<figure class="feature-spotlight scale-spotlight" data-spotlight="scale" aria-labelledby="scale-title">
+<h3 id="scale-title">From 3 to 3,000.</h3>
+<ol class="scale-flow"><li><b>3</b><strong>Easy to keep in your head.</strong></li><li><b>30</b><strong>It’s hard to keep track.</strong></li><li><b>300</b><strong>It’s no longer whether you use a framework, but which one.</strong></li><li><b>3,000</b><strong>Scheduling and recovery decide everything.</strong></li></ol>
+<figcaption>Weaver has been intensely tuned for estates of thousands of objects. From Spark concurrency, to incremental bookmarks, to asynchronous SQL endpoint refresh, it implements the complex machinery so your pipeline can keep growing.</figcaption>
+</figure>
+<div class="feature-list">
+<div class="feature-row"><h3>Tuned for each engine</h3><p>From Delta reads and writes to transactions, T-SQL and Shortcut creation, each operation is tuned for its engine to eliminate waste.</p></div>
+<div class="feature-row"><h3>Concurrency across the estate</h3><p>Independent Spark and Warehouse work runs together within limits you set, and the work that unlocks the rest of the graph goes first.</p></div>
+<div class="feature-row"><h3>Incremental is first class</h3><p>A bookmark for each object supports genuine incremental load: upserts, deletes and skips in complex transform code, not just the textbook simple cases.</p></div>
+<div class="feature-row"><h3>SQL endpoints refreshed as needed</h3><p>A refresh runs in the background, and only the consumers that need the new state wait for it.</p></div>
+</div>
+<p class="group-docs">Stress tested on an estate of 3,000 objects.<span aria-hidden="true"> · </span><a href="https://github.com/matthias-wong-dev/weaverstack/tree/main/examples/stress">See how it was tested</a><span aria-hidden="true"> · </span><a href="/get-started/">Get started</a></p>
+</div></section>
 <section class="section feature-group" id="visibility" data-feature-group="5"><div class="wrap"><h2>Visibility, included</h2>
 <p class="group-lead">Weaver comes with a Power BI dashboard over the catalogue. One command deploys it beside your estate.</p>
 <figure class="feature-spotlight dashboard-spotlight" data-spotlight="catalogue-dashboard" aria-labelledby="dashboard-title">
@@ -144,7 +157,6 @@
 <section class="section feature-group" id="advanced" data-feature-group="6"><div class="wrap"><h2>When your estate gets complicated</h2>
 <div class="feature-list">
 <div class="feature-row" data-feature="environments"><h3><a href="https://docs.weaverstack.dev/estate/environments/">One project, multiple environments</a></h3><p>Keep source files and logical identities while workspace configuration selects physical item and model destinations.</p></div>
-<div class="feature-row" data-feature="mirror"><h3><a href="https://docs.weaverstack.dev/estate/mirror/">Mirror: develop without copying everything</a></h3><p>Borrow installed Lakehouse/Warehouse data through Shortcuts and Views, then materialise selected changed or affected work locally.</p></div>
 <div class="feature-row" data-feature="incremental-build"><h3><a href="https://docs.weaverstack.dev/advanced/incremental-build-selection/">Incremental Build</a></h3><p>Reconcile changed source-data definitions and affected selected descendants, retaining certified unchanged source work.</p></div>
 <div class="feature-row" data-feature="build-preview"><h3><a href="https://docs.weaverstack.dev/estate/development-cycle/">Build previews</a></h3><p>Inspect selected actions, physical targets and destructive effects through a read-only Build plan.</p></div>
 <div class="feature-row" data-feature="bundles"><h3><a href="https://docs.weaverstack.dev/advanced/build-bundles-and-controlled-installation/">Controlled deployment bundles</a></h3><p>Review and hand off frozen, destination-specific installation plans without replanning during Install.</p></div>
@@ -152,15 +164,11 @@
 <div class="feature-row" data-feature="data-protection"><h3><a href="https://docs.weaverstack.dev/advanced/protecting-data/">Protect important data</a></h3><p>Keep irreplaceable sources outside managed targets and use Build replacement guards for protected owned objects.</p></div>
 </div>
 <figure class="feature-spotlight mirror-spotlight" data-spotlight="mirror" aria-labelledby="mirror-title">
-<h3 id="mirror-title">Develop against a large estate without copying it first.</h3>
+<h3 id="mirror-title">Fork your data, not just your code.</h3>
 <ol class="mirror-flow"><li><strong>Existing source estate</strong><span>Source-owned data</span></li><li><strong>Borrowed development data</strong><span>Warehouse Views · Lakehouse Shortcuts</span></li><li><strong>Selected changed work</strong><span>Materialised locally by Build</span></li></ol>
-<figcaption>Keep unchanged objects borrowed while selected changed or affected work becomes local.</figcaption>
+<figcaption>Mirror lets you make targeted development changes against your full data, without loading your estate from scratch.</figcaption>
 <p class="spotlight-docs"><a href="https://docs.weaverstack.dev/estate/mirror/">Develop using Mirror</a><span aria-hidden="true"> · </span><a href="https://docs.weaverstack.dev/reference/operation-behaviour/mirror/">Scope and reset boundaries</a></p>
-</figure></div></section>
-<section class="section feature-scale"><div class="wrap"><h2>From three objects to three thousand.</h2>
-<p>The scale benchmark records first-load and incremental processing separately. In the synthetic F64 benchmark, the 3,000-object estate’s first Load took about an hour; later measured incrementals were around 13 minutes. The first incremental day took about 19 minutes.</p>
-<div class="actions"><a class="button blue" href="/scale/">Built for scale →</a><a class="button ghost" href="/get-started/">Get started →</a></div>
-</div></section></main>
+</figure></div></section></main>
 <footer class="site-footer">
 <div class="wrap footer-grid">
 <div class="footer-note">
@@ -184,7 +192,6 @@
 <a href="/get-started/">Get started</a>
 </li>
 <li>
-<a href="/scale/">Built for scale</a>
 </li>
 <li>
 <a href="/vs-dbt/">Weaver vs dbt</a>
