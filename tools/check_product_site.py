@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
@@ -81,6 +83,45 @@ def with_class(root, name):
     return [n for n in root.descendants() if name in n.attrs.get("class", "").split()]
 
 
+SHARED_ASSETS = ("site.css", "site.js")
+ASSET_LINK = re.compile(
+    r'((?:href|src)="(?:\.\./|/)assets/(site\.(?:css|js)))(?:\?v=[0-9a-f]+)?"'
+)
+
+
+def asset_version(root, name):
+    """Names the content of a shared asset, so a browser holding an older copy
+    fetches the new one with the HTML that needs it."""
+
+    return hashlib.sha256((root / "assets" / name).read_bytes()).hexdigest()[:10]
+
+
+def stamp_assets(root):
+    """Write each shared asset's version into every page that links it."""
+
+    for file in sorted(root.rglob("*.html")):
+        text = file.read_text()
+        stamped = ASSET_LINK.sub(
+            lambda m: f'{m.group(1)}?v={asset_version(root, m.group(2))}"', text
+        )
+        if stamped != text:
+            file.write_text(stamped)
+
+
+def check_asset_versions(root):
+    stale = [
+        str(file.relative_to(root))
+        for file in sorted(root.rglob("*.html"))
+        for m in ASSET_LINK.finditer(file.read_text())
+        if f'{m.group(1)}?v={asset_version(root, m.group(2))}"' != m.group(0)
+    ]
+    assert not stale, (
+        "Shared stylesheet or script link is not versioned to its content, so a "
+        "cached copy would style new pages. Run check_product_site.py --stamp: "
+        + ", ".join(stale)
+    )
+
+
 def route_file(root, path):
     candidate = root / unquote(path).lstrip("/")
     return candidate / "index.html" if path.endswith("/") else candidate
@@ -93,6 +134,7 @@ def run(root: Path, developer_site: Path | None):
         ("Semantic Models", "/semantic-models/"),
         ("Reports", "/reports/"),
     ]
+    check_asset_versions(root)
     routes, titles, descriptions = set(), set(), set()
     forwarding = {}
     primary_links = None
@@ -197,7 +239,8 @@ def run(root: Path, developer_site: Path | None):
         scripts = [
             n
             for n in doc.descendants("script")
-            if n.attrs.get("src") and n.attrs["src"].endswith("assets/site.js")
+            if n.attrs.get("src")
+            and n.attrs["src"].split("?")[0].endswith("assets/site.js")
         ]
         one(scripts, f"{route} shared analytics/navigation asset")
         social = {
@@ -435,7 +478,14 @@ def main():
         "--site", type=Path, default=Path(__file__).resolve().parents[1] / "docs"
     )
     parser.add_argument("--developer-site", type=Path)
+    parser.add_argument(
+        "--stamp",
+        action="store_true",
+        help="Version the shared stylesheet and script links to their content.",
+    )
     args = parser.parse_args()
+    if args.stamp:
+        stamp_assets(args.site.resolve())
     run(
         args.site.resolve(),
         args.developer_site.resolve() if args.developer_site else None,

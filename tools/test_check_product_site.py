@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from check_product_site import run
+from check_product_site import run, stamp_assets
 
 ROOT = Path(__file__).resolve().parents[1] / "docs"
 
@@ -30,6 +30,14 @@ class ProductMigration(unittest.TestCase):
         path.write_text(text.replace(old, new, 1))
 
     def test_accepts_canonical_pages_and_noindex_pointers(self):
+        self.check()
+
+    def test_rejects_a_stylesheet_link_not_versioned_to_its_content(self):
+        css = self.site / "assets" / "site.css"
+        css.write_text(css.read_text() + "\n.changed { color: red; }\n")
+        with self.assertRaisesRegex(AssertionError, "not versioned"):
+            self.check()
+        stamp_assets(self.site)
         self.check()
 
     def test_rejects_the_retired_feature_dropdown(self):
