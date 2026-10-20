@@ -514,6 +514,15 @@ table.matrix .note code { padding: 1px 4px; font-size: 12px; }
 
 
 /* --- Homepage: people making Fabric work ------------------------------- */
+.homepage #who-its-for { padding-bottom: 80px; }
+.homepage .weaver-promise { padding-top: 78px; }
+.homepage .persona-intro {
+  max-width: var(--measure);
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 18px;
+  line-height: 1.6;
+}
 .homepage .persona-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -521,7 +530,7 @@ table.matrix .note code { padding: 1px 4px; font-size: 12px; }
   margin: 30px 0 6px;
   align-items: stretch;
 }
-.homepage .persona-card { min-width: 0; display: flex; flex-direction: column; gap: 14px; }
+.homepage .persona-card { min-width: 0; display: flex; flex-direction: column; gap: 16px; }
 .homepage .persona-card h3 {
   margin: 0; font-size: 17px; font-weight: 700; color: var(--muted);
 }
@@ -529,7 +538,7 @@ table.matrix .note code { padding: 1px 4px; font-size: 12px; }
   position: relative;
   flex: 1;
   margin: 0 0 10px;
-  padding: 23px 22px;
+  padding: 27px 26px;
   border: 1px solid var(--line);
   border-radius: 14px;
   background: var(--white);
@@ -552,17 +561,17 @@ table.matrix .note code { padding: 1px 4px; font-size: 12px; }
   font-weight: 620;
   letter-spacing: -.018em;
 }
+.homepage .persona-context {
+  margin: 0;
+  max-width: none;
+  color: var(--muted);
+  font-size: 15.5px;
+  line-height: 1.65;
+}
 .homepage .persona-lead .persona-speech { border-color: var(--line-strong); }
 .homepage .persona-lead .persona-speech::after {
   border-left-color: var(--line-strong);
   border-bottom-color: var(--line-strong);
-}
-.homepage .weaver-promise .promise-label {
-  margin: 0 0 13px;
-  color: var(--blue-dark);
-  font: 700 12px/1.4 var(--mono);
-  letter-spacing: .075em;
-  text-transform: uppercase;
 }
 .homepage .weaver-promise h2 { max-width: 27ch; }
 .homepage .weaver-promise .promise-lead {
@@ -574,7 +583,7 @@ table.matrix .note code { padding: 1px 4px; font-size: 12px; }
 .homepage .weaver-promise .promise-note { color: var(--muted); font-size: 14px; }
 .homepage .weaver-promise .button { margin-top: 12px; }
 @media (max-width: 900px) {
-  .homepage .persona-grid { grid-template-columns: 1fr; gap: 18px; }
+  .homepage .persona-grid { grid-template-columns: 1fr; gap: 30px; }
   .homepage .persona-speech p { font-size: 20px; }
 }
 
