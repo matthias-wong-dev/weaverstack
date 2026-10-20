@@ -122,6 +122,10 @@ def check_asset_versions(root):
     )
 
 
+# Routes that stay as one pointer page each, to where their content now lives.
+RETIRED_PAGES = {"/scale/": "https://weaverstack.dev/features/#scale"}
+
+
 def route_file(root, path):
     candidate = root / unquote(path).lstrip("/")
     return candidate / "index.html" if path.endswith("/") else candidate
@@ -135,6 +139,10 @@ def run(root: Path, developer_site: Path | None):
         ("Reports", "/reports/"),
     ]
     check_asset_versions(root)
+    pointers = {
+        route: "https://docs.weaverstack.dev" + route for _, route in expected_features
+    }
+    pointers.update(RETIRED_PAGES)
     routes, titles, descriptions = set(), set(), set()
     forwarding = {}
     primary_links = None
@@ -150,8 +158,8 @@ def run(root: Path, developer_site: Path | None):
     for file in sorted(root.rglob("index.html")):
         route = "/" + str(file.relative_to(root)).removesuffix("index.html")
         doc = Document(file.read_text()).root
-        if route in {x[1] for x in expected_features}:
-            destination = "https://docs.weaverstack.dev" + route
+        if route in pointers:
+            destination = pointers[route]
             canonical = one(
                 [
                     n
@@ -160,17 +168,17 @@ def run(root: Path, developer_site: Path | None):
                 ],
                 f"{route} shim canonical",
             )
-            assert canonical.attrs.get("href") == destination
+            assert canonical.attrs.get("href") == destination.split("#")[0]
             robots = one(
                 [n for n in doc.descendants("meta") if n.attrs.get("name") == "robots"],
                 f"{route} shim robots",
             )
             assert "noindex" in robots.attrs.get("content", "").split(",")
-            pointers = [
+            forward = [
                 n for n in doc.descendants("a") if "data-forward-destination" in n.attrs
             ]
             assert (
-                one(pointers, f"{route} visible pointer").attrs.get("href")
+                one(forward, f"{route} visible pointer").attrs.get("href")
                 == destination
             )
             assert not list(doc.descendants("header")), (
@@ -255,10 +263,7 @@ def run(root: Path, developer_site: Path | None):
         ), f"{route}: missing social image"
         assert social.get("twitter:card") == "summary_large_image"
         assert social.get("twitter:title") and social.get("twitter:description")
-        assert primary.count("/scale/") == 1, f"{route}: scale not independent"
-        assert not ({x[1] for x in expected_features} & set(primary)), (
-            f"{route}: item as top-level tab"
-        )
+        assert not (set(pointers) & set(primary)), f"{route}: item as top-level tab"
         footer = one(list(doc.descendants("footer")), f"{route} footer")
         current = [(n.content(), n.attrs["href"]) for n in footer.descendants("a")]
         if footer_links is None:
@@ -286,7 +291,7 @@ def run(root: Path, developer_site: Path | None):
                 continue
             if url.netloc != "weaverstack.dev":
                 continue
-            assert url.path not in {x[1] for x in expected_features}, (
+            assert url.path not in pointers, (
                 f"{route}: stale retired product link {href}"
             )
             target = route_file(root, url.path)
@@ -432,24 +437,6 @@ def run(root: Path, developer_site: Path | None):
         assert (
             fact["display"] == f"{fact['seconds'] // 60}m {fact['seconds'] % 60:02d}s"
         )
-    scale = one(list(documents["/scale/"].descendants("main")), "scale main")
-    results = {
-        n.attrs["data-scale-result"]: n.content()
-        for n in scale.descendants()
-        if "data-scale-result" in n.attrs
-    }
-    assert set(results) == {"first-load", "incremental"}
-    operations = {entry["id"]: entry for entry in data["operations"]}
-    measured = [n for n in scale.descendants() if "data-benchmark-operation" in n.attrs]
-    covered = set()
-    for node in measured:
-        ids = node.attrs["data-benchmark-operation"].split()
-        seconds = [int(value) for value in node.attrs["data-benchmark-seconds"].split()]
-        assert seconds == [operations[key]["seconds"] for key in ids]
-        covered.update(ids)
-    assert {"first-load", "day-1", "day-2", "day-3"} <= covered
-    assert "F64" in scale.content() and "synthetic" in scale.content().lower()
-    assert not any("/pull/" in n.attrs.get("href", "") for n in scale.descendants("a"))
     print(
         json.dumps(
             {
@@ -460,7 +447,6 @@ def run(root: Path, developer_site: Path | None):
                 "shared_navigation_and_footer": "pass",
                 "local_links_fragments_and_metadata": "pass",
                 "benchmark_operations_checked": len(data["operations"]),
-                "rounded_public_scale_results": "pass",
                 "developer_destinations": sorted(docs_links),
                 "developer_link_state": "staged files checked"
                 if developer_site

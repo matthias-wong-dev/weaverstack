@@ -40,6 +40,21 @@ class ProductMigration(unittest.TestCase):
         stamp_assets(self.site)
         self.check()
 
+    def test_rejects_a_link_to_the_retired_scale_page(self):
+        self.mutate(
+            "features",
+            "<h2>Built for scale</h2>",
+            '<h2>Built for scale</h2><a href="/scale/">old</a>',
+        )
+        with self.assertRaisesRegex(AssertionError, "stale retired product link"):
+            self.check()
+
+    def test_rejects_a_scale_pointer_that_is_a_full_page(self):
+        path = self.site / "scale" / "index.html"
+        path.write_text(path.read_text().replace("<main", "<header></header><main", 1))
+        with self.assertRaisesRegex(AssertionError, "full product page retained"):
+            self.check()
+
     def test_rejects_the_retired_feature_dropdown(self):
         self.mutate(
             "features",
