@@ -20,7 +20,7 @@
 <link rel="icon" type="image/png" href="/favicon.png">
 <link rel="manifest" href="/site.webmanifest">
 <link rel="sitemap" type="application/xml" href="/sitemap.xml">
-<link rel="stylesheet" href="/assets/site.css?v=2cc8d84c4f">
+<link rel="stylesheet" href="/assets/site.css?v=46ad60e29d">
 <meta property="og:image:type" content="image/png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
@@ -54,7 +54,7 @@
 <section class="page-head"><div class="wrap">
 <h1>Engineering across the Fabric estate.</h1>
 <p class="lead">Explore how Weaver handles Lakehouse pipelines, Warehouse SQL, native Power BI and the operational work that connects them.</p>
-<nav class="feature-jumps" aria-label="Feature sections"><a href="#start-simple">Start simple</a><a href="#data-engineering">Data engineering</a><a href="#power-bi">Power BI</a><a href="#operations">Operations</a><a href="#visibility">Dashboard</a><a href="#advanced">Advanced</a></nav>
+<nav class="feature-jumps" aria-label="Feature sections"><a href="#start-simple">Start simple</a><a href="#data-engineering">Data engineering</a><a href="#power-bi">Power BI</a><a href="#operations">Operations</a><a href="#scale">Scale</a><a href="#visibility">Dashboard</a><a href="#advanced">Advanced</a></nav>
 </div></section>
 <section class="section feature-group" id="start-simple" data-feature-group="1"><div class="wrap"><h2>Start with what you know</h2>
 <div class="feature-list">
@@ -128,6 +128,11 @@
 <div class="feature-row" data-feature="workflows"><h3><a href="https://docs.weaverstack.dev/estate/automation-and-deployment/">Sessions and workflows</a></h3><p>Reuse execution context and automate sequences of the same operations used interactively.</p></div>
 </div>
 <p class="group-docs"><a href="https://docs.weaverstack.dev/estate/operate/">Run and inspect an estate</a><span aria-hidden="true"> · </span><a href="https://docs.weaverstack.dev/reference/operation-behaviour/">Operation boundaries</a></p></div></section>
+<section class="section feature-group" id="scale" data-feature-group="7"><div class="wrap"><h2>Built for scale</h2>
+<h3 class="scale-title">From 3 to 3,000.</h3>
+<p class="group-lead">When your estate has 30 objects, it’s hard to keep track. When it has 300, it’s no longer whether you use a framework, but which one.</p>
+<p class="group-lead">Weaver has been stress tested on an estate of 3,000 objects. From Spark concurrency, to incremental bookmarks, to asynchronous SQL endpoint refresh, it implements the complex machinery so your pipeline can keep growing.</p>
+<p class="group-docs"><a href="/scale/">See how it was tested</a><span aria-hidden="true"> · </span><a href="/get-started/">Get started</a></p></div></section>
 <section class="section feature-group" id="visibility" data-feature-group="5"><div class="wrap"><h2>Visibility, included</h2>
 <p class="group-lead">Weaver comes with a Power BI dashboard over the catalogue. One command deploys it beside your estate.</p>
 <figure class="feature-spotlight dashboard-spotlight" data-spotlight="catalogue-dashboard" aria-labelledby="dashboard-title">
@@ -156,12 +161,7 @@
 <ol class="mirror-flow"><li><strong>Existing source estate</strong><span>Source-owned data</span></li><li><strong>Borrowed development data</strong><span>Warehouse Views · Lakehouse Shortcuts</span></li><li><strong>Selected changed work</strong><span>Materialised locally by Build</span></li></ol>
 <figcaption>Keep unchanged objects borrowed while selected changed or affected work becomes local.</figcaption>
 <p class="spotlight-docs"><a href="https://docs.weaverstack.dev/estate/mirror/">Develop using Mirror</a><span aria-hidden="true"> · </span><a href="https://docs.weaverstack.dev/reference/operation-behaviour/mirror/">Scope and reset boundaries</a></p>
-</figure></div></section>
-<section class="section feature-scale"><div class="wrap"><h2>From 3 to 3,000.</h2>
-<p>When your estate has 30 objects, it’s hard to keep track. When it has 300, it’s no longer whether you use a framework, but which one.</p>
-<p>Weaver has been stress tested on an estate of 3,000 objects. From Spark concurrency, to incremental bookmarks, to asynchronous SQL endpoint refresh, it implements the complex machinery so your pipeline can keep growing.</p>
-<div class="actions"><a class="button blue" href="/scale/">See how it was tested →</a><a class="button ghost" href="/get-started/">Get started →</a></div>
-</div></section></main>
+</figure></div></section></main>
 <footer class="site-footer">
 <div class="wrap footer-grid">
 <div class="footer-note">
