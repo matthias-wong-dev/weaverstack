@@ -687,3 +687,29 @@ table.matrix .note code { padding: 1px 4px; font-size: 12px; }
 @media (max-width: 720px) {
   .dbt-dashboard-gallery { grid-template-columns: 1fr; gap: 25px; }
 }
+
+
+/* --- Comparison-page: what dbt shows versus Weaver's project view ----- */
+.dbt-visibility-contrast {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 26px;
+  margin: 24px 0 30px;
+}
+.dbt-visibility-contrast > div {
+  min-width: 0;
+  padding-top: 15px;
+  border-top: 2px solid var(--line-strong);
+}
+.dbt-visibility-contrast > div:last-child { border-top-color: var(--blue); }
+.dbt-visibility-contrast h3 { margin: 0 0 10px; font-size: 19px; }
+.dbt-visibility-contrast p {
+  margin: 0;
+  max-width: none;
+  color: var(--ink-soft);
+  font-size: 15.5px;
+  line-height: 1.65;
+}
+@media (max-width: 720px) {
+  .dbt-visibility-contrast { grid-template-columns: 1fr; gap: 25px; }
+}
