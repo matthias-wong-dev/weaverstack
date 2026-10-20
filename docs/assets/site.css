@@ -513,18 +513,72 @@ table.matrix .note code { padding: 1px 4px; font-size: 12px; }
 .features-showcase .policy-tree i { font-style: normal; color: var(--blue-dark); }
 
 
-/* --- Product-page examples: recognizable problems and real commands ---- */
-.homepage .problem-stage {
-  margin: 0 0 11px;
+/* --- Homepage: people making Fabric work ------------------------------- */
+.homepage .persona-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 20px;
+  margin: 30px 0 6px;
+  align-items: stretch;
+}
+.homepage .persona-card { min-width: 0; display: flex; flex-direction: column; gap: 14px; }
+.homepage .persona-card h3 {
+  margin: 0; font-size: 17px; font-weight: 700; color: var(--muted);
+}
+.homepage .persona-speech {
+  position: relative;
+  flex: 1;
+  margin: 0 0 10px;
+  padding: 23px 22px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--white);
+}
+.homepage .persona-speech::after {
+  content: "";
+  position: absolute;
+  bottom: -8px; left: 24px;
+  width: 14px; height: 14px;
+  background: var(--white);
+  border-left: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  transform: rotate(-45deg);
+}
+.homepage .persona-speech p {
+  margin: 0; max-width: none;
+  color: var(--ink);
+  font-size: clamp(18px, 1.8vw, 22px);
+  line-height: 1.42;
+  font-weight: 620;
+  letter-spacing: -.018em;
+}
+.homepage .persona-lead .persona-speech { border-color: var(--line-strong); }
+.homepage .persona-lead .persona-speech::after {
+  border-left-color: var(--line-strong);
+  border-bottom-color: var(--line-strong);
+}
+.homepage .weaver-promise .promise-label {
+  margin: 0 0 13px;
   color: var(--blue-dark);
   font: 700 12px/1.4 var(--mono);
-  letter-spacing: .035em;
+  letter-spacing: .075em;
+  text-transform: uppercase;
 }
-.homepage #why-weaver .card { display: flex; flex-direction: column; gap: 10px; }
-.homepage #why-weaver .card h3 { margin: 0; line-height: 1.35; font-size: 19px; }
-.homepage #why-weaver .card p { margin: 0; }
-.homepage #why-weaver .card p:last-child { margin-top: auto; padding-top: 8px; }
+.homepage .weaver-promise h2 { max-width: 27ch; }
+.homepage .weaver-promise .promise-lead {
+  max-width: var(--measure);
+  color: var(--ink);
+  font-size: 20px;
+  line-height: 1.55;
+}
+.homepage .weaver-promise .promise-note { color: var(--muted); font-size: 14px; }
+.homepage .weaver-promise .button { margin-top: 12px; }
+@media (max-width: 900px) {
+  .homepage .persona-grid { grid-template-columns: 1fr; gap: 18px; }
+  .homepage .persona-speech p { font-size: 20px; }
+}
 
+/* --- Product-page examples: real commands ------------------------------ */
 .features-showcase .command-spotlight {
   padding: 26px 28px;
   border-radius: var(--radius);
