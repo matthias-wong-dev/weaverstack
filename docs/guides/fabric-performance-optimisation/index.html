@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="en-AU">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#f7f7f6">
+<title>Performance Engineering on Microsoft Fabric: 3,000 objects and 4 billion rows</title>
+<meta name="description" content="Lessons from stress-testing a 3,000-object Microsoft Fabric data pipeline processing approximately 4 billion rows on an F64 capacity.">
+<meta name="robots" content="index, follow, max-image-preview:large">
+<link rel="canonical" href="https://weaverstack.dev/guides/fabric-performance-optimisation/">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://weaverstack.dev/guides/fabric-performance-optimisation/">
+<meta property="og:site_name" content="Weaver">
+<meta property="og:title" content="Microsoft Fabric performance optimisation at 3,000 objects">
+<meta property="og:description" content="A measured F64 guide to high-performance Fabric engineering, parallel execution and incremental loads across Spark and Warehouses.">
+<meta property="og:image" content="https://weaverstack.dev/og.png">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Weaver performance evidence from a 3,000-object Microsoft Fabric estate.">
+<meta property="og:locale" content="en_AU">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Microsoft Fabric performance optimisation at 3,000 objects">
+<meta name="twitter:description" content="A measured F64 guide to high-performance Fabric engineering, parallel execution and incremental loads across Spark and Warehouses.">
+<meta name="twitter:image" content="https://weaverstack.dev/og.png">
+<meta name="twitter:image:alt" content="Weaver performance evidence from a 3,000-object Microsoft Fabric estate.">
+<link rel="icon" type="image/png" href="/favicon.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="manifest" href="/site.webmanifest">
+<link rel="sitemap" type="application/xml" href="/sitemap.xml">
+<link rel="stylesheet" href="/assets/site.css?v=5d47c0a6f1">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "TechArticle",
+      "headline": "Microsoft Fabric performance optimisation at 3,000 objects",
+      "description": "A measured F64 guide to high-performance Fabric engineering, parallel execution and incremental loads across Spark and Warehouses.",
+      "url": "https://weaverstack.dev/guides/fabric-performance-optimisation/",
+      "inLanguage": "en-AU",
+      "author": {"@type": "Organization", "name": "Weaver contributors"},
+      "publisher": {"@type": "Organization", "name": "Weaver", "url": "https://weaverstack.dev/"},
+      "isPartOf": {"@type": "CollectionPage", "name": "Fabric Engineering Guides", "url": "https://weaverstack.dev/guides/"},
+      "about": ["Microsoft Fabric performance optimisation", "Microsoft Fabric high performance", "Fabric parallel load", "Microsoft Fabric incremental load"]
+    },
+    {
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        {"@type": "ListItem", "position": 1, "name": "Home", "item": "https://weaverstack.dev/"},
+        {"@type": "ListItem", "position": 2, "name": "Fabric Engineering Guides", "item": "https://weaverstack.dev/guides/"},
+        {"@type": "ListItem", "position": 3, "name": "Fabric performance optimisation", "item": "https://weaverstack.dev/guides/fabric-performance-optimisation/"}
+      ]
+    }
+  ]
+}
+</script>
+<style>
+.guide-article .page-head { padding-bottom: 30px; }
+.guide-article .page-head h1 { max-width: 24ch; font-size: clamp(36px, 4.7vw, 54px); }
+.guide-article .article-meta { margin: 18px 0 0; color: var(--muted); font: 13px var(--mono); }
+.article-layout { display: grid; grid-template-columns: minmax(0, 1fr) 250px; gap: 56px; align-items: start; }
+.article-body { min-width: 0; }
+.article-body > p, .article-body > ul, .article-body > ol { max-width: 74ch; }
+.article-body h2 { margin-top: 62px; padding-top: 26px; border-top: 1px solid var(--line); }
+.article-body h2:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
+.article-body h3 { margin-top: 38px; }
+.article-nav { position: sticky; top: 92px; padding: 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--white); }
+.article-nav strong { display: block; margin-bottom: 10px; }
+.article-nav ol { margin: 0; padding-left: 20px; }
+.article-nav li { margin: 7px 0; font-size: 14px; }
+.table-scroll { max-width: 100%; margin: 24px 0 30px; overflow-x: auto; }
+table.benchmark { width: 100%; border-collapse: collapse; background: var(--white); }
+table.benchmark th, table.benchmark td { padding: 11px 13px; border: 1px solid var(--line); text-align: left; vertical-align: top; }
+table.benchmark th { color: var(--ink); background: var(--paper-deep); }
+.result-chart { margin: 30px 0 38px; padding: 22px 0 18px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.result-chart h3 { margin: 0 0 6px; font-size: 18px; }
+.result-chart-legend { display: flex; gap: 18px; margin: 0 0 20px; color: var(--muted); font: 12px var(--mono); }
+.result-chart-legend span { display: inline-flex; align-items: center; gap: 7px; }
+.result-chart-legend i { display: inline-block; width: 22px; height: 7px; background: var(--blue); }
+.result-chart-legend .baseline-key { height: 7px; border: 1px solid var(--line-strong); background: var(--paper-deep); }
+.result-chart-row { display: grid; grid-template-columns: 104px minmax(180px, 1fr) 82px; gap: 14px; align-items: center; margin: 14px 0; }
+.result-chart-row strong { font-size: 13px; }
+.result-chart-row > span { color: var(--ink-soft); font: 12px var(--mono); text-align: right; }
+.result-chart-bars { display: grid; gap: 4px; }
+.result-chart-bar { display: block; min-width: 3px; height: 8px; background: var(--blue); }
+.result-chart-bar.baseline { height: 7px; border: 1px solid var(--line-strong); background: var(--paper-deep); }
+.result-chart figcaption { margin-top: 16px; color: var(--muted); font-size: 13px; }
+@media (max-width: 900px) { .article-layout { grid-template-columns: 1fr; } .article-nav { position: static; order: -1; } }
+@media (max-width: 560px) { .result-chart-row { grid-template-columns: 78px minmax(110px, 1fr) 70px; gap: 9px; } }
+</style>
+</head>
+<body class="guide-article">
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="site-header"><nav class="nav wrap" aria-label="Primary">
+<a class="brand" href="/" aria-label="Weaver home"><img class="weaver-mark" src="/assets/brand/weaver-mark-light-134.png" width="30" height="17" alt="" aria-hidden="true">Weaver</a>
+<button class="nav-toggle" type="button" aria-expanded="false" aria-controls="nav-links" hidden>Menu</button>
+<div class="nav-links" id="nav-links"><a href="/features/">Features</a><a href="/how-it-works/">How it works</a><a href="/get-started/">Get started</a><a href="/vs-dbt/">Weaver vs dbt</a><a href="/story/">The story</a><a href="/guides/" aria-current="page">Fabric resources</a><a href="https://docs.weaverstack.dev/">Documentation</a><a class="button small" href="https://github.com/matthias-wong-dev/weaverstack">GitHub <span class="arrow" aria-hidden="true">↗</span></a></div>
+</nav></header>
+<main id="main">
+<section class="page-head"><div class="wrap">
+<p class="eyebrow"><a href="/guides/">Fabric Engineering Guides</a></p>
+<h1>Performance Engineering on Microsoft Fabric</h1>
+<p class="lead">Lessons from stress-testing a 3,000-object data pipeline processing approximately 4 billion rows on an F64 capacity.</p>
+</div></section>
+<section class="section"><div class="wrap article-layout">
+<article class="article-body">
+<h2 id="introduction">Introduction</h2>
+<p>Before recommending Microsoft Fabric to clients, I wanted to establish whether it could support the complexity and operational requirements of a mature enterprise data warehouse.</p>
+<p>My previous experience includes responsibility for a SQL data warehouse containing thousands of objects, billions of rows and complex dependencies. Such an environment requires considerably more than the ability to execute queries quickly. It must support reliable incremental processing, fault tolerance, operational auditing and the coordination of large numbers of interdependent transformations.</p>
+<p>I therefore constructed a synthetic data engineering estate comprising approximately 3,000 objects, organised in a single directed acyclic graph (DAG), and tested its operation on a Microsoft Fabric F64 trial capacity.</p>
+<p>The experiment produced an initial loading time of 54 minutes 44 seconds for just over 4 billion rows of data movement. Three subsequent incremental loads completed in 17 minutes 14 seconds to 17 minutes 35 seconds. These results were achieved only after substantial optimisation. A retrospective estimate suggested that a substantially untuned implementation could have required more than 20 hours.</p>
+<p>This article documents the experimental setup, the scope and limitations of the tests, and the three areas of performance engineering that proved most important: concurrent and asynchronous execution, optimisation of individual loads, and efficient handling of unchanged data. It concludes by discussing how these techniques can be implemented in a production data engineering environment.</p>
+<h2 id="experimental-design">1. Experimental design</h2>
+<h3 id="engineering-requirements">1.1 Engineering requirements</h3>
+<p>The objective was not simply to measure how quickly Fabric could ingest a large volume of data. A bulk-loading benchmark would test only a limited part of the work normally undertaken by an enterprise data engineering platform.</p>
+<p>Instead, I wanted to assess performance under a more realistic set of engineering requirements.</p>
+<p>These included initial loading into empty tables, staging and hashing incoming records, detecting changes and merging the resulting inserts, updates and deletes. The pipeline also needed to maintain audit columns such as row creation and update timestamps, calculate and record CRUD statistics, identify invalid records such as primary-key violations, and support configurable fault rejection and stability thresholds.</p>
+<p>Operational requirements included logging successful and failed executions, preserving bookmarks for incremental processing, and executing transformations in dependency order. Where one object failed, the orchestration system needed to distinguish between dependent objects that could no longer proceed and independent objects that could continue.</p>
+<p>These capabilities needed to operate across several Fabric execution and storage mechanisms.</p>
+<div class="table-scroll"><table class="benchmark"><thead><tr><th scope="col">Fabric object</th><th scope="col">Execution mechanism</th></tr></thead><tbody><tr><td>Lakehouse files</td><td>Python</td></tr><tr><td>Lakehouse Delta tables</td><td>Python and Spark SQL</td></tr><tr><td>Lakehouse Delta views</td><td>Spark SQL</td></tr><tr><td>Warehouse tables</td><td>T-SQL</td></tr><tr><td>Warehouse views</td><td>T-SQL</td></tr></tbody></table></div>
+<p>The distinction between these mechanisms is important because they do not share identical execution characteristics, transaction behaviour or operational overheads.</p>
+<p>The benchmark used the framework’s established loading machinery to exercise these different paths. Its primary purpose was to measure performance for a successful, representative workload, rather than to exhaustively inject every possible failure condition.</p>
+<h3 id="dataset-design">1.2 Dataset design</h3>
+<p>The data distribution was informed by a study of production workloads across the Amazon Redshift fleet <a href="https://www.vldb.org/pvldb/vol17/p3694-saxena.pdf">(van Renen et al., 2024)</a>.</p>
+<p>The study found that real enterprise data warehouses typically have a long-tailed distribution of table sizes, with relatively few very large tables and substantial numbers of small tables. It also demonstrated that many tables experience little or no daily change.</p>
+<p>These characteristics are relevant to performance engineering because they introduce a mixture of computationally intensive operations and large numbers of comparatively small operations whose execution overhead may dominate their actual data processing time.</p>
+<p>I generated approximately 1,000 source objects with the following distribution:</p>
+<div class="table-scroll"><table class="benchmark"><thead><tr><th scope="col">Source size</th><th scope="col">Number of sources</th></tr></thead><tbody><tr><td>500 million rows</td><td>1</td></tr><tr><td>100 million rows</td><td>4</td></tr><tr><td>50 million rows</td><td>12</td></tr><tr><td>10 million rows</td><td>30</td></tr><tr><td>1,000 to 1 million rows</td><td>913</td></tr><tr><td>File-based sources</td><td>40</td></tr></tbody></table></div>
+<p>The sources simulate reproducible daily changes, including inserts, updates and deletions. Their change frequencies vary according to size, with approximately one source in seven changing on a typical simulated day.</p>
+<p>A separate estate of approximately 3,000 objects consumes these sources through several transformation layers distributed across one Lakehouse and two Warehouses.</p>
+<div class="table-scroll"><table class="benchmark"><thead><tr><th scope="col">Fabric item</th><th scope="col">Transformation layers</th></tr></thead><tbody><tr><td>Lakehouse</td><td>Landing, curated and refined</td></tr><tr><td>Warehouse 1</td><td>Core and conformed</td></tr><tr><td>Warehouse 2</td><td>Mart and serving</td></tr></tbody></table></div>
+<p>Each generated table or view uses a representative set of 30 business columns, including keys, change indicators, dates, numerical attributes and textual attributes.</p>
+<p>The estate includes incremental merges, incremental loads that physically delete records, full-source upserts, static tables, append-only loads and views. In the generated configuration, more than 2,000 tables use incremental loading behaviour.</p>
+<p>The dependency graph is designed to represent an enterprise transformation estate rather than a simple linear pipeline. Each transformation consumes a parent object, while additional declared dependencies create fan-in relationships. Some objects have as many as ten additional dependencies, representing the scheduling constraints that would arise from joining fact and dimension tables.</p>
+<p>An important limitation is that these additional dependencies are represented in the DAG rather than implemented as expensive multi-table joins. This allows the experiment to measure orchestration and load-engineering performance without conflating those measurements with complex analytical query performance.</p>
+<p>The source-generation workload was also kept separate from the measured estate. Source population and daily source changes were performed outside the reported estate loading times.</p>
+<h3 id="scope-and-exclusions">1.3 Scope and exclusions</h3>
+<p>The experiment deliberately excluded complex analytical aggregates, large multi-table joins, interactive queries and Power BI report performance.</p>
+<p>These are important characteristics of an enterprise data platform, but they are not the subject of this investigation. The intention was to isolate the baseline costs of operating a data engineering estate: data movement, incremental reconciliation, validation, operational state management and orchestration.</p>
+<p>Similarly, the experiment did not seek to establish the maximum theoretical throughput of Fabric, nor to compare F64 directly against other capacity sizes.</p>
+<p>The conclusions should therefore be interpreted as evidence about the feasibility and performance of a particular class of data engineering workload, rather than a general benchmark of all Fabric capabilities.</p>
+<h2 id="performance-engineering-strategy">2. Performance engineering strategy</h2>
+<p>Early experimentation demonstrated that the default execution approach produced excessive overhead, particularly when coordinating large numbers of relatively small operations.</p>
+<p>Optimisation was consequently organised around three areas. The first addressed how operations were scheduled and allowed to overlap. The second addressed the cost of processing an individual table. The third addressed the disproportionately important case in which an object had little or no new data to process.</p>
+<h3 id="concurrency-and-asynchronous-execution">2.1 Concurrency and asynchronous execution</h3>
+<p>At the scale of several thousand objects, sequential execution is impractical. However, maximum concurrency does not necessarily produce minimum elapsed time.</p>
+<p>The principal challenge is to coordinate multiple execution engines while respecting their resource constraints and the dependencies between operations.</p>
+<h3 id="spark-concurrency">Spark concurrency</h3>
+<p>Spark introduces a particular complication because establishing an application, allocating executors and scheduling jobs can be expensive relative to a small transformation.</p>
+<p>Starting a separate application for every table would incur repeated startup costs and create substantial competition for the available capacity.</p>
+<p>The approach adopted in this experiment was to execute concurrent operations within a shared Spark application. This allowed individual load operations to submit work independently while making use of executors allocated to the application.</p>
+<p>The workload was configured for up to 24 concurrent Spark/Python operations.</p>
+<p>I also experimented with Spark’s FAIR scheduling policy, but it did not resolve the concurrency and resource-allocation problems encountered in this configuration. The eventual improvement came from a combination of shared application execution, controlled concurrency and ensuring that the Python loading code was safe to execute concurrently.</p>
+<p>Concurrent safety required particular attention to temporary objects, staging locations, shared runtime state and the handling of independent execution contexts.</p>
+<p>The optimal concurrency setting was empirical rather than theoretical. Increasing the number of simultaneous operations helps only while there is sufficient executor capacity and while additional operations do not introduce more contention than useful work.</p>
+<h3 id="warehouse-concurrency">Warehouse concurrency</h3>
+<p>Warehouse T-SQL required a different concurrency model.</p>
+<p>Unlike Spark operations sharing an application, concurrent Warehouse procedures execute through independent SQL connections. Their performance depends on the Warehouse execution engine, capacity contention and the cost of each statement.</p>
+<p>The benchmark used up to 12 concurrent procedures per Warehouse.</p>
+<p>Maintaining separate concurrency limits for Spark and each Warehouse allowed the DAG scheduler to dispatch work according to the resources required by individual nodes, rather than treating every operation as equivalent.</p>
+<p>This is particularly useful in a heterogeneous data pipeline. A Warehouse operation should not necessarily wait for a Spark execution slot, and vice versa.</p>
+<h3 id="sql-analytics-endpoint-synchronisation">SQL analytics endpoint synchronisation</h3>
+<p>Another significant issue was the visibility of Lakehouse Delta tables through the SQL analytics endpoint.</p>
+<p>The completion of a Delta write does not necessarily imply that the corresponding state is immediately ready for every downstream SQL endpoint consumer. Metadata synchronisation and readiness may introduce additional delay.</p>
+<p>This becomes a substantial bottleneck if every Lakehouse operation synchronously waits for endpoint readiness before releasing the rest of the pipeline.</p>
+<p>The solution was to represent synchronisation requirements explicitly within the DAG. Once a Delta operation completed, its dependent synchronisation operation could proceed without preventing unrelated Lakehouse or Warehouse operations from running.</p>
+<p>Only consumers requiring the updated SQL endpoint state needed to wait for the corresponding dependency barrier.</p>
+<p>In effect, the DAG treats synchronisation as an independently scheduled operation, rather than allowing it to block the entire pipeline.</p>
+<p>This preserves correctness while reducing unnecessary idle time.</p>
+<h3 id="critical-path-scheduling">Critical-path scheduling</h3>
+<p>These considerations make critical-path management central to overall performance.</p>
+<p>A DAG scheduler should release nodes as soon as their prerequisites have completed, subject to the execution capacity available for each resource type. Independent branches should continue while others are waiting for Spark execution, Warehouse connections or synchronisation.</p>
+<p>The objective is to minimise the elapsed time of the complete dependency graph, not to maximise the instantaneous number of running operations.</p>
+<p>In a large heterogeneous estate, the resulting gains can be substantial even when the performance of individual transformations remains unchanged.</p>
+<h3 id="optimising-individual-load-operations">2.2 Optimising individual load operations</h3>
+<p>Concurrency alone is insufficient if each node performs unnecessary work.</p>
+<p>A reliable incremental load involves several distinct operations. In the general case, incoming records are staged and their signatures calculated. The engine identifies new and modified records by comparing staged signatures with the target, determines deletions where applicable, calculates CRUD counts and evaluates quality and stability constraints. Invalid records are rejected according to the configured policy, and accepted changes are subsequently applied.</p>
+<p>The load must preserve audit columns and record the resulting statistics.</p>
+<p>The challenge is to implement these operations while minimising data scans, execution round trips, intermediate materialisation and unnecessary writes.</p>
+<p>This is highly dependent on the execution engine.</p>
+<p>For Spark, repeated actions on a DataFrame can generate additional jobs and potentially recompute parts of the transformation. The structure of the query plan, the use of temporary relations and the placement of materialisation boundaries can consequently have a significant effect on performance.</p>
+<p>In some circumstances, retaining an intermediate result as a virtual relation is preferable to writing it out. In others, explicit materialisation avoids repeated expensive computations. The optimal choice depends on the cost of the underlying plan and the number of times the result is consumed.</p>
+<p>For T-SQL, the trade-offs are different. Warehouse execution is designed around distributed, columnar processing, and staging through CTAS, calculating change sets and applying a targeted MERGE can be more appropriate than directly translating Spark-oriented techniques.</p>
+<p>The handling of row counts is a useful example. A simplistic implementation might execute a separate query for each count, repeating substantial portions of the work. A more carefully designed implementation can derive several required counts from the same intermediate representation or execution phase.</p>
+<p>The optimal formulation is not necessarily the same in Spark SQL and Warehouse T-SQL.</p>
+<p>I found that improving individual loads required tuning the complete reconciliation procedure, not merely the final statement that inserted or merged data.</p>
+<p>A detailed comparison of these implementations would warrant a separate article. For the purposes of this experiment, the important observation is that the performance of a data engineering estate depends on the implementation of its operational machinery as well as its business transformations.</p>
+<h3 id="the-fast-no-op">2.3 The fast no-op</h3>
+<p>The third optimisation area was the cost of determining that no processing was necessary.</p>
+<p>This deserves particular attention because the workload characteristics of a large enterprise estate are not dominated exclusively by its biggest tables.</p>
+<p>The Amazon Redshift fleet study found that a substantial majority of observed tables had no inserts or deletes during its observation period.</p>
+<p>For a pipeline with thousands of objects, unchanged sources are therefore a normal and important case, rather than an unusual exception.</p>
+<p>In principle, a load that detects no source changes should finish quickly. In practice, Fabric introduces fixed overheads that can make even an empty operation relatively expensive.</p>
+<p>These include Spark job submission, accessing Delta metadata, starting distributed SQL operations and performing transactional writes.</p>
+<p>The overhead is especially apparent in small operational updates. Logging one execution record or modifying one bookmark may involve significantly more storage and transaction machinery than the equivalent operation in a traditional SQL Server database.</p>
+<p>Operations that would be negligible individually can become material when repeated thousands of times.</p>
+<p>I addressed this problem in three ways.</p>
+<p>The first was to minimise the number of engine operations required to establish that no source changes needed processing. This involved designing the load logic to avoid unnecessary scans and reconciliation statements when the incoming change set was empty.</p>
+<p>The second was to separate operational bookkeeping from the critical path wherever possible. Logging and status updates can be buffered or performed asynchronously, provided that durability requirements are preserved and write failures are not silently ignored.</p>
+<p>The third was to make incremental bookmarks an explicit part of the loading architecture.</p>
+<h3 id="bookmark-design">Bookmark design</h3>
+<p>Incremental processing requires a reliable way to determine which source changes have already been examined.</p>
+<p>A common implementation uses the maximum update timestamp in the target table as the lower bound for the next source query.</p>
+<p>Although straightforward, this method has three important limitations.</p>
+<p>First, an output table may depend on multiple sources with different change histories. A single maximum timestamp derived from the target cannot necessarily express the processing position of each upstream dependency.</p>
+<p>Second, the source may change without causing any change to the target. This occurs, for example, when a transformation filters incoming records. If the bookmark is derived from the target, it may remain unchanged while the pipeline repeatedly examines source records that have already been processed and excluded.</p>
+<p>Third, computing the maximum timestamp from a potentially large target can itself incur a distributed scan or other execution overhead. This is an unnecessarily expensive method of recovering a small piece of operational state.</p>
+<p>My preferred approach is to maintain an explicit bookmark for each loadable object.</p>
+<p>The bookmark records the instant immediately before the most recent clean, successful load began. It advances only when the load has completed successfully and established a valid processing boundary.</p>
+<p>Using the start time rather than the completion time is deliberate. Changes that become visible while a load is running should remain eligible for processing on the next invocation, assuming the source provides consistent change timestamps.</p>
+<p>An unchanged target can therefore still advance its processing position, avoiding repeated examination of irrelevant source changes.</p>
+<p>The bookmark is stored centrally as operational metadata and exposed to the execution runtime. This avoids repeatedly deriving state from the data tables themselves and permits the same operational model to be used across different engines.</p>
+<p>The correctness of this approach depends on the semantics of source change timestamps. Late-arriving records, backdated changes or unreliable clocks may require an overlap window, change-data-capture sequence or another source-specific cursor. A timestamp bookmark should not be treated as a universal solution to change detection.</p>
+<p>The benchmark uses explicit timestamp bookmarks for a number of incremental paths, although some generated transformations also use a maximum Epoch value from their current target state. These represent different implementation strategies and should not be conflated when assessing the performance results.</p>
+<h2 id="performance-measurements">3. Performance measurements</h2>
+<p>The principal reported metric was end-to-end wall-clock duration for the measured estate.</p>
+<p>The runner also records object execution outcomes, row counts and node-level duration statistics. These allow the analysis to distinguish overall elapsed time from the distribution of work across individual objects.</p>
+<p>The headline results were as follows.</p>
+<div class="table-scroll"><table class="benchmark"><thead><tr><th scope="col">Scenario</th><th scope="col">Duration</th><th scope="col">Rows changed</th></tr></thead><tbody><tr><td>Initial load from empty</td><td>54 minutes 44 seconds</td><td>4,045,265,040</td></tr><tr><td>Unchanged load</td><td>8 minutes 19 seconds</td><td>0</td></tr><tr><td>Day 1 incremental</td><td>17 minutes 29 seconds</td><td>7,821,922</td></tr><tr><td>Day 2 incremental</td><td>17 minutes 35 seconds</td><td>7,719,640</td></tr><tr><td>Day 3 incremental</td><td>17 minutes 14 seconds</td><td>7,552,602</td></tr><tr><td>Untuned implementation</td><td>More than 20 hours</td><td>Retrospective estimate, not directly measured</td></tr></tbody></table></div>
+<p>The initial load read and inserted 4,045,265,040 rows across 2,185 executable nodes. The unchanged run executed the same graph, read 2,293,000 rows for change detection, and produced no inserts, updates or deletes. The three daily incrementals changed a median of 7,719,640 rows in 17 minutes 29 seconds.</p>
+<p>I compared each load with a qualified run of the same deterministic plan on 16 October. The current initial load was 1.21% faster. The unchanged load was 6.73% slower, while the three incremental loads differed by 3.03%, 0.94% and 0.41%. Every load retained the same node shape and exact row totals, and all four nine-test convergence checks passed.</p>
+<figure class="result-chart" aria-labelledby="load-comparison-title">
+<h3 id="load-comparison-title">Current release against the qualified baseline</h3>
+<div class="result-chart-legend" aria-hidden="true"><span><i></i>Current release</span><span><i class="baseline-key"></i>16 October baseline</span></div>
+<div class="result-chart-row"><strong>Initial</strong><div class="result-chart-bars"><i class="result-chart-bar" style="width:98.79%"></i><i class="result-chart-bar baseline" style="width:100%"></i></div><span>54m 44s</span></div>
+<div class="result-chart-row"><strong>Unchanged</strong><div class="result-chart-bars"><i class="result-chart-bar" style="width:15.02%"></i><i class="result-chart-bar baseline" style="width:14.08%"></i></div><span>8m 19s</span></div>
+<div class="result-chart-row"><strong>Day 1</strong><div class="result-chart-bars"><i class="result-chart-bar" style="width:31.55%"></i><i class="result-chart-bar baseline" style="width:30.62%"></i></div><span>17m 29s</span></div>
+<div class="result-chart-row"><strong>Day 2</strong><div class="result-chart-bars"><i class="result-chart-bar" style="width:31.73%"></i><i class="result-chart-bar baseline" style="width:31.44%"></i></div><span>17m 35s</span></div>
+<div class="result-chart-row"><strong>Day 3</strong><div class="result-chart-bars"><i class="result-chart-bar" style="width:31.10%"></i><i class="result-chart-bar baseline" style="width:30.98%"></i></div><span>17m 14s</span></div>
+<figcaption>End-to-end wall time on the same deterministic 3,000-object plan. Bars share one scale; the label shows the current duration.</figcaption>
+</figure>
+<p>Incremental load times varied between runs, partly because Fabric did not always allocate the same Spark executor resources. Warm versus cold sessions also affected the observed duration.</p>
+<p>In particular, executor allocation could vary when another Spark session continued to retain resources. This makes it important to distinguish processing efficiency from capacity availability when interpreting differences between runs.</p>
+<h3 id="resource-utilisation">3.1 Resource utilisation</h3>
+<p>Elapsed time measures the performance experienced by the user, but it is insufficient to explain the underlying resource consumption.</p>
+<p>For a complete performance assessment, four areas of monitoring are particularly relevant.</p>
+<div class="table-scroll"><table class="benchmark"><thead><tr><th scope="col">Area</th><th scope="col">Useful measurements</th><th scope="col">Instrumentation</th></tr></thead><tbody><tr><td>Orchestration</td><td>Node durations, critical-path delays, concurrency, waiting time</td><td>Execution records and DAG Gantt</td></tr><tr><td>Spark</td><td>Executor allocation, task wait times, CPU activity, memory pressure, shuffle and spill activity</td><td>Spark monitoring and application metrics</td></tr><tr><td>Warehouse</td><td>Query durations, request concurrency, execution bottlenecks</td><td>Warehouse Query Insights</td></tr><tr><td>Capacity</td><td>CU-seconds, utilisation and throttling</td><td>Fabric Capacity Metrics app</td></tr></tbody></table></div>
+<p>Fabric capacity consumption is measured in capacity-unit seconds, which should not be interpreted as a direct measure of CPU time.</p>
+<p>Similarly, Spark executor utilisation and Warehouse query duration measure different aspects of the platform. There is no single system-wide CPU percentage that adequately describes the performance of a heterogeneous Fabric workload.</p>
+<p>For this campaign I retained seven Spark applications, 325,924 Query Insights request records across five Warehouses, 396 capacity overview samples and 64,100 capacity operation events. All seven Spark applications reported that capacity was not exceeded. Spark core efficiency ranged from 89.5% to 95.3%, and all 325,924 Warehouse request records had a succeeded status.</p>
+<p>The capacity-wide 30-second overview samples averaged 18.3% utilisation and peaked at 26.9%. They recorded no overage, while the capacity-operation records reported no throttling delay. Other items were active on the capacity during the measured window, so these figures are operating context rather than an attribution of every capacity unit to the benchmark.</p>
+<h3 id="interpretation">3.2 Interpretation</h3>
+<p>The results demonstrate that an engineering workload of this scale can complete in under 55 minutes for initial loading and under 18 minutes for subsequent incremental runs on the tested F64 capacity.</p>
+<p>However, several qualifications are necessary.</p>
+<p>The transformations were deliberately simple, allowing the measurements to isolate platform and engineering overhead. The workload was synthetic, although its size distribution and change patterns were designed to resemble characteristics observed in production estates.</p>
+<p>Performance also depended on the availability of Spark executors and the state of the capacity. The reported results should therefore be treated as observations under the experimental conditions rather than guaranteed performance levels.</p>
+<p>Finally, the retrospective untuned estimate should not be interpreted as a controlled before-and-after comparison. The experiment supports the conclusion that the optimised implementation achieved the reported times, but not a precise numerical claim about the speedup over all alternative designs.</p>
+<h2 id="implementing-these-techniques-in-your-own-environment">4. Implementing these techniques in your own environment</h2>
+<p>The techniques developed through the experiment are not specific to the generated workload. They address problems that arise whenever a large number of transformations must be coordinated across different execution mechanisms.</p>
+<p>The first requirement is a dependency-aware orchestration model.</p>
+<p>Tools such as dbt, Airflow and Prefect provide mechanisms for describing and scheduling dependent work. However, coordinating a single DAG across Fabric Lakehouse and Warehouse execution, while accounting for SQL endpoint readiness, requires integration beyond ordinary table-level ordering.</p>
+<p>My approach is to maintain dependencies as ordinary, queryable catalogue metadata. The graph can be constructed in Python before execution, allowing the scheduler to determine which operations are ready, assign them to appropriate execution resources, and manage endpoint synchronisation as an explicit dependency.</p>
+<p>Keeping the graph in a queryable catalogue also makes it accessible for operational inspection and performance analysis.</p>
+<p>The second requirement is to treat incremental loading as a first-class capability.</p>
+<p>This means designing the loading framework around the common case of a small change set, rather than optimising exclusively for full replacement. In a large estate, reducing the cost of unchanged objects is at least as important as accelerating the movement of large volumes of data.</p>
+<p>The necessary machinery includes explicit bookmarks, reliable change detection, staging, validation, reconciliation and the recording of operational outcomes.</p>
+<p>In my implementation, the bookmark is maintained centrally and made available to individual transformations through the execution runtime. This avoids requiring each transformation to reconstruct its previous processing position by examining the target table or searching orchestration logs.</p>
+<p>The third requirement is to optimise the actual loading algorithm for each execution engine.</p>
+<p>Although the higher-level load contract can remain consistent, its physical execution does not need to be identical across Python, Spark SQL and T-SQL.</p>
+<p>The appropriate treatment of staging, signatures, temporary relations, validation, deletion and merging should reflect the characteristics of the engine being used.</p>
+<p>These techniques are individually familiar to experienced data engineers. The challenge lies in implementing them consistently and maintaining them across hundreds or thousands of objects.</p>
+<p>For that reason, the long-term solution is not to hand-optimise every transformation independently, but to establish an engineering framework that implements these common behaviours in a repeatable manner.</p>
+<h2 id="reproducing-the-experiment">Reproducing the experiment</h2>
+<p>The experiment was generated programmatically using a deterministic source and estate generator, with configurable object count and data scale.</p>
+<p>The benchmark runner supports preparing the Fabric environment, populating the source estate, constructing the measured estate, running initial and unchanged loads, and simulating further days of source changes.</p>
+<p>It records execution results in a machine-readable format, allowing comparisons between configurations and runs.</p>
+<p>A smaller configuration, for example 300 objects at 1% of the full data scale, can be used to exercise the same workflow without requiring the full benchmark resources.</p>
+<h2 id="conclusion">5. Conclusion</h2>
+<p>The experiment provides evidence that Microsoft Fabric can support a substantial enterprise data engineering workload. A pipeline comprising approximately 3,000 objects and just over 4 billion rows of initial data movement completed in 54 minutes 44 seconds on an F64 trial capacity, with three incremental executions completing in 17 minutes 14 seconds to 17 minutes 35 seconds.</p>
+<p>The more important finding is that this level of performance depended on the architecture of the loading system.</p>
+<p>Concurrency had to be managed across distinct execution engines. SQL endpoint synchronisation had to be incorporated into the DAG without unnecessarily blocking independent work. Individual loading procedures required engine-specific optimisation, while the common case of unchanged data required particular attention to fixed execution overheads and incremental bookmarking.</p>
+<p>These concerns become increasingly important as an estate grows. In a large environment, performance is not determined solely by the amount of data processed, but also by the number of operations required to process it, the dependencies between those operations, and the cost of discovering that nothing has changed.</p>
+<p>This leads to a broader engineering conclusion: for an estate containing hundreds or thousands of objects, a standardised framework for incremental loading, orchestration and operational management is not merely a convenience. It is an important part of achieving predictable and maintainable performance.</p>
+<h2 id="the-implementation-weaver">The implementation: Weaver</h2>
+<p>I developed Weaver, an open-source data engineering framework for Microsoft Fabric, to incorporate these engineering techniques into a repeatable build, load and test workflow.</p>
+<p>Weaver uses metadata declarations alongside ordinary Python and SQL transformations to manage dependencies, incremental loading, staging, row comparison, auditing, fault rejection, bookmarks and concurrent execution across Fabric Lakehouses and Warehouses.</p>
+<p>The intention is to make these engineering capabilities available without requiring each data team to implement and maintain them independently.</p>
+<p>The complete benchmark generator, methodology and runner are available in the <a href="https://github.com/matthias-wong-dev/weaverstack/tree/main/examples/stress">public stress-test source code</a>.</p>
+</article>
+<nav class="article-nav" aria-label="On this page"><strong>On this page</strong><ol><li><a href="#introduction">Introduction</a></li><li><a href="#experimental-design">Experimental design</a></li><li><a href="#performance-engineering-strategy">Performance engineering strategy</a></li><li><a href="#performance-measurements">Performance measurements</a></li><li><a href="#implementing-these-techniques-in-your-own-environment">Implementing these techniques in your own environment</a></li><li><a href="#reproducing-the-experiment">Reproducing the experiment</a></li><li><a href="#conclusion">Conclusion</a></li><li><a href="#the-implementation-weaver">The implementation: Weaver</a></li></ol></nav>
+</div></section>
+</main>
+<footer class="site-footer"><div class="wrap footer-grid">
+<div class="footer-note"><span class="brand"><img class="weaver-mark" src="/assets/brand/weaver-mark-light-134.png" width="30" height="17" alt="" aria-hidden="true">Weaver</span><p>Build, load, test and inspect your Microsoft Fabric estate.</p><p>Free and open source under the <a href="https://github.com/matthias-wong-dev/weaverstack/blob/main/LICENSE">Mozilla Public License 2.0</a>.</p></div>
+<div class="footer-links">
+<ul><li><strong>Site</strong></li><li><a href="/features/">Features</a></li><li><a href="/how-it-works/">How it works</a></li><li><a href="/get-started/">Get started</a></li><li><a href="/guides/">Fabric resources</a></li><li><a href="/vs-dbt/">Weaver vs dbt</a></li><li><a href="/story/">The story behind Weaver</a></li></ul>
+<ul><li><strong>Explore the docs</strong></li><li><a href="https://docs.weaverstack.dev/lakehouse/">Lakehouse</a></li><li><a href="https://docs.weaverstack.dev/warehouse/">Warehouse</a></li><li><a href="https://docs.weaverstack.dev/semantic-models/">Semantic Models</a></li><li><a href="https://docs.weaverstack.dev/reports/">Reports</a></li></ul>
+<ul><li><strong>Project</strong></li><li><a href="https://docs.weaverstack.dev/">Technical documentation</a></li><li><a href="https://github.com/matthias-wong-dev/weaverstack">Source on GitHub</a></li><li><a href="https://github.com/matthias-wong-dev/weaverstack/issues">Issues</a></li><li><a href="https://pypi.org/project/weaverstack/">weaverstack on PyPI</a></li></ul>
+</div></div></footer>
+<script src="/assets/site.js?v=858d1659f7" defer></script>
+</body>
+</html>
