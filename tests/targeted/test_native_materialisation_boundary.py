@@ -180,6 +180,28 @@ def test_materialisation_waits_for_removed_shortcut_namespace_before_native_writ
 
 
 @weaver_test()
+def test_a_refused_destination_probe_is_waited_on(tmp_path):
+    from weaver.build_bundle.executors.base import Waiting
+
+    context, action, payload, calls, *_ = native_case(tmp_path)
+    probes = []
+
+    def refuses_once(location):
+        probes.append(location)
+        if len(probes) == 1:
+            raise RuntimeError('Operation failed: "Forbidden", 403, HEAD')
+        return False
+
+    context.store.exists = refuses_once
+    executor = default_executors()["materialise_mirror"]
+    waiting = executor.execute(action, payload, context)
+    assert isinstance(waiting, Waiting) and calls == ["remove-shortcut"]
+    context.resolver.onelake_shortcuts = lambda item: ()
+    result = executor.execute(action, payload, context, state=waiting.state)
+    assert result["mechanism"] == "recursive_copy" and len(probes) == 2
+
+
+@weaver_test()
 def test_warehouse_table_replaces_local_wrapper_view_with_source_rows_via_ctas(
     tmp_path,
 ):

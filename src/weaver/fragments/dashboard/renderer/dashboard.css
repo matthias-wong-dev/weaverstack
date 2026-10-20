@@ -307,8 +307,25 @@ body { background: #f7f7f6; }
 .wd-er-more text { fill: var(--muted); font: 600 9.5px var(--mono); text-anchor: middle; }
 .wd-gantt { position: relative; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
 .wd-gantt-canvas { position: absolute; left: 0; display: block; }
-.wd-trend { display: block; width: 100%; height: auto; max-height: 220px; }
-.wd-trend-bar { fill: var(--blue); }
+.wd-runs { display: block; width: 100%; height: auto; max-height: 360px; }
+.wd-runs-band { fill: var(--paper-deep); opacity: .45; }
+.wd-run { cursor: pointer; outline: none; }
+.wd-run-hit { fill: transparent; }
+.wd-run-bar { fill: var(--surface); stroke: var(--line-strong); stroke-width: 1; }
+.wd-run-bar.wd-run-failed { stroke: var(--red); stroke-width: 2; }
+.wd-run-task { opacity: .92; }
+.wd-run-load { fill: var(--blue); }
+.wd-run-test { fill: var(--violet); }
+.wd-run-other { fill: var(--faint); }
+.wd-run:hover .wd-run-bar, .wd-run:focus-visible .wd-run-bar { stroke: var(--ink); stroke-width: 2; }
+.wd-run-picked .wd-run-bar { stroke: var(--ink); stroke-width: 2.5; }
+.wd-deadline { stroke: var(--red); stroke-width: 1.5; stroke-dasharray: 6 4; }
+.wd-deadline-label { fill: var(--red); font: 600 11px var(--mono); }
+.wd-swatch { display: inline-block; width: 10px; height: 10px; margin-right: 6px; vertical-align: -1px; border-radius: 2px; }
+.wd-swatch-load { background: var(--blue); }
+.wd-swatch-test { background: var(--violet); }
+.wd-swatch-failed { border: 2px solid var(--red); background: var(--surface); }
+.wd-object { display: inline-flex; align-items: center; white-space: nowrap; }
 .wd-grid { stroke: var(--line); }
 .wd-axis { fill: var(--muted); font: 10px var(--mono); }
 
@@ -328,3 +345,8 @@ body { background: #f7f7f6; }
 @media (prefers-reduced-motion: reduce) {
   .wd *, .wd *::before, .wd *::after { transition-duration: .01ms !important; }
 }
+.wd-mini { width: 100%; margin: 6px 0 0; border-collapse: collapse; font: 11px var(--mono); }
+.wd-mini th { padding: 3px 4px; color: var(--muted); font-size: 9px; font-weight: 700; letter-spacing: .05em; text-align: right; text-transform: uppercase; }
+.wd-mini td { padding: 4px; border-top: 1px solid var(--line); text-align: right; }
+.wd-mini th:first-child, .wd-mini td:first-child { text-align: left; }
+.wd-mini .wd-current td { background: var(--blue-soft); font-weight: 700; }

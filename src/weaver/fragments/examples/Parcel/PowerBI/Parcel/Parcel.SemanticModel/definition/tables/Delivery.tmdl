@@ -1,0 +1,25 @@
+/// Three parcel events, including two delivered parcels.
+table Delivery
+	measure 'Delivery Count' = SUM(Delivery[Delivered])
+		formatString: 0
+	measure InternalCost = 7
+		formatString: 0.00
+	column ParcelId
+		dataType: int64
+		sourceColumn: ParcelId
+		summarizeBy: none
+	column DepotId
+		dataType: int64
+		sourceColumn: DepotId
+		summarizeBy: none
+	column Delivered
+		dataType: int64
+		sourceColumn: Delivered
+		summarizeBy: sum
+	partition Delivery = m
+		mode: import
+		source =
+			let
+			    Source = #table(type table [ParcelId = Int64.Type, DepotId = Int64.Type, Delivered = Int64.Type], {{1, 10, 1}, {2, 10, 1}, {3, 20, 0}})
+			in
+			    Source

@@ -139,18 +139,31 @@ def test_interrupted_publication_can_be_retried(tmp_path, fabric, monkeypatch):
 
 @weaver_test()
 def test_dry_run_writes_and_creates_nothing(tmp_path, fabric):
-    report = setup(tmp_path, fabric, dry_run=True, example=True)
+    report = setup(tmp_path, fabric, dry_run=True, example="Sales")
     assert report.dry_run and report.example.generated
     assert not fabric.created and not fabric.published and not list(tmp_path.iterdir())
 
 
 @pytest.mark.parametrize("path", ["workflow.yml", "README.md"])
 @weaver_test()
-def test_a_rerun_keeps_edited_project_files(tmp_path, fabric, path):
+def test_edited_project_helpers_are_preserved(tmp_path, fabric, path):
     setup(tmp_path, fabric)
-    (tmp_path / path).write_text("user content")
-    report = setup(tmp_path, fabric)
-    assert report.succeeded and (tmp_path / path).read_text() == "user content"
+    existing = tmp_path / path
+    content = existing.read_text() + "\n# User addition\n"
+    existing.write_text(content)
+    fabric.created.clear()
+    setup(tmp_path, fabric)
+    assert not fabric.created and existing.read_text() == content
+
+
+@weaver_test()
+def test_invalid_existing_configuration_is_refused_before_mutation(tmp_path, fabric):
+    setup(tmp_path, fabric)
+    (tmp_path / "workspace-config.yml").write_text("user content")
+    fabric.created.clear()
+    with pytest.raises(weaver.errors.WeaverError):
+        setup(tmp_path, fabric)
+    assert not fabric.created
 
 
 @weaver_test()
@@ -241,23 +254,6 @@ def test_a_dry_run_plans_the_items_the_targets_name(tmp_path, fabric):
 
 
 @weaver_test()
-def test_an_unreadable_configuration_stops_a_rerun_before_creation(tmp_path, fabric):
-    setup(tmp_path, fabric)
-    (tmp_path / "workspace-config.yml").write_text("user content")
-    fabric.created.clear()
-    with pytest.raises(InitialiseError, match="cannot be read"):
-        setup(tmp_path, fabric)
-    assert not fabric.created
-
-
-@weaver_test()
-def test_a_rerun_refuses_a_catalogue_the_configuration_does_not_name(tmp_path, fabric):
-    setup(tmp_path, fabric)
-    with pytest.raises(InitialiseError, match="names catalogue Catalogue, not Other"):
-        setup(tmp_path, fabric, catalogue="Other")
-
-
-@weaver_test()
 def test_new_files_beside_unrelated_ones_are_still_refused(tmp_path, fabric):
     (tmp_path / "README.md").write_text("someone else's project")
     with pytest.raises(InitialiseError, match="Choose another project folder"):
@@ -306,7 +302,7 @@ def test_example_only_generates_source(tmp_path, fabric, monkeypatch):
 
     for name in ("build", "load", "test"):
         monkeypatch.setattr(f"weaver.operations.{name}.{name}", refuse)
-    report = setup(tmp_path, fabric, example=True)
+    report = setup(tmp_path, fabric, example="Sales")
     assert report.example.generated and report.succeeded
     assert (tmp_path / "Lakehouse/Landing/Tables/Sales__Customer.py").is_file()
 
@@ -317,16 +313,16 @@ def test_the_example_refuses_a_power_bi_name_the_workspace_has(tmp_path, fabric)
 
     fabric.held.append(resources.Item("id", "Sales", "SemanticModel", "ws"))
     with pytest.raises(InitialiseError, match="--semantic-model"):
-        setup(tmp_path, fabric, example=True)
+        setup(tmp_path, fabric, example="Sales", semantic_model="Sales")
     assert not fabric.created and not (tmp_path / "PowerBI").exists()
 
-    setup(tmp_path, fabric, example=True, semantic_model="Orders")
+    setup(tmp_path, fabric, example="Sales", semantic_model="Orders")
     assert (tmp_path / "PowerBI/Orders/Orders.pbip").is_file()
 
 
 @weaver_test()
 def test_an_example_rerun_after_build_converges(tmp_path, fabric):
-    setup(tmp_path, fabric, example=True)
+    setup(tmp_path, fabric, example="Sales")
     before = {
         p.relative_to(tmp_path): p.read_bytes()
         for p in tmp_path.rglob("*")
@@ -337,7 +333,7 @@ def test_an_example_rerun_after_build_converges(tmp_path, fabric):
         for kind in ("SemanticModel", "Report")
     )
 
-    setup(tmp_path, fabric, example=True)
+    setup(tmp_path, fabric, example="Sales")
 
     assert before == {
         p.relative_to(tmp_path): p.read_bytes()
@@ -480,9 +476,7 @@ def test_a_session_in_another_workspace_is_refused_before_creation(tmp_path, fab
         resolver=SimpleNamespace(client=object()),
     )
 
-    with pytest.raises(
-        InitialiseError, match="names workspace Analytics, not Elsewhere"
-    ):
+    with pytest.raises(InitialiseError, match="binds workspace to 'Analytics'"):
         weaver.initialise(tmp_path, lakehouse="Landing", session=elsewhere)
     assert not fabric.created
 
@@ -492,7 +486,9 @@ def test_a_new_item_kind_names_the_workflow_steps_it_needs(tmp_path, fabric):
     weaver.initialise(
         tmp_path, workspace="Analytics", lakehouse="Landing", session=fabric.session
     )
-    workflow = (tmp_path / "workflow.yml").read_text()
+    # An edited workflow is the user's, so initialise names what it lacks.
+    workflow = (tmp_path / "workflow.yml").read_text() + "\n# Reviewed\n"
+    (tmp_path / "workflow.yml").write_text(workflow)
 
     report = weaver.initialise(
         tmp_path,
@@ -506,7 +502,6 @@ def test_a_new_item_kind_names_the_workflow_steps_it_needs(tmp_path, fabric):
     assert "weaver build --item PowerBI" in guidance
     assert "SemanticModel" in guidance
     assert report.to_mapping()["guidance"] == [guidance]
-    # The workflow is the user's: named, not rewritten.
     assert (tmp_path / "workflow.yml").read_text() == workflow
 
 

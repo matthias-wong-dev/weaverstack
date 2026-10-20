@@ -1,35 +1,36 @@
 <!doctype html>
 <html lang="en-AU">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="theme-color" content="#f7f7f6">
-    <title>Microsoft Fabric data engineering with Weaver</title>
-    <meta name="description" content="Build and operate Microsoft Fabric Lakehouses and Warehouses from ordinary Python and SQL, with dependencies, incremental loads and run state recorded.">
-    <meta name="robots" content="index, follow, max-image-preview:large">
-    <meta name="author" content="Weaver contributors">
-    <link rel="canonical" href="https://weaverstack.dev/">
-    <meta property="og:type" content="website">
-    <meta property="og:url" content="https://weaverstack.dev/">
-    <meta property="og:site_name" content="Weaver">
-    <meta property="og:locale" content="en_AU">
-    <meta property="og:title" content="Weaver for Microsoft Fabric data engineering">
-    <meta property="og:description" content="Build and operate Fabric Lakehouses and Warehouses from one Python and SQL project.">
-    <meta property="og:image" content="https://weaverstack.dev/og.png">
-    <meta property="og:image:type" content="image/png">
-    <meta property="og:image:width" content="1200">
-    <meta property="og:image:height" content="630">
-    <meta property="og:image:alt" content="Weaver: Microsoft Fabric data engineering.">
-    <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:title" content="Weaver for Microsoft Fabric data engineering">
-    <meta name="twitter:description" content="Build and operate Fabric Lakehouses and Warehouses from one Python and SQL project.">
-    <meta name="twitter:image" content="https://weaverstack.dev/og.png">
-    <meta name="twitter:image:alt" content="Weaver: Microsoft Fabric data engineering.">
-    <link rel="icon" type="image/png" sizes="128x128" href="favicon.png">
-    <link rel="manifest" href="site.webmanifest">
-    <link rel="sitemap" type="application/xml" href="sitemap.xml">
-    <link rel="stylesheet" href="assets/site.css">
-    <script type="application/ld+json">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#f7f7f6">
+<title>Microsoft Fabric data engineering with Weaver</title>
+<meta name="description" content="Deliver data products in Microsoft Fabric with Python, SQL and native Power BI. Weaver coordinates Lakehouses, Warehouses, semantic models and Reports.">
+<meta name="robots" content="index, follow, max-image-preview:large">
+<link rel="canonical" href="https://weaverstack.dev/">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://weaverstack.dev/">
+<meta property="og:site_name" content="Weaver">
+<meta property="og:title" content="Weaver for Microsoft Fabric data engineering">
+<meta property="og:description" content="Deliver data products in Microsoft Fabric with Python, SQL and native Power BI. Weaver coordinates Lakehouses, Warehouses, semantic models and Reports.">
+<meta property="og:image" content="https://weaverstack.dev/og.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Weaver for Microsoft Fabric data engineering">
+<meta name="twitter:description" content="Deliver data products in Microsoft Fabric with Python, SQL and native Power BI. Weaver coordinates Lakehouses, Warehouses, semantic models and Reports.">
+<link rel="icon" type="image/png" href="/favicon.png">
+<link rel="manifest" href="/site.webmanifest">
+<link rel="sitemap" type="application/xml" href="/sitemap.xml">
+<link rel="stylesheet" href="/assets/site.css?v=2cc8d84c4f">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Weaver logo.">
+<meta name="twitter:image:alt" content="Weaver logo.">
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<meta name="author" content="Weaver contributors">
+<meta property="og:locale" content="en_AU">
+<meta name="twitter:image" content="https://weaverstack.dev/og.png">
+<script type="application/ld+json">
       {
         "@context": "https://schema.org",
         "@graph": [
@@ -39,7 +40,7 @@
             "url": "https://weaverstack.dev/",
             "name": "Weaver",
             "alternateName": "weaverstack",
-            "description": "Weaver helps Python, SQL, Lakehouses and Warehouses work together in Microsoft Fabric.",
+            "description": "Deliver data products in Microsoft Fabric with Python, SQL and native Power BI. Weaver coordinates Lakehouses, Warehouses, semantic models and Reports.",
             "inLanguage": "en-AU"
           },
           {
@@ -47,7 +48,7 @@
             "@id": "https://weaverstack.dev/#software",
             "name": "Weaver",
             "alternateName": "weaverstack",
-            "description": "Build and operate data pipelines across Microsoft Fabric Lakehouses and Warehouses from one project.",
+            "description": "Deliver data products in Microsoft Fabric with Python, SQL and native Power BI. Weaver coordinates Lakehouses, Warehouses, semantic models and Reports.",
             "url": "https://weaverstack.dev/",
             "codeRepository": "https://github.com/matthias-wong-dev/weaverstack",
             "license": "https://www.mozilla.org/en-US/MPL/2.0/",
@@ -59,222 +60,335 @@
         ]
       }
     </script>
-  </head>
-  <body>
-    <a class="skip-link" href="#main">Skip to content</a>
-
-    <header class="site-header">
-      <nav class="nav wrap" aria-label="Primary">
-        <a class="brand" href="/" aria-label="Weaver home"><span class="weave-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>Weaver</a>
-        <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="nav-links" hidden>Menu</button>
-        <div class="nav-links" id="nav-links">
-          <a href="/get-started/">Get started</a>
-          <a href="/problem/">The problem</a>
-          <a href="/how-it-works/">How it works</a>
-          <a href="/scale/">Built for scale</a>
-          <a href="/vs-dbt/">Weaver vs dbt</a>
-          <a href="https://docs.weaverstack.dev/">Documentation</a>
-          <a class="button small" href="https://github.com/matthias-wong-dev/weaverstack">GitHub <span class="arrow" aria-hidden="true">↗</span></a>
-        </div>
-      </nav>
-    </header>
-
-    <main id="main">
-      <section class="page-head">
-        <div class="wrap">
-          <h1>Making Fabric easier to use</h1>
-          <p class="lead">Write normal Python and SQL across your Lakehouses and Warehouses. Weaver works out the dependencies, creates the Fabric objects, runs the data work in the right order and records what happened.</p>
-          <p style="margin-top: 26px;">
-            <a class="button blue" href="/get-started/">Try the Sales example</a>
-            <a class="button ghost" href="https://github.com/matthias-wong-dev/weaverstack" style="margin-left: 8px;">View on GitHub <span class="arrow" aria-hidden="true">↗</span></a>
-          </p>
-        </div>
-      </section>
-
-      <section class="section">
-        <div class="wrap">
-          <h2>What Weaver makes easier</h2>
-          <div class="cards two">
-            <div class="card">
-              <h3>Work across Lakehouses and Warehouses as one project</h3>
-              <p>Weaver works out the order between your Python and SQL, including dependencies that cross Fabric items. You do not need another pipeline simply because the next table uses a different engine.</p>
-            </div>
-            <div class="card">
-              <h3>Write Python and SQL without repeating the dependencies</h3>
-              <p>Your Python imports and SQL references already say what depends on what. Weaver uses them directly instead of making you declare the same order in a separate orchestration layer.</p>
-            </div>
-            <div class="card">
-              <h3>Change Fabric structure without loading data</h3>
-              <p><code>weaver build</code> creates or changes tables, views, shortcuts and other Fabric objects. <code>weaver load</code> runs the data work, so the two jobs do not have to happen together.</p>
-            </div>
-            <div class="card">
-              <h3>Know what happened after a run</h3>
-              <p>Weaver records what loaded, what failed, what was blocked and how far each object got. The next run can use that state instead of starting again or relying on logs.</p>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section class="section">
-        <div class="wrap">
-          <h2>What a Weaver project looks like</h2>
-          <p class="lede">The generated Sales example has Python in a Lakehouse, T-SQL in a Warehouse, a shortcut between them and a check on each side.</p>
-
-          <div class="code plain" style="max-width: 640px;">
-            <div class="code-bar"><span>Analytics/</span></div>
-            <!-- example-tree -->
-            <pre>workspace-config.yml
-workflow.yml
-
-<span class="c-key">Lakehouse/Landing/</span>
-├── Files/
-│   └── <span class="c-fn">Sales__Customers.py</span>
-├── Tables/
-│   └── <span class="c-fn">Sales__Customer.py</span>
-└── assumptions/
-    └── <span class="c-fn">Sales__CustomerValid.py</span>
-
-<span class="c-key">Warehouse/Curated/</span>
-├── <span class="c-dim">shortcuts.yml</span>
-├── <span class="c-fn">Sales.Region.sql</span>
-├── <span class="c-fn">Sales.CustomerByRegion.sql</span>
-└── assumptions/
-    └── <span class="c-fn">Sales.CustomerByRegionValid.sql</span></pre>
-            <!-- /example-tree -->
-          </div>
-
-          <p>Each file sits under the Lakehouse or Warehouse that owns it. A small configuration file says which real Fabric items those names refer to, so the project files stay the same in development and production.</p>
-
-          <h3>Weaver works out the order</h3>
-          <figure>
-            <svg class="dag" viewBox="0 0 850 336" role="img" aria-labelledby="home-dag-title home-dag-desc">
-              <title id="home-dag-title">The Sales example as one dependency graph</title>
-              <desc id="home-dag-desc">The graph contains dependency edges from the Customers file folder to the Customer Delta table, from Customer to CustomerValid and a Warehouse shortcut, from the shortcut and Region to CustomerByRegion, and from CustomerByRegion to CustomerByRegionValid.</desc>
-              <defs>
-                <marker id="ah" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-                  <path d="M0 0 L8 4 L0 8 z" class="arrow-head"></path>
-                </marker>
-                <marker id="ah-s" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-                  <path d="M0 0 L8 4 L0 8 z" class="arrow-head shortcut"></path>
-                </marker>
-              </defs>
-
-              <rect class="lane" x="6" y="22" width="600" height="94" rx="10"></rect>
-              <text class="lane-label" x="20" y="41">LAKEHOUSE / LANDING</text>
-              <rect class="lane" x="6" y="140" width="838" height="188" rx="10"></rect>
-              <text class="lane-label" x="20" y="159">WAREHOUSE / CURATED</text>
-
-              <path class="edge" d="M182 76 H210" marker-end="url(#ah)"></path>
-              <path class="edge" d="M376 76 H404" marker-end="url(#ah)"></path>
-              <path class="edge shortcut" d="M294 98 V166" marker-end="url(#ah-s)"></path>
-              <path class="edge" d="M376 190 C404 190 404 230 426 230" marker-end="url(#ah)"></path>
-              <path class="edge" d="M376 274 C404 274 404 230 426 230" marker-end="url(#ah)"></path>
-              <path class="edge" d="M616 230 H642" marker-end="url(#ah)"></path>
-
-              <g class="kind-file">
-                <rect class="n-box" x="22" y="54" width="160" height="44"></rect>
-                <text class="n-title" x="34" y="73">Customers</text>
-                <text class="n-sub" x="34" y="88">Files/Sales · Python folder</text>
-              </g>
-              <g>
-                <rect class="n-box" x="214" y="54" width="162" height="44"></rect>
-                <text class="n-title" x="226" y="73">Customer</text>
-                <text class="n-sub" x="226" y="88">Sales · Delta table</text>
-              </g>
-              <g class="kind-validation">
-                <rect class="n-box" x="406" y="54" width="176" height="44"></rect>
-                <text class="n-title" x="418" y="73">CustomerValid</text>
-                <text class="n-sub" x="418" y="88">Sales · Assumption</text>
-              </g>
-
-              <g class="kind-shortcut">
-                <rect class="n-box" x="214" y="168" width="162" height="44"></rect>
-                <text class="n-title" x="226" y="187">Customer</text>
-                <text class="n-sub" x="226" y="202">Sales · Shortcut</text>
-              </g>
-              <g>
-                <rect class="n-box" x="214" y="252" width="162" height="44"></rect>
-                <text class="n-title" x="226" y="271">Region</text>
-                <text class="n-sub" x="226" y="286">Sales · Table, T-SQL</text>
-              </g>
-              <g>
-                <rect class="n-box" x="428" y="208" width="188" height="44"></rect>
-                <text class="n-title" x="440" y="227">CustomerByRegion</text>
-                <text class="n-sub" x="440" y="242">Sales · Table, T-SQL</text>
-              </g>
-              <g class="kind-validation">
-                <rect class="n-box" x="644" y="208" width="188" height="44"></rect>
-                <text class="n-title" x="656" y="227">CustomerByRegionValid</text>
-                <text class="n-sub" x="656" y="242">Sales · Assumption</text>
-              </g>
-            </svg>
-            <ul class="legend">
-              <li><i class="file" aria-hidden="true"></i> Files</li>
-              <li><i aria-hidden="true"></i> Tables</li>
-              <li><i class="shortcut" aria-hidden="true"></i> Shortcut</li>
-              <li><i class="validation" aria-hidden="true"></i> Assumption</li>
-            </ul>
-            <figcaption>The dependency graph places the Warehouse join after the Lakehouse table it reads, even though the objects are in different Fabric items.</figcaption>
-          </figure>
-
-          <p>The Warehouse join reads a Lakehouse table through a shortcut. Weaver sees that dependency in the project and runs the Lakehouse work first.</p>
-          <p><a class="text-link" href="/get-started/">Build this example in your own workspace <span class="arrow" aria-hidden="true">→</span></a></p>
-        </div>
-      </section>
-
-      <section class="section">
-        <div class="wrap">
-          <h2>Branch your data as well as your code</h2>
-          <p class="lede">A Git branch gives you another version of the project files. Weaver Mirror gives you a development branch of the actual Fabric estate.</p>
-          <p>Your development estate can start from current production data without copying every table. Lakehouse data can remain behind OneLake shortcuts and Warehouse data behind views.</p>
-          <p>When you need to change part of the estate, build that part in development and leave the rest mirrored. The code and the data can branch together.</p>
-          <p><a class="text-link" href="/scale/">See how Mirror works as the project grows <span class="arrow" aria-hidden="true">→</span></a></p>
-        </div>
-      </section>
-
-      <section class="section">
-        <div class="wrap">
-          <h2>Try it on a small Fabric project</h2>
-          <p class="lede">Install Weaver, choose the Sales example, then build, load and test it in your own workspace.</p>
-          <div class="code" style="max-width: 540px;">
-            <div class="code-bar"><span>terminal</span></div>
-            <pre>pip install weaverstack
-weaver initialise --workspace Analytics</pre>
-          </div>
-          <p><a class="button blue" href="/get-started/">Read the walkthrough</a></p>
-          <p class="small muted">Weaver is free and open source under the Mozilla Public License 2.0. It runs from a Fabric notebook or from your own machine.</p>
-        </div>
-      </section>
-    </main>
-
-    <footer class="site-footer">
-      <div class="wrap footer-grid">
-        <div class="footer-note">
-          <span class="brand"><span class="weave-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>Weaver</span>
-          <p>Weaver helps Python, SQL, Lakehouses and Warehouses work together in Microsoft Fabric.</p>
-          <p>Free and open source under the <a href="https://github.com/matthias-wong-dev/weaverstack/blob/main/LICENSE">Mozilla Public License 2.0</a>.</p>
-          <p class="small">Technical documentation is available at <a href="https://docs.weaverstack.dev/">docs.weaverstack.dev</a>.</p>
-        </div>
-        <div class="footer-links">
-          <ul>
-            <strong>Site</strong>
-            <li><a href="/get-started/">Get started</a></li>
-            <li><a href="/problem/">The problem</a></li>
-            <li><a href="/how-it-works/">How it works</a></li>
-            <li><a href="/scale/">Built for scale</a></li>
-            <li><a href="/vs-dbt/">Weaver vs dbt</a></li>
-          </ul>
-          <ul>
-            <strong>Project</strong>
-            <li><a href="https://github.com/matthias-wong-dev/weaverstack">Source on GitHub</a></li>
-            <li><a href="https://github.com/matthias-wong-dev/weaverstack/tree/main/design">Design notes</a></li>
-            <li><a href="https://github.com/matthias-wong-dev/weaverstack/issues">Issues</a></li>
-            <li><a href="https://pypi.org/project/weaverstack/">weaverstack on PyPI</a></li>
-          </ul>
-        </div>
-      </div>
-    </footer>
-
-    <script src="assets/site.js" defer></script>
-  </body>
+<style>
+/* Homepage spacing accommodates the reviewed copy without changing shared layouts. */
+.homepage .section { padding: 40px 0; }
+.homepage .section > .wrap > p { margin-bottom: 12px; }
+.homepage .page-head .actions { margin: 24px 0 12px; }
+.homepage .page-head .button { padding-inline: 16px; }
+.homepage .hero-note { margin: 0; color: var(--muted); font-size: 15px; }
+@media (max-width: 600px) {
+  .homepage .section { padding: 26px 0; }
+  .homepage .cards { margin: 20px 0; }
+  .homepage .card { padding: 18px; }
+}
+/* The restored project illustration stays local to the homepage. */
+.homepage .project-glance {
+  --pv-paper: var(--paper);
+  --pv-band: var(--white);
+  --pv-surface: var(--white);
+  --pv-ink: var(--ink);
+  --pv-muted: var(--muted);
+  --pv-line: var(--line);
+  --pv-blue: var(--blue);
+  --pv-blue-soft: var(--blue-soft);
+  --pv-green: var(--green);
+  --pv-green-soft: var(--green-soft);
+  --pv-amber: var(--amber);
+  --pv-amber-soft: var(--amber-soft);
+  --pv-sans: var(--sans);
+  display: grid;
+  grid-template-columns: 340px minmax(0, 1fr);
+  gap: 28px;
+  align-items: center;
+  margin-top: 26px;
+}
+.homepage .project-glance > * { min-width: 0; }
+.homepage .project-glance .code { margin: 0; }
+.homepage .project-glance .code pre { padding: 16px; font-size: 11.5px; line-height: 1.8; }
+.homepage .project-glance figure { margin: 0; }
+.homepage .project-glance .project-diagram-scroll { overflow-x: auto; }
+.homepage .project-glance h3 { margin: 0 0 16px; font-size: 18px; }
+.homepage .project-glance figcaption { margin-top: 14px; color: var(--muted); font-size: 14px; }
+.parcel-diagram { display: block; width: 100%; min-width: 700px; height: auto; font-family: var(--pv-sans); }
+.parcel-diagram .parcel-band rect { fill: var(--pv-band); stroke: var(--pv-line); stroke-width: 1; }
+.parcel-diagram .band-1 rect, .parcel-diagram .band-3 rect { fill: var(--pv-paper); }
+.parcel-diagram .parcel-band-title { fill: var(--pv-ink); font-size: 19px; font-weight: 650; }
+.parcel-diagram .parcel-band-sub { fill: var(--pv-muted); font-size: 15px; }
+.parcel-diagram .parcel-node rect { fill: var(--pv-surface); stroke: var(--pv-blue); stroke-width: 1.2; }
+.parcel-diagram .parcel-file rect { fill: var(--pv-green-soft); stroke: var(--pv-green); }
+.parcel-diagram .parcel-shortcut rect { fill: var(--pv-amber-soft); stroke: var(--pv-amber); }
+.parcel-diagram .parcel-model rect, .parcel-diagram .parcel-report rect { fill: var(--pv-blue-soft); }
+.parcel-diagram .parcel-node-title { fill: var(--pv-ink); text-anchor: middle; font-weight: 600; }
+.parcel-diagram .parcel-node-sub { fill: var(--pv-muted); text-anchor: middle; font-size: 17px; }
+.parcel-diagram .parcel-edge { fill: none; stroke: var(--pv-blue); stroke-width: 1.5; }
+.parcel-diagram .parcel-binding { stroke-dasharray: 4 3; }
+.parcel-diagram .parcel-binding-label { fill: var(--pv-muted); text-anchor: middle; font-size: 12px; }
+@media (max-width: 1050px) {
+  .homepage .project-glance { grid-template-columns: minmax(0, 1fr); gap: 24px; }
+}
+</style>
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="site-header">
+<nav class="nav wrap" aria-label="Primary">
+<a class="brand" href="/" aria-label="Weaver home">
+<img class="weaver-mark" src="/assets/brand/weaver-mark-light-134.png" width="30" height="17" alt="" aria-hidden="true">Weaver</a>
+<button class="nav-toggle" type="button" aria-expanded="false" aria-controls="nav-links" hidden>Menu</button>
+<div class="nav-links" id="nav-links">
+<a href="/features/">Features</a>
+<a href="/how-it-works/">How it works</a>
+<a href="/get-started/">Get started</a>
+<a href="/scale/">Built for scale</a>
+<a href="/vs-dbt/">Weaver vs dbt</a>
+<a href="/story/">The story</a>
+<a href="https://docs.weaverstack.dev/">Documentation</a>
+<a class="button small" href="https://github.com/matthias-wong-dev/weaverstack">GitHub <span class="arrow" aria-hidden="true">↗</span>
+</a>
+</div>
+</nav>
+</header>
+<main id="main" class="homepage">
+<section class="page-head">
+<div class="wrap">
+<h1>Making Fabric easier to use</h1>
+<p class="lead">Write the Python, SQL and native Power BI your team already knows. Weaver keeps Fabric under control.</p>
+<div class="actions">
+<a class="button blue" href="https://docs.weaverstack.dev/getting-started/">Get started →</a>
+<a class="button ghost" href="/features/">Explore features →</a>
+</div>
+<p class="hero-note">Free and open source. Installs with pip. No new language to learn.</p>
+</div>
+</section>
+<section class="section" id="project-at-a-glance">
+<div class="wrap">
+<h2>What a Weaver project looks like</h2>
+<p>Ordinary Python, SQL and native Power BI files, organised by Fabric item. Start with one item; connect more as you need them.</p>
+<div class="project-glance">
+<div class="code plain">
+<div class="code-bar"><span>What you write</span></div>
+<pre><span class="c-key">parcel/</span>
+├── <span class="c-dim">workspace-config.yml</span>
+├── <span class="c-dim">workflow.yml</span>
+├── <span class="c-key">Environment/Weaver.Environment/</span>
+├── <span class="c-key">Lakehouse/Landing/</span>
+│   ├── <span class="c-fn">Files/Parcel__Events.py</span>
+│   ├── <span class="c-fn">Tables/Parcel__Event.py</span>
+│   └── <span class="c-fn">Tables/Parcel.CurrentStatus.sql</span>
+├── <span class="c-key">Warehouse/Operations/</span>
+│   ├── <span class="c-fn">Parcel.StatusEvent.sql</span>
+│   ├── <span class="c-dim">shortcuts.yml</span>
+│   ├── <span class="c-fn">Parcel.LakehouseCurrentStatus.sql</span>
+│   └── <span class="c-key">tests/</span>
+└── <span class="c-key">PowerBI/Parcel/</span>
+    ├── <span class="c-key">Parcel.SemanticModel/</span>
+    └── <span class="c-key">Parcel.Report/</span></pre>
+</div>
+<figure aria-labelledby="product-project-flow">
+<h3 id="product-project-flow">End-to-end DAG orchestration across Fabric workspace</h3>
+<div class="project-diagram-scroll" tabindex="0" role="region" aria-label="Illustrative Fabric project; scroll horizontally on narrow screens">
+<svg class="parcel-diagram" viewBox="0 0 960 340" role="img" aria-labelledby="product-project-flow parcel-product-desc">
+<desc id="parcel-product-desc">An illustrative project: Python files and Tables in a Lakehouse feed Warehouse SQL through a Shortcut, then a native semantic model and Report. A Spark SQL transformation branches from the Lakehouse Table.</desc>
+<defs><marker id="parcel-product-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L8 4 L0 8 Z" fill="var(--pv-blue)"/></marker></defs>
+<g data-project-band="Lakehouse" class="parcel-band band-0">
+<rect x="1" y="1" width="358" height="332" rx="10"/>
+<text class="parcel-band-title" x="16" y="32">Lakehouse</text>
+<text class="parcel-band-sub" x="16" y="56">Landing · Parcel</text>
+</g>
+<g data-project-band="Warehouse" class="parcel-band band-1">
+<rect x="371" y="1" width="268" height="332" rx="10"/>
+<text class="parcel-band-title" x="386" y="32">Warehouse</text>
+<text class="parcel-band-sub" x="386" y="56">Operations · Parcel</text>
+</g>
+<g data-project-band="Semantic Model" class="parcel-band band-2">
+<rect x="651" y="1" width="143" height="332" rx="10"/>
+<text class="parcel-band-title" x="666" y="28">Semantic<tspan x="666" dy="22"> Model</tspan></text>
+<text class="parcel-band-sub" x="666" y="78">Parcel</text>
+</g>
+<g data-project-band="Report" class="parcel-band band-3">
+<rect x="806" y="1" width="143" height="332" rx="10"/>
+<text class="parcel-band-title" x="821" y="32">Report</text>
+<text class="parcel-band-sub" x="821" y="56">Parcel</text>
+</g>
+<path class="parcel-edge" data-project-edge="folder|event" d="M116 164 H132" marker-end="url(#parcel-product-arrow)"/>
+<path class="parcel-edge" data-project-edge="event|current" d="M232 164 H240 V108 H248" marker-end="url(#parcel-product-arrow)"/>
+<path class="parcel-edge" data-project-edge="event|shortcut" d="M232 164 H386" marker-end="url(#parcel-product-arrow)"/>
+<path class="parcel-edge" data-project-edge="shortcut|consumer" d="M498 164 H514" marker-end="url(#parcel-product-arrow)"/>
+<path class="parcel-edge" data-project-edge="consumer|model" d="M626 164 H666" marker-end="url(#parcel-product-arrow)"/>
+<path class="parcel-edge parcel-binding" data-project-binding="model|report" d="M778 164 H821" marker-end="url(#parcel-product-arrow)"/>
+<g class="parcel-node parcel-file" data-project-node="folder" data-logical-id="Lakehouse/Landing/Files/Parcel.Events">
+<rect x="16" y="132" width="100" height="76" rx="8"/>
+<text class="parcel-node-title" style="font-size:18px" x="66.0" y="156">Events</text>
+<text class="parcel-node-sub" x="66.0" y="179">Python</text>
+<text class="parcel-node-sub" x="66.0" y="197">Folder</text>
+</g>
+<g class="parcel-node parcel-table" data-project-node="event" data-logical-id="Lakehouse/Landing/Tables/Parcel.Event">
+<rect x="132" y="132" width="100" height="76" rx="8"/>
+<text class="parcel-node-title" style="font-size:18px" x="182.0" y="156">Event</text>
+<text class="parcel-node-sub" x="182.0" y="179">Python</text>
+<text class="parcel-node-sub" x="182.0" y="197">Table</text>
+</g>
+<g class="parcel-node parcel-table" data-project-node="current" data-logical-id="Lakehouse/Landing/Tables/Parcel.CurrentStatus">
+<rect x="248" y="76" width="96" height="76" rx="8"/>
+<text class="parcel-node-title" style="font-size:18px" x="296.0" y="101">Current</text>
+<text class="parcel-node-title" style="font-size:18px" x="296.0" y="120">Status</text>
+<text class="parcel-node-sub" x="296.0" y="139">Spark SQL</text>
+</g>
+<g class="parcel-node parcel-shortcut" data-project-node="shortcut" data-logical-id="Warehouse/Operations/Parcel.LakehouseEvent">
+<rect x="386" y="132" width="112" height="76" rx="8"/>
+<text class="parcel-node-title" style="font-size:18px" x="442.0" y="163">Events</text>
+<text class="parcel-node-sub" x="442.0" y="195">Shortcut</text>
+</g>
+<g class="parcel-node parcel-table" data-project-node="consumer" data-logical-id="Warehouse/Operations/Parcel.LakehouseCurrentStatus">
+<rect x="514" y="132" width="112" height="76" rx="8"/>
+<text class="parcel-node-title" style="font-size:18px" x="570.0" y="157">Current</text>
+<text class="parcel-node-title" style="font-size:18px" x="570.0" y="176">Status</text>
+<text class="parcel-node-sub" x="570.0" y="195">T-SQL</text>
+</g>
+<g class="parcel-node parcel-model" data-project-node="model" data-logical-id="SemanticModel/Parcel">
+<rect x="666" y="132" width="112" height="76" rx="8"/>
+<text class="parcel-node-title" style="font-size:18px" x="722.0" y="156">Parcel</text>
+<text class="parcel-node-sub" x="722.0" y="179">Native</text>
+<text class="parcel-node-sub" x="722.0" y="197">TMDL</text>
+</g>
+<g class="parcel-node parcel-report" data-project-node="report" data-logical-id="Report/Parcel">
+<rect x="821" y="132" width="112" height="76" rx="8"/>
+<text class="parcel-node-title" style="font-size:18px" x="877.0" y="156">Parcel</text>
+<text class="parcel-node-sub" x="877.0" y="179">Native</text>
+<text class="parcel-node-sub" x="877.0" y="197">Report</text>
+</g>
+</svg>
+</div>
+</figure>
+</div>
+</div>
+</section>
+<section class="section">
+<div class="wrap">
+<h2>Keep your work. Lose the repeated engineering.</h2>
+<div class="cards two">
+<a class="card" href="https://docs.weaverstack.dev/lakehouse/">
+<h3>Lakehouse</h3>
+<p><strong>Python and Spark SQL are both <span style="white-space: nowrap;">first-class.</span></strong></p>
+<p>Use them together across files, Tables and transformations. Weaver keeps everything connected and running in the right order, without a tangled web of notebooks and pipelines.</p>
+<span class="go">Explore Lakehouse →</span>
+</a>
+<a class="card" href="https://docs.weaverstack.dev/warehouse/">
+<h3>Warehouse</h3>
+<p><strong>Write the T-SQL your team already knows.</strong></p>
+<p>No macros or handcrafted loading procedures. Weaver takes care of staging, change processing, dependencies and the operational plumbing needed for serious data engineering.</p>
+<span class="go">Explore Warehouse →</span>
+</a>
+<a class="card" href="https://docs.weaverstack.dev/semantic-models/">
+<h3>Semantic Models</h3>
+<p><strong>Keep native TMDL.</strong></p>
+<p>Apply consistent modelling conventions across your organisation's models. Test DAX calculations against independent expectations, so you can have confidence in the numbers.</p>
+<span class="go">Explore Semantic Models →</span>
+</a>
+<a class="card" href="https://docs.weaverstack.dev/reports/">
+<h3>Reports</h3>
+<p><strong>One Power BI Report project. Different environments and models.</strong></p>
+<p>Deploy the same source to different workspaces, with Weaver resolving and verifying the right semantic-model binding for each destination.</p>
+<span class="go">Explore Reports →</span>
+</a>
+</div>
+</div>
+</section>
+<section class="section">
+<div class="wrap">
+<h2>Start with what you already have</h2>
+<p>Have a CSV, a T-SQL query or a Power BI project?</p>
+<p>Start there. You don't need to design an entire data estate before getting something useful running.</p>
+<p>Add more as you need it.</p>
+<p><a class="text-link" href="/get-started/">Choose your first task →</a></p>
+</div>
+</section>
+<section class="section">
+<div class="wrap">
+<h2>Know what ran. Know what needs attention.</h2>
+<p>When something fails, you shouldn't have to piece together what happened from pipeline histories, notebooks and log files.</p>
+<p>Weaver keeps track of dependencies, data changes, test results and failures together. You can see what's current, what's stale and where to pick up when something goes wrong.</p>
+<p><a class="text-link" href="/how-it-works/">See how Weaver works →</a></p>
+</div>
+</section>
+<section class="section">
+<div class="wrap">
+<h2>Multiple environments, without the variable tangle</h2>
+<p>Keep one set of Python, SQL and Power BI files across development and production.</p>
+<p>Weaver handles the different Fabric item names and model bindings without burying your code in environment-specific variables.</p>
+<p>And with Mirror, development can use existing data without copying everything first.</p>
+<p><a class="text-link" href="https://docs.weaverstack.dev/estate/environments/">Develop without the tangle →</a></p>
+</div>
+</section>
+<section class="section">
+<div class="wrap">
+<h2>Useful at three objects. Engineered for three thousand.</h2>
+<p>Repeatable deployment and testing are useful even for a couple of files and a Table.</p>
+<p>As your estate grows, Weaver takes care of increasingly difficult engineering: dependencies, incremental processing, scheduling, concurrency and recovery.</p>
+<p>The same approach works whether you're managing three objects or three thousand.</p>
+<p>In a synthetic 3,000-object test estate on F64, the first load completed in about an hour.</p>
+<p><a class="text-link" href="/scale/">Built for scale →</a></p>
+</div>
+</section>
+</main>
+<footer class="site-footer">
+<div class="wrap footer-grid">
+<div class="footer-note">
+<span class="brand">
+<img class="weaver-mark" src="/assets/brand/weaver-mark-light-134.png" width="30" height="17" alt="" aria-hidden="true">Weaver</span>
+<p>Build, load, test and inspect your Microsoft Fabric estate.</p>
+<p>Free and open source under the <a href="https://github.com/matthias-wong-dev/weaverstack/blob/main/LICENSE">Mozilla Public License 2.0</a>.</p>
+</div>
+<div class="footer-links">
+<ul>
+<li>
+<strong>Site</strong>
+</li>
+<li>
+<a href="/features/">Features</a>
+</li>
+<li>
+<a href="/how-it-works/">How it works</a>
+</li>
+<li>
+<a href="/get-started/">Get started</a>
+</li>
+<li>
+<a href="/scale/">Built for scale</a>
+</li>
+<li>
+<a href="/vs-dbt/">Weaver vs dbt</a>
+</li>
+<li>
+<a href="/story/">The story behind Weaver</a>
+</li>
+</ul>
+<ul>
+<li>
+<strong>Explore the docs</strong>
+</li>
+<li>
+<a href="https://docs.weaverstack.dev/lakehouse/">Lakehouse</a>
+</li>
+<li>
+<a href="https://docs.weaverstack.dev/warehouse/">Warehouse</a>
+</li>
+<li>
+<a href="https://docs.weaverstack.dev/semantic-models/">Semantic Models</a>
+</li>
+<li>
+<a href="https://docs.weaverstack.dev/reports/">Reports</a>
+</li>
+</ul>
+<ul>
+<li>
+<strong>Project</strong>
+</li>
+<li>
+<a href="https://docs.weaverstack.dev/">Technical documentation</a>
+</li>
+<li>
+<a href="https://github.com/matthias-wong-dev/weaverstack">Source on GitHub</a>
+</li>
+<li>
+<a href="https://github.com/matthias-wong-dev/weaverstack/issues">Issues</a>
+</li>
+<li>
+<a href="https://pypi.org/project/weaverstack/">weaverstack on PyPI</a>
+</li>
+</ul>
+</div>
+</div>
+</footer><script src="/assets/site.js?v=858d1659f7" defer></script></body>
 </html>

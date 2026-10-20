@@ -13,13 +13,14 @@ from pathlib import Path
 from typing import Iterable, Mapping
 
 from ..errors import CommandError
+from ..representation import ReportAlias
 from ..workspaces import Workspace
 from .wipe import WipeTarget
 from .workspace import operation_workspace
 
 
 @dataclass(frozen=True)
-class UnbindPlan:
+class UnbindPlan(ReportAlias):
     """The targets whose claims are removed, as the catalogue and Fabric hold them."""
 
     workspace: Workspace
@@ -70,7 +71,7 @@ class UnbindPlan:
 
 
 @dataclass(frozen=True)
-class UnbindResult:
+class UnbindResult(ReportAlias):
     plan: UnbindPlan
     logical_items: tuple[str, ...] = ()
     dry_run: bool = False

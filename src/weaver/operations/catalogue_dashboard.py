@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Sequence
 
 from ..errors import CommandError
+from ..representation import ReportAlias
 from ..workspaces import Workspace
 
 CREATED = "created"
@@ -24,7 +25,7 @@ _FINGERPRINT = ("Dashboard measures", "Renderer")
 
 
 @dataclass(frozen=True)
-class DashboardItem:
+class DashboardItem(ReportAlias):
     kind: str
     name: str
     #: ``created`` or ``updated``; a dry run says what it would do.
@@ -41,7 +42,7 @@ class DashboardItem:
 
 
 @dataclass(frozen=True)
-class CatalogueDashboardResult:
+class CatalogueDashboardResult(ReportAlias):
     workspace: str
     #: The source catalogue, as ``Workspace/Warehouse/Name``.
     catalogue: str

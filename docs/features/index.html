@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="en-AU">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#f7f7f6">
+<title>Weaver features: one Fabric graph and built-in engineering</title>
+<meta name="description" content="Discover one managed dependency graph across Fabric, generated pipelines, native Power BI engineering, operational state and development without full data copies.">
+<meta name="robots" content="index, follow, max-image-preview:large">
+<link rel="canonical" href="https://weaverstack.dev/features/">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://weaverstack.dev/features/">
+<meta property="og:site_name" content="Weaver">
+<meta property="og:title" content="Weaver features: one Fabric graph and built-in engineering">
+<meta property="og:description" content="Discover one managed dependency graph across Fabric, generated pipelines, native Power BI engineering, operational state and development without full data copies.">
+<meta property="og:image" content="https://weaverstack.dev/og.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Weaver features: one Fabric graph and built-in engineering">
+<meta name="twitter:description" content="Discover one managed dependency graph across Fabric, generated pipelines, native Power BI engineering, operational state and development without full data copies.">
+<link rel="icon" type="image/png" href="/favicon.png">
+<link rel="manifest" href="/site.webmanifest">
+<link rel="sitemap" type="application/xml" href="/sitemap.xml">
+<link rel="stylesheet" href="/assets/site.css?v=2cc8d84c4f">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Weaver logo.">
+<meta name="twitter:image" content="https://weaverstack.dev/og.png">
+<meta name="twitter:image:alt" content="Weaver logo.">
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<meta property="og:locale" content="en_AU">
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="site-header">
+<nav class="nav wrap" aria-label="Primary">
+<a class="brand" href="/" aria-label="Weaver home">
+<img class="weaver-mark" src="/assets/brand/weaver-mark-light-134.png" width="30" height="17" alt="" aria-hidden="true">Weaver</a>
+<button class="nav-toggle" type="button" aria-expanded="false" aria-controls="nav-links" hidden>Menu</button>
+<div class="nav-links" id="nav-links">
+<a href="/features/" aria-current="page">Features</a>
+<a href="/how-it-works/">How it works</a>
+<a href="/get-started/">Get started</a>
+<a href="/scale/">Built for scale</a>
+<a href="/vs-dbt/">Weaver vs dbt</a>
+<a href="/story/">The story</a>
+<a href="https://docs.weaverstack.dev/">Documentation</a>
+<a class="button small" href="https://github.com/matthias-wong-dev/weaverstack">GitHub <span class="arrow" aria-hidden="true">↗</span>
+</a>
+</div>
+</nav>
+</header>
+<main id="main" class="features-showcase">
+<section class="page-head"><div class="wrap">
+<h1>Engineering across the Fabric estate.</h1>
+<p class="lead">Explore how Weaver handles Lakehouse pipelines, Warehouse SQL, native Power BI and the operational work that connects them.</p>
+<nav class="feature-jumps" aria-label="Feature sections"><a href="#start-simple">Start simple</a><a href="#data-engineering">Data engineering</a><a href="#power-bi">Power BI</a><a href="#operations">Operations</a><a href="#visibility">Dashboard</a><a href="#advanced">Advanced</a></nav>
+</div></section>
+<section class="section feature-group" id="start-simple" data-feature-group="1"><div class="wrap"><h2>Start with what you know</h2>
+<div class="feature-list">
+<div class="feature-row" data-feature="python-spark"><h3><a href="https://docs.weaverstack.dev/lakehouse/spark-sql/">Python and Spark SQL, together</a></h3><p>Use Python and Spark SQL together for Lakehouse Files and Delta Tables in the same dependency model.</p></div>
+<div class="feature-row" data-feature="tsql"><h3><a href="https://docs.weaverstack.dev/warehouse/first-project/">Ordinary T-SQL</a></h3><p>Keep ordinary SELECTs, without a proprietary modelling language or macros.</p></div>
+<div class="feature-row" data-feature="native-powerbi"><h3><a href="https://docs.weaverstack.dev/semantic-models/native-tmdl/">Native Power BI</a></h3><p>Keep PBIP, TMDL and native Report definitions rather than converting to a Weaver-only format.</p></div>
+<div class="feature-row" data-feature="portable"><h3><a href="https://docs.weaverstack.dev/advanced/portable-execution-between-desktop-and-fabric/">Windows, macOS, Linux, or just Fabric Notebooks</a></h3><p>Develop and operate Weaver projects on Windows, macOS or Linux, or work entirely inside Fabric Notebooks. Build and deploy native Power BI models and Reports without Power BI Desktop or a Windows computer.</p></div>
+<div class="feature-row" data-feature="agents"><h3><a href="https://docs.weaverstack.dev/reference/machine-readable-output/">Built for developers and AI agents</a></h3><p>Readable terminal output for developers, and structured <code>--json</code> results for AI agents from Check, Build, Load, Test and Health. Preview, build, load, test and inspect in a repeatable cycle, with explicit outcomes for what ran and what needs attention.</p></div>
+</div>
+<p class="scope-note">Existing Fabric services, compute and workspace permissions still apply. Lakehouse processing uses Fabric’s Spark runtime, not a separate Weaver orchestration service.</p>
+<p class="group-docs"><a href="https://docs.weaverstack.dev/lakehouse/python/">First Python pipeline</a><span aria-hidden="true"> · </span><a href="https://docs.weaverstack.dev/reference/weaver-documents/overview/">Native document reference</a></p></div></section>
+<section class="section feature-group" id="data-engineering" data-feature-group="2"><div class="wrap"><h2>Pipelines, dependencies and data quality</h2>
+<figure class="feature-spotlight dag-spotlight" data-spotlight="cross-engine-dag" aria-labelledby="dag-title">
+<h3 id="dag-title">One dependency graph. Across Fabric.</h3>
+<div class="fabric-dag" role="group" aria-label="One selected managed flow from Lakehouse Files through Python, Spark SQL and Warehouse T-SQL to model refresh">
+<div class="dag-engine lakehouse-engine"><h4>Lakehouse</h4><ol>
+<li data-dag-node="folder" data-dag-edge="folder:python-table"><strong>Files</strong><span>Python Folder</span></li>
+<li data-dag-node="python-table" data-dag-edge="python-table:spark-table"><strong>Delta Table</strong><span>Python</span></li>
+<li data-dag-node="spark-table"><strong>Delta Table</strong><span>Spark SQL</span></li>
+</ol></div>
+<div class="dag-connection" data-dag-edge="spark-table:warehouse-table" data-boundary="Lakehouse:Warehouse"><span aria-hidden="true">→</span><small>Logical Shortcut<br>SQL endpoint readiness</small></div>
+<div class="dag-engine warehouse-engine"><h4>Warehouse</h4><div data-dag-node="warehouse-table"><strong>Table</strong><span>T-SQL</span></div></div>
+<div class="dag-connection" data-dag-edge="warehouse-table:model-refresh"><span aria-hidden="true">→</span><small>Managed model source</small></div>
+<div class="dag-engine model-engine"><h4>Power BI</h4><div data-dag-node="model-refresh"><strong>Semantic Model</strong><span>Refresh</span></div></div>
+</div>
+<figcaption>One managed Load/refresh graph orders the selected work across engines, with supported publication and endpoint-readiness barriers—not a separate pipeline joining engine jobs.</figcaption>
+<p class="scope-note">Logical Shortcuts and managed model sources supply cross-item edges. Build source items before Power BI items; a Report has no refresh of its own.</p>
+<p class="spotlight-docs"><a href="https://docs.weaverstack.dev/estate/connected-items/">Connect Lakehouse and Warehouse</a><span aria-hidden="true"> · </span><a href="https://docs.weaverstack.dev/semantic-models/managed-sources/">Add a managed model source</a></p>
+</figure><div class="feature-list">
+<div class="feature-row" data-feature="fabric-dag"><h3><a href="https://docs.weaverstack.dev/estate/connected-items/">One dependency graph across Fabric</a></h3><p>Order selected managed Lakehouse work, Warehouse T-SQL and dependent Semantic Model refreshes in one DAG.</p></div>
+<div class="feature-row" data-feature="generated-warehouse"><h3><a href="https://docs.weaverstack.dev/warehouse/first-project/">Generated Warehouse pipelines</a></h3><p>A SELECT becomes a Table with generated staging, declared-key matching, row-change reconciliation and recorded results.</p></div>
+<div class="feature-row" data-feature="managed-lakehouse"><h3><a href="https://docs.weaverstack.dev/lakehouse/python/">Managed Lakehouse pipelines</a></h3><p>Materialise Files, Python and Spark SQL into managed Delta Tables without hand-building another orchestration project.</p></div>
+<div class="feature-row" data-feature="dependency-discovery"><h3><a href="https://docs.weaverstack.dev/estate/connected-items/">Dependency discovery</a></h3><p>Python imports and supported T-SQL references supply dependencies; Spark SQL uses explicit declarations.</p></div>
+<div class="feature-row" data-feature="incremental-changes"><h3><a href="https://docs.weaverstack.dev/warehouse/incremental/">Incremental inserts, updates and deletes</a></h3><p>Apply insert/update candidates and explicit delete keys under the declared policy, without rebuilding every target.</p></div>
+<div class="feature-row" data-feature="bookmarks"><h3><a href="https://docs.weaverstack.dev/lakehouse/incremental/">Per-consumer bookmarks</a></h3><p>Each loadable Table or Folder keeps its own clean processing boundary, even when consumers share a source.</p></div>
+<div class="feature-row" data-feature="data-tests"><h3><a href="https://docs.weaverstack.dev/warehouse/tests/">Tests and Assumptions</a></h3><p>Compare expected and actual results or catch rule-breaking rows through supported Python, SQL and DAX validations.</p></div>
+<div class="feature-row" data-feature="quality-guards"><h3><a href="https://docs.weaverstack.dev/advanced/partial-failures-rejected-data-and-thresholds/">Data-quality safeguards</a></h3><p>Record rejected input and refuse proposed update/delete changes that exceed active stability thresholds.</p></div>
+</div>
+<figure class="feature-spotlight warehouse-spotlight" data-spotlight="generated-warehouse" aria-labelledby="select-title">
+<h3 id="select-title">Write a SELECT. Get the engineering around it.</h3>
+<div class="select-engineering"><div class="authored-query"><h4>You write</h4><strong>T-SQL query</strong><span>+ native metadata comment</span></div><span class="engineering-arrow" aria-hidden="true">→</span><div class="generated-work"><h4>Weaver supplies</h4><ul><li>Physical Table</li><li>Load procedure &amp; staging</li><li>Declared-key reconciliation</li><li>Supported dependencies</li><li>Change statistics</li><li>Health evidence</li></ul></div></div>
+<figcaption>Declare the key used to reconcile rows. Incremental source logic identifies changes and explicit deletes.</figcaption>
+<p class="spotlight-docs"><a href="https://docs.weaverstack.dev/warehouse/first-project/">From a query to a managed Table</a></p>
+</figure><p class="group-docs"><a href="https://docs.weaverstack.dev/warehouse/first-project/">First Warehouse pipeline</a><span aria-hidden="true"> · </span><a href="https://docs.weaverstack.dev/reference/operation-behaviour/load/">Load behaviour</a></p></div></section>
+<section class="section feature-group" id="power-bi" data-feature-group="3"><div class="wrap"><h2>Power BI, engineered for organisations</h2>
+<figure class="feature-spotlight powerbi-spotlight" data-spotlight="power-bi" aria-labelledby="powerbi-title">
+<h3 id="powerbi-title">One modelling foundation. Different audiences. Consistent standards.</h3>
+<div class="model-foundation"><strong>Native TMDL foundation</strong><span>+ shared policy</span></div>
+<div class="model-variants">
+<div><h4>Operations model</h4><p>Native variant + independent DAX checks</p><span class="variant-arrow" aria-hidden="true">↓</span><strong>Operations Report</strong><span>Verified model binding</span></div>
+<div><h4>Executive model</h4><p>Native variant + independent DAX checks</p><span class="variant-arrow" aria-hidden="true">↓</span><strong>Executive Report</strong><span>Verified model binding</span></div>
+</div>
+<figcaption>Compose native model sources, apply shared standards, validate calculations and deploy each Report against its intended model.</figcaption>
+</figure><div class="feature-list">
+<div class="feature-row" data-feature="model-deployment"><h3><a href="https://docs.weaverstack.dev/semantic-models/native-tmdl/">Native Semantic Model deployment</a></h3><p>Deploy the PBIP/TMDL model you already author while preserving its native source files.</p></div>
+<div class="feature-row" data-feature="shared-policy"><h3><a href="https://docs.weaverstack.dev/semantic-models/shared-policy/">Organisation-wide modelling standards</a></h3><p>Apply shared native TMDL policy across Semantic Models instead of repeating formats and conventions.</p></div>
+<div class="feature-row" data-feature="builtin-annotations"><h3><a href="https://docs.weaverstack.dev/reference/power-bi/annotations/">Built-in modelling annotations</a></h3><p>Hide foreign keys, generate measure selectors and apply supported model rules through native TMDL annotations.</p></div>
+<div class="feature-row" data-feature="custom-annotations"><h3><a href="https://docs.weaverstack.dev/semantic-models/custom-annotations/">Custom Python annotations</a></h3><p>Implement project-specific modelling conventions in trusted Python when native policy and built-ins are not enough.</p></div>
+<div class="feature-row" data-feature="composition"><h3><a href="https://docs.weaverstack.dev/semantic-models/composition/">Semantic Model composition</a></h3><p>Reuse a native model foundation to produce audience variants without maintaining complete copies.</p></div>
+<div class="feature-row" data-feature="dax-reconciliation"><h3><a href="https://docs.weaverstack.dev/semantic-models/validation/">DAX validation and SQL reconciliation</a></h3><p>Check DAX measures against independent expectations, including SQL calculations over managed Lakehouse or Warehouse sources.</p></div>
+<div class="feature-row" data-feature="report-binding"><h3><a href="https://docs.weaverstack.dev/reports/environments/">Verified Report deployment</a></h3><p>Deploy the same authored Report to different destinations, resolving and verifying its intended model and workspace binding.</p></div>
+</div>
+<p class="scope-note">Supported native model/Report deployment also works in an appropriately licensed <a href="https://docs.weaverstack.dev/reference/power-bi/requirements-and-compatibility/">Power BI service workspace</a>, without Lakehouse/Warehouse work or a Weaver Catalogue.</p>
+<p class="group-docs"><a href="https://docs.weaverstack.dev/semantic-models/native-tmdl/">Deploy a native model</a><span aria-hidden="true"> · </span><a href="https://docs.weaverstack.dev/reference/power-bi/">Power BI reference</a></p></div></section>
+<section class="section feature-group" id="operations" data-feature-group="4"><div class="wrap"><h2>An estate that knows what’s happening</h2>
+<div class="feature-list">
+<div class="feature-row" data-feature="catalogue"><h3><a href="https://docs.weaverstack.dev/core-concepts/catalogue/">Central Fabric Catalogue</a></h3><p>Query installed definitions, signatures, metadata, dependencies and operational state in one Fabric Warehouse.</p></div>
+<div class="feature-row" data-feature="health"><h3><a href="https://docs.weaverstack.dev/estate/catalogue-and-health/">Unified Health</a></h3><p>See current, stale, pending, failed or inconsistent work across the registered managed estate.</p></div>
+<div class="feature-row" data-feature="history"><h3><a href="https://docs.weaverstack.dev/advanced/row-auditing-and-operational-history/">Logging and statistics</a></h3><p>Inspect workflow history, Load counts, timings, row changes and recorded outcomes.</p></div>
+<div class="feature-row" data-feature="recovery"><h3><a href="https://docs.weaverstack.dev/estate/recovery/">Fault-tolerant execution</a></h3><p>Retain completed effects, record failures and blocked work, and optionally continue independent Load branches.</p></div>
+<div class="feature-row" data-feature="selection"><h3><a href="https://docs.weaverstack.dev/estate/selective-runs/">Selective execution</a></h3><p>Select installed Load work by whole-name regex, deliberately add ancestors/descendants and preview the selection.</p></div>
+<div class="feature-row" data-feature="concurrency"><h3><a href="https://docs.weaverstack.dev/estate/concurrency/">Controlled concurrency</a></h3><p>Cap one invocation or tune per-resource limits while scheduling independent work in dependency order.</p></div>
+<div class="feature-row" data-feature="workflows"><h3><a href="https://docs.weaverstack.dev/estate/automation-and-deployment/">Sessions and workflows</a></h3><p>Reuse execution context and automate sequences of the same operations used interactively.</p></div>
+</div>
+<p class="group-docs"><a href="https://docs.weaverstack.dev/estate/operate/">Run and inspect an estate</a><span aria-hidden="true"> · </span><a href="https://docs.weaverstack.dev/reference/operation-behaviour/">Operation boundaries</a></p></div></section>
+<section class="section feature-group" id="visibility" data-feature-group="5"><div class="wrap"><h2>Visibility, included</h2>
+<p class="group-lead">Weaver comes with a Power BI dashboard over the catalogue. One command deploys it beside your estate.</p>
+<figure class="feature-spotlight dashboard-spotlight" data-spotlight="catalogue-dashboard" aria-labelledby="dashboard-title">
+<h3 id="dashboard-title">The whole estate, at a glance.</h3>
+<div class="dashboard-gallery"><a href="https://docs.weaverstack.dev/estate/catalogue-dashboard/#overview"><img src="/assets/images/catalogue-dashboard/overview.webp" width="1440" height="900" loading="lazy" alt="Overview: installed items and Health."><span>Overview</span></a><a href="https://docs.weaverstack.dev/estate/catalogue-dashboard/#orchestration"><img src="/assets/images/catalogue-dashboard/orchestration.webp" width="1440" height="900" loading="lazy" alt="Orchestration: one table's lineage, readiness and last outcome."><span>Orchestration</span></a><a href="https://docs.weaverstack.dev/estate/catalogue-dashboard/#performance"><img src="/assets/images/catalogue-dashboard/performance.webp" width="1440" height="900" loading="lazy" alt="Performance: each run as a bar from its start to its finish by time of day, and one load's own row counts beside the loads around it."><span>Performance</span></a><a href="https://docs.weaverstack.dev/estate/catalogue-dashboard/#gantt"><img src="/assets/images/catalogue-dashboard/gantt.webp" width="1440" height="900" loading="lazy" alt="Gantt: one workflow's loads and Tests on a timeline."><span>Gantt</span></a><a href="https://docs.weaverstack.dev/estate/catalogue-dashboard/#entity-dictionary"><img src="/assets/images/catalogue-dashboard/entities.webp" width="1440" height="900" loading="lazy" alt="Entity dictionary: an ER diagram from declared keys."><span>Entity dictionary</span></a></div>
+<figcaption>Seven pages: Overview, Health, the Orchestration graph, Performance by time of day, a Gantt of each workflow, an ER diagram with a metadata browser, and a bus matrix for every semantic model.</figcaption>
+<p class="spotlight-docs"><a href="https://docs.weaverstack.dev/estate/catalogue-dashboard/#the-pages">Try every page in the browser</a><span aria-hidden="true"> · </span><a href="https://docs.weaverstack.dev/estate/catalogue-dashboard/#deploy-the-dashboard">Deploy the Catalogue Dashboard</a></p>
+</figure><div class="feature-list">
+<div class="feature-row" data-feature="dashboard-deploy"><h3><a href="https://docs.weaverstack.dev/estate/catalogue-dashboard/#deploy-the-dashboard">One command</a></h3><p><code>weaver catalogue-dashboard</code> deploys the semantic model and Report beside the catalogue, and brings them up to date on the next run.</p></div>
+<div class="feature-row" data-feature="dashboard-live"><h3><a href="https://docs.weaverstack.dev/estate/catalogue-dashboard/#what-it-reads">Live over Direct Lake</a></h3><p>The model reads the catalogue’s tables over Direct Lake, so each page shows your Weaver-managed estate as work is processed.</p></div>
+<div class="feature-row" data-feature="dashboard-yours"><h3><a href="https://docs.weaverstack.dev/estate/catalogue-dashboard/">Free to tweak</a></h3><p>It is an ordinary Power BI Report. Tweak it to fit your needs, or throw it away and build your own over the catalogue.</p></div>
+</div>
+</div></section>
+<section class="section feature-group" id="advanced" data-feature-group="6"><div class="wrap"><h2>When your estate gets complicated</h2>
+<div class="feature-list">
+<div class="feature-row" data-feature="environments"><h3><a href="https://docs.weaverstack.dev/estate/environments/">One project, multiple environments</a></h3><p>Keep source files and logical identities while workspace configuration selects physical item and model destinations.</p></div>
+<div class="feature-row" data-feature="mirror"><h3><a href="https://docs.weaverstack.dev/estate/mirror/">Mirror: develop without copying everything</a></h3><p>Borrow installed Lakehouse/Warehouse data through Shortcuts and Views, then materialise selected changed or affected work locally.</p></div>
+<div class="feature-row" data-feature="incremental-build"><h3><a href="https://docs.weaverstack.dev/advanced/incremental-build-selection/">Incremental Build</a></h3><p>Reconcile changed source-data definitions and affected selected descendants, retaining certified unchanged source work.</p></div>
+<div class="feature-row" data-feature="build-preview"><h3><a href="https://docs.weaverstack.dev/estate/development-cycle/">Build previews</a></h3><p>Inspect selected actions, physical targets and destructive effects through a read-only Build plan.</p></div>
+<div class="feature-row" data-feature="bundles"><h3><a href="https://docs.weaverstack.dev/advanced/build-bundles-and-controlled-installation/">Controlled deployment bundles</a></h3><p>Review and hand off frozen, destination-specific installation plans without replanning during Install.</p></div>
+<div class="feature-row" data-feature="publication-readiness"><h3><a href="https://docs.weaverstack.dev/estate/connected-items/">Cross-engine publication and readiness</a></h3><p>Order supported OneLake publication and SQL endpoint-readiness barriers before dependent cross-engine consumers.</p></div>
+<div class="feature-row" data-feature="data-protection"><h3><a href="https://docs.weaverstack.dev/advanced/protecting-data/">Protect important data</a></h3><p>Keep irreplaceable sources outside managed targets and use Build replacement guards for protected owned objects.</p></div>
+</div>
+<figure class="feature-spotlight mirror-spotlight" data-spotlight="mirror" aria-labelledby="mirror-title">
+<h3 id="mirror-title">Develop against a large estate without copying it first.</h3>
+<ol class="mirror-flow"><li><strong>Existing source estate</strong><span>Source-owned data</span></li><li><strong>Borrowed development data</strong><span>Warehouse Views · Lakehouse Shortcuts</span></li><li><strong>Selected changed work</strong><span>Materialised locally by Build</span></li></ol>
+<figcaption>Keep unchanged objects borrowed while selected changed or affected work becomes local.</figcaption>
+<p class="scope-note">Mirror reconstructs the destination Catalogue and selected targets in the same workspace. Re-mirroring resets local work; it is not an in-place sync.</p>
+<p class="spotlight-docs"><a href="https://docs.weaverstack.dev/estate/mirror/">Develop using Mirror</a><span aria-hidden="true"> · </span><a href="https://docs.weaverstack.dev/reference/operation-behaviour/mirror/">Scope and reset boundaries</a></p>
+</figure><p class="scope-note">Bundles are destination-specific. Build replacement guards do not protect data from Load, Wipe or deliberate resets.</p>
+</div></section>
+<section class="section feature-scale"><div class="wrap"><h2>From three objects to three thousand.</h2>
+<p>The scale benchmark records first-load and incremental processing separately. In the synthetic F64 benchmark, the 3,000-object estate’s first Load took about an hour; later measured incrementals were around 13 minutes. The first incremental day took about 19 minutes.</p>
+<div class="actions"><a class="button blue" href="/scale/">Built for scale →</a><a class="button ghost" href="/get-started/">Get started →</a></div>
+</div></section></main>
+<footer class="site-footer">
+<div class="wrap footer-grid">
+<div class="footer-note">
+<span class="brand">
+<img class="weaver-mark" src="/assets/brand/weaver-mark-light-134.png" width="30" height="17" alt="" aria-hidden="true">Weaver</span>
+<p>Build, load, test and inspect your Microsoft Fabric estate.</p>
+<p>Free and open source under the <a href="https://github.com/matthias-wong-dev/weaverstack/blob/main/LICENSE">Mozilla Public License 2.0</a>.</p>
+</div>
+<div class="footer-links">
+<ul>
+<li>
+<strong>Site</strong>
+</li>
+<li>
+<a href="/features/">Features</a>
+</li>
+<li>
+<a href="/how-it-works/">How it works</a>
+</li>
+<li>
+<a href="/get-started/">Get started</a>
+</li>
+<li>
+<a href="/scale/">Built for scale</a>
+</li>
+<li>
+<a href="/vs-dbt/">Weaver vs dbt</a>
+</li>
+<li>
+<a href="/story/">The story behind Weaver</a>
+</li>
+</ul>
+<ul>
+<li>
+<strong>Explore the docs</strong>
+</li>
+<li>
+<a href="https://docs.weaverstack.dev/lakehouse/">Lakehouse</a>
+</li>
+<li>
+<a href="https://docs.weaverstack.dev/warehouse/">Warehouse</a>
+</li>
+<li>
+<a href="https://docs.weaverstack.dev/semantic-models/">Semantic Models</a>
+</li>
+<li>
+<a href="https://docs.weaverstack.dev/reports/">Reports</a>
+</li>
+</ul>
+<ul>
+<li>
+<strong>Project</strong>
+</li>
+<li>
+<a href="https://docs.weaverstack.dev/">Technical documentation</a>
+</li>
+<li>
+<a href="https://github.com/matthias-wong-dev/weaverstack">Source on GitHub</a>
+</li>
+<li>
+<a href="https://github.com/matthias-wong-dev/weaverstack/issues">Issues</a>
+</li>
+<li>
+<a href="https://pypi.org/project/weaverstack/">weaverstack on PyPI</a>
+</li>
+</ul>
+</div>
+</div>
+</footer><script src="/assets/site.js?v=858d1659f7" defer></script></body>
+</html>

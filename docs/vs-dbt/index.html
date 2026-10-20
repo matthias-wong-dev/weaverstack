@@ -18,40 +18,44 @@
     <meta property="og:image:type" content="image/png">
     <meta property="og:image:width" content="1200">
     <meta property="og:image:height" content="630">
-    <meta property="og:image:alt" content="Weaver vs dbt: a dbt alternative for Microsoft Fabric.">
+    <meta property="og:image:alt" content="Weaver logo.">
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="A dbt alternative for Microsoft Fabric">
     <meta name="twitter:description" content="Compare Weaver and dbt for Fabric projects that span SQL, Python, Lakehouses, Warehouses, loading and recovery.">
     <meta name="twitter:image" content="https://weaverstack.dev/og-dbt.png">
-    <meta name="twitter:image:alt" content="Weaver vs dbt: a dbt alternative for Microsoft Fabric.">
+    <meta name="twitter:image:alt" content="Weaver logo.">
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
     <link rel="icon" type="image/png" sizes="128x128" href="../favicon.png">
     <link rel="manifest" href="../site.webmanifest">
-    <link rel="stylesheet" href="../assets/site.css">
+    <link rel="stylesheet" href="../assets/site.css?v=2cc8d84c4f">
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to content</a>
 
     <header class="site-header">
-      <nav class="nav wrap" aria-label="Primary">
-        <a class="brand" href="/" aria-label="Weaver home"><span class="weave-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>Weaver</a>
-        <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="nav-links" hidden>Menu</button>
-        <div class="nav-links" id="nav-links">
-          <a href="/get-started/">Get started</a>
-          <a href="/problem/">The problem</a>
-          <a href="/how-it-works/">How it works</a>
-          <a href="/scale/">Built for scale</a>
-          <a href="/vs-dbt/" aria-current="page">Weaver vs dbt</a>
-          <a href="https://docs.weaverstack.dev/">Documentation</a>
-          <a class="button small" href="https://github.com/matthias-wong-dev/weaverstack">GitHub <span class="arrow" aria-hidden="true">↗</span></a>
-        </div>
-      </nav>
-    </header>
+<nav class="nav wrap" aria-label="Primary">
+<a class="brand" href="/" aria-label="Weaver home">
+<img class="weaver-mark" src="/assets/brand/weaver-mark-light-134.png" width="30" height="17" alt="" aria-hidden="true">Weaver</a>
+<button class="nav-toggle" type="button" aria-expanded="false" aria-controls="nav-links" hidden>Menu</button>
+<div class="nav-links" id="nav-links">
+<a href="/features/">Features</a>
+<a href="/how-it-works/">How it works</a>
+<a href="/get-started/">Get started</a>
+<a href="/scale/">Built for scale</a>
+<a href="/vs-dbt/" aria-current="page">Weaver vs dbt</a>
+<a href="/story/">The story</a>
+<a href="https://docs.weaverstack.dev/">Documentation</a>
+<a class="button small" href="https://github.com/matthias-wong-dev/weaverstack">GitHub <span class="arrow" aria-hidden="true">↗</span>
+</a>
+</div>
+</nav>
+</header>
 
     <main id="main">
       <section class="page-head">
         <div class="wrap">
           <h1>Weaver vs dbt</h1>
-          <p class="lead">dbt is a strong choice when the main job is modelling transformations. Weaver is aimed at Fabric projects where Python, files, Lakehouses, Warehouses, loading and recovery all need to work together.</p>
+          <p class="lead">dbt has a mature transformation ecosystem and a cross-platform design. Weaver focuses on coordinating Lakehouse work, Warehouse SQL, native Semantic Models and Reports inside Fabric.</p>
         </div>
       </section>
 
@@ -66,17 +70,18 @@
             </div>
             <div class="card">
               <h3>Dependencies from ordinary Python and SQL</h3>
-              <p>Weaver reads Python imports and SQL table references. You do not repeat them in another pipeline or replace the SQL references with framework-specific syntax.</p>
+              <p>Weaver reads Python imports and supported T-SQL references. Spark SQL Tables and Views declare their dependencies explicitly; they still use native SQL rather than a macro layer.</p>
               <p>dbt uses <code>ref()</code> and <code>source()</code> to declare those relationships.</p>
             </div>
             <div class="card">
               <h3>Build the structure without loading the data</h3>
-              <p><code>weaver build</code> creates or changes tables, views, shortcuts and load code. <code>weaver load</code> runs the data work separately.</p>
+              <p>
+<code>weaver build</code> creates or changes tables, views, shortcuts and load code. <code>weaver load</code> runs the data work separately.</p>
               <p>A dbt model is created and populated by the same run.</p>
             </div>
             <div class="card">
               <h3>Run results stay in Fabric</h3>
-              <p>Weaver records what was built, what loaded, what failed and where each load should continue in a Fabric Warehouse.</p>
+              <p>Weaver records installed definitions, load and model-refresh outcomes, validation results and consumer bookmarks in a Fabric Warehouse.</p>
               <p>dbt Core writes files such as <code>manifest.json</code> and <code>run_results.json</code>. State comparison uses a previous manifest.</p>
             </div>
             <div class="card">
@@ -84,108 +89,196 @@
               <p>Weaver can give a development project the current production data without copying every table. Build the parts you need to change and leave the rest behind views or OneLake shortcuts.</p>
               <p>dbt-fabric documents table cloning within one Warehouse. Mirror works across the Lakehouses and Warehouses in the Weaver project.</p>
             </div>
-          </div>
+<div class="card">
+<h3>Native semantic models and Reports</h3>
+<p>Weaver deploys PBIP/TMDL definitions, applies shared modelling rules, binds Reports to their model and runs DAX validations.</p>
+<p>dbt does not deploy native Power BI models or Reports. Its Power BI connector queries the dbt Semantic Layer; it is a different integration.</p>
+</div>          </div>
         </div>
       </section>
 
       <section class="section">
         <div class="wrap">
           <h2>Feature comparison</h2>
-          <p class="small muted"><span class="mark yes">✓</span> yes &nbsp; <span class="mark part">◐</span> partly, see the note &nbsp; <span class="mark no">✕</span> no</p>
+          <p class="small muted">
+<span class="mark yes">✓</span> yes &nbsp; <span class="mark part">◐</span> partly, see the note &nbsp; <span class="mark no">✕</span> no</p>
           <div class="table-scroll">
             <table class="matrix">
               <thead>
-                <tr><th scope="col">Capability</th><th scope="col"><span class="who weaver"><span class="weave-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>Weaver</span></th><th scope="col"><span class="who dbt">dbt on Fabric</span></th></tr>
+                <tr>
+<th scope="col">Capability</th>
+<th scope="col">
+<span class="who weaver">
+<img class="weaver-mark" src="/assets/brand/weaver-mark-dark-134.png" width="30" height="17" alt="" aria-hidden="true">Weaver</span>
+</th>
+<th scope="col">
+<span class="who dbt">dbt on Fabric</span>
+</th>
+</tr>
               </thead>
               <tbody>
-                <tr class="group"><th scope="row" colspan="3">Fabric projects</th></tr>
+                <tr class="group">
+<th scope="row" colspan="3">Fabric projects</th>
+</tr>
                 <tr>
                   <th scope="row">One project containing both a Fabric Lakehouse and Warehouse</th>
-                  <td class="v-yes"><span class="mark yes">✓</span></td>
-                  <td class="v-no"><span class="mark no">✕</span> <span class="note">Warehouse and Spark use separate adapters and targets</span></td>
+                  <td class="v-yes">
+<span class="mark yes">✓</span>
+</td>
+                  <td class="v-no">
+<span class="mark no">✕</span> <span class="note">Warehouse and Spark use separate adapters and targets</span>
+</td>
                 </tr>
                 <tr>
                   <th scope="row">Fabric shortcuts represented as dependencies</th>
-                  <td class="v-yes"><span class="mark yes">✓</span></td>
-                  <td class="v-no"><span class="mark no">✕</span> <span class="note">not graph resources</span></td>
+                  <td class="v-yes">
+<span class="mark yes">✓</span>
+</td>
+                  <td class="v-no">
+<span class="mark no">✕</span> <span class="note">not graph resources</span>
+</td>
                 </tr>
                 <tr>
                   <th scope="row">Same project files used with different development and production items</th>
-                  <td class="v-yes"><span class="mark yes">✓</span></td>
-                  <td class="v-part"><span class="mark part">◐</span> <span class="note">targets and database configuration change relation locations</span></td>
+                  <td class="v-yes">
+<span class="mark yes">✓</span>
+</td>
+                  <td class="v-part">
+<span class="mark part">◐</span> <span class="note">targets and database configuration change relation locations</span>
+</td>
                 </tr>
                 <tr>
                   <th scope="row">Create a development branch of Fabric data with Mirror</th>
-                  <td class="v-yes"><span class="mark yes">✓</span></td>
-                  <td class="v-part"><span class="mark part">◐</span> <span class="note">table clone is documented within a Warehouse</span></td>
+                  <td class="v-yes">
+<span class="mark yes">✓</span>
+</td>
+                  <td class="v-part">
+<span class="mark part">◐</span> <span class="note">table clone is documented within a Warehouse</span>
+</td>
                 </tr>
 
-                <tr class="group"><th scope="row" colspan="3">Authoring</th></tr>
+                <tr class="group">
+<th scope="row" colspan="3">Authoring</th>
+</tr>
                 <tr>
                   <th scope="row">Ordinary SQL references, without dependency templating</th>
-                  <td class="v-yes"><span class="mark yes">✓</span></td>
-                  <td class="v-no"><span class="mark no">✕</span> <span class="note">dependencies use <code>ref()</code> and <code>source()</code></span></td>
+                  <td class="v-yes">
+<span class="mark yes">✓</span>
+</td>
+                  <td class="v-no">
+<span class="mark no">✕</span> <span class="note">dependencies use <code>ref()</code> and <code>source()</code>
+</span>
+</td>
                 </tr>
                 <tr>
                   <th scope="row">Dependencies read from Python imports</th>
-                  <td class="v-yes"><span class="mark yes">✓</span></td>
-                  <td class="v-no"><span class="mark no">✕</span> <span class="note">Python models use <code>dbt.ref()</code></span></td>
+                  <td class="v-yes">
+<span class="mark yes">✓</span>
+</td>
+                  <td class="v-no">
+<span class="mark no">✕</span> <span class="note">Python models use <code>dbt.ref()</code>
+</span>
+</td>
                 </tr>
                 <tr>
                   <th scope="row">Python loaders for APIs, SFTP, archives and files</th>
-                  <td class="v-yes"><span class="mark yes">✓</span></td>
-                  <td class="v-no"><span class="mark no">✕</span> <span class="note">Python models produce relations</span></td>
+                  <td class="v-yes">
+<span class="mark yes">✓</span>
+</td>
+                  <td class="v-no">
+<span class="mark no">✕</span> <span class="note">Python models produce relations</span>
+</td>
                 </tr>
                 <tr>
                   <th scope="row">Warehouse identity column declared with the table</th>
-                  <td class="v-yes"><span class="mark yes">✓</span></td>
-                  <td class="v-no"><span class="mark no">✕</span> <span class="note">no documented model configuration</span></td>
+                  <td class="v-yes">
+<span class="mark yes">✓</span>
+</td>
+                  <td class="v-no">
+<span class="mark no">✕</span> <span class="note">no documented model configuration</span>
+</td>
                 </tr>
 
-                <tr class="group"><th scope="row" colspan="3">Build and runs</th></tr>
+                <tr class="group">
+<th scope="row" colspan="3">Build and runs</th>
+</tr>
                 <tr>
                   <th scope="row">Deploy physical structure without loading data</th>
-                  <td class="v-yes"><span class="mark yes">✓</span></td>
-                  <td class="v-no"><span class="mark no">✕</span> <span class="note">model materialisation creates and populates the relation</span></td>
+                  <td class="v-yes">
+<span class="mark yes">✓</span>
+</td>
+                  <td class="v-no">
+<span class="mark no">✕</span> <span class="note">model materialisation creates and populates the relation</span>
+</td>
                 </tr>
                 <tr>
                   <th scope="row">Build and run results kept in Fabric for later commands</th>
-                  <td class="v-yes"><span class="mark yes">✓</span></td>
-                  <td class="v-part"><span class="mark part">◐</span> <span class="note">dbt Core carries state in run files</span></td>
+                  <td class="v-yes">
+<span class="mark yes">✓</span>
+</td>
+                  <td class="v-part">
+<span class="mark part">◐</span> <span class="note">dbt Core carries state in run files</span>
+</td>
                 </tr>
                 <tr>
                   <th scope="row">Remember where each incremental load should continue</th>
-                  <td class="v-yes"><span class="mark yes">✓</span> <span class="note">bookmarks</span></td>
-                  <td class="v-part"><span class="mark part">◐</span> <span class="note">incremental models usually query the target</span></td>
+                  <td class="v-yes">
+<span class="mark yes">✓</span> <span class="note">bookmarks</span>
+</td>
+                  <td class="v-part">
+<span class="mark part">◐</span> <span class="note">incremental models usually query the target</span>
+</td>
                 </tr>
                 <tr>
                   <th scope="row">Report what is current, stale, failed, blocked or missing</th>
-                  <td class="v-yes"><span class="mark yes">✓</span></td>
-                  <td class="v-part"><span class="mark part">◐</span> <span class="note">source freshness covers declared sources</span></td>
+                  <td class="v-yes">
+<span class="mark yes">✓</span>
+</td>
+                  <td class="v-part">
+<span class="mark part">◐</span> <span class="note">source freshness covers declared sources</span>
+</td>
                 </tr>
                 <tr>
                   <th scope="row">Independent branches continue after a failure</th>
-                  <td class="v-yes"><span class="mark yes">✓</span> <span class="note">with fault-tolerant loading</span></td>
-                  <td class="v-yes"><span class="mark yes">✓</span> <span class="note">descendants are skipped</span></td>
+                  <td class="v-yes">
+<span class="mark yes">✓</span> <span class="note">with fault-tolerant loading</span>
+</td>
+                  <td class="v-yes">
+<span class="mark yes">✓</span> <span class="note">descendants are skipped</span>
+</td>
                 </tr>
 
-                <tr class="group"><th scope="row" colspan="3">Loading data</th></tr>
+                <tr class="group">
+<th scope="row" colspan="3">Loading data</th>
+</tr>
                 <tr>
                   <th scope="row">Work out inserts, updates and deletes before writing</th>
-                  <td class="v-yes"><span class="mark yes">✓</span></td>
-                  <td class="v-part"><span class="mark part">◐</span> <span class="note">depends on incremental strategy</span></td>
+                  <td class="v-yes">
+<span class="mark yes">✓</span>
+</td>
+                  <td class="v-part">
+<span class="mark part">◐</span> <span class="note">depends on incremental strategy</span>
+</td>
                 </tr>
                 <tr>
                   <th scope="row">Invalid incoming rows refused and retained with a reason</th>
-                  <td class="v-yes"><span class="mark yes">✓</span></td>
-                  <td class="v-no"><span class="mark no">✕</span> <span class="note">tests detect invalid target rows after loading</span></td>
+                  <td class="v-yes">
+<span class="mark yes">✓</span>
+</td>
+                  <td class="v-no">
+<span class="mark no">✕</span> <span class="note">tests detect invalid target rows after loading</span>
+</td>
                 </tr>
                 <tr>
                   <th scope="row">Threshold stops an unusually large change before writing</th>
-                  <td class="v-yes"><span class="mark yes">✓</span></td>
-                  <td class="v-no"><span class="mark no">✕</span> <span class="note">not a built-in model policy</span></td>
+                  <td class="v-yes">
+<span class="mark yes">✓</span>
+</td>
+                  <td class="v-no">
+<span class="mark no">✕</span> <span class="note">not a built-in model policy</span>
+</td>
                 </tr>
-              </tbody>
+<tr class="group"><th scope="row" colspan="3">Power BI semantic models and Reports</th></tr><tr><th scope="row">Deploy native PBIP/TMDL models and Reports</th><td class="v-yes"><span class="mark yes">✓</span></td><td class="v-no"><span class="mark no">✕</span><span class="note">not part of dbt-fabric deployment</span></td></tr><tr><th scope="row">Apply native TMDL modelling rules and compose model variants</th><td class="v-yes"><span class="mark yes">✓</span></td><td class="v-no"><span class="mark no">✕</span><span class="note">dbt semantic models define its own metrics layer</span></td></tr><tr><th scope="row">Validate DAX against Lakehouse or Warehouse SQL</th><td class="v-yes"><span class="mark yes">✓</span></td><td class="v-no"><span class="mark no">✕</span><span class="note">not a dbt-fabric validation target</span></td></tr><tr><th scope="row">Order model refreshes with managed source loads</th><td class="v-yes"><span class="mark yes">✓</span></td><td class="v-no"><span class="mark no">✕</span><span class="note">Power BI refresh is outside the adapter run</span></td></tr>              </tbody>
             </table>
           </div>
         </div>
@@ -194,52 +287,97 @@
       <section class="section">
         <div class="wrap">
           <h2>Where each tool fits</h2>
-          <p>dbt is built around transformation models across many data platforms. Weaver is built for Microsoft Fabric projects that include Python loaders, files, Lakehouses, Warehouses, cross-item dependencies, data loading and recovery.</p>
+          <p>dbt suits teams standardising transformations across platforms. Weaver suits teams that want source loading, native Power BI deployment and managed operational state together in Fabric.</p>
           <div class="cards two">
             <a class="card" href="/get-started/">
-              <h3>Run the Sales example</h3>
-              <p>Build and load one project across a Lakehouse and Warehouse.</p>
-              <span class="go">Get started <span class="arrow" aria-hidden="true">→</span></span>
+              <h3>Choose your entry route</h3>
+              <p>Start with Fabric Python or SQL, or deploy an existing Power BI project.</p>
+              <span class="go">Get started <span class="arrow" aria-hidden="true">→</span>
+</span>
             </a>
             <a class="card" href="/how-it-works/">
               <h3>See what each command does</h3>
               <p>Build, load, test and health in plain language.</p>
-              <span class="go">How it works <span class="arrow" aria-hidden="true">→</span></span>
+              <span class="go">How it works <span class="arrow" aria-hidden="true">→</span>
+</span>
             </a>
           </div>
+<p>dbt’s <a href="https://docs.getdbt.com/docs/platform-integrations/semantic-layer/power-bi">Power BI integration</a> lets Power BI query the dbt Semantic Layer. It does not provide the native model, Report and DAX lifecycle compared above.</p>
           <p class="small muted">Sources: <a href="https://docs.getdbt.com/reference/resource-configs/fabric-configs">dbt-fabric</a>, <a href="https://docs.getdbt.com/reference/resource-configs/fabricspark-configs">dbt-fabricspark</a> and <a href="https://learn.microsoft.com/en-us/fabric/data-warehouse/identity">Microsoft Fabric</a> documentation.</p>
         </div>
       </section>
     </main>
 
     <footer class="site-footer">
-      <div class="wrap footer-grid">
-        <div class="footer-note">
-          <span class="brand"><span class="weave-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>Weaver</span>
-          <p>Weaver helps Python, SQL, Lakehouses and Warehouses work together in Microsoft Fabric.</p>
-          <p>Free and open source under the <a href="https://github.com/matthias-wong-dev/weaverstack/blob/main/LICENSE">Mozilla Public License 2.0</a>.</p>
-          <p class="small">Technical documentation is available at <a href="https://docs.weaverstack.dev/">docs.weaverstack.dev</a>.</p>
-        </div>
-        <div class="footer-links">
-          <ul>
-            <strong>Site</strong>
-            <li><a href="/get-started/">Get started</a></li>
-            <li><a href="/problem/">The problem</a></li>
-            <li><a href="/how-it-works/">How it works</a></li>
-            <li><a href="/scale/">Built for scale</a></li>
-            <li><a href="/vs-dbt/">Weaver vs dbt</a></li>
-          </ul>
-          <ul>
-            <strong>Project</strong>
-            <li><a href="https://github.com/matthias-wong-dev/weaverstack">Source on GitHub</a></li>
-            <li><a href="https://github.com/matthias-wong-dev/weaverstack/tree/main/design">Design notes</a></li>
-            <li><a href="https://github.com/matthias-wong-dev/weaverstack/issues">Issues</a></li>
-            <li><a href="https://pypi.org/project/weaverstack/">weaverstack on PyPI</a></li>
-          </ul>
-        </div>
-      </div>
-    </footer>
+<div class="wrap footer-grid">
+<div class="footer-note">
+<span class="brand">
+<img class="weaver-mark" src="/assets/brand/weaver-mark-light-134.png" width="30" height="17" alt="" aria-hidden="true">Weaver</span>
+<p>Build, load, test and inspect your Microsoft Fabric estate.</p>
+<p>Free and open source under the <a href="https://github.com/matthias-wong-dev/weaverstack/blob/main/LICENSE">Mozilla Public License 2.0</a>.</p>
+</div>
+<div class="footer-links">
+<ul>
+<li>
+<strong>Site</strong>
+</li>
+<li>
+<a href="/features/">Features</a>
+</li>
+<li>
+<a href="/how-it-works/">How it works</a>
+</li>
+<li>
+<a href="/get-started/">Get started</a>
+</li>
+<li>
+<a href="/scale/">Built for scale</a>
+</li>
+<li>
+<a href="/vs-dbt/">Weaver vs dbt</a>
+</li>
+<li>
+<a href="/story/">The story behind Weaver</a>
+</li>
+</ul>
+<ul>
+<li>
+<strong>Explore the docs</strong>
+</li>
+<li>
+<a href="https://docs.weaverstack.dev/lakehouse/">Lakehouse</a>
+</li>
+<li>
+<a href="https://docs.weaverstack.dev/warehouse/">Warehouse</a>
+</li>
+<li>
+<a href="https://docs.weaverstack.dev/semantic-models/">Semantic Models</a>
+</li>
+<li>
+<a href="https://docs.weaverstack.dev/reports/">Reports</a>
+</li>
+</ul>
+<ul>
+<li>
+<strong>Project</strong>
+</li>
+<li>
+<a href="https://docs.weaverstack.dev/">Technical documentation</a>
+</li>
+<li>
+<a href="https://github.com/matthias-wong-dev/weaverstack">Source on GitHub</a>
+</li>
+<li>
+<a href="https://github.com/matthias-wong-dev/weaverstack/issues">Issues</a>
+</li>
+<li>
+<a href="https://pypi.org/project/weaverstack/">weaverstack on PyPI</a>
+</li>
+</ul>
+</div>
+</div>
+</footer>
 
-    <script src="../assets/site.js" defer></script>
+    <script src="../assets/site.js?v=858d1659f7" defer></script>
   </body>
 </html>

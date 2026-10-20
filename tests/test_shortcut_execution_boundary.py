@@ -629,6 +629,31 @@ def test_a_removal_yields_until_onelake_releases_the_name(tmp_path):
     assert "released_after_seconds" in details
 
 
+class _RefusesWhileReleasing(_ReleasesAfter):
+    """Refuses the probe, as notebookutils does for a path OneLake still holds."""
+
+    def exists(self, location) -> bool:
+        self.asked += 1
+        if self.remaining <= 0:
+            return False
+        self.remaining -= 1
+        raise RuntimeError('Operation failed: "Forbidden", 403, HEAD')
+
+
+@weaver_test()
+def test_a_refused_release_probe_is_waited_on(tmp_path):
+    resolver = _Unpicks()
+    store = _RefusesWhileReleasing(FilesystemStore(), occupied=2)
+    context = _local_context(tmp_path, resolver=resolver, store=store)
+
+    details, waits = run(
+        ShortcutExecutor(), _removal(True), _removal_payload(), context
+    )
+
+    assert store.asked == 3 and len(waits) == 2
+    assert "released_after_seconds" in details
+
+
 @weaver_test()
 def test_a_removal_that_reuses_no_name_does_not_poll(tmp_path):
     """The flag is what gates the wait, so an ordinary removal pays nothing."""

@@ -1,0 +1,6 @@
+relationship Delivery_Depot
+	fromColumn: Delivery.DepotId
+	toColumn: Depot.DepotId
+	fromCardinality: many
+	toCardinality: one
+	crossFilteringBehavior: oneDirection

@@ -29,6 +29,7 @@ from typing import Iterable, Mapping, Sequence
 from ..catalogue.builtin import BUILTIN_ITEM
 from ..errors import CommandError
 from ..locations import Location
+from ..representation import ReportAlias
 from ..targets import (
     ItemRef,
     parse_physical_target,
@@ -92,7 +93,7 @@ def _report_refusal(target: WipeTarget) -> str:
 
 
 @dataclass(frozen=True)
-class WipePlan:
+class WipePlan(ReportAlias):
     """The estate to empty and the catalogue disposition.
 
     ``targets`` is in execution order, and a catalogue being removed is last:
@@ -186,7 +187,7 @@ class WipePlan:
 
 
 @dataclass(frozen=True)
-class WipeReport:
+class WipeReport(ReportAlias):
     target: str
     location: Location
     removed: tuple[str, ...]
@@ -206,7 +207,7 @@ class WipeReport:
 
 
 @dataclass(frozen=True)
-class WipeItemResult:
+class WipeItemResult(ReportAlias):
     target: str
     outcome: str
     is_catalogue: bool = False
@@ -243,7 +244,7 @@ class WipeItemResult:
 
 
 @dataclass(frozen=True)
-class WipeResult:
+class WipeResult(ReportAlias):
     """Wipe outcomes by physical Fabric item.
 
     ``items`` is the result. ``reports`` is the per-area detail underneath it,

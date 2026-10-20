@@ -46,6 +46,7 @@ from .catalogue.tables import (
 )
 from .declaration.model import WeaverDocumentId, WeaverItemId
 from .installed import InstalledDag, InstalledNode, stored_identity
+from .representation import ReportAlias
 from .targets import PhysicalTargetRef
 
 #: Severity vocabulary, ordered from best to worst.
@@ -78,7 +79,7 @@ DEPENDENCY_UNRESOLVED = "dependency_unresolved"
 AMBIGUOUS_INSTALLATION = "ambiguous_installation"
 INSTALLATION_INCONSISTENT = "installation_inconsistent"
 
-#: Default age of a settled load before it is stale.
+#: Default age of a processed load before it is stale.
 DEFAULT_AGE_HOURS = 24
 
 #: Load outcomes that establish nothing about the data. A blocked node did no
@@ -224,7 +225,7 @@ def _effective_history(local, *, source, statuses, mirrored):
         if _row_identity(row) in mirrored
     )
     if not statuses and not rows:
-        # Bootstrap on both sides. Nothing has settled a load.
+        # Bootstrap on both sides. No load has processed anything.
         return None
     return LoadHistory(statistics=tuple(rows))
 
@@ -250,7 +251,7 @@ def _row_identity(
 
 
 @dataclass(frozen=True)
-class HealthFinding:
+class HealthFinding(ReportAlias):
     """``severity`` is the health vocabulary and ``status`` the runtime one, so a
     consumer reads how bad it is and what actually happened without either word
     standing in for the other.
@@ -296,7 +297,7 @@ class HealthFinding:
 
 
 @dataclass(frozen=True)
-class HealthSection:
+class HealthSection(ReportAlias):
     area: str
     findings: tuple[HealthFinding, ...] = ()
     counts: Mapping[str, int] = field(default_factory=dict)
@@ -317,7 +318,7 @@ class HealthSection:
 
 
 @dataclass(frozen=True)
-class LoadActivity:
+class LoadActivity(ReportAlias):
     object_id: str
     target: str | None
     workflow_id: str
@@ -380,7 +381,7 @@ class CurrentLoad:
 
 
 @dataclass(frozen=True)
-class HealthReport:
+class HealthReport(ReportAlias):
     generated_at: datetime
     as_of: datetime
     load: HealthSection
@@ -613,7 +614,7 @@ class _LoadHealth:
                 AMBER,
                 node,
                 PENDING,
-                "no load has settled since this object was built",
+                "no load has processed this object since it was built",
                 status,
             )
             return
@@ -664,7 +665,7 @@ class _LoadHealth:
                 AMBER,
                 node,
                 status.result,
-                f"{unestablished} has no settled state for its current incarnation",
+                f"{unestablished} has not been processed since it was built",
                 status,
             )
         newer = self._newer_ancestor(node)
@@ -698,9 +699,9 @@ class _LoadHealth:
         )
 
     def established_at(self, identity) -> datetime | None:
-        """When this node last settled, or ``None`` if it has not.
+        """When this node was last processed, or ``None`` if it has not.
 
-        A Pending, failed, errored or blocked state settled nothing, and neither
+        A Pending, failed, errored or blocked state processed nothing, and neither
         does a missing row.
         """
 
@@ -718,7 +719,7 @@ class _LoadHealth:
         return sorted(behind)[0] if behind else None
 
     def _newer_ancestor(self, node: InstalledNode) -> str | None:
-        """The ancestor that settled after this object last loaded.
+        """The ancestor processed after this object last loaded.
 
         A rebuilt View settles when its build succeeds, so a new View definition
         puts everything materialised from it behind.

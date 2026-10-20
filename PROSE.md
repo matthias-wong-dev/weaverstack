@@ -104,6 +104,35 @@ shortest direct statement. Delete comments that only narrate the code. Public
 product behaviour belongs at `docs.weaverstack.dev`; implementation invariants
 belong in `AGENTS.md`, source or tests.
 
+## Product website
+
+Preserve the accepted tagline **Making Fabric easier to use**. Editing adjacent
+copy for tone is not permission to replace it or invent another proposition.
+
+Lead with Microsoft Fabric. Present items in this order: Lakehouse, Warehouse,
+semantic models, Reports. When naming the platforms, use Fabric before Power BI.
+Catalogue-free Power BI operation is a setup detail, not the product proposition.
+
+Use the same senior engineering voice on the website. Explain the work Weaver
+removes and how it fits a project; do not substitute slogans or reassurance for
+that explanation. Feature cards can be a little more inviting without becoming
+sales copy. Read the heading and first paragraph as someone meeting Weaver for
+the first time: do not introduce catalogue exceptions before the reader knows
+what the product does.
+
+Keep benchmark evidence in the maintainer record. Public scale copy uses rounded
+results and the workload/capacity context, not PR numbers, second-level timing,
+tuning diaries or a catalogue of caveats. Round without changing the measured
+claim, and describe observed results rather than universal performance promises.
+
+## First success and progressive depth
+
+Keep the current architecture. Lead with familiar Python, SQL or native Power BI work, give one working result, then explain the engineering handled around it and the next useful capability. A senior voice is approachable and precise, not dry or exhaustive. Keep full contracts in Reference rather than making them an admission requirement.
+
+State the project, required files and active configuration. Leave checkpoint maps, fixture variants, testing oracles and why examples are different in maintenance evidence; name a real source change plainly when the next task needs it. Keep actual permissions, trusted-code warnings and destructive scope at the action that depends on them.
+
+Make passing validation the ordinary path. Put deliberate failures, diagnostic selectors and restoration exercises behind clearly optional exploration; retain safe restoration and operation-specific failure boundaries. Judge flow through complete rendered reader routes, not sentence/page counts or exact-sentence assertions.
+
 ## Review
 
 For every comment, docstring, error or help string, ask:

@@ -46,7 +46,7 @@ def test_initialise_scaffolds_a_semantic_model_and_creates_no_power_bi_item(
         workspace="Demo", semantic_model="Reporting", session=session, client=client
     )
     dry = weaver.initialise(tmp_path, dry_run=True, **arguments)
-    assert {r.role for r in dry.resources} == {"Catalogue", "Environment"}
+    assert dry.resources == ()
     assert not list(tmp_path.iterdir())
 
     first = weaver.initialise(tmp_path, **arguments)

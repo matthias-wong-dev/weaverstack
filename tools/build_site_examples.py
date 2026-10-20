@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Write the canonical Sales example into the website's code blocks.
 
-The site shows the project `weaver initialise --example` generates. Retyping it
+The site shows the project `weaver initialise --example Sales` generates. Retyping it
 would let the two drift, so the pages carry markers and this fills them from
 `weaver.onboarding` itself:
 
@@ -40,7 +40,7 @@ MARKER = re.compile(
 
 
 def generated() -> dict[str, str]:
-    """Every file one `weaver initialise --example` run writes."""
+    """Every file one `weaver initialise --example Sales` run writes."""
 
     sys.path.insert(0, str(ROOT / "src"))
     from weaver.onboarding import example_files, project_files
@@ -52,7 +52,8 @@ def generated() -> dict[str, str]:
         environment="Weaver",
         lakehouse=LAKEHOUSE,
         warehouse=WAREHOUSE,
-        example=True,
+        example="Sales",
+        semantic_model="Sales",
     )
     return {**project_files(request), **example_files(request)}
 

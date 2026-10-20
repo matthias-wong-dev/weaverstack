@@ -20,6 +20,39 @@ def test_error_hierarchy_has_one_root():
 
 
 @weaver_test()
+def test_public_mapping_results_share_a_notebook_report_alias():
+    from weaver.build_bundle.preview import BuildPreview
+    from weaver.representation import ReportAlias
+
+    mapping_results = {
+        name: value
+        for name in weaver.__all__
+        if isinstance((value := getattr(weaver, name)), type)
+        and callable(getattr(value, "to_mapping", None))
+    }
+
+    assert mapping_results
+    assert {
+        name for name, value in mapping_results.items() if not hasattr(value, "report")
+    } == set()
+    assert not {
+        name for name, value in mapping_results.items() if hasattr(value, "as_dict")
+    }
+    assert hasattr(BuildPreview, "report")
+    assert not hasattr(BuildPreview, "as_dict")
+    outcome = weaver.FabricItemOutcome(
+        role="Warehouse", name="Catalogue", status="created"
+    )
+    assert outcome.report() == outcome.to_mapping()
+
+    class ExistingAsDict(ReportAlias):
+        def as_dict(self):
+            return {"status": "existing"}
+
+    assert ExistingAsDict().report() == {"status": "existing"}
+
+
+@weaver_test()
 def test_the_top_level_is_the_ordinary_notebook_surface_only():
     assert set(weaver.__all__) == {
         "__version__",

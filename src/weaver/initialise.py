@@ -3,9 +3,6 @@
 Environment publication is optional. Examples are source files for a later
 build, load and test. The first build creates the catalogue tables. Power BI
 items are scaffolded here and created by Build.
-
-Run again over a project folder, initialise keeps the files already there and
-adds only the targets a new item needs.
 """
 
 from __future__ import annotations
@@ -27,6 +24,7 @@ from .onboarding import (
     project_files,
 )
 from .onboarding.environment import environment_directory
+from .representation import ReportAlias
 
 DEFAULT_CATALOGUE = "Catalogue"
 DEFAULT_ENVIRONMENT = "Weaver"
@@ -45,7 +43,7 @@ class InitialiseError(WeaverError):
 
 
 @dataclass(frozen=True)
-class FabricItemOutcome:
+class FabricItemOutcome(ReportAlias):
     role: str
     name: str
     status: str
@@ -61,15 +59,16 @@ class FabricItemOutcome:
 
 
 @dataclass(frozen=True)
-class ExampleOutcome:
+class ExampleOutcome(ReportAlias):
     generated: bool = False
+    name: str | None = None
 
     def to_mapping(self) -> dict[str, Any]:
-        return {"generated": self.generated}
+        return {"generated": self.generated, "name": self.name}
 
 
 @dataclass(frozen=True)
-class InitialiseReport:
+class InitialiseReport(ReportAlias):
     project_folder: str
     workspace: str
     resources: tuple[FabricItemOutcome, ...] = ()
@@ -79,6 +78,7 @@ class InitialiseReport:
     environment_publication: str = "deferred"
     environment_definition: str = "written"
     builds: tuple[str, ...] = ("build",)
+    catalogue_configured: bool = True
     #: What the project's existing files need for the items added this run.
     guidance: tuple[str, ...] = ()
 
@@ -100,8 +100,7 @@ class InitialiseReport:
             "weaver workflow full",
             *(f"weaver {build}" for build in self.builds),
             "weaver load",
-            "weaver test",
-            "weaver health",
+            *(("weaver test", "weaver health") if self.catalogue_configured else ()),
         )
 
     def to_mapping(self) -> dict[str, Any]:
@@ -129,7 +128,7 @@ def initialise(
     lakehouse: str | None = None,
     warehouse: str | None = None,
     semantic_model: str | None = None,
-    example: bool = False,
+    example: str | None = None,
     publish_environment: bool = False,
     install_weaver: bool | None = None,
     dry_run: bool = False,
@@ -139,8 +138,10 @@ def initialise(
     """Validate and create a project and its requested Fabric items.
 
     ``semantic_model`` adds ``PowerBI/<name>/<name>.tmdl`` for Build to create.
-    ``example`` adds source files. ``publish_environment`` publishes the
-    Environment after writing the project.
+    ``example`` selects Parcel or Sales source files. Native-only projects do
+    not provision a catalogue or Environment unless explicitly requested.
+    Adding a data item supplies those defaults. ``publish_environment``
+    publishes the Environment after writing the project.
     """
 
     if project_folder is None:
@@ -155,38 +156,82 @@ def initialise(
         )
         publish_environment = publish_environment or install_weaver
     destination = Path(project_folder).resolve()
-    source_items, adopted, configured = existing_project(
-        destination, semantic_model=semantic_model
+    source_items = ()
+    from .onboarding.extension import RECORD, extend_files, read_project, selections
+
+    configured, state_record = read_project(destination)
+    if configured is not None:
+        inherited = getattr(getattr(session, "workspace", None), "workspace", None)
+        for field, supplied, existing in (
+            (
+                "workspace",
+                workspace if workspace is not None else inherited,
+                configured.workspace,
+            ),
+            (
+                "catalogue",
+                catalogue,
+                configured.catalogue_item.name if configured.catalogue else None,
+            ),
+            (
+                "environment",
+                environment,
+                configured.environment.name if configured.environment else None,
+            ),
+        ):
+            if (
+                supplied is not None
+                and existing is not None
+                and str(supplied) != str(existing)
+            ):
+                raise InitialiseError(
+                    f"workspace-config.yml already binds {field} to {existing!r}; cannot retarget it to {supplied!r}."
+                )
+        workspace = configured.workspace
+    effective = selections(
+        configured,
+        state_record,
+        lakehouse=lakehouse,
+        warehouse=warehouse,
+        semantic_model=semantic_model,
     )
-    # One workspace for every step: an explicit name, the Session's, then the
-    # project's own. A project configured for another workspace is refused here.
-    workspace = _workspace_name(workspace, session=session, configured=configured)
-    _refuse_conflicts(
-        configured, workspace=workspace, catalogue=catalogue, environment=environment
+    adopted = set(configured.configured_items) if configured is not None else set()
+    repository = powerbi_repository(destination)
+    if repository is not None:
+        source_items = tuple(
+            str(item)
+            for item in sorted(
+                set(repository.semantic_models) | set(repository.reports)
+            )
+        )
+        adopted.update(item.identity for item in repository.items)
+    has_data = bool(
+        effective["lakehouse"] or effective["warehouse"] or _sources(adopted)
     )
     request = ProjectRequest(
-        workspace=workspace,
+        workspace=_workspace_name(workspace, session=session),
         catalogue=catalogue
         or (
             configured.catalogue_item.name
             if configured is not None and configured.catalogue
             else DEFAULT_CATALOGUE
+            if has_data
+            else None
         ),
         environment=environment
         or (
             configured.environment.name
             if configured is not None and configured.environment
             else DEFAULT_ENVIRONMENT
+            if has_data or publish_environment
+            else None
         ),
-        lakehouse=lakehouse,
-        warehouse=warehouse,
-        semantic_model=semantic_model,
+        **effective,
         example=example,
         source_items=source_items,
         adopted_items=_sources(adopted),
     )
     wanted_items = _requested(request, configured)
-    rerun = configured is not None
 
     from .sessions.host import use_or_create_session
 
@@ -202,17 +247,29 @@ def initialise(
                     request,
                     client=rest,
                     wanted_items=wanted_items,
-                    example_written=(
-                        request.example_model is not None
-                        and (destination / "PowerBI" / request.example_model).exists()
-                    ),
+                    existing_powerbi=source_items,
                 )
 
-            with opened.step("Reading the Environment", request.environment):
+            with opened.step(
+                "Reading the Environment"
+                if request.environment
+                else "Reading the native project",
+                request.environment or request.workspace,
+            ):
                 files = _generated_files(request)
-                definition_status = "written"
-                directory = environment_directory(request.environment)
-                if state != MISSING and not (destination / directory).exists():
+                definition_status = (
+                    "written" if request.environment else "not applicable"
+                )
+                directory = (
+                    environment_directory(request.environment)
+                    if request.environment
+                    else None
+                )
+                if (
+                    directory is not None
+                    and state != MISSING
+                    and not (destination / directory).exists()
+                ):
                     definition_status = "imported"
                     from .fabric.environment import overlay_weaver, read_definition
 
@@ -227,7 +284,7 @@ def initialise(
                             for path, content in definition.parts.items()
                         }
                     )
-                elif (destination / directory).is_dir():
+                elif directory is not None and (destination / directory).is_dir():
                     # Reruns preserve adopted packages and binary custom libraries.
                     for path in (destination / directory).rglob("*"):
                         if path.is_file():
@@ -235,23 +292,31 @@ def initialise(
                                 path.read_bytes()
                             )
             with opened.step("Checking the project files", str(destination)):
-                if rerun or source_items:
-                    # Adopt existing project files, not fresh scaffolding.
-                    files = {
-                        path: (destination / path).read_bytes()
-                        if (destination / path).is_file()
-                        else content
-                        for path, content in files.items()
-                    }
-                _refuse_overwrites(destination, files)
+                _check_destination_paths(destination, files)
+                merged = set()
+                files = extend_files(
+                    destination, files, request, configured, state_record, merged
+                )
+                metadata = {RECORD, *merged}
+                if configured is not None:
+                    metadata.add(WORKSPACE_CONFIG_FILE)
+                metadata.update(
+                    p
+                    for p in ("workflow.yml", "README.md")
+                    if p in state_record.get("files", {})
+                )
+                _refuse_overwrites(
+                    destination, {p: c for p, c in files.items() if p not in metadata}
+                )
+                if source_items:
+                    files = _with_source_targets(files, source_items)
                 guidance = (
                     _workflow_guidance(files[WORKFLOW_FILE], request, configured)
-                    if rerun and WORKFLOW_FILE in files
+                    if configured is not None and WORKFLOW_FILE in files
                     else ()
                 )
-                files = _with_targets(files, request.items)
                 _check_destination_paths(destination, files)
-                _parse_generated(files, request, destination=destination)
+                configured = _parse_generated(files, request, destination=destination)
 
             if dry_run:
                 return InitialiseReport(
@@ -259,10 +324,16 @@ def initialise(
                     workspace=request.workspace,
                     resources=_planned(request, found, wanted_items=wanted_items),
                     files=tuple(sorted(files)),
-                    example=ExampleOutcome(generated=request.example),
+                    example=ExampleOutcome(
+                        generated=request.example is not None, name=request.example
+                    ),
                     dry_run=True,
+                    environment_publication="deferred"
+                    if request.environment
+                    else "not applicable",
                     environment_definition=definition_status,
                     builds=build_commands(request),
+                    catalogue_configured=bool(request.catalogue),
                     guidance=guidance,
                 )
 
@@ -278,7 +349,7 @@ def initialise(
             )
             with opened.step("Writing the project files", str(destination)):
                 _write(destination, files)
-            if state == MISSING:
+            if request.environment and state == MISSING:
                 from .fabric.environment import create_with_definition
                 from .fabric.environment_definition import read_environment_definition
 
@@ -297,14 +368,15 @@ def initialise(
                         raise _creation_error(
                             ENVIRONMENT_ROLE, request.environment, exc
                         ) from exc
-            resources.append(
-                FabricItemOutcome(
-                    ENVIRONMENT_ROLE,
-                    request.environment,
-                    CREATED if state == MISSING else EXISTING,
+            if request.environment:
+                resources.append(
+                    FabricItemOutcome(
+                        ENVIRONMENT_ROLE,
+                        request.environment,
+                        CREATED if state == MISSING else EXISTING,
+                    )
                 )
-            )
-            publication = "deferred"
+            publication = "deferred" if request.environment else "not applicable"
             if publish_environment:
                 from .fabric import publish_environment as publish
 
@@ -318,7 +390,9 @@ def initialise(
                 publication = (
                     "already published" if result.action == UNCHANGED else "published"
                 )
-            outcome = ExampleOutcome(generated=request.example)
+            outcome = ExampleOutcome(
+                generated=request.example is not None, name=request.example
+            )
 
     return InitialiseReport(
         project_folder=str(destination),
@@ -330,6 +404,7 @@ def initialise(
         environment_definition=definition_status,
         dry_run=False,
         builds=build_commands(request),
+        catalogue_configured=bool(request.catalogue),
         guidance=guidance,
     )
 
@@ -354,54 +429,6 @@ def _sources(items) -> tuple[str, ...]:
             if item.item_type in {LAKEHOUSE, WAREHOUSE} and item != BUILTIN_ITEM
         )
     )
-
-
-def existing_project(destination: Path, *, semantic_model=None):
-    """The Power BI items, declared items and configuration a project folder holds."""
-
-    source_items, adopted, configured = (), set(), None
-    repository = None if semantic_model else powerbi_repository(destination)
-    if repository is not None:
-        source_items = tuple(
-            str(item)
-            for item in sorted(
-                set(repository.semantic_models) | set(repository.reports)
-            )
-        )
-        adopted.update(item.identity for item in repository.items)
-    if (destination / WORKSPACE_CONFIG_FILE).is_file():
-        from .config import load_workspace
-
-        try:
-            configured = load_workspace(destination / WORKSPACE_CONFIG_FILE)
-        except WeaverError as exc:
-            raise InitialiseError(
-                f"{destination / WORKSPACE_CONFIG_FILE} cannot be read: {exc}"
-            ) from exc
-        adopted.update(configured.configured_items)
-    return source_items, adopted, configured
-
-
-def _refuse_conflicts(configured, **requested) -> None:
-    """An existing configuration names its own workspace, catalogue and Environment."""
-
-    if configured is None:
-        return
-    current = {
-        "workspace": configured.workspace,
-        "catalogue": configured.catalogue_item.name if configured.catalogue else None,
-        "environment": configured.environment.name if configured.environment else None,
-    }
-    for name, value in requested.items():
-        if (
-            value is not None
-            and current[name] is not None
-            and str(value) != current[name]
-        ):
-            raise InitialiseError(
-                f"{WORKSPACE_CONFIG_FILE} names {name} {current[name]}, not {value}. "
-                f"Edit {WORKSPACE_CONFIG_FILE} or omit --{name}."
-            )
 
 
 def _workflow_guidance(
@@ -437,15 +464,14 @@ def _workflow_guidance(
     )
 
 
-def _with_targets(files, items):
-    """Add default bindings for new items without replacing existing targets."""
+def _with_source_targets(files, source_items):
+    """Add default bindings for new source items without replacing existing targets."""
 
     import yaml
 
     declaration = yaml.safe_load(files[WORKSPACE_CONFIG_FILE])
-    targets = declaration.get("targets") or {}
-    declaration["targets"] = targets
-    missing = [item for item in items if item not in targets]
+    targets = declaration.setdefault("targets", {})
+    missing = [item for item in source_items if item not in targets]
     if not missing:
         return files
     for item in missing:
@@ -474,14 +500,12 @@ def _bare(request: ProjectRequest):
     return Workspace(workspace=request.workspace)
 
 
-def _workspace_name(workspace: str | None, *, session, configured=None) -> str:
+def _workspace_name(workspace: str | None, *, session) -> str:
     if workspace is not None:
         return str(workspace)
     inherited = getattr(session, "workspace", None)
     if inherited is not None:
         return inherited.workspace
-    if configured is not None:
-        return configured.workspace
     from .sessions.host import current_workspace_name
 
     discovered = current_workspace_name()
@@ -495,7 +519,8 @@ def _workspace_name(workspace: str | None, *, session, configured=None) -> str:
 
 def _generated_files(request: ProjectRequest) -> dict[str, str]:
     files = dict(project_files(request))
-    files.update(environment_definition_files(request.environment))
+    if request.environment:
+        files.update(environment_definition_files(request.environment))
     if request.example:
         files.update(example_files(request))
     return files
@@ -508,7 +533,9 @@ def _parse_generated(files, request: ProjectRequest, *, destination=None):
     from .fabric.environment_definition import read_environment_definition
     from .operations.check import check
 
-    directory = environment_directory(request.environment)
+    directory = (
+        environment_directory(request.environment) if request.environment else None
+    )
     with tempfile.TemporaryDirectory(prefix="weaver-initialise-") as temporary:
         root = Path(temporary)
         if destination is not None and destination.exists():
@@ -532,7 +559,7 @@ def _parse_generated(files, request: ProjectRequest, *, destination=None):
         _write(root, files)
         try:
             configured = load_workspace(root / WORKSPACE_CONFIG_FILE)
-            if (root / directory).is_dir():
+            if directory is not None and (root / directory).is_dir():
                 read_environment_definition(root / directory)
             check(root)
         except WeaverError as exc:
@@ -558,7 +585,11 @@ def _refuse_overwrites(destination: Path, files: dict[str, str]) -> None:
 
 
 def _write(destination: Path, files: dict[str, str]) -> None:
-    for relative, text in sorted(files.items()):
+    # Record ownership only after the generated files have reached disk.
+    for relative, text in sorted(
+        files.items(),
+        key=lambda entry: (entry[0] == ".weaver-initialise.json", entry[0]),
+    ):
         path = destination / relative
         if path.resolve() != destination.resolve() / relative or path.is_symlink():
             raise InitialiseError(f"Generated path escapes the project: {relative}")
@@ -609,7 +640,11 @@ def _requested(request: ProjectRequest, configured=None) -> tuple[_Requested, ..
         bound = targets.get(WeaverItemId.parse(f"{kind}/{name}"))
         return bound.physical if bound is not None else name
 
-    wanted = [_Requested(CATALOGUE_ROLE, request.catalogue, WAREHOUSE_ITEM)]
+    wanted = (
+        [_Requested(CATALOGUE_ROLE, request.catalogue, WAREHOUSE_ITEM)]
+        if request.catalogue
+        else []
+    )
     if request.lakehouse:
         wanted.append(
             _Requested(
@@ -628,7 +663,8 @@ def _requested(request: ProjectRequest, configured=None) -> tuple[_Requested, ..
             wanted.append(
                 _Requested(item.item_type, declaration.physical, kinds[item.item_type])
             )
-    wanted.append(_Requested(ENVIRONMENT_ROLE, request.environment, ENVIRONMENT))
+    if request.environment:
+        wanted.append(_Requested(ENVIRONMENT_ROLE, request.environment, ENVIRONMENT))
     # One physical item is wanted once, under the first role that names it.
     seen, unique = set(), []
     for one in wanted:
@@ -639,7 +675,7 @@ def _requested(request: ProjectRequest, configured=None) -> tuple[_Requested, ..
 
 
 def _read_the_workspace(
-    request: ProjectRequest, *, client, wanted_items, example_written=False
+    request: ProjectRequest, *, client, wanted_items=None, existing_powerbi=()
 ):
     """Read all requested item identities from one workspace listing.
 
@@ -664,7 +700,7 @@ def _read_the_workspace(
         by_name.setdefault(item.name, set()).add(item.type)
 
     found: dict[_Requested, bool] = {}
-    for wanted in wanted_items:
+    for wanted in wanted_items if wanted_items is not None else _requested(request):
         types = by_name.get(wanted.name, set())
         if types and wanted.item_type not in types:
             other = ", ".join(sorted(types))
@@ -674,14 +710,18 @@ def _read_the_workspace(
                 f"{wanted.role}, or use an existing {wanted.item_type}."
             )
         found[wanted] = bool(types)
-    name = request.example_model
-    if name is not None and not example_written:
-        if taken := sorted(by_name.get(name, set()) & {SEMANTIC_MODEL, REPORT}):
-            raise InitialiseError(
-                f"'{request.workspace}' already has a {' and a '.join(taken)} "
-                f"named '{name}'. Name the example's Power BI project with "
-                "--semantic-model."
-            )
+    if request.example_model:
+        for identity in request.items:
+            kind, _, name = identity.partition("/")
+            if (
+                kind in {SEMANTIC_MODEL, REPORT}
+                and identity not in existing_powerbi
+                and kind in by_name.get(name, set())
+            ):
+                raise InitialiseError(
+                    f"'{request.workspace}' already has a {kind} named '{name}'. "
+                    "Choose another --semantic-model name."
+                )
 
     environment = next(
         (
@@ -695,7 +735,7 @@ def _read_the_workspace(
 
 
 def _planned(
-    request: ProjectRequest, found: dict[_Requested, bool], *, wanted_items
+    request: ProjectRequest, found: dict[_Requested, bool], *, wanted_items=None
 ) -> tuple[FabricItemOutcome, ...]:
     """Report dry-run items in the same order as a real run."""
 
@@ -705,7 +745,9 @@ def _planned(
             name=wanted.name,
             status=EXISTING if found[wanted] else PLANNED,
         )
-        for wanted in wanted_items
+        for wanted in (
+            wanted_items if wanted_items is not None else _requested(request)
+        )
     )
 
 
@@ -716,13 +758,13 @@ def _create_missing(
     physical,
     session,
     client,
-    wanted_items,
+    wanted_items=None,
 ) -> tuple[FabricItemOutcome, ...]:
     from .fabric.resources import LAKEHOUSE as LAKEHOUSE_ITEM
     from .fabric.resources import create_lakehouse, create_warehouse
 
     made = []
-    for wanted in wanted_items:
+    for wanted in wanted_items if wanted_items is not None else _requested(request):
         if wanted.role == ENVIRONMENT_ROLE:
             continue
         if found[wanted]:

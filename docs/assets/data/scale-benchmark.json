@@ -1,0 +1,111 @@
+{
+  "source_url": "https://github.com/matthias-wong-dev/weaverstack/pull/193",
+  "source_revision": "39dd32dc4bff4998f3e4a5a98d96d3079477e029",
+  "run_identifier": null,
+  "run_timestamp": null,
+  "evidence_kind": "historical measured benchmark reported in PR #193; not a fresh documentation-release run",
+  "capacity": "F64",
+  "workload": "Synthetic source-data estate: one Lakehouse and two Warehouses, 30 business columns",
+  "counts": {
+    "declared_objects": 3000,
+    "tables": 2144,
+    "views": 816,
+    "folders": 40,
+    "first_load_nodes": 2185,
+    "initial_build_actions": 5372,
+    "convergence_tests": 9
+  },
+  "configuration": {
+    "spark_lanes": 24,
+    "warehouse_lanes_per_warehouse": 12
+  },
+  "operations": [
+    {
+      "id": "empty-build",
+      "label": "Build from empty",
+      "seconds": 828,
+      "display": "13m 48s",
+      "context": "5,372 actions"
+    },
+    {
+      "id": "first-load",
+      "label": "First Load",
+      "seconds": 3680,
+      "display": "61m 20s",
+      "context": "2,185 nodes; approximately 4.05B rows inserted across the estate"
+    },
+    {
+      "id": "unchanged-build",
+      "label": "Unchanged Build",
+      "seconds": 77,
+      "display": "1m 17s",
+      "context": "No actions"
+    },
+    {
+      "id": "unchanged-load",
+      "label": "Unchanged Load",
+      "seconds": 477,
+      "display": "7m 57s",
+      "context": "2,185 nodes; no changed rows"
+    },
+    {
+      "id": "day-1",
+      "label": "Day 1 Load",
+      "seconds": 1165,
+      "display": "19m 25s",
+      "context": "Approximately 5.75M inserted, 2.03M updated, 40,910 deleted"
+    },
+    {
+      "id": "day-2",
+      "label": "Day 2 Load",
+      "seconds": 785,
+      "display": "13m 05s",
+      "context": "Approximately 5.70M inserted, 1.98M updated, 44,563 deleted"
+    },
+    {
+      "id": "day-3",
+      "label": "Day 3 Load",
+      "seconds": 776,
+      "display": "12m 56s",
+      "context": "Approximately 5.66M inserted, 1.86M updated, 33,105 deleted"
+    }
+  ],
+  "endpoint_refresh_seconds": {
+    "initial_build_before": 581,
+    "initial_build_after": 109,
+    "unchanged_load_before": 401,
+    "unchanged_load_after": 19
+  },
+  "spark_probe": {
+    "nodes": 60,
+    "same_spark_application": true,
+    "observations": [
+      {
+        "lanes": 4,
+        "seconds": 208
+      },
+      {
+        "lanes": 8,
+        "seconds": 140
+      },
+      {
+        "lanes": 16,
+        "seconds": 85
+      },
+      {
+        "lanes": 24,
+        "seconds": 60
+      }
+    ]
+  },
+  "caveats": [
+    "Rows inserted across multiple layers are not distinct source records.",
+    "Declared objects, scheduled Load nodes and physical Build actions are different measures.",
+    "Declared dependency fan-in includes waits without the corresponding join workload.",
+    "This is not a semantic-model or Report-rendering benchmark.",
+    "Concurrency settings are not defaults, maximums or general capacity recommendations.",
+    "Earlier mixed-workload totals are not a controlled speedup comparison; workload width and incremental design changed.",
+    "PR #218 used scale 0.01; its separate qualification does not carry these times or 4.05B volume.",
+    "No raw logs, exact run timestamp or run identifier are invented."
+  ]
+}

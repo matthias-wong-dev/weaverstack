@@ -9,6 +9,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Sequence
 
+from .representation import ReportAlias
+
 #: The validation ran and found nothing.
 PASSED = "passed"
 #: The validation ran and found evidence, discrepancies, or violations.
@@ -22,7 +24,7 @@ STATUSES = (PASSED, FAILED, INVALID, PLANNED)
 
 
 @dataclass(frozen=True)
-class ValidationNodeReport:
+class ValidationNodeReport(ReportAlias):
     logical_id: str
     kind: str
     physical_target: str
@@ -96,7 +98,7 @@ class ValidationNodeReport:
 
 
 @dataclass(frozen=True)
-class ValidationRunReport:
+class ValidationRunReport(ReportAlias):
     status: str
     nodes: tuple[ValidationNodeReport, ...] = ()
     workflow_id: str | None = None

@@ -1,0 +1,48 @@
+{
+  "baseline_product_head": "bc19acbb3bc4286b12e559b25ffc3faf8e5f1f10",
+  "approved_page_bodies": [
+    {
+      "path": "docs/index.html",
+      "body": "byte-identical except approved contextual href replacements"
+    },
+    {
+      "path": "docs/problem/index.html",
+      "body": "byte-identical except approved contextual href replacements"
+    },
+    {
+      "path": "docs/get-started/index.html",
+      "body": "byte-identical except approved contextual href replacements"
+    },
+    {
+      "path": "docs/how-it-works/index.html",
+      "body": "byte-identical except approved contextual href replacements"
+    },
+    {
+      "path": "docs/scale/index.html",
+      "body": "byte-identical except approved contextual href replacements"
+    },
+    {
+      "path": "docs/vs-dbt/index.html",
+      "body": "byte-identical except approved contextual href replacements"
+    },
+    {
+      "path": "docs/story/index.html",
+      "body": "byte-identical except approved contextual href replacements"
+    }
+  ],
+  "runtime_tests_configuration_workflows_benchmark": "unchanged",
+  "developer_content_examples_navigation": "unchanged",
+  "separate_source_runs": {
+    "features-source-tests.xml": {
+      "tests": 199,
+      "failures": 0,
+      "errors": 0
+    },
+    "features-mirror-tests.xml": {
+      "tests": 111,
+      "failures": 0,
+      "errors": 0
+    }
+  },
+  "benchmark_sha256": "d23df66a9192c3088215cf936f578e861813e8b6675acf4cc802ff03bc813167"
+}

@@ -153,7 +153,7 @@ def test_a_generated_warehouse_project_builds_loads_and_tests(
             catalogue=fabric_catalogue.name,
             environment=environment_name,
             warehouse=emptied_disposable_warehouse.item.name,
-            example=True,
+            example="Sales",
             session=session,
         )
 
@@ -185,7 +185,7 @@ def test_notebook_initialise_writes_source_with_different_project_settings(
         "                     catalogue='Warehouse/OtherCatalogue', environment='OtherRuntime')\n"
         "with tempfile.TemporaryDirectory() as directory:\n"
         "    with NotebookSession(workspace=attached) as session:\n"
-        "        report = weaver.initialise(Path(directory), example=True, session=session, **choices)\n"
+        "        report = weaver.initialise(Path(directory), example='Sales', session=session, **choices)\n"
         "    emit(report.to_mapping())\n"
     ).payload
     assert result["example_added"]
