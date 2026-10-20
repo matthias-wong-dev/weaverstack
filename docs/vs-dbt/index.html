@@ -93,15 +93,14 @@
 
       <section class="section">
         <div class="wrap">
-          <h2>One set of commands for the whole project</h2>
-          <p>Build what you've defined, load the data, test the results and see how everything stands. These operations work across the Fabric items in your project.</p>
+          <h2>Build it. Load it. Test it. Know where it stands.</h2>
+          <p>Deploying a table, loading its data and checking the results are separate steps. Run just the one you need. Here is the workflow for a Warehouse item:</p>
           <div class="code plain">
-            <div class="code-bar"><span>From your Fabric project folder</span></div>
-            <pre>weaver check             <span class="c-dim"># Check the project</span>
-weaver build             <span class="c-dim"># Deploy what you've defined</span>
-weaver load              <span class="c-dim"># Load data and refresh models</span>
-weaver test              <span class="c-dim"># Verify the results</span>
-weaver health            <span class="c-dim"># See what needs attention</span></pre>
+            <div class="code-bar"><span>From a configured Fabric project</span></div>
+            <pre>weaver build --item Warehouse/Operations   <span class="c-dim"># Deploy its definitions</span>
+weaver load Warehouse/Operations           <span class="c-dim"># Run the data work</span>
+weaver test Warehouse/Operations           <span class="c-dim"># Check the results</span>
+weaver health                              <span class="c-dim"># Inspect the whole project</span></pre>
           </div>
           <p><a class="text-link" href="/how-it-works/">See how the commands work →</a></p>
         </div>
