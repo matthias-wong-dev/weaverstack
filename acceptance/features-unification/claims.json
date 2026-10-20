@@ -54,7 +54,7 @@
     "sources": [
       "docs/semantic-models/native-tmdl.md"
     ],
-    "description": "Keep PBIP, TMDL and native Report definitions rather than converting to a Weaver-only format.",
+    "description": "Add enterprise power to your Power BI models and reports, while keeping to native PBIP, TMDL and native Report definitions.",
     "qualification": "",
     "evidence": [
       {
@@ -306,28 +306,6 @@
         "revision": "df5e266ffe5c6b893ef7a6291ba7b23ab0ed2b45",
         "path": "docs/advanced/partial-failures-rejected-data-and-thresholds.md",
         "sha256": "ca1d7382dd02eb31a54d1c6eedda8353b30b314895ee8da3272ae47fa9c9ec94"
-      }
-    ]
-  },
-  {
-    "id": "model-deployment",
-    "group": 3,
-    "title": "Native Semantic Model deployment",
-    "brief_copy": "Deploy the PBIP/TMDL model you already author, preserving its native source.",
-    "urls": [
-      "https://docs.weaverstack.dev/semantic-models/native-tmdl/"
-    ],
-    "sources": [
-      "docs/semantic-models/native-tmdl.md"
-    ],
-    "description": "Deploy the PBIP/TMDL model you already author while preserving its native source files.",
-    "qualification": "",
-    "evidence": [
-      {
-        "repository": "matthias-wong-dev/weaverstack-docs",
-        "revision": "df5e266ffe5c6b893ef7a6291ba7b23ab0ed2b45",
-        "path": "docs/semantic-models/native-tmdl.md",
-        "sha256": "853884c00e66e3eddc0c47fa127b50140b65320a3013cd6d27bd5ff83b5bd1b2"
       }
     ]
   },
@@ -592,28 +570,6 @@
         "revision": "df5e266ffe5c6b893ef7a6291ba7b23ab0ed2b45",
         "path": "docs/estate/concurrency.md",
         "sha256": "b20c5934691c59c514fa09bc6e5acde83ba947dcf399d55b72237f1892cec812"
-      }
-    ]
-  },
-  {
-    "id": "workflows",
-    "group": 4,
-    "title": "Sessions and workflows",
-    "brief_copy": "Reuse execution context and automate sequences of the same commands used interactively.",
-    "urls": [
-      "https://docs.weaverstack.dev/estate/automation-and-deployment/"
-    ],
-    "sources": [
-      "docs/estate/automation-and-deployment.md"
-    ],
-    "description": "Reuse execution context and automate sequences of the same operations used interactively.",
-    "qualification": "",
-    "evidence": [
-      {
-        "repository": "matthias-wong-dev/weaverstack-docs",
-        "revision": "df5e266ffe5c6b893ef7a6291ba7b23ab0ed2b45",
-        "path": "docs/estate/automation-and-deployment.md",
-        "sha256": "6d997a8b3ea3f04439ea84b2d814f7c3a0518f3a0444c565d33f5ea51385a9c1"
       }
     ]
   },
