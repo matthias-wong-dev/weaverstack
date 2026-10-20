@@ -445,7 +445,10 @@ def run(rows, at) -> str:
     for w in sorted(_latest(found, 8)):
         mine = [r for r in _rows(rows, "LoadStatistic") if r["workflow_id"] == w]
         mine.sort(
-            key=lambda r: (-(r.get("duration_milliseconds") or 0), r["load_statistic_sk"])
+            key=lambda r: (
+                -(r.get("duration_milliseconds") or 0),
+                r["load_statistic_sk"],
+            )
         )
         stats.extend(mine[:200])
 
