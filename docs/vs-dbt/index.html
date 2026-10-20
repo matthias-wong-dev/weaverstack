@@ -80,8 +80,8 @@
               <p>Mirror can use existing Warehouse and Lakehouse data through views and OneLake shortcuts. Make local changes to the parts you're working on without copying every table into development.</p>
             </div>
             <div class="card">
-              <h3>A Power BI dashboard for your Fabric estate</h3>
-              <p>Weaver keeps dependencies, loads and tests in queryable Fabric Warehouse tables. Deploy its Catalogue Dashboard to explore Health, performance, run timelines, an ER diagram and Power BI model bus matrices. <a href="https://docs.weaverstack.dev/estate/catalogue-dashboard/#the-pages">Explore the dashboard →</a></p>
+              <h3>See beyond dbt job history</h3>
+              <p>dbt shows job results and lineage. Weaver adds queryable Fabric Warehouse history and a Power BI dashboard for the Lakehouse, Warehouse and semantic-model work it manages, including ER diagrams and model bus matrices. <a href="#catalogue-dashboard">See the difference →</a></p>
             </div>
             <div class="card">
               <h3>Take native Power BI all the way to deployment</h3>
@@ -91,28 +91,7 @@
         </div>
       </section>
 
-<section class="section dbt-dashboard-section" id="catalogue-dashboard">
-        <div class="wrap">
-          <h2>See the whole managed project in Power BI</h2>
-          <p>Weaver includes a Power BI Report over its queryable Fabric Catalogue. One command deploys a dashboard for Health, performance, workflow timelines, table relationships and Power BI semantic models.</p>
-          <div class="dbt-dashboard-gallery">
-            <figure>
-              <a href="https://docs.weaverstack.dev/estate/catalogue-dashboard/#overview">
-                <img src="/assets/images/catalogue-dashboard/overview.webp" width="1440" height="900" loading="lazy" alt="Catalogue Dashboard overview: deployed items, status and recent activity.">
-              </a>
-              <figcaption>Overview and Health</figcaption>
-            </figure>
-            <figure>
-              <a href="https://docs.weaverstack.dev/estate/catalogue-dashboard/#entity-dictionary">
-                <img src="/assets/images/catalogue-dashboard/entities.webp" width="1440" height="900" loading="lazy" alt="Catalogue Dashboard entity dictionary: an ER diagram with related tables.">
-              </a>
-              <figcaption>ER diagram and table dictionary</figcaption>
-            </figure>
-          </div>
-          <p>The seven pages also include an orchestration graph, Gantt and performance views, and a bus matrix for each Power BI semantic model.</p>
-          <p><a class="text-link" href="https://docs.weaverstack.dev/estate/catalogue-dashboard/#the-pages">Try the interactive Catalogue Dashboard pages →</a></p>
-        </div>
-      </section>
+
 
             <section class="section">
         <div class="wrap">
@@ -126,6 +105,39 @@ weaver test Warehouse/Operations           <span class="c-dim"># Check the resul
 weaver health                              <span class="c-dim"># Inspect the whole project</span></pre>
           </div>
           <p><a class="text-link" href="/how-it-works/">See how the commands work →</a></p>
+        </div>
+      </section>
+
+      <section class="section dbt-dashboard-section" id="catalogue-dashboard">
+        <div class="wrap">
+          <h2>Beyond dbt lineage: see your Fabric estate in Power BI</h2>
+          <p>dbt in Fabric already gives you job results, tests and model lineage. Weaver adds a different perspective: <strong>what is happening across the Fabric project it manages?</strong></p>
+          <div class="dbt-visibility-contrast">
+            <div>
+              <h3>dbt in Fabric</h3>
+              <p>Inspect dbt job runs, tests, compiled SQL and model dependencies. Detailed execution logs are stored in OneLake.</p>
+            </div>
+            <div>
+              <h3>Weaver</h3>
+              <p>Query deployment, load and test history in Fabric Warehouse tables. Open a ready-to-use Power BI dashboard covering managed Lakehouses, Warehouses and semantic models, including Health, performance and workflow timelines.</p>
+            </div>
+          </div>
+          <div class="dbt-dashboard-gallery">
+            <figure>
+              <a href="https://docs.weaverstack.dev/estate/catalogue-dashboard/#overview">
+                <img src="/assets/images/catalogue-dashboard/overview.webp" width="1440" height="900" loading="lazy" alt="Weaver Catalogue Dashboard: overview of deployed Fabric work, Health and recent activity.">
+              </a>
+              <figcaption>Operational Health and run history</figcaption>
+            </figure>
+            <figure>
+              <a href="https://docs.weaverstack.dev/estate/catalogue-dashboard/#entity-dictionary">
+                <img src="/assets/images/catalogue-dashboard/entities.webp" width="1440" height="900" loading="lazy" alt="Weaver Catalogue Dashboard: an ER diagram based on declared table relationships.">
+              </a>
+              <figcaption>ER diagram and table dictionary</figcaption>
+            </figure>
+          </div>
+          <p><strong>Lineage isn't the same as data modelling.</strong> dbt's lineage shows transformation dependencies. Weaver also shows declared primary-key and foreign-key relationships in an ER diagram, and fact-to-dimension relationships in a bus matrix for each native Power BI semantic model.</p>
+          <p><a class="text-link" href="https://docs.weaverstack.dev/estate/catalogue-dashboard/#the-pages">Try all seven interactive dashboard pages →</a><span aria-hidden="true"> · </span><a class="text-link" href="https://docs.weaverstack.dev/estate/catalogue-dashboard/#semantic-model">Explore the semantic-model bus matrix →</a></p>
         </div>
       </section>
 
