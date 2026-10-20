@@ -67,7 +67,7 @@
 <section class="section feature-group" id="data-engineering" data-feature-group="2"><div class="wrap"><h2>Build reliable data pipelines</h2>
 <figure class="feature-spotlight dag-spotlight" data-spotlight="cross-engine-dag" aria-labelledby="dag-title">
 <h3 id="dag-title">Run connected work in the right order.</h3>
-<div class="fabric-dag" role="group" aria-label="One selected managed flow from Lakehouse Files through Python, Spark SQL and Warehouse T-SQL to model refresh">
+<div class="fabric-dag" role="group" aria-label="How a file moves through Lakehouse Python and Spark SQL, Warehouse SQL and Power BI model refresh">
 <div class="dag-engine lakehouse-engine"><h4>Lakehouse</h4><ol>
 <li data-dag-node="folder" data-dag-edge="folder:python-table"><strong>Files</strong><span>Python Folder</span></li>
 <li data-dag-node="python-table" data-dag-edge="python-table:spark-table"><strong>Delta Table</strong><span>Python</span></li>
@@ -83,7 +83,7 @@
 </figure><div class="feature-list">
 <div class="feature-row" data-feature="fabric-dag"><h3><a href="https://docs.weaverstack.dev/estate/connected-items/">Keep work in the right order</a></h3><p>Run Lakehouse work, Warehouse SQL and dependent Power BI model refreshes in one connected workflow.</p></div>
 <div class="feature-row" data-feature="generated-warehouse"><h3><a href="https://docs.weaverstack.dev/warehouse/first-project/">Turn a SQL query into a working table</a></h3><p>Give Weaver a SELECT and a key. It creates the table and loading steps, tracks changes and records the results.</p></div>
-<div class="feature-row" data-feature="managed-lakehouse"><h3><a href="https://docs.weaverstack.dev/lakehouse/python/">Turn Python and SQL into Lakehouse tables</a></h3><p>Use Python and Spark SQL to load files and update Delta Tables, without building a separate orchestration project.</p></div>
+<div class="feature-row" data-feature="managed-lakehouse"><h3><a href="https://docs.weaverstack.dev/lakehouse/python/">Turn Python and SQL into Lakehouse tables</a></h3><p>Use Python and Spark SQL to load files and update Delta Tables, without building a separate pipeline to connect them.</p></div>
 <div class="feature-row" data-feature="dependency-discovery"><h3><a href="https://docs.weaverstack.dev/estate/connected-items/">Find what depends on what</a></h3><p>Weaver can read dependencies from Python imports and supported T-SQL references. With Spark SQL, you specify them.</p></div>
 <div class="feature-row" data-feature="incremental-changes"><h3><a href="https://docs.weaverstack.dev/warehouse/incremental/">Load only what has changed</a></h3><p>Apply inserts, updates and explicit deletes using rules you choose, without rebuilding every target.</p></div>
 <div class="feature-row" data-feature="bookmarks"><h3><a href="https://docs.weaverstack.dev/lakehouse/incremental/">Pick up where each table left off</a></h3><p>Each table or folder tracks its own progress through the source data, even when several share the same source.</p></div>
@@ -131,12 +131,12 @@
 <div class="feature-row" data-feature="selection"><h3><a href="https://docs.weaverstack.dev/estate/selective-runs/">Run only the parts you choose</a></h3><p>Select work by name, preview what will run and include related steps when you need them.</p></div>
 <div class="feature-row" data-feature="concurrency"><h3><a href="https://docs.weaverstack.dev/estate/concurrency/">Control how much runs at once</a></h3><p>Set limits on how much runs together while Weaver keeps dependent work in the right order.</p></div>
 </div>
-<p class="group-docs"><a href="https://docs.weaverstack.dev/estate/operate/">Run and inspect an estate</a><span aria-hidden="true"> · </span><a href="https://docs.weaverstack.dev/reference/operation-behaviour/">Operation boundaries</a></p></div></section>
+<p class="group-docs"><a href="https://docs.weaverstack.dev/estate/operate/">Run and inspect your project</a><span aria-hidden="true"> · </span><a href="https://docs.weaverstack.dev/reference/operation-behaviour/">Operation boundaries</a></p></div></section>
 <section class="section feature-group" id="scale" data-feature-group="7"><div class="wrap"><h2>Built for scale</h2>
 <figure class="feature-spotlight scale-spotlight" data-spotlight="scale" aria-labelledby="scale-title">
 <h3 id="scale-title">From 3 to 3,000.</h3>
 <ol class="scale-flow"><li><b>3</b><strong>Easy to keep in your head.</strong></li><li><b>30</b><strong>It’s hard to keep track.</strong></li><li><b>300</b><strong>It’s no longer whether you use a framework, but which one.</strong></li><li><b>3,000</b><strong>Scheduling and recovery decide everything.</strong></li></ol>
-<figcaption>Weaver has been intensely tuned for estates of thousands of objects. From Spark concurrency, to incremental bookmarks, to asynchronous SQL endpoint refresh, it implements the complex machinery so your pipeline can keep growing.</figcaption>
+<figcaption>Weaver has been tested and tuned for thousands of connected objects. It runs independent work together, tracks what data has changed and refreshes SQL access only when needed.</figcaption>
 </figure>
 <div class="feature-list">
 <div class="feature-row"><h3>Tuned for each engine</h3><p>From Delta reads and writes to transactions, T-SQL and Shortcut creation, each operation is tuned for its engine to eliminate waste.</p></div>
@@ -144,7 +144,7 @@
 <div class="feature-row"><h3>Process only the changes</h3><p>Each object tracks its own progress, so it can process inserts, updates and deletes rather than starting over every time.</p></div>
 <div class="feature-row"><h3>SQL endpoints refreshed as needed</h3><p>A refresh runs in the background, and only the consumers that need the new state wait for it.</p></div>
 </div>
-<p class="group-docs">Stress tested on an estate of 3,000 objects.<span aria-hidden="true"> · </span><a href="https://github.com/matthias-wong-dev/weaverstack/tree/main/examples/stress">See how it was tested</a><span aria-hidden="true"> · </span><a href="/get-started/">Get started</a></p>
+<p class="group-docs">Stress tested with 3,000 Fabric objects.<span aria-hidden="true"> · </span><a href="https://github.com/matthias-wong-dev/weaverstack/tree/main/examples/stress">See how it was tested</a><span aria-hidden="true"> · </span><a href="/get-started/">Get started</a></p>
 </div></section>
 <section class="section feature-group" id="visibility" data-feature-group="5"><div class="wrap"><h2>Visibility, included</h2>
 <p class="group-lead">Weaver includes a Power BI dashboard showing the status of your work. One command adds it to your Fabric workspace.</p>
@@ -155,13 +155,13 @@
 <p class="spotlight-docs"><a href="https://docs.weaverstack.dev/estate/catalogue-dashboard/#the-pages">Try every page in the browser</a><span aria-hidden="true"> · </span><a href="https://docs.weaverstack.dev/estate/catalogue-dashboard/#deploy-the-dashboard">Deploy the Catalogue Dashboard</a></p>
 </figure><div class="feature-list">
 <div class="feature-row" data-feature="dashboard-deploy"><h3><a href="https://docs.weaverstack.dev/estate/catalogue-dashboard/#deploy-the-dashboard">One command</a></h3><p><code>weaver catalogue-dashboard</code> deploys the semantic model and Report beside the catalogue, and brings them up to date on the next run.</p></div>
-<div class="feature-row" data-feature="dashboard-live"><h3><a href="https://docs.weaverstack.dev/estate/catalogue-dashboard/#what-it-reads">Live over Direct Lake</a></h3><p>The model reads the catalogue’s tables over Direct Lake, so each page shows your Weaver-managed estate as work is processed.</p></div>
+<div class="feature-row" data-feature="dashboard-live"><h3><a href="https://docs.weaverstack.dev/estate/catalogue-dashboard/#what-it-reads">Live over Direct Lake</a></h3><p>The dashboard reads the Fabric Catalogue using Direct Lake, so its pages reflect the latest recorded results.</p></div>
 <div class="feature-row" data-feature="dashboard-yours"><h3><a href="https://docs.weaverstack.dev/estate/catalogue-dashboard/">Free to tweak</a></h3><p>It is an ordinary Power BI Report. Tweak it to fit your needs, or throw it away and build your own over the catalogue.</p></div>
 </div>
 </div></section>
 <section class="section feature-group" id="advanced" data-feature-group="6"><div class="wrap"><h2>When your projects get more complex</h2>
 <div class="feature-list">
-<div class="feature-row" data-feature="environments"><h3><a href="https://docs.weaverstack.dev/estate/environments/">One project, multiple environments</a></h3><p>Keep source files and logical identities while workspace configuration selects physical item and model destinations.</p></div>
+<div class="feature-row" data-feature="environments"><h3><a href="https://docs.weaverstack.dev/estate/environments/">One project, multiple environments</a></h3><p>Use the same files in development and production. A configuration file sets which workspaces, Fabric items and Power BI models they belong to.</p></div>
 <div class="feature-row" data-feature="incremental-build"><h3><a href="https://docs.weaverstack.dev/advanced/incremental-build-selection/">Update only what changed</a></h3><p>Update changed source definitions and the work that depends on them, while leaving unchanged parts in place.</p></div>
 <div class="feature-row" data-feature="build-preview"><h3><a href="https://docs.weaverstack.dev/estate/development-cycle/">See changes before applying them</a></h3><p>Preview what will change, where it will go and whether anything will be replaced or deleted.</p></div>
 <div class="feature-row" data-feature="bundles"><h3><a href="https://docs.weaverstack.dev/advanced/build-bundles-and-controlled-installation/">Review deployments before applying them</a></h3><p>Prepare a fixed deployment plan, review it and apply it later without changing the plan.</p></div>
@@ -171,7 +171,7 @@
 <figure class="feature-spotlight mirror-spotlight" data-spotlight="mirror" aria-labelledby="mirror-title">
 <h3 id="mirror-title">Fork your data, not just your code.</h3>
 <ol class="mirror-flow"><li><strong>Existing source estate</strong><span>Source-owned data</span></li><li><strong>Borrowed development data</strong><span>Warehouse Views · Lakehouse Shortcuts</span></li><li><strong>Selected changed work</strong><span>Materialised locally by Build</span></li></ol>
-<figcaption>Mirror lets you make targeted development changes against your full data, without loading your estate from scratch.</figcaption>
+<figcaption>With Mirror, you can change the parts you're working on and use existing data for the rest, without reloading everything.</figcaption>
 <p class="spotlight-docs"><a href="https://docs.weaverstack.dev/estate/mirror/">Develop using Mirror</a><span aria-hidden="true"> · </span><a href="https://docs.weaverstack.dev/reference/operation-behaviour/mirror/">Scope and reset boundaries</a></p>
 </figure></div></section>
 <section class="section feature-cta"><div class="wrap"><h2>Start with one item.</h2>
