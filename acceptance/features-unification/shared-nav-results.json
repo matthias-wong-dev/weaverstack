@@ -1,0 +1,258 @@
+[
+  {
+    "route": "/",
+    "width": 390,
+    "javascript": true,
+    "ordinary_features_navigation": "pass",
+    "escape_focus": "pass",
+    "overflow": false
+  },
+  {
+    "route": "/get-started/",
+    "width": 390,
+    "javascript": true,
+    "ordinary_features_navigation": "pass",
+    "escape_focus": "pass",
+    "overflow": false
+  },
+  {
+    "route": "/features/",
+    "width": 390,
+    "javascript": true,
+    "ordinary_features_navigation": "pass",
+    "escape_focus": "pass",
+    "overflow": false
+  },
+  {
+    "route": "/how-it-works/",
+    "width": 390,
+    "javascript": true,
+    "ordinary_features_navigation": "pass",
+    "escape_focus": "pass",
+    "overflow": false
+  },
+  {
+    "route": "/problem/",
+    "width": 390,
+    "javascript": true,
+    "ordinary_features_navigation": "pass",
+    "escape_focus": "pass",
+    "overflow": false
+  },
+  {
+    "route": "/vs-dbt/",
+    "width": 390,
+    "javascript": true,
+    "ordinary_features_navigation": "pass",
+    "escape_focus": "pass",
+    "overflow": false
+  },
+  {
+    "route": "/scale/",
+    "width": 390,
+    "javascript": true,
+    "ordinary_features_navigation": "pass",
+    "escape_focus": "pass",
+    "overflow": false
+  },
+  {
+    "route": "/story/",
+    "width": 390,
+    "javascript": true,
+    "ordinary_features_navigation": "pass",
+    "escape_focus": "pass",
+    "overflow": false
+  },
+  {
+    "route": "/",
+    "width": 390,
+    "javascript": false,
+    "ordinary_features_navigation": "pass",
+    "escape_focus": "not applicable",
+    "overflow": false
+  },
+  {
+    "route": "/get-started/",
+    "width": 390,
+    "javascript": false,
+    "ordinary_features_navigation": "pass",
+    "escape_focus": "not applicable",
+    "overflow": false
+  },
+  {
+    "route": "/features/",
+    "width": 390,
+    "javascript": false,
+    "ordinary_features_navigation": "pass",
+    "escape_focus": "not applicable",
+    "overflow": false
+  },
+  {
+    "route": "/how-it-works/",
+    "width": 390,
+    "javascript": false,
+    "ordinary_features_navigation": "pass",
+    "escape_focus": "not applicable",
+    "overflow": false
+  },
+  {
+    "route": "/problem/",
+    "width": 390,
+    "javascript": false,
+    "ordinary_features_navigation": "pass",
+    "escape_focus": "not applicable",
+    "overflow": false
+  },
+  {
+    "route": "/vs-dbt/",
+    "width": 390,
+    "javascript": false,
+    "ordinary_features_navigation": "pass",
+    "escape_focus": "not applicable",
+    "overflow": false
+  },
+  {
+    "route": "/scale/",
+    "width": 390,
+    "javascript": false,
+    "ordinary_features_navigation": "pass",
+    "escape_focus": "not applicable",
+    "overflow": false
+  },
+  {
+    "route": "/story/",
+    "width": 390,
+    "javascript": false,
+    "ordinary_features_navigation": "pass",
+    "escape_focus": "not applicable",
+    "overflow": false
+  },
+  {
+    "route": "/",
+    "width": 1241,
+    "javascript": true,
+    "ordinary_features_navigation": "pass",
+    "escape_focus": "not applicable",
+    "overflow": false
+  },
+  {
+    "route": "/get-started/",
+    "width": 1241,
+    "javascript": true,
+    "ordinary_features_navigation": "pass",
+    "escape_focus": "not applicable",
+    "overflow": false
+  },
+  {
+    "route": "/features/",
+    "width": 1241,
+    "javascript": true,
+    "ordinary_features_navigation": "pass",
+    "escape_focus": "not applicable",
+    "overflow": false
+  },
+  {
+    "route": "/how-it-works/",
+    "width": 1241,
+    "javascript": true,
+    "ordinary_features_navigation": "pass",
+    "escape_focus": "not applicable",
+    "overflow": false
+  },
+  {
+    "route": "/problem/",
+    "width": 1241,
+    "javascript": true,
+    "ordinary_features_navigation": "pass",
+    "escape_focus": "not applicable",
+    "overflow": false
+  },
+  {
+    "route": "/vs-dbt/",
+    "width": 1241,
+    "javascript": true,
+    "ordinary_features_navigation": "pass",
+    "escape_focus": "not applicable",
+    "overflow": false
+  },
+  {
+    "route": "/scale/",
+    "width": 1241,
+    "javascript": true,
+    "ordinary_features_navigation": "pass",
+    "escape_focus": "not applicable",
+    "overflow": false
+  },
+  {
+    "route": "/story/",
+    "width": 1241,
+    "javascript": true,
+    "ordinary_features_navigation": "pass",
+    "escape_focus": "not applicable",
+    "overflow": false
+  },
+  {
+    "route": "/",
+    "width": 1241,
+    "javascript": false,
+    "ordinary_features_navigation": "pass",
+    "escape_focus": "not applicable",
+    "overflow": false
+  },
+  {
+    "route": "/get-started/",
+    "width": 1241,
+    "javascript": false,
+    "ordinary_features_navigation": "pass",
+    "escape_focus": "not applicable",
+    "overflow": false
+  },
+  {
+    "route": "/features/",
+    "width": 1241,
+    "javascript": false,
+    "ordinary_features_navigation": "pass",
+    "escape_focus": "not applicable",
+    "overflow": false
+  },
+  {
+    "route": "/how-it-works/",
+    "width": 1241,
+    "javascript": false,
+    "ordinary_features_navigation": "pass",
+    "escape_focus": "not applicable",
+    "overflow": false
+  },
+  {
+    "route": "/problem/",
+    "width": 1241,
+    "javascript": false,
+    "ordinary_features_navigation": "pass",
+    "escape_focus": "not applicable",
+    "overflow": false
+  },
+  {
+    "route": "/vs-dbt/",
+    "width": 1241,
+    "javascript": false,
+    "ordinary_features_navigation": "pass",
+    "escape_focus": "not applicable",
+    "overflow": false
+  },
+  {
+    "route": "/scale/",
+    "width": 1241,
+    "javascript": false,
+    "ordinary_features_navigation": "pass",
+    "escape_focus": "not applicable",
+    "overflow": false
+  },
+  {
+    "route": "/story/",
+    "width": 1241,
+    "javascript": false,
+    "ordinary_features_navigation": "pass",
+    "escape_focus": "not applicable",
+    "overflow": false
+  }
+]

@@ -1,0 +1,38 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.4.0/schema.json",
+  "name": "DeliveryCount",
+  "position": {
+    "x": 48,
+    "y": 48,
+    "z": 0,
+    "height": 200,
+    "width": 400,
+    "tabOrder": 0
+  },
+  "visual": {
+    "visualType": "card",
+    "query": {
+      "queryState": {
+        "Values": {
+          "projections": [
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Delivery"
+                    }
+                  },
+                  "Property": "Delivery Count"
+                }
+              },
+              "queryRef": "Delivery.Delivery Count",
+              "nativeQueryRef": "Delivery Count"
+            }
+          ]
+        }
+      }
+    },
+    "drillFilterOtherVisuals": true
+  }
+}

@@ -23,12 +23,22 @@
   var toggle = document.querySelector(".nav-toggle");
   var links = document.querySelector(".nav-links");
   if (toggle && links) {
+    document.documentElement.classList.add("nav-enhanced");
     toggle.hidden = false;
     toggle.addEventListener("click", function () {
       var open = links.classList.toggle("open");
       toggle.setAttribute("aria-expanded", open ? "true" : "false");
     });
   }
+
+  document.addEventListener("keydown", function (event) {
+    if (event.key !== "Escape" || !toggle || !links) return;
+    if (links.classList.contains("open")) {
+      links.classList.remove("open");
+      toggle.setAttribute("aria-expanded", "false");
+      toggle.focus();
+    }
+  });
 
   // --- copy buttons --------------------------------------------------------
 

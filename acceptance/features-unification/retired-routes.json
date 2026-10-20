@@ -1,0 +1,34 @@
+[
+  {
+    "old_route": "/lakehouse/",
+    "destination": "https://docs.weaverstack.dev/lakehouse/",
+    "former_fragments": [
+      "main"
+    ],
+    "decision": "minimal noindex accessible pointer; no automatic refresh or fragment-loss redirect"
+  },
+  {
+    "old_route": "/warehouse/",
+    "destination": "https://docs.weaverstack.dev/warehouse/",
+    "former_fragments": [
+      "main"
+    ],
+    "decision": "minimal noindex accessible pointer; no automatic refresh or fragment-loss redirect"
+  },
+  {
+    "old_route": "/semantic-models/",
+    "destination": "https://docs.weaverstack.dev/semantic-models/",
+    "former_fragments": [
+      "main"
+    ],
+    "decision": "minimal noindex accessible pointer; no automatic refresh or fragment-loss redirect"
+  },
+  {
+    "old_route": "/reports/",
+    "destination": "https://docs.weaverstack.dev/reports/",
+    "former_fragments": [
+      "main"
+    ],
+    "decision": "minimal noindex accessible pointer; no automatic refresh or fragment-loss redirect"
+  }
+]

@@ -66,7 +66,7 @@ Set up a Weaver project and its Fabric items.
 Choose a catalogue Warehouse, Environment, Lakehouse and/or Warehouse.
 Missing items are created.
 
-Optionally add the Sales example, with a Power BI model and Report.\
+Optionally add the Parcel or Sales example for the selected items.\
 """
 
 WIPE_DESCRIPTION = """\
@@ -1194,14 +1194,11 @@ def _add_initialise_args(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--catalogue",
-        help="Catalogue Warehouse. Defaults to Catalogue.",
+        help="Catalogue Warehouse. Defaults to Catalogue for data projects; omitted for native-only projects.",
     )
     parser.add_argument(
         "--environment",
-        help=(
-            "Fabric Environment for the project. It may already exist. Defaults "
-            "to Weaver."
-        ),
+        help="Fabric Environment for Python work. Defaults to Weaver for data projects; omitted for native-only projects.",
     )
     parser.add_argument("--lakehouse", help="Lakehouse for Delta tables and files.")
     parser.add_argument("--warehouse", help="Warehouse for SQL tables and views.")
@@ -1213,17 +1210,9 @@ def _add_initialise_args(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--example",
-        dest="example",
-        action="store_true",
-        default=None,
-        help="Add the Sales example: source files and a Power BI project that reads them.",
-    )
-
-    parser.add_argument(
-        "--no-example",
-        dest="example",
-        action="store_false",
-        help="Do not add example source files.",
+        choices=("Parcel", "Sales"),
+        metavar="NAME",
+        help="Add the Parcel or Sales example for the selected items.",
     )
     parser.add_argument(
         "--interactive",
@@ -2352,7 +2341,7 @@ def _initialise_once(args: argparse.Namespace, *, session):
         lakehouse=args.lakehouse,
         warehouse=args.warehouse,
         semantic_model=getattr(args, "semantic_model", None),
-        example=bool(args.example),
+        example=args.example,
         publish_environment=args.publish_environment,
         dry_run=args.dry_run,
         session=session,
