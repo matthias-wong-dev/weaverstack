@@ -64,7 +64,6 @@
 <div class="feature-row" data-feature="portable"><h3><a href="https://docs.weaverstack.dev/advanced/portable-execution-between-desktop-and-fabric/">Windows, macOS, Linux, or just Fabric Notebooks</a></h3><p>Develop and operate Weaver projects on Windows, macOS or Linux, or work entirely inside Fabric Notebooks. Build and deploy native Power BI models and Reports without Power BI Desktop or a Windows computer.</p></div>
 <div class="feature-row" data-feature="agents"><h3><a href="https://docs.weaverstack.dev/reference/machine-readable-output/">Built for developers and AI agents</a></h3><p>Readable terminal output for developers, and structured <code>--json</code> results for AI agents from Check, Build, Load, Test and Health. Preview, build, load, test and inspect in a repeatable cycle, with explicit outcomes for what ran and what needs attention.</p></div>
 </div>
-<p class="scope-note">Existing Fabric services, compute and workspace permissions still apply. Lakehouse processing uses Fabric’s Spark runtime, not a separate Weaver orchestration service.</p>
 <p class="group-docs"><a href="https://docs.weaverstack.dev/lakehouse/python/">First Python pipeline</a><span aria-hidden="true"> · </span><a href="https://docs.weaverstack.dev/reference/weaver-documents/overview/">Native document reference</a></p></div></section>
 <section class="section feature-group" id="data-engineering" data-feature-group="2"><div class="wrap"><h2>Pipelines, dependencies and data quality</h2>
 <figure class="feature-spotlight dag-spotlight" data-spotlight="cross-engine-dag" aria-labelledby="dag-title">
@@ -81,7 +80,6 @@
 <div class="dag-engine model-engine"><h4>Power BI</h4><div data-dag-node="model-refresh"><strong>Semantic Model</strong><span>Refresh</span></div></div>
 </div>
 <figcaption>One managed Load/refresh graph orders the selected work across engines, with supported publication and endpoint-readiness barriers—not a separate pipeline joining engine jobs.</figcaption>
-<p class="scope-note">Logical Shortcuts and managed model sources supply cross-item edges. Build source items before Power BI items; a Report has no refresh of its own.</p>
 <p class="spotlight-docs"><a href="https://docs.weaverstack.dev/estate/connected-items/">Connect Lakehouse and Warehouse</a><span aria-hidden="true"> · </span><a href="https://docs.weaverstack.dev/semantic-models/managed-sources/">Add a managed model source</a></p>
 </figure><div class="feature-list">
 <div class="feature-row" data-feature="fabric-dag"><h3><a href="https://docs.weaverstack.dev/estate/connected-items/">One dependency graph across Fabric</a></h3><p>Order selected managed Lakehouse work, Warehouse T-SQL and dependent Semantic Model refreshes in one DAG.</p></div>
@@ -157,10 +155,8 @@
 <h3 id="mirror-title">Develop against a large estate without copying it first.</h3>
 <ol class="mirror-flow"><li><strong>Existing source estate</strong><span>Source-owned data</span></li><li><strong>Borrowed development data</strong><span>Warehouse Views · Lakehouse Shortcuts</span></li><li><strong>Selected changed work</strong><span>Materialised locally by Build</span></li></ol>
 <figcaption>Keep unchanged objects borrowed while selected changed or affected work becomes local.</figcaption>
-<p class="scope-note">Mirror reconstructs the destination Catalogue and selected targets in the same workspace. Re-mirroring resets local work; it is not an in-place sync.</p>
 <p class="spotlight-docs"><a href="https://docs.weaverstack.dev/estate/mirror/">Develop using Mirror</a><span aria-hidden="true"> · </span><a href="https://docs.weaverstack.dev/reference/operation-behaviour/mirror/">Scope and reset boundaries</a></p>
-</figure><p class="scope-note">Bundles are destination-specific. Build replacement guards do not protect data from Load, Wipe or deliberate resets.</p>
-</div></section>
+</figure></div></section>
 <section class="section feature-scale"><div class="wrap"><h2>From 3 to 3,000.</h2>
 <p>When your estate has 30 objects, it’s hard to keep track. When it has 300, it’s no longer whether you use a framework, but which one.</p>
 <p>Weaver has been stress tested on an estate of 3,000 objects. From Spark concurrency, to incremental bookmarks, to asynchronous SQL endpoint refresh, it implements the complex machinery so your pipeline can keep growing.</p>
