@@ -43,4 +43,4 @@ weaver build
 
 ## Licence
 
-Mozilla Public License 2.0. See [LICENSE](LICENSE).
+Mozilla Public License 2.0. See [LICENSE](https://github.com/matthias-wong-dev/weaverstack/blob/main/LICENSE).
