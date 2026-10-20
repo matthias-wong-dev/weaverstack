@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#f7f7f6">
     <title>A dbt alternative for Microsoft Fabric | Weaver</title>
-    <meta name="description" content="Compare Weaver with dbt for Microsoft Fabric projects spanning Python, SQL, Lakehouses, Warehouses, incremental loads and recovery.">
+    <meta name="description" content="For dbt developers on Microsoft Fabric: discover one project for Python loads, Lakehouse and Warehouse SQL, native Power BI, tests and run history.">
     <meta name="robots" content="index, follow, max-image-preview:large">
     <link rel="canonical" href="https://weaverstack.dev/vs-dbt/">
     <meta property="og:type" content="article">
@@ -13,7 +13,7 @@
     <meta property="og:site_name" content="Weaver">
     <meta property="og:locale" content="en_AU">
     <meta property="og:title" content="A dbt alternative for Microsoft Fabric">
-    <meta property="og:description" content="Compare Weaver and dbt for Fabric projects that span SQL, Python, Lakehouses, Warehouses, loading and recovery.">
+    <meta property="og:description" content="Love developing data models in code? Discover how Weaver takes that approach across more of Microsoft Fabric.">
     <meta property="og:image" content="https://weaverstack.dev/og-dbt.png">
     <meta property="og:image:type" content="image/png">
     <meta property="og:image:width" content="1200">
@@ -21,7 +21,7 @@
     <meta property="og:image:alt" content="Weaver logo.">
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="A dbt alternative for Microsoft Fabric">
-    <meta name="twitter:description" content="Compare Weaver and dbt for Fabric projects that span SQL, Python, Lakehouses, Warehouses, loading and recovery.">
+    <meta name="twitter:description" content="Love developing data models in code? Discover how Weaver takes that approach across more of Microsoft Fabric.">
     <meta name="twitter:image" content="https://weaverstack.dev/og-dbt.png">
     <meta name="twitter:image:alt" content="Weaver logo.">
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
@@ -53,54 +53,66 @@
     <main id="main">
       <section class="page-head">
         <div class="wrap">
-          <h1>Weaver vs dbt</h1>
-          <p class="lead">dbt has a mature transformation ecosystem and a cross-platform design. Weaver focuses on coordinating Lakehouse work, Warehouse SQL, native Semantic Models and Reports inside Fabric.</p>
+          <p class="eyebrow">For dbt developers working in Microsoft Fabric</p>
+          <h1>Keep the code-first approach. Go further in Fabric.</h1>
+          <p class="lead">You already know the appeal of defining data models in code. Weaver takes that approach across more of Microsoft Fabric: Python data loading, Lakehouses, Warehouse SQL, native Power BI, testing and the work that connects them.</p>
         </div>
       </section>
 
       <section class="section">
         <div class="wrap">
-          <h2>Differences that change the work</h2>
+          <h2>More of Fabric, less work joining the pieces</h2>
           <div class="cards two">
             <div class="card">
-              <h3>Lakehouse and Warehouse in one project</h3>
-              <p>Weaver can put Python and Delta work in a Lakehouse, T-SQL in a Warehouse and the shortcut between them in the same project.</p>
-              <p>dbt uses separate Fabric adapters for Warehouse and Spark work. The order between the two has to be managed elsewhere.</p>
+              <h3>One project from source data to Power BI</h3>
+              <p>Load files and APIs with Python, build Delta Tables in a Lakehouse, write T-SQL in a Warehouse, then deploy native Power BI models and Reports. Weaver connects the supported steps in the right order.</p>
             </div>
             <div class="card">
-              <h3>Dependencies from ordinary Python and SQL</h3>
-              <p>Weaver reads Python imports and supported T-SQL references. Spark SQL Tables and Views declare their dependencies explicitly; they still use native SQL rather than a macro layer.</p>
-              <p>dbt uses <code>ref()</code> and <code>source()</code> to declare those relationships.</p>
+              <h3>Keep your SQL looking like SQL</h3>
+              <p>Write an ordinary Warehouse SELECT. Weaver creates the table and loading code around it, including staging, key-based updates and recorded row changes. Python and supported SQL references also help establish what depends on what.</p>
             </div>
             <div class="card">
-              <h3>Build the structure without loading the data</h3>
-              <p>
-<code>weaver build</code> creates or changes tables, views, shortcuts and load code. <code>weaver load</code> runs the data work separately.</p>
-              <p>A dbt model is created and populated by the same run.</p>
+              <h3>Build first. Load when you're ready.</h3>
+              <p><code>weaver build</code> deploys tables, views, shortcuts and loading code. <code>weaver load</code> runs the data work separately. Preview proposed changes before applying them, or run only the parts you need.</p>
             </div>
             <div class="card">
-              <h3>Run results stay in Fabric</h3>
-              <p>Weaver records installed definitions, load and model-refresh outcomes, validation results and consumer bookmarks in a Fabric Warehouse.</p>
-              <p>dbt Core writes files such as <code>manifest.json</code> and <code>run_results.json</code>. State comparison uses a previous manifest.</p>
+              <h3>Develop with the data already there</h3>
+              <p>Mirror can use existing Warehouse and Lakehouse data through views and OneLake shortcuts. Make local changes to the parts you're working on without copying every table into development.</p>
             </div>
             <div class="card">
-              <h3>Branch the Fabric data with Mirror</h3>
-              <p>Weaver can give a development project the current production data without copying every table. Build the parts you need to change and leave the rest behind views or OneLake shortcuts.</p>
-              <p>dbt-fabric documents table cloning within one Warehouse. Mirror works across the Lakehouses and Warehouses in the Weaver project.</p>
+              <h3>Know what ran, what changed and what failed</h3>
+              <p>Weaver keeps definitions, dependencies, load results, tests and progress together in a Fabric Warehouse. Run <code>weaver health</code> to see what's up to date and what needs attention.</p>
             </div>
-<div class="card">
-<h3>Native semantic models and Reports</h3>
-<p>Weaver deploys PBIP/TMDL definitions, applies shared modelling rules, binds Reports to their model and runs DAX validations.</p>
-<p>dbt does not deploy native Power BI models or Reports. Its Power BI connector queries the dbt Semantic Layer; it is a different integration.</p>
-</div>          </div>
+            <div class="card">
+              <h3>Take native Power BI all the way to deployment</h3>
+              <p>Use PBIP and TMDL, apply shared or model-specific rules, unit test DAX measures against independent SQL results, and deploy Reports connected to the right semantic model.</p>
+            </div>
+          </div>
         </div>
       </section>
 
       <section class="section">
         <div class="wrap">
-          <h2>Feature comparison</h2>
+          <h2>One set of commands for the whole project</h2>
+          <p>Build what you've defined, load the data, test the results and see how everything stands. These operations work across the Fabric items in your project.</p>
+          <div class="code plain">
+            <div class="code-bar"><span>From your Fabric project folder</span></div>
+            <pre>weaver check             <span class="c-dim"># Check the project</span>
+weaver build             <span class="c-dim"># Deploy what you've defined</span>
+weaver load              <span class="c-dim"># Load data and refresh models</span>
+weaver test              <span class="c-dim"># Verify the results</span>
+weaver health            <span class="c-dim"># See what needs attention</span></pre>
+          </div>
+          <p><a class="text-link" href="/how-it-works/">See how the commands work →</a></p>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="wrap">
+          <h2>The differences, side by side</h2>
+          <p>Here is what each tool handles directly in Fabric. The dbt column describes the Fabric Warehouse and Spark adapters, rather than every integration available in the wider dbt ecosystem.</p>
           <p class="small muted">
-<span class="mark yes">✓</span> yes &nbsp; <span class="mark part">◐</span> partly, see the note &nbsp; <span class="mark no">✕</span> no</p>
+<span class="mark yes">✓</span> included &nbsp; <span class="mark part">◐</span> partial support &nbsp; <span class="mark no">✕</span> not built into the adapter</p>
           <div class="table-scroll">
             <table class="matrix">
               <thead>
@@ -111,7 +123,7 @@
 <img class="weaver-mark" src="/assets/brand/weaver-mark-dark-134.png" width="30" height="17" alt="" aria-hidden="true">Weaver</span>
 </th>
 <th scope="col">
-<span class="who dbt">dbt on Fabric</span>
+<span class="who dbt">dbt Fabric adapters</span>
 </th>
 </tr>
               </thead>
@@ -285,24 +297,22 @@
 
       <section class="section">
         <div class="wrap">
-          <h2>Where each tool fits</h2>
-          <p>dbt suits teams standardising transformations across platforms. Weaver suits teams that want source loading, native Power BI deployment and managed operational state together in Fabric.</p>
+          <h2>Try it with one Fabric item</h2>
+          <p>Start with a T-SQL query, a Python loader or an existing Power BI project. You don't need to commit your entire project to try Weaver. Begin with one item and connect more when you're ready.</p>
           <div class="cards two">
             <a class="card" href="/get-started/">
-              <h3>Choose your entry route</h3>
-              <p>Start with Fabric Python or SQL, or deploy an existing Power BI project.</p>
-              <span class="go">Get started <span class="arrow" aria-hidden="true">→</span>
-</span>
+              <h3>Build something small</h3>
+              <p>Choose a Lakehouse, Warehouse or Power BI starting point and see Weaver at work.</p>
+              <span class="go">Get started <span class="arrow" aria-hidden="true">→</span></span>
             </a>
-            <a class="card" href="/how-it-works/">
-              <h3>See what each command does</h3>
-              <p>Build, load, test and health in plain language.</p>
-              <span class="go">How it works <span class="arrow" aria-hidden="true">→</span>
-</span>
+            <a class="card" href="/features/">
+              <h3>Explore what else it can do</h3>
+              <p>See change tracking, testing, environments, recovery, native Power BI and more.</p>
+              <span class="go">Explore features <span class="arrow" aria-hidden="true">→</span></span>
             </a>
           </div>
-<p>dbt’s <a href="https://docs.getdbt.com/docs/platform-integrations/semantic-layer/power-bi">Power BI integration</a> lets Power BI query the dbt Semantic Layer. It does not provide the native model, Report and DAX lifecycle compared above.</p>
-          <p class="small muted">Sources: <a href="https://docs.getdbt.com/reference/resource-configs/fabric-configs">dbt-fabric</a>, <a href="https://docs.getdbt.com/reference/resource-configs/fabricspark-configs">dbt-fabricspark</a> and <a href="https://learn.microsoft.com/en-us/fabric/data-warehouse/identity">Microsoft Fabric</a> documentation.</p>
+          <p class="small muted">The Power BI comparison is about deploying and testing native PBIP/TMDL models and Reports. dbt's <a href="https://docs.getdbt.com/docs/platform-integrations/semantic-layer/power-bi">Power BI Semantic Layer integration</a> is a different workflow.</p>
+          <p class="small muted">Comparison sources: <a href="https://docs.getdbt.com/reference/resource-configs/fabric-configs">dbt-fabric</a>, <a href="https://docs.getdbt.com/reference/resource-configs/fabricspark-configs">dbt-fabricspark</a> and <a href="https://learn.microsoft.com/en-us/fabric/data-warehouse/identity">Microsoft Fabric</a> documentation.</p>
         </div>
       </section>
     </main>
