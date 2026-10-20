@@ -350,6 +350,7 @@
     "cross-engine-dag",
     "generated-warehouse",
     "power-bi",
+    "scale",
     "catalogue-dashboard",
     "mirror"
   ]

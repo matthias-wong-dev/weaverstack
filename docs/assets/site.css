@@ -437,7 +437,6 @@ table.matrix .note code { padding: 1px 4px; font-size: 12px; }
 .features-showcase .scope-note { font-size: 15px; margin: 16px 0; }
 .features-showcase .group-docs, .features-showcase .spotlight-docs { font-size: 15px; margin: 20px 0 0; }
 .features-showcase .feature-spotlight { margin: 28px 0 34px; }
-.features-showcase .scale-title { max-width: 36ch; margin: 22px 0 0; font-size: clamp(24px, 2.7vw, 30px); line-height: 1.2; }
 .features-showcase .group-lead { max-width: var(--measure); margin: 14px 0 0; font-size: 18px; line-height: 1.55; color: var(--ink-soft); }
 .features-showcase .dashboard-gallery { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px; }
 .features-showcase .dashboard-gallery a { display: block; color: var(--ink); font-size: 15px; text-decoration: none; }
@@ -477,6 +476,14 @@ table.matrix .note code { padding: 1px 4px; font-size: 12px; }
 .features-showcase .model-variants > div > strong, .features-showcase .model-variants > div > span { display: block; }
 .features-showcase .model-variants > div > span { font-size: 14px; color: var(--ink-soft); margin-top: 6px; }
 .features-showcase .model-variants > div > .variant-arrow { color: var(--blue-dark); font-size: 26px; margin: 8px 0; }
+.features-showcase .scale-flow { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 30px; list-style: none; padding: 0; margin: 0; }
+.features-showcase .scale-flow li { position: relative; max-width: none; margin: 0; padding: 18px 18px 22px; border-top: 2px solid var(--line-strong); border-radius: 0 0 var(--radius) var(--radius); background: var(--white); }
+.features-showcase .scale-flow li:nth-child(2) { background: color-mix(in srgb, var(--blue-soft) 35%, var(--white)); }
+.features-showcase .scale-flow li:nth-child(3) { background: color-mix(in srgb, var(--blue-soft) 70%, var(--white)); }
+.features-showcase .scale-flow li:nth-child(4) { background: var(--blue-soft); border-top-color: var(--blue); }
+.features-showcase .scale-flow li:not(:last-child)::after { content: '→'; position: absolute; top: 16px; right: -24px; color: var(--blue-dark); font-size: 24px; }
+.features-showcase .scale-flow b { display: block; color: var(--blue); font: 700 clamp(30px, 3.4vw, 44px)/1.1 var(--mono); letter-spacing: -.02em; }
+.features-showcase .scale-flow strong { display: block; margin-top: 12px; font-size: 17px; line-height: 1.4; font-weight: 650; }
 .features-showcase .mirror-flow { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 30px; list-style: none; padding: 0; margin: 0; }
 .features-showcase .mirror-flow li { position: relative; max-width: none; margin: 0; border-top: 2px solid var(--line-strong); padding-top: 16px; }
 .features-showcase .mirror-flow li:not(:last-child)::after { content: '→'; position: absolute; top: 16px; right: -24px; color: var(--blue-dark); font-size: 24px; }
@@ -498,12 +505,12 @@ table.matrix .note code { padding: 1px 4px; font-size: 12px; }
  .features-showcase .dag-engine ol { grid-template-columns: 1fr; gap: 24px; }
  .features-showcase .dag-engine li:not(:last-child)::after { content: '↓'; right: auto; top: auto; bottom: -24px; }
  .features-showcase .warehouse-spotlight { padding: 22px 18px; }
- .features-showcase .select-engineering, .features-showcase .model-variants, .features-showcase .mirror-flow, .features-showcase .dashboard-gallery { grid-template-columns: 1fr; }
+ .features-showcase .select-engineering, .features-showcase .model-variants, .features-showcase .mirror-flow, .features-showcase .scale-flow, .features-showcase .dashboard-gallery { grid-template-columns: 1fr; }
  .features-showcase .dashboard-gallery a:last-child:nth-child(odd) { width: auto; }
  .features-showcase .generated-work ul { grid-template-columns: 1fr; }
  .features-showcase .engineering-arrow { font-size: 0; }
  .features-showcase .engineering-arrow::after { content: '↓'; font-size: 30px; }
- .features-showcase .mirror-flow li:not(:last-child)::after { content: '↓'; top: auto; bottom: -30px; right: auto; }
+ .features-showcase .mirror-flow li:not(:last-child)::after, .features-showcase .scale-flow li:not(:last-child)::after { content: '↓'; top: auto; bottom: -30px; right: auto; }
 }
 
 .forwarding-page main { padding-top: 80px; padding-bottom: 80px; }
