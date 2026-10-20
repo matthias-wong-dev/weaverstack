@@ -172,7 +172,7 @@ function semanticPage(body, m) {
   mo.tables.forEach(function (tb) { measureCount += tb.measures.length; columnCount += tb.columns.length; });
   var facts = el("dl", { "class": "wd-facts wd-facts-wide" });
   function fact(label, value) { facts.appendChild(el("dt", { text: label })); facts.appendChild(el("dd", {}, [value])); }
-  fact("Last refresh", refresh ? el("span", {}, [chip(refresh.result), " " + stamp(refresh.completed)]) : el("span", { "class": "wd-muted", text: "Nothing has settled since it was built" }));
+  fact("Last refresh", refresh ? el("span", {}, [chip(refresh.result), " " + stamp(refresh.completed)]) : el("span", { "class": "wd-muted", text: "Nothing has been processed since it was built" }));
   if (mo.node && mo.node.built) fact("Built", stamp(mo.node.built));
   if (it && it.target) fact("Fabric item", it.target);
   fact("Contents", fmt(mo.tables.size) + " tables · " + fmt(columnCount) + " columns · " + fmt(measureCount) + " measures · " + fmt(mo.relationships.length) + " relationships");

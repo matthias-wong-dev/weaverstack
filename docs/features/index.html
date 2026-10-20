@@ -54,7 +54,7 @@
 <section class="page-head"><div class="wrap">
 <h1>Engineering across the Fabric estate.</h1>
 <p class="lead">Explore how Weaver handles Lakehouse pipelines, Warehouse SQL, native Power BI and the operational work that connects them.</p>
-<nav class="feature-jumps" aria-label="Feature sections"><a href="#start-simple">Start simple</a><a href="#data-engineering">Data engineering</a><a href="#power-bi">Power BI</a><a href="#operations">Operations</a><a href="#advanced">Advanced</a></nav>
+<nav class="feature-jumps" aria-label="Feature sections"><a href="#start-simple">Start simple</a><a href="#data-engineering">Data engineering</a><a href="#power-bi">Power BI</a><a href="#operations">Operations</a><a href="#visibility">Dashboard</a><a href="#advanced">Advanced</a></nav>
 </div></section>
 <section class="section feature-group" id="start-simple" data-feature-group="1"><div class="wrap"><h2>Start with what you know</h2>
 <div class="feature-list">
@@ -130,7 +130,20 @@
 <div class="feature-row" data-feature="workflows"><h3><a href="https://docs.weaverstack.dev/estate/automation-and-deployment/">Sessions and workflows</a></h3><p>Reuse execution context and automate sequences of the same operations used interactively.</p></div>
 </div>
 <p class="group-docs"><a href="https://docs.weaverstack.dev/estate/operate/">Run and inspect an estate</a><span aria-hidden="true"> · </span><a href="https://docs.weaverstack.dev/reference/operation-behaviour/">Operation boundaries</a></p></div></section>
-<section class="section feature-group" id="advanced" data-feature-group="5"><div class="wrap"><h2>When your estate gets complicated</h2>
+<section class="section feature-group" id="visibility" data-feature-group="5"><div class="wrap"><h2>Visibility, included</h2>
+<p class="group-lead">Weaver comes with a Power BI dashboard over the catalogue. One command deploys it beside your estate.</p>
+<figure class="feature-spotlight dashboard-spotlight" data-spotlight="catalogue-dashboard" aria-labelledby="dashboard-title">
+<h3 id="dashboard-title">The whole estate, at a glance.</h3>
+<div class="dashboard-gallery"><a href="https://docs.weaverstack.dev/estate/catalogue-dashboard/#overview"><img src="/assets/images/catalogue-dashboard/overview.webp" width="1440" height="900" loading="lazy" alt="Overview: installed items and Health."><span>Overview</span></a><a href="https://docs.weaverstack.dev/estate/catalogue-dashboard/#orchestration"><img src="/assets/images/catalogue-dashboard/orchestration.webp" width="1440" height="900" loading="lazy" alt="Orchestration: one table's lineage, readiness and last outcome."><span>Orchestration</span></a><a href="https://docs.weaverstack.dev/estate/catalogue-dashboard/#performance"><img src="/assets/images/catalogue-dashboard/performance.webp" width="1440" height="900" loading="lazy" alt="Performance: each run as a bar from its start to its finish by time of day, with its Load and Test parts."><span>Performance</span></a><a href="https://docs.weaverstack.dev/estate/catalogue-dashboard/#gantt"><img src="/assets/images/catalogue-dashboard/gantt.webp" width="1440" height="900" loading="lazy" alt="Gantt: one workflow's loads and Tests on a timeline."><span>Gantt</span></a><a href="https://docs.weaverstack.dev/estate/catalogue-dashboard/#entity-dictionary"><img src="/assets/images/catalogue-dashboard/entities.webp" width="1440" height="900" loading="lazy" alt="Entity dictionary: an ER diagram from declared keys."><span>Entity dictionary</span></a></div>
+<figcaption>Health, the Orchestration graph, when each run started and finished, a Gantt of each workflow, an ER diagram with a metadata browser, and a bus matrix for every semantic model.</figcaption>
+<p class="spotlight-docs"><a href="https://docs.weaverstack.dev/estate/catalogue-dashboard/#the-pages">Try every page in the browser</a><span aria-hidden="true"> · </span><a href="https://docs.weaverstack.dev/estate/catalogue-dashboard/#deploy-the-dashboard">Deploy the Catalogue Dashboard</a></p>
+</figure><div class="feature-list">
+<div class="feature-row" data-feature="dashboard-deploy"><h3><a href="https://docs.weaverstack.dev/estate/catalogue-dashboard/#deploy-the-dashboard">One command</a></h3><p><code>weaver catalogue-dashboard</code> deploys the semantic model and Report beside the catalogue, and brings them up to date on the next run.</p></div>
+<div class="feature-row" data-feature="dashboard-live"><h3><a href="https://docs.weaverstack.dev/estate/catalogue-dashboard/#what-it-reads">Live over Direct Lake</a></h3><p>The model reads the catalogue’s tables over Direct Lake, so each page shows your Weaver-managed estate as work is processed.</p></div>
+<div class="feature-row" data-feature="dashboard-yours"><h3><a href="https://docs.weaverstack.dev/estate/catalogue-dashboard/">Free to tweak</a></h3><p>It is an ordinary Power BI Report. Tweak it to fit your needs, or throw it away and build your own over the catalogue.</p></div>
+</div>
+</div></section>
+<section class="section feature-group" id="advanced" data-feature-group="6"><div class="wrap"><h2>When your estate gets complicated</h2>
 <div class="feature-list">
 <div class="feature-row" data-feature="environments"><h3><a href="https://docs.weaverstack.dev/estate/environments/">One project, multiple environments</a></h3><p>Keep source files and logical identities while workspace configuration selects physical item and model destinations.</p></div>
 <div class="feature-row" data-feature="mirror"><h3><a href="https://docs.weaverstack.dev/estate/mirror/">Mirror: develop without copying everything</a></h3><p>Borrow installed Lakehouse/Warehouse data through Shortcuts and Views, then materialise selected changed or affected work locally.</p></div>

@@ -3,6 +3,28 @@
   "name": "performance",
   "displayName": "Performance",
   "displayOption": "FitToPage",
-  "height": 720,
-  "width": 1280
+  "height": 1080,
+  "width": 1920,
+  "objects": {
+    "pageRefresh": [
+      {
+        "properties": {
+          "show": {
+            "expr": {
+              "Literal": {
+                "Value": "true"
+              }
+            }
+          },
+          "duration": {
+            "expr": {
+              "Literal": {
+                "Value": "'PT30S'"
+              }
+            }
+          }
+        }
+      }
+    ]
+  }
 }

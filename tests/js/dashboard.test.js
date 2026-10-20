@@ -4,7 +4,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const { load } = require("./renderer.js");
 
-const D = load();
+const D = load({ __WD_STATE: { utc: true } });
 const AT = Date.UTC(2026, 9, 16, 2, 0, 0);
 const H = 3600 * 1000;
 
@@ -504,4 +504,130 @@ test("the Gantt axis reads clock time, with the date where the day changes", () 
   assert.equal(D.clockLabel(a, null), "2026-10-16 23:58:10");
   assert.equal(D.clockLabel(Date.UTC(2026, 9, 16, 23, 59), a), "23:59:00");
   assert.equal(D.clockLabel(Date.UTC(2026, 9, 17, 0, 0), Date.UTC(2026, 9, 16, 23, 59)), "2026-10-17 00:00:00");
+});
+
+test("a canvas draws at the scale the Service fits the page up to", () => {
+  const ratio = (root, w = 900, h = 560) => load(root).canvasRatio(w, h);
+  const screen = { availWidth: 2560, availHeight: 1440 };
+  // A 1280 x 720 page on a 2560 x 1440 screen can be scaled twice over, in a
+  // window or in full screen, which leave the layout and the screen alone.
+  assert.equal(ratio({ devicePixelRatio: 2, innerWidth: 1280, innerHeight: 720, screen }), 4);
+  // An expanded visual fills the screen unscaled.
+  assert.equal(ratio({ devicePixelRatio: 2, innerWidth: 2500, innerHeight: 1300, screen }), 3);
+  // A large canvas gives way to the pixel budget but never below the device ratio.
+  assert.ok(ratio({ devicePixelRatio: 2, innerWidth: 1280, innerHeight: 720, screen }, 4000, 2500) < 4);
+  assert.equal(ratio({ devicePixelRatio: 2, innerWidth: 1280, innerHeight: 720, screen }, 9000, 6000), 2);
+  // Without a screen it still draws twice over.
+  assert.equal(ratio({ devicePixelRatio: 1 }), 2);
+});
+
+// --- Performance -----------------------------------------------------------------
+
+const RUN = ["workflow", "started", "completed", "records", "failed"];
+const RUN_TASK = ["workflow", "task", "started", "completed", "records", "failed"];
+
+test("runs are newest first and each carries the span of every task type it ran", () => {
+  const m = model(estate({ extra:
+    table("runs", RUN, [["a", AT - 9 * H, AT - 8 * H, 4, 0], ["c", AT - 3 * H, AT - H, 9, 1], ["b", AT - 5 * H, AT - 4 * H, 2, 0], ["x", null, null, 1, 0]]) +
+    table("runtasks", RUN_TASK, [["c", "load", AT - 3 * H, AT - 2 * H, 6, 0], ["c", "test", AT - 2 * H, AT - H, 3, 1], ["a", "load", AT - 9 * H, AT - 8 * H, 4, 0]]) }));
+  const runs = D.runsOf(m);
+  assert.deepEqual(runs.map((r) => r.id), ["c", "b", "a"]);
+  assert.deepEqual(runs[0].tasks.map((t) => t.task), ["load", "test"]);
+  assert.equal(runs[1].tasks.length, 0);
+});
+
+test("a run's time is its span, and a task filter measures that task alone", () => {
+  const m = model(estate({ extra:
+    table("runs", RUN, [["c", AT - 3 * H, AT - H, 9, 1]]) +
+    table("runtasks", RUN_TASK, [["c", "load", AT - 3 * H, AT - 2 * H, 6, 0], ["c", "test", AT - 2.5 * H, AT - H, 3, 1]]) }));
+  const run = D.runsOf(m)[0];
+  assert.equal(D.runView(run, "all").elapsed, 2 * H);
+  // Overlapping tasks are one span, never two summed.
+  assert.equal(D.runView(run, "load").elapsed, H);
+  assert.equal(D.runView(run, "test").elapsed, 1.5 * H);
+  assert.equal(D.runView(run, "build"), null);
+});
+
+test("the day column starts at midnight unless a run crosses it, then in the quiet hours", () => {
+  const at = (day, hour) => Date.UTC(2026, 9, day, hour);
+  const view = (a, b) => ({ started: a, completed: b });
+  assert.equal(D.dayStartHour([view(at(15, 2), at(15, 5)), view(at(16, 2), at(16, 4))]), 0);
+  const night = D.dayStartHour([view(at(15, 23), at(16, 2)), view(at(16, 23), at(17, 3))]);
+  // No hour any run touches: 23:00 to 03:00 UTC.
+  assert.ok(night >= 4 && night <= 22, String(night));
+  assert.equal(D.dayStartHour([]), 0);
+});
+
+test("Tests resolve to their item and drop the catalogue's own", () => {
+  const T = ["targettype", "target", "schema", "object", "runs", "duration", "longest", "failed", "last"];
+  const m = model(estate({ extra: table("testweek", T, [
+    ["Warehouse", "Curated_WH", "Sales", "ByRegionValid", 3, 9000, 4000, 1, AT - H],
+    ["Warehouse", "Weaver", "_", "Internal", 1, 1, 1, 0, AT - H],
+  ]) }));
+  const rows = D.testRows(m, "testweek");
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].item, "Warehouse/Curated");
+  assert.equal(rows[0].node.key, "v");
+  assert.equal(rows[0].failed, 1);
+});
+
+test("a record carries its item, and a Test keeps its mark when the catalogue does not know the object", () => {
+  const L = ["index", "workflow", "records", "included"];
+  const R = ["id", "flow", "task", "targettype", "target", "schema", "object", "result", "started", "completed", "duration", "message"];
+  const m = model(estate({ extra: table("logflows", L, [[1, "w", 2, 2]]) + table("log", R, [
+    ["1", 1, "load", "Warehouse", "Curated_WH", "Sales", "Region", "Succeeded", AT - H, AT - H + 5, 5, ""],
+    ["2", 1, "test", "Warehouse", "Curated_WH", "Sales", "Gone", "Failed", AT - H, AT - H + 5, 5, "x"],
+  ]) }));
+  const rows = D.logRows(m);
+  assert.equal(rows[0].item, "Warehouse/Curated");
+  assert.equal(D.recordKind(rows[0].node, rows[0].task), "Table");
+  assert.equal(rows[1].node, null);
+  assert.equal(D.recordKind(rows[1].node, rows[1].task), "Test");
+});
+
+test("a duration rounds to whole seconds before it splits into minutes", () => {
+  assert.equal(D.duration(2600), "2.6 s");
+  assert.equal(D.duration(59600), "1 min 0 s");
+  assert.equal(D.duration(2699600), "45 min 0 s");
+  assert.equal(D.duration(3 * 3600000 + 125000), "3 h 2 min");
+  assert.equal(D.duration(null), "—");
+});
+
+// --- Time zones ------------------------------------------------------------------
+
+function inZone(zone, f) {
+  const previous = process.env.TZ;
+  process.env.TZ = zone;
+  try { return f(); } finally { if (previous === undefined) delete process.env.TZ; else process.env.TZ = previous; }
+}
+
+test("a stamp is in the viewer's zone, or in UTC when the viewer asks", () => {
+  const t = Date.UTC(2026, 9, 16, 2, 0, 0);
+  inZone("Australia/Sydney", () => {
+    assert.equal(load({}).stamp(t), "2026-10-16 13:00:00 AEDT");
+    assert.equal(load({ __WD_STATE: { utc: true } }).stamp(t), "2026-10-16 02:00:00 UTC");
+    // A winter instant takes the zone's other offset.
+    assert.equal(load({}).stamp(Date.UTC(2026, 6, 16, 2, 0, 0)), "2026-07-16 12:00:00 AEST");
+  });
+});
+
+test("clock ticks fall on the viewer's round times, through a daylight saving change", () => {
+  inZone("Australia/Sydney", () => {
+    const Z = load({});
+    // Sydney moves its clocks forward at 02:00 on 4 October 2026.
+    const a = Date.UTC(2026, 9, 3, 12, 0), b = Date.UTC(2026, 9, 4, 4, 0);
+    const ticks = Z.clockTicks(a, b, 1100);
+    assert.ok(ticks.length >= 3);
+    assert.ok(ticks.every((t, i) => i === 0 || t > ticks[i - 1]));
+    ticks.forEach((t) => assert.equal(Z.wallOf(t) % 3600000, 0, new Date(t).toISOString()));
+    assert.equal(Z.clockLabel(Date.UTC(2026, 9, 16, 13, 30), null), "2026-10-17 00:30:00");
+  });
+});
+
+test("a run that crosses local midnight starts the day column in the quiet hours", () => {
+  const run = (a, b) => ({ started: Date.UTC(2026, 9, 15, ...a), completed: Date.UTC(2026, 9, 15, ...b) });
+  // 12:30 to 14:30 UTC is 23:30 to 01:30 in Sydney.
+  const night = [run([12, 30], [14, 30])];
+  assert.equal(load({ __WD_STATE: { utc: true } }).dayStartHour(night), 0);
+  inZone("Australia/Sydney", () => assert.notEqual(load({}).dayStartHour(night), 0));
 });

@@ -148,7 +148,7 @@ function erLayout(g, win) {
   return { boxes: boxes, bounds: { x: left - 80, y: -80, w: right - left + 160, h: y - ER.GAP_ROW + 160 } };
 }
 
-/* The ER page's workspace, framed as the Load orchestration graph is: s holds
+/* The ER page's workspace, framed as the Orchestration graph is: s holds
    the selection, depths, expansions and viewport. options.item limits it to one
    item's relationships; options.tools come first in its toolbar; options.onPick
    hears a table chosen in the diagram, options.describe fills the details, and

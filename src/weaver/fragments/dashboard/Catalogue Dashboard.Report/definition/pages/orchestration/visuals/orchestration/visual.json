@@ -5,8 +5,8 @@
     "x": 0,
     "y": 0,
     "z": 0,
-    "height": 720,
-    "width": 1280,
+    "height": 1080,
+    "width": 1920,
     "tabOrder": 0
   },
   "visual": {
@@ -23,11 +23,11 @@
                       "Entity": "Dashboard measures"
                     }
                   },
-                  "Property": "Load orchestration page"
+                  "Property": "Orchestration page"
                 }
               },
-              "queryRef": "Dashboard measures.Load orchestration page",
-              "nativeQueryRef": "Load orchestration page"
+              "queryRef": "Dashboard measures.Orchestration page",
+              "nativeQueryRef": "Orchestration page"
             }
           ]
         }

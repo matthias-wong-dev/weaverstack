@@ -90,7 +90,8 @@ table 'Semantic model relationship'
 /// with U+E003 and its name and column names, each row with U+E002, and
 /// U+E001 separates fields. Times are milliseconds since 1970 UTC. The page
 /// measures replace every < with U+E000, so no catalogue text can close the
-/// script element that carries the data.
+/// script element that carries the data. A measure's text cannot exceed 2^21
+/// characters, so a page carries only the data it draws.
 table 'Dashboard measures'
     annotation 'Weaver.MeasureTable' = true
 
@@ -114,8 +115,8 @@ table 'Dashboard measures'
         formatString: #,##0
         displayFolder: Health
 
-    /// When the latest load or test settled, in UTC.
-    measure 'Latest settled completion' = ```
+    /// When the latest load or test was processed, in UTC.
+    measure 'Latest processed completion' = ```
         MAX(
             CALCULATE(MAX('Load status'[Completed datetime]), 'Load status'[Result] <> "Pending"),
             CALCULATE(MAX('Test status'[Completed datetime]), 'Test status'[Result] <> "Pending")
@@ -139,8 +140,8 @@ table 'Dashboard measures'
         formatString: #,##0
         displayFolder: Estate
 
-    /// Settled Log records.
-    measure 'Settled log records' = COUNTROWS('Log') + 0
+    /// Processed Log records.
+    measure 'Processed log records' = COUNTROWS('Log') + 0
         formatString: #,##0
         displayFolder: Estate
 
@@ -209,6 +210,35 @@ table 'Dashboard measures'
         ```
         displayFolder: Data
 
+    /// Installed nodes only, without edges or descriptions: what a page that names
+    /// objects needs to draw their marks and say what they are.
+    measure 'Node data' = ```
+        VAR _f = UNICHAR(57345)
+        VAR _r = UNICHAR(57346)
+        VAR _t = UNICHAR(57347)
+        VAR _nodes = FILTER('Lineage node', NOT 'Lineage node'[Is internal])
+        VAR _internal = EXCEPT(
+            CALCULATETABLE(VALUES('Lineage node'[Item label]), 'Lineage node'[Is internal]),
+            SELECTCOLUMNS(_nodes, "@item", 'Lineage node'[Item label])
+        )
+        RETURN
+            _t & "nodes" & _f & "key" & _f & "item" & _f & "schema" & _f & "object" & _f & "kind" & _f & "label" & _f & "flags"
+            & CONCATENATEX(
+                _nodes,
+                _r & 'Lineage node'[Node key]
+                    & _f & 'Lineage node'[Item label]
+                    & _f & 'Lineage node'[Schema name]
+                    & _f & 'Lineage node'[Object name]
+                    & _f & 'Lineage node'[Node kind]
+                    & _f & 'Lineage node'[Label]
+                    & _f & (IF('Lineage node'[Can load], 1, 0) + IF('Lineage node'[Is static], 2, 0) + IF('Lineage node'[Is mirrored], 4, 0) + IF('Lineage node'[Is installed], 8, 0)),
+                ""
+            )
+            & _t & "internal" & _f & "item"
+            & CONCATENATEX(_internal, _r & 'Lineage node'[Item label], "")
+        ```
+        displayFolder: Data
+
     /// Current load and test outcomes, and when each data object was last built.
     measure 'Status data' = ```
         VAR _f = UNICHAR(57345)
@@ -270,7 +300,7 @@ table 'Dashboard measures'
         displayFolder: Data
 
     /// The 40 latest workflows of the last 7 days, each summarised over every
-    /// record it settled, and how many the 7 days hold.
+    /// record it processed, and how many the 7 days hold.
     measure 'Workflow data' = ```
         VAR _f = UNICHAR(57345)
         VAR _r = UNICHAR(57346)
@@ -302,15 +332,163 @@ table 'Dashboard measures'
         ```
         displayFolder: Data
 
+    /// The 300 latest workflows of the last 30 days with the span each task type
+    /// of each occupied, the 200 longest object records of the 8 latest of them,
+    /// and the Tests' statistics per object over the last day, 7 days and 30 days.
+    measure 'Run data' = ```
+        VAR _f = UNICHAR(57345)
+        VAR _r = UNICHAR(57346)
+        VAR _t = UNICHAR(57347)
+        VAR _now = UTCNOW()
+        VAR _all = ADDCOLUMNS(
+            CALCULATETABLE(VALUES('Log'[Workflow ID]), 'Log'[Completed datetime] >= _now - 30),
+            "@start", CALCULATE(MIN('Log'[Started datetime])),
+            "@end", CALCULATE(MAX('Log'[Completed datetime])),
+            "@records", CALCULATE(COUNTROWS('Log')),
+            "@objects", CALCULATE(COUNTROWS('Log'), NOT ISBLANK('Log'[Object name])) + 0,
+            "@failed", CALCULATE(COUNTROWS('Log'), 'Log'[Result] IN {"Failed", "Error", "Blocked"}) + 0
+        )
+        VAR _recent = TOPN(300, _all, [@end], DESC, 'Log'[Workflow ID], ASC)
+        VAR _objects = GENERATE(
+            SELECTCOLUMNS(TOPN(8, _recent, [@end], DESC, 'Log'[Workflow ID], ASC), "@owner", 'Log'[Workflow ID]),
+            VAR _o = [@owner]
+            RETURN TOPN(200, CALCULATETABLE('Log', 'Log'[Workflow ID] = _o, NOT ISBLANK('Log'[Object name])), 'Log'[Duration milliseconds], DESC, 'Log'[Log SK], ASC)
+        )
+        VAR _spans = GENERATE(
+            SELECTCOLUMNS(_recent, "@workflow", 'Log'[Workflow ID]),
+            VAR _w = [@workflow]
+            RETURN CALCULATETABLE(
+                ADDCOLUMNS(
+                    VALUES('Log'[Task type]),
+                    "@tstart", CALCULATE(MIN('Log'[Started datetime])),
+                    "@tend", CALCULATE(MAX('Log'[Completed datetime])),
+                    "@trecords", CALCULATE(COUNTROWS('Log')),
+                    "@tfailed", CALCULATE(COUNTROWS('Log'), 'Log'[Result] IN {"Failed", "Error", "Blocked"}) + 0
+                ),
+                'Log'[Workflow ID] = _w
+            )
+        )
+        VAR _day = CALCULATETABLE(
+            ADDCOLUMNS(
+                SUMMARIZE('Log', 'Log'[Target type], 'Log'[Target name], 'Log'[Schema name], 'Log'[Object name]),
+                "@runs", CALCULATE(COUNTROWS('Log')),
+                "@duration", CALCULATE(SUM('Log'[Duration milliseconds])),
+                "@longest", CALCULATE(MAX('Log'[Duration milliseconds])),
+                "@failed", CALCULATE(COUNTROWS('Log'), 'Log'[Result] IN {"Failed", "Error", "Blocked"}) + 0,
+                "@last", CALCULATE(MAX('Log'[Completed datetime]))
+            ),
+            'Log'[Task type] = "test",
+            NOT ISBLANK('Log'[Object name]),
+            'Log'[Completed datetime] >= _now - 1
+        )
+        VAR _seven = CALCULATETABLE(
+            ADDCOLUMNS(
+                SUMMARIZE('Log', 'Log'[Target type], 'Log'[Target name], 'Log'[Schema name], 'Log'[Object name]),
+                "@runs", CALCULATE(COUNTROWS('Log')),
+                "@duration", CALCULATE(SUM('Log'[Duration milliseconds])),
+                "@longest", CALCULATE(MAX('Log'[Duration milliseconds])),
+                "@failed", CALCULATE(COUNTROWS('Log'), 'Log'[Result] IN {"Failed", "Error", "Blocked"}) + 0,
+                "@last", CALCULATE(MAX('Log'[Completed datetime]))
+            ),
+            'Log'[Task type] = "test",
+            NOT ISBLANK('Log'[Object name]),
+            'Log'[Completed datetime] >= _now - 7
+        )
+        VAR _month = CALCULATETABLE(
+            ADDCOLUMNS(
+                SUMMARIZE('Log', 'Log'[Target type], 'Log'[Target name], 'Log'[Schema name], 'Log'[Object name]),
+                "@runs", CALCULATE(COUNTROWS('Log')),
+                "@duration", CALCULATE(SUM('Log'[Duration milliseconds])),
+                "@longest", CALCULATE(MAX('Log'[Duration milliseconds])),
+                "@failed", CALCULATE(COUNTROWS('Log'), 'Log'[Result] IN {"Failed", "Error", "Blocked"}) + 0,
+                "@last", CALCULATE(MAX('Log'[Completed datetime]))
+            ),
+            'Log'[Task type] = "test",
+            NOT ISBLANK('Log'[Object name]),
+            'Log'[Completed datetime] >= _now - 30
+        )
+        VAR _testheader = _f & "targettype" & _f & "target" & _f & "schema" & _f & "object" & _f & "runs" & _f & "duration" & _f & "longest" & _f & "failed" & _f & "last"
+        RETURN
+            _t & "runs" & _f & "workflow" & _f & "started" & _f & "completed" & _f & "records" & _f & "objects" & _f & "failed"
+            & CONCATENATEX(
+                _recent,
+                _r & 'Log'[Workflow ID]
+                    & _f & IF(ISBLANK([@start]), "", FORMAT(([@start] - DATE(1970, 1, 1)) * 86400000, "0"))
+                    & _f & IF(ISBLANK([@end]), "", FORMAT(([@end] - DATE(1970, 1, 1)) * 86400000, "0"))
+                    & _f & [@records]
+                    & _f & [@objects]
+                    & _f & [@failed],
+                "",
+                [@end], DESC,
+                'Log'[Workflow ID], ASC
+            )
+            & _t & "runtasks" & _f & "workflow" & _f & "task" & _f & "started" & _f & "completed" & _f & "records" & _f & "failed"
+            & CONCATENATEX(
+                _spans,
+                _r & [@workflow]
+                    & _f & 'Log'[Task type]
+                    & _f & IF(ISBLANK([@tstart]), "", FORMAT(([@tstart] - DATE(1970, 1, 1)) * 86400000, "0"))
+                    & _f & IF(ISBLANK([@tend]), "", FORMAT(([@tend] - DATE(1970, 1, 1)) * 86400000, "0"))
+                    & _f & [@trecords]
+                    & _f & [@tfailed],
+                "",
+                [@workflow], ASC,
+                'Log'[Task type], ASC
+            )
+            & _t & "runobjects" & _f & "workflow" & _f & "task" & _f & "targettype" & _f & "target" & _f & "schema" & _f & "object" & _f & "result" & _f & "started" & _f & "completed" & _f & "message"
+            & CONCATENATEX(
+                _objects,
+                _r & [@owner]
+                    & _f & 'Log'[Task type]
+                    & _f & 'Log'[Target type]
+                    & _f & 'Log'[Target name]
+                    & _f & 'Log'[Schema name]
+                    & _f & 'Log'[Object name]
+                    & _f & 'Log'[Result]
+                    & _f & IF(ISBLANK('Log'[Started datetime]), "", FORMAT(('Log'[Started datetime] - DATE(1970, 1, 1)) * 86400000, "0"))
+                    & _f & IF(ISBLANK('Log'[Completed datetime]), "", FORMAT(('Log'[Completed datetime] - DATE(1970, 1, 1)) * 86400000, "0"))
+                    & _f & IF('Log'[Result] <> "Succeeded", LEFT('Log'[Message], 160)),
+                "",
+                [@owner], ASC,
+                'Log'[Duration milliseconds], DESC,
+                'Log'[Log SK], ASC
+            )
+            & _t & "testday" & _testheader
+            & CONCATENATEX(
+                _day,
+                _r & 'Log'[Target type] & _f & 'Log'[Target name] & _f & 'Log'[Schema name] & _f & 'Log'[Object name]
+                    & _f & [@runs] & _f & [@duration] & _f & [@longest] & _f & [@failed]
+                    & _f & IF(ISBLANK([@last]), "", FORMAT(([@last] - DATE(1970, 1, 1)) * 86400000, "0")),
+                ""
+            )
+            & _t & "testweek" & _testheader
+            & CONCATENATEX(
+                _seven,
+                _r & 'Log'[Target type] & _f & 'Log'[Target name] & _f & 'Log'[Schema name] & _f & 'Log'[Object name]
+                    & _f & [@runs] & _f & [@duration] & _f & [@longest] & _f & [@failed]
+                    & _f & IF(ISBLANK([@last]), "", FORMAT(([@last] - DATE(1970, 1, 1)) * 86400000, "0")),
+                ""
+            )
+            & _t & "testmonth" & _testheader
+            & CONCATENATEX(
+                _month,
+                _r & 'Log'[Target type] & _f & 'Log'[Target name] & _f & 'Log'[Schema name] & _f & 'Log'[Object name]
+                    & _f & [@runs] & _f & [@duration] & _f & [@longest] & _f & [@failed]
+                    & _f & IF(ISBLANK([@last]), "", FORMAT(([@last] - DATE(1970, 1, 1)) * 86400000, "0")),
+                ""
+            )
+        ```
+        displayFolder: Data
+
     /// Every Log record of the twelve latest workflows of the last 7 days, up to
-    /// 20,000 records, newest workflow first. Each workflow says how many it holds and how many
+    /// 9,000 records, newest workflow first. Each workflow says how many it holds and how many
     /// are included; a record names its workflow by that order. A message is
     /// kept for workflow records and for work that did not succeed.
     measure 'Log data' = ```
         VAR _f = UNICHAR(57345)
         VAR _r = UNICHAR(57346)
         VAR _t = UNICHAR(57347)
-        VAR _budget = 20000
+        VAR _budget = 9000
         VAR _all = ADDCOLUMNS(
             CALCULATETABLE(VALUES('Log'[Workflow ID]), 'Log'[Completed datetime] >= UTCNOW() - 7),
             "@end", CALCULATE(MAX('Log'[Completed datetime])),
@@ -363,9 +541,8 @@ table 'Dashboard measures'
         ```
         displayFolder: Data
 
-    /// Load statistics: per object over the last day, 7 days and 30 days, per
-    /// item per day for 30 days, and the 50 slowest and 50 largest single loads
-    /// of the last 7 days.
+    /// Load statistics: per object over the last day, 7 days and 30 days, and the
+    /// 50 largest single loads of the last 7 days.
     measure 'Statistic data' = ```
         VAR _f = UNICHAR(57345)
         VAR _r = UNICHAR(57346)
@@ -429,24 +606,7 @@ table 'Dashboard measures'
             ),
             'Load statistic'[Completed datetime] >= _now - 30
         )
-        VAR _days = GENERATE(
-            SELECTCOLUMNS(GENERATESERIES(0, 29), "@day", TRUNC(_now) - [Value]),
-            VAR _d = [@day]
-            RETURN CALCULATETABLE(
-                ADDCOLUMNS(
-                    SUMMARIZE('Load statistic', 'Load statistic'[Item type], 'Load statistic'[Item name]),
-                    "@loads", CALCULATE(COUNTROWS('Load statistic')),
-                    "@duration", CALCULATE(SUM('Load statistic'[Duration milliseconds])),
-                    "@read", CALCULATE(SUM('Load statistic'[Rows read])),
-                    "@changed", CALCULATE(SUM('Load statistic'[Rows inserted]) + SUM('Load statistic'[Rows updated]) + SUM('Load statistic'[Rows deleted])),
-                    "@rejected", CALCULATE(SUM('Load statistic'[Rows rejected]))
-                ),
-                'Load statistic'[Completed datetime] >= _d,
-                'Load statistic'[Completed datetime] < _d + 1
-            )
-        )
         VAR _week = CALCULATETABLE('Load statistic', 'Load statistic'[Completed datetime] >= _now - 7)
-        VAR _slowest = TOPN(50, _week, 'Load statistic'[Duration milliseconds], DESC, 'Load statistic'[Load statistic SK], ASC)
         VAR _largest = TOPN(
             50,
             FILTER(_week, NOT ISBLANK('Load statistic'[Rows inserted]) || NOT ISBLANK('Load statistic'[Rows updated]) || NOT ISBLANK('Load statistic'[Rows deleted])),
@@ -480,27 +640,6 @@ table 'Dashboard measures'
                     & _f & [@loads] & _f & [@duration] & _f & [@longest] & _f & [@read] & _f & [@inserted] & _f & [@updated] & _f & [@deleted] & _f & [@rejected]
                     & _f & [@reloads] & _f & [@skips] & _f & [@timedread] & _f & [@timedduration]
                     & _f & IF(ISBLANK([@last]), "", FORMAT(([@last] - DATE(1970, 1, 1)) * 86400000, "0")),
-                ""
-            )
-            & _t & "perftrend" & _f & "day" & _f & "item" & _f & "loads" & _f & "duration" & _f & "read" & _f & "changed" & _f & "rejected"
-            & CONCATENATEX(
-                _days,
-                _r & FORMAT(([@day] - DATE(1970, 1, 1)) * 86400000, "0")
-                    & _f & 'Load statistic'[Item type] & "/" & 'Load statistic'[Item name]
-                    & _f & [@loads] & _f & [@duration] & _f & [@read] & _f & [@changed] & _f & [@rejected],
-                ""
-            )
-            & _t & "slowest" & _single
-            & CONCATENATEX(
-                _slowest,
-                _r & 'Load statistic'[Load statistic SK]
-                    & _f & 'Load statistic'[Item type] & "/" & 'Load statistic'[Item name] & _f & 'Load statistic'[Schema name] & _f & 'Load statistic'[Object name]
-                    & _f & 'Load statistic'[Workflow ID]
-                    & _f & IF(ISBLANK('Load statistic'[Started datetime]), "", FORMAT(('Load statistic'[Started datetime] - DATE(1970, 1, 1)) * 86400000, "0"))
-                    & _f & IF(ISBLANK('Load statistic'[Completed datetime]), "", FORMAT(('Load statistic'[Completed datetime] - DATE(1970, 1, 1)) * 86400000, "0"))
-                    & _f & 'Load statistic'[Duration milliseconds]
-                    & _f & 'Load statistic'[Rows read] & _f & 'Load statistic'[Rows inserted] & _f & 'Load statistic'[Rows updated] & _f & 'Load statistic'[Rows deleted] & _f & 'Load statistic'[Rows rejected]
-                    & _f & IF('Load statistic'[Is reload], "1") & _f & IF('Load statistic'[Is static skip], "1"),
                 ""
             )
             & _t & "largest" & _single
@@ -699,18 +838,10 @@ table 'Dashboard measures'
         ```
         displayFolder: Pages
 
-    /// The Load orchestration page for HTML Content.
-    measure 'Load orchestration page' = ```
+    /// The Orchestration page for HTML Content.
+    measure 'Orchestration page' = ```
         "<div id=""wd-app"" class=""wd""></div><script type=""text/plain"" id=""wd-data"">"
             & SUBSTITUTE(UNICHAR(57347) & "page" & UNICHAR(57345) & "name" & UNICHAR(57346) & "orchestration" & [Catalogue data] & [Lineage data] & [Status data] & [Workflow data], "<", UNICHAR(57344))
-            & "</script>" & [Renderer]
-        ```
-        displayFolder: Pages
-
-    /// The Gantt page for HTML Content.
-    measure 'Gantt page' = ```
-        "<div id=""wd-app"" class=""wd""></div><script type=""text/plain"" id=""wd-data"">"
-            & SUBSTITUTE(UNICHAR(57347) & "page" & UNICHAR(57345) & "name" & UNICHAR(57346) & "gantt" & [Catalogue data] & [Workflow data] & [Log data], "<", UNICHAR(57344))
             & "</script>" & [Renderer]
         ```
         displayFolder: Pages
@@ -718,7 +849,15 @@ table 'Dashboard measures'
     /// The Performance page for HTML Content.
     measure 'Performance page' = ```
         "<div id=""wd-app"" class=""wd""></div><script type=""text/plain"" id=""wd-data"">"
-            & SUBSTITUTE(UNICHAR(57347) & "page" & UNICHAR(57345) & "name" & UNICHAR(57346) & "performance" & [Catalogue data] & [Workflow data] & [Statistic data], "<", UNICHAR(57344))
+            & SUBSTITUTE(UNICHAR(57347) & "page" & UNICHAR(57345) & "name" & UNICHAR(57346) & "performance" & [Catalogue data] & [Node data] & [Run data] & [Statistic data], "<", UNICHAR(57344))
+            & "</script>" & [Renderer]
+        ```
+        displayFolder: Pages
+
+    /// The Gantt page for HTML Content.
+    measure 'Gantt page' = ```
+        "<div id=""wd-app"" class=""wd""></div><script type=""text/plain"" id=""wd-data"">"
+            & SUBSTITUTE(UNICHAR(57347) & "page" & UNICHAR(57345) & "name" & UNICHAR(57346) & "gantt" & [Catalogue data] & [Node data] & [Workflow data] & [Log data], "<", UNICHAR(57344))
             & "</script>" & [Renderer]
         ```
         displayFolder: Pages

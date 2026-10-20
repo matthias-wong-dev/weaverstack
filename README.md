@@ -229,15 +229,15 @@ Weaver version's tables; build a project into it first. The Dashboard deploys
 in the catalogue's own workspace. `--dry-run` resolves the source and the two
 items without changing anything.
 
-The Report has seven pages: Overview, Health, Load orchestration, Gantt,
-Performance, Entity dictionary and Semantic model. Each renders in the HTML
+The Report has seven pages: Overview, Health, Orchestration, Performance,
+Gantt, Entity dictionary and Semantic model. Each renders in the HTML
 Content visual's regular edition, which runs scripts; its certified edition
 does not. A tenant that allows only certified visuals can admit it as an
 organisational visual. The model needs no visual, and any Report can use it.
 The model reads the catalogue's tables over Direct Lake, so the Overview,
-Health, Load orchestration and Gantt pages show settled work as it is recorded;
-they refresh every 30 seconds, or at the capacity's minimum interval when that
-is longer.
+Health, Orchestration, Performance and Gantt pages show processed work as it is
+recorded; they refresh every 30 seconds, or at the capacity's minimum interval
+when that is longer.
 
 ### Shared data sources
 
