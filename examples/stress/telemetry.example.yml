@@ -1,0 +1,10 @@
+# Capacity that hosts the stress workspaces and emits both event feeds.
+capacity_id: 00000000-0000-0000-0000-000000000000
+
+# Query endpoint and database of the Eventhouse retaining the feeds.
+query_service_uri: https://cluster.z0.kusto.fabric.microsoft.com
+database: WeaverStressTelemetry
+
+# Tables populated by the capacity overview and operation Eventstreams.
+overview_table: CapacityOverviewEvents
+operation_table: CapacityOperationEvents
