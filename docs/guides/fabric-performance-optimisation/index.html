@@ -75,19 +75,22 @@ table.benchmark th, table.benchmark td { padding: 11px 13px; border: 1px solid v
 table.benchmark th { color: var(--ink); background: var(--paper-deep); }
 .result-chart { margin: 30px 0 38px; padding: 22px 0 18px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
 .result-chart h3 { margin: 0 0 6px; font-size: 18px; }
-.result-chart-legend { display: flex; gap: 18px; margin: 0 0 20px; color: var(--muted); font: 12px var(--mono); }
-.result-chart-legend span { display: inline-flex; align-items: center; gap: 7px; }
-.result-chart-legend i { display: inline-block; width: 22px; height: 7px; background: var(--blue); }
-.result-chart-legend .baseline-key { height: 7px; border: 1px solid var(--line-strong); background: var(--paper-deep); }
 .result-chart-row { display: grid; grid-template-columns: 104px minmax(180px, 1fr) 82px; gap: 14px; align-items: center; margin: 14px 0; }
 .result-chart-row strong { font-size: 13px; }
 .result-chart-row > span { color: var(--ink-soft); font: 12px var(--mono); text-align: right; }
-.result-chart-bars { display: grid; gap: 4px; }
 .result-chart-bar { display: block; min-width: 3px; height: 8px; background: var(--blue); }
-.result-chart-bar.baseline { height: 7px; border: 1px solid var(--line-strong); background: var(--paper-deep); }
 .result-chart figcaption { margin-top: 16px; color: var(--muted); font-size: 13px; }
+.telemetry-chart { margin: 26px 0 34px; padding: 22px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.telemetry-chart > strong { display: block; margin-bottom: 18px; font-size: 18px; }
+.telemetry-row { display: grid; grid-template-columns: 178px minmax(180px, 1fr) 100px; gap: 14px; align-items: center; margin: 15px 0; }
+.telemetry-row > span:first-child { font-size: 13px; font-weight: 650; }
+.telemetry-row > span:last-child { color: var(--ink-soft); font: 12px var(--mono); text-align: right; }
+.telemetry-track { position: relative; height: 9px; background: var(--paper-deep); }
+.telemetry-fill { display: block; height: 100%; background: var(--blue); }
+.telemetry-marker { position: absolute; top: -3px; width: 2px; height: 15px; background: var(--ink); }
+.telemetry-chart figcaption { margin-top: 18px; color: var(--muted); font-size: 13px; }
 @media (max-width: 900px) { .article-layout { grid-template-columns: 1fr; } .article-nav { position: static; order: -1; } }
-@media (max-width: 560px) { .result-chart-row { grid-template-columns: 78px minmax(110px, 1fr) 70px; gap: 9px; } }
+@media (max-width: 560px) { .result-chart-row { grid-template-columns: 78px minmax(110px, 1fr) 70px; gap: 9px; } .telemetry-row { grid-template-columns: 108px minmax(90px, 1fr) 76px; gap: 8px; } }
 </style>
 </head>
 <body class="guide-article">
@@ -219,28 +222,41 @@ table.benchmark th { color: var(--ink); background: var(--paper-deep); }
 <p>The headline results were as follows.</p>
 <div class="table-scroll"><table class="benchmark"><thead><tr><th scope="col">Scenario</th><th scope="col">Duration</th><th scope="col">Rows changed</th></tr></thead><tbody><tr><td>Initial load from empty</td><td>54 minutes 44 seconds</td><td>4,045,265,040</td></tr><tr><td>Unchanged load</td><td>8 minutes 19 seconds</td><td>0</td></tr><tr><td>Day 1 incremental</td><td>17 minutes 29 seconds</td><td>7,821,922</td></tr><tr><td>Day 2 incremental</td><td>17 minutes 35 seconds</td><td>7,719,640</td></tr><tr><td>Day 3 incremental</td><td>17 minutes 14 seconds</td><td>7,552,602</td></tr><tr><td>Untuned implementation</td><td>More than 20 hours</td><td>Retrospective estimate, not directly measured</td></tr></tbody></table></div>
 <p>The initial load read and inserted 4,045,265,040 rows across 2,185 executable nodes. The unchanged run executed the same graph, read 2,293,000 rows for change detection, and produced no inserts, updates or deletes. The three daily incrementals changed a median of 7,719,640 rows in 17 minutes 29 seconds.</p>
-<p>I compared each load with a qualified run of the same deterministic plan on 16 October. The current initial load was 1.21% faster. The unchanged load was 6.73% slower, while the three incremental loads differed by 3.03%, 0.94% and 0.41%. Every load retained the same node shape and exact row totals, and all four nine-test convergence checks passed.</p>
+<p>Across repeated runs of the deterministic workload, incremental loads completed in approximately 13 to 18 minutes. The three runs in this campaign were tightly grouped between 17 minutes 14 seconds and 17 minutes 35 seconds. Every load retained the same node shape and exact row totals, and all four nine-test convergence checks passed.</p>
 <figure class="result-chart" aria-labelledby="load-comparison-title">
-<h3 id="load-comparison-title">Current release against the qualified baseline</h3>
-<div class="result-chart-legend" aria-hidden="true"><span><i></i>Current release</span><span><i class="baseline-key"></i>16 October baseline</span></div>
-<div class="result-chart-row"><strong>Initial</strong><div class="result-chart-bars"><i class="result-chart-bar" style="width:98.79%"></i><i class="result-chart-bar baseline" style="width:100%"></i></div><span>54m 44s</span></div>
-<div class="result-chart-row"><strong>Unchanged</strong><div class="result-chart-bars"><i class="result-chart-bar" style="width:15.02%"></i><i class="result-chart-bar baseline" style="width:14.08%"></i></div><span>8m 19s</span></div>
-<div class="result-chart-row"><strong>Day 1</strong><div class="result-chart-bars"><i class="result-chart-bar" style="width:31.55%"></i><i class="result-chart-bar baseline" style="width:30.62%"></i></div><span>17m 29s</span></div>
-<div class="result-chart-row"><strong>Day 2</strong><div class="result-chart-bars"><i class="result-chart-bar" style="width:31.73%"></i><i class="result-chart-bar baseline" style="width:31.44%"></i></div><span>17m 35s</span></div>
-<div class="result-chart-row"><strong>Day 3</strong><div class="result-chart-bars"><i class="result-chart-bar" style="width:31.10%"></i><i class="result-chart-bar baseline" style="width:30.98%"></i></div><span>17m 14s</span></div>
-<figcaption>End-to-end wall time on the same deterministic 3,000-object plan. Bars share one scale; the label shows the current duration.</figcaption>
+<h3 id="load-comparison-title">Measured load duration</h3>
+<div class="result-chart-row"><strong>Initial</strong><i class="result-chart-bar" style="width:100%"></i><span>54m 44s</span></div>
+<div class="result-chart-row"><strong>Unchanged</strong><i class="result-chart-bar" style="width:15.21%"></i><span>8m 19s</span></div>
+<div class="result-chart-row"><strong>Day 1</strong><i class="result-chart-bar" style="width:31.93%"></i><span>17m 29s</span></div>
+<div class="result-chart-row"><strong>Day 2</strong><i class="result-chart-bar" style="width:32.12%"></i><span>17m 35s</span></div>
+<div class="result-chart-row"><strong>Day 3</strong><i class="result-chart-bar" style="width:31.48%"></i><span>17m 14s</span></div>
+<figcaption>End-to-end wall time for the current 3,000-object campaign. Source generation and daily source changes were outside these measured estate-loading intervals.</figcaption>
 </figure>
 <p>Incremental load times varied between runs, partly because Fabric did not always allocate the same Spark executor resources. Warm versus cold sessions also affected the observed duration.</p>
 <p>In particular, executor allocation could vary when another Spark session continued to retain resources. This makes it important to distinguish processing efficiency from capacity availability when interpreting differences between runs.</p>
 <h3 id="resource-utilisation">3.1 Resource utilisation</h3>
 <p>Elapsed time measures the performance experienced by the user, but it is insufficient to explain the underlying resource consumption.</p>
 <p>For a complete performance assessment, four areas of monitoring are particularly relevant.</p>
-<div class="table-scroll"><table class="benchmark"><thead><tr><th scope="col">Area</th><th scope="col">Useful measurements</th><th scope="col">Instrumentation</th></tr></thead><tbody><tr><td>Orchestration</td><td>Node durations, critical-path delays, concurrency, waiting time</td><td>Execution records and DAG Gantt</td></tr><tr><td>Spark</td><td>Executor allocation, task wait times, CPU activity, memory pressure, shuffle and spill activity</td><td>Spark monitoring and application metrics</td></tr><tr><td>Warehouse</td><td>Query durations, request concurrency, execution bottlenecks</td><td>Warehouse Query Insights</td></tr><tr><td>Capacity</td><td>CU-seconds, utilisation and throttling</td><td>Fabric Capacity Metrics app</td></tr></tbody></table></div>
+<div class="table-scroll"><table class="benchmark"><thead><tr><th scope="col">Area</th><th scope="col">Useful measurements</th><th scope="col">Instrumentation</th></tr></thead><tbody><tr><td>Orchestration</td><td>Node durations, critical-path delays, concurrency, waiting time</td><td>Execution records and DAG Gantt</td></tr><tr><td>Spark</td><td>Executor allocation, task wait times, CPU activity, memory pressure, shuffle and spill activity</td><td>Spark monitoring and application metrics</td></tr><tr><td>Warehouse</td><td>Query durations, request concurrency, execution bottlenecks</td><td>Warehouse Query Insights</td></tr><tr><td>Capacity</td><td>CU-seconds, utilisation and throttling</td><td>Capacity Eventstreams and Metrics app</td></tr></tbody></table></div>
 <p>Fabric capacity consumption is measured in capacity-unit seconds, which should not be interpreted as a direct measure of CPU time.</p>
 <p>Similarly, Spark executor utilisation and Warehouse query duration measure different aspects of the platform. There is no single system-wide CPU percentage that adequately describes the performance of a heterogeneous Fabric workload.</p>
+<h3 id="telemetry-findings">3.2 Telemetry findings</h3>
 <p>For this campaign I retained seven Spark applications, 325,924 Query Insights request records across five Warehouses, 396 capacity overview samples and 64,100 capacity operation events. All seven Spark applications reported that capacity was not exceeded. Spark core efficiency ranged from 89.5% to 95.3%, and all 325,924 Warehouse request records had a succeeded status.</p>
-<p>The capacity-wide 30-second overview samples averaged 18.3% utilisation and peaked at 26.9%. They recorded no overage, while the capacity-operation records reported no throttling delay. Other items were active on the capacity during the measured window, so these figures are operating context rather than an attribution of every capacity unit to the benchmark.</p>
-<h3 id="interpretation">3.2 Interpretation</h3>
+<p>The capacity-wide 30-second overview samples averaged 18.3% utilisation and peaked at 26.9%. They recorded no overage, while the capacity-operation records reported no throttling delay. The incremental duration was therefore not explained by F64 saturation.</p>
+<p>Spark was efficient while active. The remaining time was more consistent with session overhead, dependency waiting, data movement and coordination than with inefficient Spark computation. This is also visible in the operation mix: 42,405 of the 43,657 capacity-operation events associated with the seven campaign items were OneLake operations.</p>
+<figure class="telemetry-chart" aria-labelledby="telemetry-chart-title">
+<strong id="telemetry-chart-title">What the telemetry showed</strong>
+<div class="telemetry-row"><span>Capacity average</span><div class="telemetry-track"><i class="telemetry-fill" style="width:18.3%"></i></div><span>18.3%</span></div>
+<div class="telemetry-row"><span>Capacity peak</span><div class="telemetry-track"><i class="telemetry-fill" style="width:26.9%"></i></div><span>26.9%</span></div>
+<div class="telemetry-row"><span>Spark efficiency</span><div class="telemetry-track"><i class="telemetry-fill" style="width:95.3%"></i><i class="telemetry-marker" style="left:89.5%"></i></div><span>89.5–95.3%</span></div>
+<div class="telemetry-row"><span>OneLake operations</span><div class="telemetry-track"><i class="telemetry-fill" style="width:97.1%"></i></div><span>97.1%</span></div>
+<figcaption>Capacity utilisation uses capacity-wide 30-second samples. Spark shows the observed core-efficiency range. The OneLake share covers capacity-operation events associated with the seven campaign items.</figcaption>
+</figure>
+<p>Warehouse request duration showed a long tail rather than a broad failure pattern.</p>
+<div class="table-scroll"><table class="benchmark"><thead><tr><th scope="col">Warehouse scope</th><th scope="col">Requests</th><th scope="col">Median</th><th scope="col">p95</th><th scope="col">Maximum</th></tr></thead><tbody><tr><td>All five Warehouses</td><td>325,924</td><td>0.488s</td><td>9.554s</td><td>349.937s</td></tr><tr><td>Source Warehouse</td><td>75,979</td><td>3.131s</td><td>24.097s</td><td>80.397s</td></tr><tr><td>Core Warehouse</td><td>139,844</td><td>0.476s</td><td>8.440s</td><td>349.937s</td></tr></tbody></table></div>
+<p>The Core Warehouse contained the longest individual request, but the stable end-to-end load times and node-duration distributions show that this was a tail event rather than a general slowdown.</p>
+<p>Other items were active on the capacity during the measured window. The campaign items accounted for 68.1% of capacity-operation events, yet the capacity remained well below saturation and recorded no throttling. The result therefore did not depend on obtaining a completely isolated capacity.</p>
+<h3 id="interpretation">3.3 Interpretation</h3>
 <p>The results demonstrate that an engineering workload of this scale can complete in under 55 minutes for initial loading and under 18 minutes for subsequent incremental runs on the tested F64 capacity.</p>
 <p>However, several qualifications are necessary.</p>
 <p>The transformations were deliberately simple, allowing the measurements to isolate platform and engineering overhead. The workload was synthetic, although its size distribution and change patterns were designed to resemble characteristics observed in production estates.</p>
