@@ -116,6 +116,44 @@ python examples/stress/run.py stress populate
 python examples/stress/run.py stress measure --cycles 3
 ```
 
+For an evidence run, configure the retained Fabric capacity feeds first. Two
+Eventstreams must write capacity overview events and capacity operation events
+to separate tables in one Eventhouse. Copy
+`examples/stress/telemetry.example.yml`, then set the capacity ID, KQL query
+endpoint, database and table names.
+
+Run the full estate with retries disabled and an evidence directory outside the
+generated project:
+
+```bash
+python examples/stress/run.py stress measure --cycles 3 --retries 0 \
+  --telemetry-config stress/telemetry.yml \
+  --evidence .perf-archive/runs
+```
+
+The runner retains:
+
+- the Git commit, plan hash, Weaver version and imported source path;
+- complete Build, Load and Test reports;
+- each Session's REST, Livy, TDS and OneLake telemetry;
+- capacity overview and operation events for the measured UTC window;
+- every overlapping Livy session's `resourceUsage`, jobs, stages, executors and
+  Spark SQL executions;
+- Warehouse Query Insights from both project catalogues and every Warehouse
+  target.
+
+Fabric monitoring feeds are asynchronous, and Query Insights can take up to 15
+minutes to show a completed query. The runner waits 15 minutes after the
+measured work by default; change this with `--telemetry-settle-seconds`. The
+wait does not extend the measured UTC window. The runner fails the command if
+either capacity feed is empty, no Spark application is found, Query Insights is
+empty, or an engine endpoint cannot be downloaded. Every raw payload remains
+under the run's evidence directory when collection fails.
+
+Capacity event subscriptions have no historical backfill and consume a small
+amount of Fabric capacity while events flow. Keep the Eventstreams running for
+the full measured window.
+
 ```bash
 python examples/stress/run.py stress perturb --days 2
 ```
