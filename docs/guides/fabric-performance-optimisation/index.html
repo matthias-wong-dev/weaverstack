@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="en-AU">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#f7f7f6">
+<title>Performance Engineering on Microsoft Fabric: 3,000 objects and 4 billion rows</title>
+<meta name="description" content="Lessons from stress-testing a 3,000-object Microsoft Fabric data pipeline processing approximately 4 billion rows on an F64 capacity.">
+<meta name="robots" content="index, follow, max-image-preview:large">
+<link rel="canonical" href="https://weaverstack.dev/guides/fabric-performance-optimisation/">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://weaverstack.dev/guides/fabric-performance-optimisation/">
+<meta property="og:site_name" content="Weaver">
+<meta property="og:title" content="Microsoft Fabric performance optimisation at 3,000 objects">
+<meta property="og:description" content="A measured F64 guide to high-performance Fabric engineering, parallel execution and incremental loads across Spark and Warehouses.">
+<meta property="og:image" content="https://weaverstack.dev/og.png">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Weaver performance evidence from a 3,000-object Microsoft Fabric estate.">
+<meta property="og:locale" content="en_AU">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Microsoft Fabric performance optimisation at 3,000 objects">
+<meta name="twitter:description" content="A measured F64 guide to high-performance Fabric engineering, parallel execution and incremental loads across Spark and Warehouses.">
+<meta name="twitter:image" content="https://weaverstack.dev/og.png">
+<meta name="twitter:image:alt" content="Weaver performance evidence from a 3,000-object Microsoft Fabric estate.">
+<link rel="icon" type="image/png" href="/favicon.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="manifest" href="/site.webmanifest">
+<link rel="sitemap" type="application/xml" href="/sitemap.xml">
+<link rel="stylesheet" href="/assets/site.css?v=07163cf81a">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "TechArticle",
+      "headline": "Microsoft Fabric performance optimisation at 3,000 objects",
+      "description": "A measured F64 guide to high-performance Fabric engineering, parallel execution and incremental loads across Spark and Warehouses.",
+      "url": "https://weaverstack.dev/guides/fabric-performance-optimisation/",
+      "inLanguage": "en-AU",
+      "author": {"@type": "Organization", "name": "Weaver contributors"},
+      "publisher": {"@type": "Organization", "name": "Weaver", "url": "https://weaverstack.dev/"},
+      "isPartOf": {"@type": "CollectionPage", "name": "Fabric Engineering Guides", "url": "https://weaverstack.dev/guides/"},
+      "about": ["Microsoft Fabric performance optimisation", "Microsoft Fabric high performance", "Fabric parallel load", "Microsoft Fabric incremental load"]
+    },
+    {
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        {"@type": "ListItem", "position": 1, "name": "Home", "item": "https://weaverstack.dev/"},
+        {"@type": "ListItem", "position": 2, "name": "Fabric Engineering Guides", "item": "https://weaverstack.dev/guides/"},
+        {"@type": "ListItem", "position": 3, "name": "Fabric performance optimisation", "item": "https://weaverstack.dev/guides/fabric-performance-optimisation/"}
+      ]
+    }
+  ]
+}
+</script>
+<style>
+.guide-article .page-head { padding-bottom: 30px; }
+.guide-article .page-head h1 { max-width: 24ch; font-size: clamp(36px, 4.7vw, 54px); }
+.guide-article .article-meta { margin: 18px 0 0; color: var(--muted); font: 13px var(--mono); }
+.article-layout { display: grid; grid-template-columns: minmax(0, 1fr) 250px; gap: 56px; align-items: start; }
+.article-body { min-width: 0; }
+.article-body > p, .article-body > ul, .article-body > ol { max-width: 74ch; }
+.article-body h2 { margin-top: 62px; padding-top: 26px; border-top: 1px solid var(--line); }
+.article-body h2:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
+.article-body h3 { margin-top: 38px; }
+.article-nav { position: sticky; top: 92px; padding: 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--white); }
+.article-nav strong { display: block; margin-bottom: 10px; }
+.article-nav ol { margin: 0; padding-left: 20px; }
+.article-nav li { margin: 7px 0; font-size: 14px; }
+.table-scroll { max-width: 100%; margin: 24px 0 30px; overflow-x: auto; }
+table.benchmark { width: 100%; border-collapse: collapse; background: var(--white); }
+table.benchmark th, table.benchmark td { padding: 11px 13px; border: 1px solid var(--line); text-align: left; vertical-align: top; }
+table.benchmark th { color: var(--ink); background: var(--paper-deep); }
+.result-chart { margin: 30px 0 38px; padding: 22px 0 18px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.result-chart h3 { margin: 0 0 6px; font-size: 18px; }
+.result-chart-row { display: grid; grid-template-columns: 104px minmax(180px, 1fr) 82px; gap: 14px; align-items: center; margin: 14px 0; }
+.result-chart-row strong { font-size: 13px; }
+.result-chart-row > span { color: var(--ink-soft); font: 12px var(--mono); text-align: right; }
+.result-chart-bar { display: block; min-width: 3px; height: 8px; background: var(--blue); }
+.result-chart figcaption { margin-top: 16px; color: var(--muted); font-size: 13px; }
+.telemetry-chart { margin: 26px 0 34px; padding: 22px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.telemetry-chart > strong { display: block; margin-bottom: 18px; font-size: 18px; }
+.telemetry-row { display: grid; grid-template-columns: 178px minmax(180px, 1fr) 100px; gap: 14px; align-items: center; margin: 15px 0; }
+.telemetry-row > span:first-child { font-size: 13px; font-weight: 650; }
+.telemetry-row > span:last-child { color: var(--ink-soft); font: 12px var(--mono); text-align: right; }
+.telemetry-track { position: relative; height: 9px; background: var(--paper-deep); }
+.telemetry-fill { display: block; height: 100%; background: var(--blue); }
+.telemetry-marker { position: absolute; top: -3px; width: 2px; height: 15px; background: var(--ink); }
+.telemetry-chart figcaption { margin-top: 18px; color: var(--muted); font-size: 13px; }
+.facts-figure { display: grid; grid-template-columns: repeat(4, 1fr); margin: 34px 0 48px; padding: 20px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.facts-figure div { padding: 0 18px; border-left: 1px solid var(--line); }
+.facts-figure div:first-child { padding-left: 0; border-left: 0; }
+.facts-figure strong { display: block; color: var(--blue); font: 700 25px var(--mono); }
+.facts-figure span { display: block; margin-top: 5px; color: var(--muted); font-size: 12px; }
+.facts-figure figcaption { grid-column: 1 / -1; margin-top: 18px; color: var(--muted); font-size: 13px; }
+.process-figure { margin: 28px 0 38px; }
+.process-figure > strong { display: block; margin-bottom: 15px; font-size: 17px; }
+.process-steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+.process-steps span { min-height: 76px; padding: 14px 12px; border-top: 3px solid var(--blue); background: var(--white); font-size: 13px; font-weight: 700; }
+.process-steps small { display: block; margin-top: 7px; color: var(--muted); font-size: 11px; font-weight: 450; line-height: 1.35; }
+.process-figure figcaption { margin-top: 13px; color: var(--muted); font-size: 13px; }
+.strategy-figure { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; margin: 26px 0 42px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--line); }
+.strategy-figure div { padding: 18px; background: var(--paper); }
+.strategy-figure strong { display: block; color: var(--blue); font: 12px var(--mono); }
+.strategy-figure span { display: block; margin: 8px 0 5px; font-weight: 750; }
+.strategy-figure small { color: var(--muted); font-size: 12px; line-height: 1.4; }
+.implementation-steps { margin: 24px 0 34px; padding: 0; list-style: none; counter-reset: implementation; border-top: 1px solid var(--line); }
+.implementation-steps li { display: grid; grid-template-columns: 230px 1fr; gap: 22px; padding: 18px 0; border-bottom: 1px solid var(--line); counter-increment: implementation; }
+.implementation-steps strong::before { content: counter(implementation, decimal-leading-zero) "  "; color: var(--blue); font: 12px var(--mono); }
+.implementation-steps span { color: var(--ink-soft); }
+.evidence-layers { margin: 24px 0 30px; border-top: 1px solid var(--line); }
+.evidence-layers > div { display: grid; grid-template-columns: 120px minmax(0, 1fr) 210px; gap: 18px; padding: 15px 0; border-bottom: 1px solid var(--line); align-items: start; }
+.evidence-layers strong { color: var(--blue-dark); font-size: 13px; }
+.evidence-layers span { color: var(--ink-soft); font-size: 13px; }
+.evidence-layers small { color: var(--muted); font-size: 12px; }
+@media (max-width: 900px) { .article-layout { grid-template-columns: 1fr; } .article-nav { position: static; order: -1; } }
+@media (max-width: 640px) { .facts-figure { grid-template-columns: repeat(2, 1fr); } .facts-figure div { padding: 12px; border-left: 0; border-top: 1px solid var(--line); } .facts-figure div:nth-child(-n+2) { border-top: 0; } .process-steps { grid-template-columns: repeat(2, 1fr); } .strategy-figure { grid-template-columns: 1fr; } .implementation-steps li { grid-template-columns: 1fr; gap: 7px; } .evidence-layers > div { grid-template-columns: 1fr; gap: 4px; } }
+@media (max-width: 560px) { .result-chart-row { grid-template-columns: 78px minmax(110px, 1fr) 70px; gap: 9px; } .telemetry-row { grid-template-columns: 108px minmax(90px, 1fr) 76px; gap: 8px; } }
+</style>
+</head>
+<body class="guide-article">
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="site-header"><nav class="nav wrap" aria-label="Primary">
+<a class="brand" href="/" aria-label="Weaver home"><img class="weaver-mark" src="/assets/brand/weaver-mark-light-134.png" width="30" height="17" alt="" aria-hidden="true">Weaver</a>
+<button class="nav-toggle" type="button" aria-expanded="false" aria-controls="nav-links" hidden>Menu</button>
+<div class="nav-links" id="nav-links"><a href="/features/">Features</a><a href="/how-it-works/">How it works</a><a href="/get-started/">Get started</a><a href="/vs-dbt/">Weaver vs dbt</a><a href="/story/">The story</a><a href="/guides/" aria-current="page">Fabric resources</a><a href="https://docs.weaverstack.dev/">Documentation</a><a class="button small" href="https://github.com/matthias-wong-dev/weaverstack">GitHub <span class="arrow" aria-hidden="true">↗</span></a></div>
+</nav></header>
+<main id="main">
+<section class="page-head"><div class="wrap">
+<p class="eyebrow"><a href="/guides/">Fabric Engineering Guides</a></p>
+<h1>Performance Engineering on Microsoft Fabric</h1>
+<p class="lead">Lessons from stress-testing a 3,000-object data pipeline processing approximately 4 billion rows on an F64 capacity.</p>
+</div></section>
+<section class="section"><div class="wrap article-layout">
+<article class="article-body">
+<h2 id="introduction">Introduction</h2>
+<p>The experiment tested whether Microsoft Fabric could run an enterprise-scale data engineering estate: approximately 3,000 objects, more than 4 billion rows of initial data movement and a single dependency graph spanning Spark and Warehouses.</p>
+<p>The initial load completed in 54 minutes 44 seconds on an F64 trial capacity. Repeated incremental runs completed in approximately 13 to 18 minutes. Reaching those times depended on controlled concurrency, engine-specific load design and making unchanged data cheap to process.</p>
+<figure class="facts-figure" aria-label="Experiment at a glance">
+<div><strong>3,000</strong><span>declared objects</span></div><div><strong>4.045B</strong><span>initial rows</span></div><div><strong>2,185</strong><span>load nodes</span></div><div><strong>F64</strong><span>trial capacity</span></div>
+<figcaption>One deterministic workload across a Lakehouse and two Warehouses.</figcaption>
+</figure>
+<h2 id="experimental-design">1. Experimental design</h2>
+<h3 id="engineering-requirements">1.1 Engineering requirements</h3>
+<p>The experiment is motivated to include the backend workload necessary for serious data engineering, including staging, hashing, change detection, quality thresholds, audit columns, CRUD statistics, bookmarks and execution logging.</p>
+<p>It also tests dependency-aware recovery: a failed branch blocks its dependants without stopping independent work. Five execution paths are exercised:</p>
+<div class="table-scroll"><table class="benchmark"><thead><tr><th scope="col">Fabric object</th><th scope="col">Execution mechanism</th></tr></thead><tbody><tr><td>Lakehouse files</td><td>Python</td></tr><tr><td>Lakehouse Delta tables</td><td>Python and Spark SQL</td></tr><tr><td>Lakehouse Delta views</td><td>Spark SQL</td></tr><tr><td>Warehouse tables</td><td>T-SQL</td></tr><tr><td>Warehouse views</td><td>T-SQL</td></tr></tbody></table></div>
+<p>The benchmark measured one successful representative workload. It did not attempt exhaustive failure injection.</p>
+<h3 id="dataset-design">1.2 Dataset design</h3>
+<p>The source distribution follows the long-tailed shape documented in a study of production workloads across the Amazon Redshift fleet <a href="https://www.vldb.org/pvldb/vol17/p3694-saxena.pdf">(van Renen et al., 2024)</a>: a few large tables, many small ones and many sources with little daily change.</p>
+<p>The generator produced approximately 1,000 source objects:</p>
+<div class="table-scroll"><table class="benchmark"><thead><tr><th scope="col">Source size</th><th scope="col">Number of sources</th></tr></thead><tbody><tr><td>500 million rows</td><td>1</td></tr><tr><td>100 million rows</td><td>4</td></tr><tr><td>50 million rows</td><td>12</td></tr><tr><td>10 million rows</td><td>30</td></tr><tr><td>1,000 to 1 million rows</td><td>913</td></tr><tr><td>File-based sources</td><td>40</td></tr></tbody></table></div>
+<p>The sources simulate reproducible daily changes, including inserts, updates and deletions. Their change frequencies vary according to size, with approximately one source in seven changing on a typical simulated day.</p>
+<p>A separate estate of approximately 3,000 objects consumes these sources through several transformation layers distributed across one Lakehouse and two Warehouses.</p>
+<div class="table-scroll"><table class="benchmark"><thead><tr><th scope="col">Fabric item</th><th scope="col">Transformation layers</th></tr></thead><tbody><tr><td>Lakehouse</td><td>Landing, curated and refined</td></tr><tr><td>Warehouse 1</td><td>Core and conformed</td></tr><tr><td>Warehouse 2</td><td>Mart and serving</td></tr></tbody></table></div>
+<p>The estate contains incremental merges, physical deletes, full-source upserts, append-only loads, static tables and views. More than 2,000 tables use incremental behaviour.</p>
+<figure class="process-figure" aria-labelledby="estate-shape-title">
+<strong id="estate-shape-title">Estate shape</strong>
+<div class="process-steps"><span>1,000 source objects<small>Files and Warehouse tables</small></span><span>Lakehouse<small>Landing, curated, refined</small></span><span>Core Warehouse<small>Core and conformed</small></span><span>Mart Warehouse<small>Mart and serving</small></span></div>
+<figcaption>Additional dependencies create fan-in across one DAG. Some transformations declare up to ten extra prerequisites.</figcaption>
+</figure>
+<p>The extra dependencies model scheduling pressure rather than expensive analytical joins. Source generation and daily source changes were kept outside the measured estate-load interval.</p>
+<h3 id="scope-and-exclusions">1.3 Scope and exclusions</h3>
+<p>The experiment isolates data movement, incremental reconciliation, validation, operational state and orchestration. It does not cover complex analytical joins, interactive query performance, Power BI rendering, theoretical maximum throughput or comparisons between Fabric SKUs.</p>
+<h2 id="performance-engineering-strategy">2. Performance engineering strategy</h2>
+<p>Three changes mattered: schedule independent work together, reduce the cost of each load and make unchanged objects finish quickly.</p>
+<figure class="strategy-figure" aria-label="Performance strategy">
+<div><strong>01</strong><span>Schedule</span><small>Separate Spark and Warehouse lanes</small></div><div><strong>02</strong><span>Reconcile</span><small>Stage, compare and apply once</small></div><div><strong>03</strong><span>Skip</span><small>Fast paths for unchanged data</small></div>
+</figure>
+<h3 id="concurrency-and-asynchronous-execution">2.1 Concurrency and asynchronous execution</h3>
+<p>Several thousand objects cannot run sequentially, but unlimited concurrency creates contention. The scheduler therefore used separate resource limits for Spark and each Warehouse while releasing nodes as soon as their dependencies cleared.</p>
+<h3 id="spark-concurrency">Spark concurrency</h3>
+<p>A separate Spark application per table would spend too much time on startup and executor allocation. The benchmark instead ran up to 24 concurrent Python or Spark SQL operations inside one application.</p>
+<p>Shared execution required isolated temporary objects and safe runtime state. FAIR scheduling alone did not solve the problem; controlled concurrency did.</p>
+<h3 id="warehouse-concurrency">Warehouse concurrency</h3>
+<p>Warehouse procedures ran through independent SQL connections, with up to 12 concurrent procedures per Warehouse. These lanes did not consume Spark slots.</p>
+<p>Separate limits allowed Lakehouse and Warehouse branches to progress together without treating every operation as equivalent.</p>
+<h3 id="sql-analytics-endpoint-synchronisation">SQL analytics endpoint synchronisation</h3>
+<p>A completed Delta write is not always immediately visible through the SQL analytics endpoint. Waiting synchronously after every write would stall unrelated work.</p>
+<p>The DAG therefore models endpoint refresh as its own operation. Only consumers of the refreshed state wait; independent branches continue.</p>
+<h3 id="critical-path-scheduling">Critical-path scheduling</h3>
+<p>The scheduler optimises elapsed time across the full dependency graph. A branch waiting for Spark, Warehouse or endpoint readiness does not stop another branch whose prerequisites have cleared.</p>
+<h3 id="optimising-individual-load-operations">2.2 Optimising individual load operations</h3>
+<p>Concurrency cannot compensate for waste inside every node. A reliable incremental load still has to stage data, calculate signatures, detect inserts, updates and deletes, apply quality policy and preserve audit fields.</p>
+<figure class="process-figure" aria-labelledby="load-flow-title">
+<strong id="load-flow-title">Incremental reconciliation</strong>
+<div class="process-steps"><span>Stage<small>Shape and hash incoming rows</small></span><span>Compare<small>Find inserts, updates and deletes</small></span><span>Validate<small>Apply quality and stability rules</small></span><span>Apply<small>Write accepted changes and audit</small></span></div>
+</figure>
+<p>The implementation minimises repeated scans, round trips and materialisation. Spark may benefit from retaining an intermediate relation; Warehouse T-SQL may favour CTAS, a calculated change set and a targeted MERGE.</p>
+<p>CRUD counts should come from the same reconciliation work where possible. Separate queries for every count repeat expensive distributed work.</p>
+<h3 id="the-fast-no-op">2.3 The fast no-op</h3>
+<p>Unchanged objects are common in large estates. The Redshift fleet study found that most observed tables had no inserts or deletes during its observation period.</p>
+<p>Fabric still pays fixed costs for an empty operation: Spark submission, Delta metadata access, distributed SQL startup and transactional bookkeeping. Small costs become material when repeated thousands of times.</p>
+<p>The benchmark reduced this path to three things: detect an empty change set with minimal engine work, move non-critical bookkeeping off the critical path, and advance an explicit bookmark after a clean load.</p>
+<h3 id="bookmark-design">Bookmark design</h3>
+<p>Bookmarks are persistent cursors that record how far each load has processed its sources. They are significant because they let the next run start from a known point instead of rediscovering its position by scanning target data or orchestration history.</p>
+<p>Using the maximum timestamp in a target table as that cursor is fragile. It cannot describe several upstream sources, filtered changes may never reach the target, and calculating the maximum can scan a large table.</p>
+<p>The benchmark stores one bookmark per loadable object. It records the instant immediately before the last clean load began and advances only after success. Changes that arrive during a load remain eligible next time.</p>
+<p>Late or backdated source records still need source-specific handling, such as an overlap window or change-data-capture sequence. Some generated transformations use a target Epoch maximum, so the benchmark contains both patterns.</p>
+<h2 id="performance-measurements">3. Performance measurements</h2>
+<p>End-to-end wall time is the headline metric. Row counts, execution outcomes and node-duration distributions provide the correctness and tail checks.</p>
+<div class="table-scroll"><table class="benchmark"><thead><tr><th scope="col">Scenario</th><th scope="col">Duration</th><th scope="col">Rows changed</th></tr></thead><tbody><tr><td>Initial load from empty</td><td>54 minutes 44 seconds</td><td>4,045,265,040</td></tr><tr><td>Unchanged load</td><td>8 minutes 19 seconds</td><td>0</td></tr><tr><td>Day 1 incremental</td><td>17 minutes 29 seconds</td><td>7,821,922</td></tr><tr><td>Day 2 incremental</td><td>17 minutes 35 seconds</td><td>7,719,640</td></tr><tr><td>Day 3 incremental</td><td>17 minutes 14 seconds</td><td>7,552,602</td></tr><tr><td>Untuned implementation</td><td>More than 20 hours</td><td>Retrospective estimate, not directly measured</td></tr></tbody></table></div>
+<p>The initial load read and inserted 4,045,265,040 rows across 2,185 executable nodes. The unchanged run executed the same graph, read 2,293,000 rows for change detection, and produced no inserts, updates or deletes. The three daily incrementals changed a median of 7,719,640 rows in 17 minutes 29 seconds.</p>
+<p>Across repeated runs of the deterministic workload, incremental loads completed in approximately 13 to 18 minutes. The three runs in this campaign were tightly grouped between 17 minutes 14 seconds and 17 minutes 35 seconds. Every load retained the same node shape and exact row totals, and all four nine-test convergence checks passed.</p>
+<figure class="result-chart" aria-labelledby="load-comparison-title">
+<h3 id="load-comparison-title">Measured load duration</h3>
+<div class="result-chart-row"><strong>Initial</strong><i class="result-chart-bar" style="width:100%"></i><span>54m 44s</span></div>
+<div class="result-chart-row"><strong>Unchanged</strong><i class="result-chart-bar" style="width:15.21%"></i><span>8m 19s</span></div>
+<div class="result-chart-row"><strong>Day 1</strong><i class="result-chart-bar" style="width:31.93%"></i><span>17m 29s</span></div>
+<div class="result-chart-row"><strong>Day 2</strong><i class="result-chart-bar" style="width:32.12%"></i><span>17m 35s</span></div>
+<div class="result-chart-row"><strong>Day 3</strong><i class="result-chart-bar" style="width:31.48%"></i><span>17m 14s</span></div>
+<figcaption>End-to-end wall time for the current 3,000-object campaign. Source generation and daily source changes were outside these measured estate-loading intervals.</figcaption>
+</figure>
+<p>Incremental timing varied with Spark executor allocation and whether another session still held resources. Processing efficiency and capacity availability are separate effects.</p>
+<h3 id="resource-utilisation">3.1 Resource utilisation</h3>
+<p>Wall time alone does not explain where the run spent its resources, so the campaign retained four evidence layers.</p>
+<div class="evidence-layers" role="list" aria-label="Performance evidence layers">
+<div role="listitem"><strong>Orchestration</strong><span>Node durations, critical path, concurrency and waiting</span><small>Execution records and DAG Gantt</small></div>
+<div role="listitem"><strong>Spark</strong><span>Executors, tasks, CPU, memory, shuffle and spill</span><small>Spark application metrics</small></div>
+<div role="listitem"><strong>Warehouse</strong><span>Request duration, concurrency and bottlenecks</span><small>Warehouse Query Insights</small></div>
+<div role="listitem"><strong>Capacity</strong><span>CU-seconds, utilisation and throttling</span><small>Capacity Eventstreams and Metrics app</small></div>
+</div>
+<p>These layers are not interchangeable: capacity-unit seconds are not CPU time, and Spark efficiency does not describe Warehouse execution.</p>
+<h3 id="telemetry-findings">3.2 Telemetry findings</h3>
+<p>The campaign retained seven Spark applications, 325,924 Query Insights records across five Warehouses, 396 capacity samples and 64,100 capacity-operation events. No Spark application exceeded capacity; Spark core efficiency ranged from 89.5% to 95.3%; every Warehouse request record succeeded.</p>
+<p>The capacity-wide 30-second overview samples averaged 18.3% utilisation and peaked at 26.9%. They recorded no overage, while the capacity-operation records reported no throttling delay. The incremental duration was therefore not explained by F64 saturation.</p>
+<p>Spark was efficient while active. The remaining time was more consistent with session overhead, dependency waiting, data movement and coordination than with inefficient Spark computation. This is also visible in the operation mix: 42,405 of the 43,657 capacity-operation events associated with the seven campaign items were OneLake operations.</p>
+<figure class="telemetry-chart" aria-labelledby="telemetry-chart-title">
+<strong id="telemetry-chart-title">What the telemetry showed</strong>
+<div class="telemetry-row"><span>Capacity average</span><div class="telemetry-track"><i class="telemetry-fill" style="width:18.3%"></i></div><span>18.3%</span></div>
+<div class="telemetry-row"><span>Capacity peak</span><div class="telemetry-track"><i class="telemetry-fill" style="width:26.9%"></i></div><span>26.9%</span></div>
+<div class="telemetry-row"><span>Spark efficiency</span><div class="telemetry-track"><i class="telemetry-fill" style="width:95.3%"></i><i class="telemetry-marker" style="left:89.5%"></i></div><span>89.5–95.3%</span></div>
+<div class="telemetry-row"><span>OneLake operations</span><div class="telemetry-track"><i class="telemetry-fill" style="width:97.1%"></i></div><span>97.1%</span></div>
+<figcaption>Capacity utilisation uses capacity-wide 30-second samples. Spark shows the observed core-efficiency range. The OneLake share covers capacity-operation events associated with the seven campaign items.</figcaption>
+</figure>
+<p>Warehouse request duration showed a long tail rather than a broad failure pattern.</p>
+<div class="table-scroll"><table class="benchmark"><thead><tr><th scope="col">Warehouse scope</th><th scope="col">Requests</th><th scope="col">Median</th><th scope="col">p95</th><th scope="col">Maximum</th></tr></thead><tbody><tr><td>All five Warehouses</td><td>325,924</td><td>0.488s</td><td>9.554s</td><td>349.937s</td></tr><tr><td>Source Warehouse</td><td>75,979</td><td>3.131s</td><td>24.097s</td><td>80.397s</td></tr><tr><td>Core Warehouse</td><td>139,844</td><td>0.476s</td><td>8.440s</td><td>349.937s</td></tr></tbody></table></div>
+<p>The Core Warehouse contained the longest individual request, but the stable end-to-end load times and node-duration distributions show that this was a tail event rather than a general slowdown.</p>
+<p>Other items were active on the capacity during the measured window. The campaign items accounted for 68.1% of capacity-operation events, yet the capacity remained well below saturation and recorded no throttling. The result therefore did not depend on obtaining a completely isolated capacity.</p>
+<h3 id="interpretation">3.3 Interpretation</h3>
+<p>The tested workload completed its initial load in under 55 minutes and incremental loads in under 18 minutes on F64.</p>
+<p>This is evidence for this class of engineering workload, not a general Fabric benchmark. The transformations were deliberately simple, the estate was synthetic and the untuned estimate was not a controlled before-and-after measurement.</p>
+<h2 id="implementing-these-techniques-in-your-own-environment">4. Implementing these techniques in your own environment</h2>
+<p>The same patterns apply outside the generated workload:</p>
+<ol class="implementation-steps">
+<li><strong>Schedule from dependencies.</strong><span>Keep the graph as queryable metadata. Release work when prerequisites clear, with separate resource limits for Spark and each Warehouse.</span></li>
+<li><strong>Treat incremental state as infrastructure.</strong><span>Give every loadable object reliable change detection, an explicit bookmark, validation, reconciliation and an operational record.</span></li>
+<li><strong>Implement the contract for each engine.</strong><span>Keep one load contract, but use the physical strategy that suits Python, Spark SQL or Warehouse T-SQL.</span></li>
+</ol>
+<p>These capabilities are already included in Weaver, with concurrency parameters that can be chosen for each site. Everything else, including asynchronous execution, endpoint barriers, incremental bookmarks, reconciliation and operational recording, is handled automatically.</p>
+<h2 id="reproducing-the-experiment">Reproducing the experiment</h2>
+<p>The public stress-test generator creates the source estate, measured estate and deterministic daily changes. The runner records each build, load and test in machine-readable form.</p>
+<p>The same workflow can run at a smaller scale, such as 300 objects and 1% of the data volume.</p>
+<h2 id="conclusion">5. Conclusion</h2>
+<p>Microsoft Fabric completed the 3,000-object initial load in 54 minutes 44 seconds and the three measured incremental loads in 17 minutes 14 seconds to 17 minutes 35 seconds.</p>
+<p>The result came from the loading architecture: separate execution lanes, explicit endpoint barriers, engine-specific reconciliation and a cheap no-change path. At this scale, orchestration and operational overhead matter as much as row volume.</p>
+<h2 id="the-implementation-weaver">The implementation: Weaver</h2>
+<p>Weaver is the open-source implementation used by the experiment. Metadata declarations sit alongside ordinary Python and SQL transformations to manage dependencies, incremental loading, auditing, rejection policy, bookmarks and concurrent execution.</p>
+<p>The benchmark generator, methodology and runner are available in the <a href="https://github.com/matthias-wong-dev/weaverstack/tree/main/examples/stress">public stress-test source code</a>.</p>
+</article>
+<nav class="article-nav" aria-label="On this page"><strong>On this page</strong><ol><li><a href="#introduction">Introduction</a></li><li><a href="#experimental-design">Experimental design</a></li><li><a href="#performance-engineering-strategy">Performance engineering strategy</a></li><li><a href="#performance-measurements">Performance measurements</a></li><li><a href="#implementing-these-techniques-in-your-own-environment">Implementing these techniques in your own environment</a></li><li><a href="#reproducing-the-experiment">Reproducing the experiment</a></li><li><a href="#conclusion">Conclusion</a></li><li><a href="#the-implementation-weaver">The implementation: Weaver</a></li></ol></nav>
+</div></section>
+</main>
+<footer class="site-footer"><div class="wrap footer-grid">
+<div class="footer-note"><span class="brand"><img class="weaver-mark" src="/assets/brand/weaver-mark-light-134.png" width="30" height="17" alt="" aria-hidden="true">Weaver</span><p>Build, load, test and inspect your Microsoft Fabric estate.</p><p>Free and open source under the <a href="https://github.com/matthias-wong-dev/weaverstack/blob/main/LICENSE">Mozilla Public License 2.0</a>.</p></div>
+<div class="footer-links">
+<ul><li><strong>Site</strong></li><li><a href="/features/">Features</a></li><li><a href="/how-it-works/">How it works</a></li><li><a href="/get-started/">Get started</a></li><li><a href="/guides/">Fabric resources</a></li><li><a href="/vs-dbt/">Weaver vs dbt</a></li><li><a href="/story/">The story behind Weaver</a></li></ul>
+<ul><li><strong>Explore the docs</strong></li><li><a href="https://docs.weaverstack.dev/lakehouse/">Lakehouse</a></li><li><a href="https://docs.weaverstack.dev/warehouse/">Warehouse</a></li><li><a href="https://docs.weaverstack.dev/semantic-models/">Semantic Models</a></li><li><a href="https://docs.weaverstack.dev/reports/">Reports</a></li></ul>
+<ul><li><strong>Project</strong></li><li><a href="https://docs.weaverstack.dev/">Technical documentation</a></li><li><a href="https://github.com/matthias-wong-dev/weaverstack">Source on GitHub</a></li><li><a href="https://github.com/matthias-wong-dev/weaverstack/issues">Issues</a></li><li><a href="https://pypi.org/project/weaverstack/">weaverstack on PyPI</a></li></ul>
+</div></div></footer>
+<script src="/assets/site.js?v=858d1659f7" defer></script>
+</body>
+</html>

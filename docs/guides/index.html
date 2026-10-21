@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en-AU">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#f7f7f6">
+<title>Microsoft Fabric engineering guides: performance, incremental loads and reliability</title>
+<meta name="description" content="Practical Microsoft Fabric engineering guides for performance optimisation, high-performance data processing, parallel loads, incremental loading and fault tolerance.">
+<meta name="robots" content="index, follow, max-image-preview:large">
+<link rel="canonical" href="https://weaverstack.dev/guides/">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://weaverstack.dev/guides/">
+<meta property="og:site_name" content="Weaver">
+<meta property="og:title" content="Microsoft Fabric engineering guides">
+<meta property="og:description" content="Practical guides for Fabric performance optimisation, parallel data processing, incremental loads and reliable recovery.">
+<meta property="og:image" content="https://weaverstack.dev/og.png">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Weaver logo.">
+<meta property="og:locale" content="en_AU">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Microsoft Fabric engineering guides">
+<meta name="twitter:description" content="Practical guides for Fabric performance optimisation, parallel data processing, incremental loads and reliable recovery.">
+<meta name="twitter:image" content="https://weaverstack.dev/og.png">
+<meta name="twitter:image:alt" content="Weaver logo.">
+<link rel="icon" type="image/png" href="/favicon.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="manifest" href="/site.webmanifest">
+<link rel="sitemap" type="application/xml" href="/sitemap.xml">
+<link rel="stylesheet" href="/assets/site.css?v=07163cf81a">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "CollectionPage",
+  "name": "Fabric Engineering Guides",
+  "description": "Practical Microsoft Fabric engineering guides for performance optimisation, parallel loads, incremental loading and fault tolerance.",
+  "url": "https://weaverstack.dev/guides/",
+  "inLanguage": "en-AU",
+  "isPartOf": {"@type": "WebSite", "name": "Weaver", "url": "https://weaverstack.dev/"}
+}
+</script>
+<style>
+.resources-page .page-head { padding-bottom: 42px; }
+.featured-resource, .resource-index > h2, .coming-soon-intro, .resource-upcoming { max-width: 900px; }
+.featured-resource { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 28px; padding: 30px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.resource-label { margin: 5px 0 0; color: var(--blue); font: 700 12px var(--mono); letter-spacing: .08em; text-transform: uppercase; }
+.resource-copy h2 { max-width: none; margin: 0 0 10px; font-size: clamp(25px, 3vw, 34px); }
+.resource-copy p { max-width: 68ch; margin: 0 0 14px; }
+.resource-meta { color: var(--muted); font: 13px var(--mono); }
+.resource-index > h2 { margin: 52px 0 10px; }
+.coming-soon-intro { color: var(--muted); }
+.resource-upcoming { margin: 26px 0 0; padding: 0; border-top: 1px solid var(--line); list-style: none; }
+.resource-upcoming li { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 14px; margin: 0; padding: 15px 0; border-bottom: 1px solid var(--line); }
+.resource-number { color: var(--muted); font: 13px var(--mono); }
+@media (max-width: 680px) { .featured-resource { grid-template-columns: 1fr; gap: 10px; } }
+</style>
+</head>
+<body class="resources-page">
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="site-header">
+<nav class="nav wrap" aria-label="Primary">
+<a class="brand" href="/" aria-label="Weaver home"><img class="weaver-mark" src="/assets/brand/weaver-mark-light-134.png" width="30" height="17" alt="" aria-hidden="true">Weaver</a>
+<button class="nav-toggle" type="button" aria-expanded="false" aria-controls="nav-links" hidden>Menu</button>
+<div class="nav-links" id="nav-links">
+<a href="/features/">Features</a>
+<a href="/how-it-works/">How it works</a>
+<a href="/get-started/">Get started</a>
+<a href="/vs-dbt/">Weaver vs dbt</a>
+<a href="/story/">The story</a>
+<a href="/guides/" aria-current="page">Fabric resources</a>
+<a href="https://docs.weaverstack.dev/">Documentation</a>
+<a class="button small" href="https://github.com/matthias-wong-dev/weaverstack">GitHub <span class="arrow" aria-hidden="true">↗</span></a>
+</div>
+</nav>
+</header>
+<main id="main">
+<section class="page-head"><div class="wrap">
+<p class="eyebrow">Guide</p>
+<h1>Fabric Engineering Guides</h1>
+<p class="lead">A collection of practical Microsoft Fabric engineering articles on performance optimisation, high-performance data processing, parallel loads, incremental loading, recovery and operating large estates.</p>
+</div></section>
+<section class="section"><div class="wrap resource-index">
+<article class="featured-resource">
+<p class="resource-label">Published guide</p>
+<div class="resource-copy">
+<h2><a href="/guides/fabric-performance-optimisation/">Performance Engineering on Microsoft Fabric</a></h2>
+<p>Lessons from stress-testing a 3,000-object data pipeline processing approximately 4 billion rows on an F64 capacity.</p>
+<span class="resource-meta">Performance · Parallel loading · Incremental processing</span>
+</div>
+</article>
+<h2>Coming soon</h2>
+<p class="coming-soon-intro">Practical tutorials for building and operating Microsoft Fabric data estates.</p>
+<ul class="resource-upcoming">
+<li><span class="resource-number">01</span><span>Incremental loading in Microsoft Fabric</span></li>
+<li><span class="resource-number">02</span><span>Managing Fabric notebooks</span></li>
+<li><span class="resource-number">03</span><span>Fault-tolerant loads in Microsoft Fabric</span></li>
+<li><span class="resource-number">04</span><span>Orchestrating Lakehouse and Warehouse workloads</span></li>
+<li><span class="resource-number">05</span><span>Monitoring Fabric capacity and throttling</span></li>
+<li><span class="resource-number">06</span><span>Working with OneLake shortcuts</span></li>
+</ul>
+</div></section>
+</main>
+<footer class="site-footer"><div class="wrap footer-grid">
+<div class="footer-note"><span class="brand"><img class="weaver-mark" src="/assets/brand/weaver-mark-light-134.png" width="30" height="17" alt="" aria-hidden="true">Weaver</span><p>Build, load, test and inspect your Microsoft Fabric estate.</p><p>Free and open source under the <a href="https://github.com/matthias-wong-dev/weaverstack/blob/main/LICENSE">Mozilla Public License 2.0</a>.</p></div>
+<div class="footer-links">
+<ul><li><strong>Site</strong></li><li><a href="/features/">Features</a></li><li><a href="/how-it-works/">How it works</a></li><li><a href="/get-started/">Get started</a></li><li><a href="/guides/">Fabric resources</a></li><li><a href="/vs-dbt/">Weaver vs dbt</a></li><li><a href="/story/">The story behind Weaver</a></li></ul>
+<ul><li><strong>Explore the docs</strong></li><li><a href="https://docs.weaverstack.dev/lakehouse/">Lakehouse</a></li><li><a href="https://docs.weaverstack.dev/warehouse/">Warehouse</a></li><li><a href="https://docs.weaverstack.dev/semantic-models/">Semantic Models</a></li><li><a href="https://docs.weaverstack.dev/reports/">Reports</a></li></ul>
+<ul><li><strong>Project</strong></li><li><a href="https://docs.weaverstack.dev/">Technical documentation</a></li><li><a href="https://github.com/matthias-wong-dev/weaverstack">Source on GitHub</a></li><li><a href="https://github.com/matthias-wong-dev/weaverstack/issues">Issues</a></li><li><a href="https://pypi.org/project/weaverstack/">weaverstack on PyPI</a></li></ul>
+</div></div></footer>
+<script src="/assets/site.js?v=858d1659f7" defer></script>
+</body>
+</html>
