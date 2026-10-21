@@ -100,9 +100,10 @@
 <section class="section feature-group" id="power-bi" data-feature-group="3"><div class="wrap"><h2>Power BI, engineered for organisations</h2>
 <figure class="feature-spotlight powerbi-spotlight" data-spotlight="power-bi" aria-labelledby="powerbi-title">
 <h3 id="powerbi-title">Keep your Power BI files. Add shared standards, model-specific rules and unit tests.</h3>
-<pre class="policy-tree" aria-label="Power BI project with organisation-wide policy, Sales-specific TMDL rules, native models and Reports, and semantic-model unit tests"><code>PowerBI/
+<pre class="policy-tree" aria-label="Power BI project with a standard PBIP file, organisation-wide policy, Sales-specific TMDL rules, native models and Reports, and semantic-model unit tests"><code>PowerBI/
 ├── <b>policy.tmdl</b>          <i>← organisation-wide policies</i>
 ├── Sales/
+│   ├── <b>Sales.pbip</b>       <i>← standard Power BI project file</i>
 │   ├── <b>Sales.tmdl</b>       <i>← Sales-specific policies</i>
 │   ├── Sales.SemanticModel/
 │   ├── Sales.Report/
@@ -174,7 +175,7 @@ health.report()</code></pre>
 <p class="group-docs"><a href="https://docs.weaverstack.dev/estate/operate/">Run and inspect your project</a><span aria-hidden="true"> · </span><a href="https://docs.weaverstack.dev/reference/operation-behaviour/">Operation boundaries</a></p></div></section>
 <section class="section feature-group" id="scale" data-feature-group="7"><div class="wrap"><h2>Built for scale</h2>
 <figure class="feature-spotlight scale-spotlight" data-spotlight="scale" aria-labelledby="scale-title">
-<h3 id="scale-title">From 3 to 3,000.</h3>
+<h3 id="scale-title">From 3 objects to 3,000.</h3>
 <ol class="scale-flow"><li><b>3</b><strong>Easy to keep in your head.</strong></li><li><b>30</b><strong>It’s hard to keep track.</strong></li><li><b>300</b><strong>It’s no longer whether you use a framework, but which one.</strong></li><li><b>3,000</b><strong>Scheduling and recovery decide everything.</strong></li></ol>
 <figcaption>Weaver has been tested and tuned for thousands of connected objects. It runs independent work together, tracks what data has changed and refreshes SQL access only when needed.</figcaption>
 </figure>
