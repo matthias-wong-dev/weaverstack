@@ -110,8 +110,13 @@ table.benchmark th { color: var(--ink); background: var(--paper-deep); }
 .implementation-steps li { display: grid; grid-template-columns: 230px 1fr; gap: 22px; padding: 18px 0; border-bottom: 1px solid var(--line); counter-increment: implementation; }
 .implementation-steps strong::before { content: counter(implementation, decimal-leading-zero) "  "; color: var(--blue); font: 12px var(--mono); }
 .implementation-steps span { color: var(--ink-soft); }
+.evidence-layers { margin: 24px 0 30px; border-top: 1px solid var(--line); }
+.evidence-layers > div { display: grid; grid-template-columns: 120px minmax(0, 1fr) 210px; gap: 18px; padding: 15px 0; border-bottom: 1px solid var(--line); align-items: start; }
+.evidence-layers strong { color: var(--blue-dark); font-size: 13px; }
+.evidence-layers span { color: var(--ink-soft); font-size: 13px; }
+.evidence-layers small { color: var(--muted); font-size: 12px; }
 @media (max-width: 900px) { .article-layout { grid-template-columns: 1fr; } .article-nav { position: static; order: -1; } }
-@media (max-width: 640px) { .facts-figure { grid-template-columns: repeat(2, 1fr); } .facts-figure div { padding: 12px; border-left: 0; border-top: 1px solid var(--line); } .facts-figure div:nth-child(-n+2) { border-top: 0; } .process-steps { grid-template-columns: repeat(2, 1fr); } .strategy-figure { grid-template-columns: 1fr; } .implementation-steps li { grid-template-columns: 1fr; gap: 7px; } }
+@media (max-width: 640px) { .facts-figure { grid-template-columns: repeat(2, 1fr); } .facts-figure div { padding: 12px; border-left: 0; border-top: 1px solid var(--line); } .facts-figure div:nth-child(-n+2) { border-top: 0; } .process-steps { grid-template-columns: repeat(2, 1fr); } .strategy-figure { grid-template-columns: 1fr; } .implementation-steps li { grid-template-columns: 1fr; gap: 7px; } .evidence-layers > div { grid-template-columns: 1fr; gap: 4px; } }
 @media (max-width: 560px) { .result-chart-row { grid-template-columns: 78px minmax(110px, 1fr) 70px; gap: 9px; } .telemetry-row { grid-template-columns: 108px minmax(90px, 1fr) 76px; gap: 8px; } }
 </style>
 </head>
@@ -139,8 +144,8 @@ table.benchmark th { color: var(--ink); background: var(--paper-deep); }
 </figure>
 <h2 id="experimental-design">1. Experimental design</h2>
 <h3 id="engineering-requirements">1.1 Engineering requirements</h3>
-<p>The workload covered more than ingestion. Each load staged and hashed incoming records, detected inserts, updates and deletes, applied quality thresholds, maintained audit columns and recorded CRUD statistics.</p>
-<p>The runner also preserved bookmarks, logged outcomes and respected dependency failures without stopping independent branches. It exercised five execution paths:</p>
+<p>The experiment is motivated to include the backend workload necessary for serious data engineering, including staging, hashing, change detection, quality thresholds, audit columns, CRUD statistics, bookmarks and execution logging.</p>
+<p>It also tests dependency-aware recovery: a failed branch blocks its dependants without stopping independent work. Five execution paths are exercised:</p>
 <div class="table-scroll"><table class="benchmark"><thead><tr><th scope="col">Fabric object</th><th scope="col">Execution mechanism</th></tr></thead><tbody><tr><td>Lakehouse files</td><td>Python</td></tr><tr><td>Lakehouse Delta tables</td><td>Python and Spark SQL</td></tr><tr><td>Lakehouse Delta views</td><td>Spark SQL</td></tr><tr><td>Warehouse tables</td><td>T-SQL</td></tr><tr><td>Warehouse views</td><td>T-SQL</td></tr></tbody></table></div>
 <p>The benchmark measured one successful representative workload. It did not attempt exhaustive failure injection.</p>
 <h3 id="dataset-design">1.2 Dataset design</h3>
@@ -190,7 +195,8 @@ table.benchmark th { color: var(--ink); background: var(--paper-deep); }
 <p>Fabric still pays fixed costs for an empty operation: Spark submission, Delta metadata access, distributed SQL startup and transactional bookkeeping. Small costs become material when repeated thousands of times.</p>
 <p>The benchmark reduced this path to three things: detect an empty change set with minimal engine work, move non-critical bookkeeping off the critical path, and advance an explicit bookmark after a clean load.</p>
 <h3 id="bookmark-design">Bookmark design</h3>
-<p>A target-table maximum timestamp is a weak bookmark. It cannot describe several upstream sources, filtered changes may never reach the target, and calculating the maximum can scan a large table.</p>
+<p>Bookmarks are persistent cursors that record how far each load has processed its sources. They are significant because they let the next run start from a known point instead of rediscovering its position by scanning target data or orchestration history.</p>
+<p>Using the maximum timestamp in a target table as that cursor is fragile. It cannot describe several upstream sources, filtered changes may never reach the target, and calculating the maximum can scan a large table.</p>
 <p>The benchmark stores one bookmark per loadable object. It records the instant immediately before the last clean load began and advances only after success. Changes that arrive during a load remain eligible next time.</p>
 <p>Late or backdated source records still need source-specific handling, such as an overlap window or change-data-capture sequence. Some generated transformations use a target Epoch maximum, so the benchmark contains both patterns.</p>
 <h2 id="performance-measurements">3. Performance measurements</h2>
@@ -210,7 +216,12 @@ table.benchmark th { color: var(--ink); background: var(--paper-deep); }
 <p>Incremental timing varied with Spark executor allocation and whether another session still held resources. Processing efficiency and capacity availability are separate effects.</p>
 <h3 id="resource-utilisation">3.1 Resource utilisation</h3>
 <p>Wall time alone does not explain where the run spent its resources, so the campaign retained four evidence layers.</p>
-<div class="table-scroll"><table class="benchmark"><thead><tr><th scope="col">Area</th><th scope="col">Useful measurements</th><th scope="col">Instrumentation</th></tr></thead><tbody><tr><td>Orchestration</td><td>Node durations, critical-path delays, concurrency, waiting time</td><td>Execution records and DAG Gantt</td></tr><tr><td>Spark</td><td>Executor allocation, task wait times, CPU activity, memory pressure, shuffle and spill activity</td><td>Spark monitoring and application metrics</td></tr><tr><td>Warehouse</td><td>Query durations, request concurrency, execution bottlenecks</td><td>Warehouse Query Insights</td></tr><tr><td>Capacity</td><td>CU-seconds, utilisation and throttling</td><td>Capacity Eventstreams and Metrics app</td></tr></tbody></table></div>
+<div class="evidence-layers" role="list" aria-label="Performance evidence layers">
+<div role="listitem"><strong>Orchestration</strong><span>Node durations, critical path, concurrency and waiting</span><small>Execution records and DAG Gantt</small></div>
+<div role="listitem"><strong>Spark</strong><span>Executors, tasks, CPU, memory, shuffle and spill</span><small>Spark application metrics</small></div>
+<div role="listitem"><strong>Warehouse</strong><span>Request duration, concurrency and bottlenecks</span><small>Warehouse Query Insights</small></div>
+<div role="listitem"><strong>Capacity</strong><span>CU-seconds, utilisation and throttling</span><small>Capacity Eventstreams and Metrics app</small></div>
+</div>
 <p>These layers are not interchangeable: capacity-unit seconds are not CPU time, and Spark efficiency does not describe Warehouse execution.</p>
 <h3 id="telemetry-findings">3.2 Telemetry findings</h3>
 <p>The campaign retained seven Spark applications, 325,924 Query Insights records across five Warehouses, 396 capacity samples and 64,100 capacity-operation events. No Spark application exceeded capacity; Spark core efficiency ranged from 89.5% to 95.3%; every Warehouse request record succeeded.</p>
@@ -238,7 +249,7 @@ table.benchmark th { color: var(--ink); background: var(--paper-deep); }
 <li><strong>Treat incremental state as infrastructure.</strong><span>Give every loadable object reliable change detection, an explicit bookmark, validation, reconciliation and an operational record.</span></li>
 <li><strong>Implement the contract for each engine.</strong><span>Keep one load contract, but use the physical strategy that suits Python, Spark SQL or Warehouse T-SQL.</span></li>
 </ol>
-<p>A framework is useful here because these behaviours must stay consistent across hundreds or thousands of objects. Hand-tuning each transformation does not scale.</p>
+<p>These capabilities are already included in Weaver, with concurrency parameters that can be chosen for each site. Everything else, including asynchronous execution, endpoint barriers, incremental bookmarks, reconciliation and operational recording, is handled automatically.</p>
 <h2 id="reproducing-the-experiment">Reproducing the experiment</h2>
 <p>The public stress-test generator creates the source estate, measured estate and deterministic daily changes. The runner records each build, load and test in machine-readable form.</p>
 <p>The same workflow can run at a smaller scale, such as 300 objects and 1% of the data volume.</p>
