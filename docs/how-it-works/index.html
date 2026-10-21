@@ -4,24 +4,24 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#f7f7f6">
-    <title>How Weaver works: native code, one Fabric Catalogue</title>
-    <meta name="description" content="Native Python, SQL and TMDL. One Fabric Catalogue connects installed definitions, dependencies and operational state for Build, Load, Test and Health.">
+    <title>How Weaver works: build, load and test on Fabric</title>
+    <meta name="description" content="Weaver turns familiar Python, SQL and Power BI files into native Microsoft Fabric items, and keeps deployment, loading and test results in Fabric.">
     <meta name="robots" content="index, follow, max-image-preview:large">
     <link rel="canonical" href="https://weaverstack.dev/how-it-works/">
     <meta property="og:type" content="article">
     <meta property="og:url" content="https://weaverstack.dev/how-it-works/">
     <meta property="og:site_name" content="Weaver">
     <meta property="og:locale" content="en_AU">
-    <meta property="og:title" content="How Weaver works: native code, one Fabric Catalogue">
-    <meta property="og:description" content="Native Python, SQL and TMDL. One Fabric Catalogue connects installed definitions, dependencies and operational state for Build, Load, Test and Health.">
+    <meta property="og:title" content="How Weaver works: build, load and test on Fabric">
+    <meta property="og:description" content="Weaver turns familiar Python, SQL and Power BI files into native Microsoft Fabric items, and keeps deployment, loading and test results in Fabric.">
     <meta property="og:image" content="https://weaverstack.dev/og.png">
     <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:title" content="How Weaver works: native code, one Fabric Catalogue">
-    <meta name="twitter:description" content="Native Python, SQL and TMDL. One Fabric Catalogue connects installed definitions, dependencies and operational state for Build, Load, Test and Health.">
+    <meta name="twitter:title" content="How Weaver works: build, load and test on Fabric">
+    <meta name="twitter:description" content="Weaver turns familiar Python, SQL and Power BI files into native Microsoft Fabric items, and keeps deployment, loading and test results in Fabric.">
     <meta name="twitter:image" content="https://weaverstack.dev/og.png">
     <link rel="icon" type="image/png" sizes="128x128" href="../favicon.png">
     <link rel="manifest" href="../site.webmanifest">
-    <link rel="stylesheet" href="../assets/site.css?v=5d47c0a6f1">
+    <link rel="stylesheet" href="../assets/site.css?v=29ecf4692e">
   <meta property="og:image:type" content="image/png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
@@ -136,13 +136,13 @@
 
     <main id="main" class="how-weaver-works">
 <section class="page-head"><div class="wrap">
-<h1>One project. One set of operations.</h1>
-<p class="lead">Weaver reads declarations in Python, SQL and TMDL, then uses them to build and operate Fabric items.</p>
-<p class="architecture-statement">Source files describe the project; installed state records what has been deployed.</p>
+<h1>One project. One way to build, load and test.</h1>
+<p class="lead">Write familiar Python, SQL and Power BI files. Weaver deploys native Fabric items and connects the work around them.</p>
+<p class="architecture-statement">When you use a Catalogue, deployment and run history are recorded in an ordinary Fabric Warehouse.</p>
 </div></section>
 <section class="section" id="dependencies"><div class="wrap">
-<h2>Native declarations</h2>
-<div class="native-examples"><div class="native-example"><h3>T-SQL</h3><p>A comment above an ordinary query. Identity, keys and schema sit in native SQL metadata; the SELECT stays ordinary T-SQL.</p><div class="code"><div class="code-bar"><span>Warehouse/Curated/Parcel.Event.sql</span></div><pre><code data-language="sql"><span class="c-dim">/*</span><span class="c-dim">
+<h2>Write code you already know</h2>
+<div class="native-examples"><div class="native-example"><h3>T-SQL</h3><p>Write an ordinary SQL query. Add a comment that tells Weaver the table name, key and columns.</p><div class="code"><div class="code-bar"><span>Warehouse/Curated/Parcel.Event.sql</span></div><pre><code data-language="sql"><span class="c-dim">/*</span><span class="c-dim">
 Table ID: Parcel.Event
 Description: Parcel events.
 Lineage: Example input.
@@ -151,7 +151,7 @@ Schema:
   parcel_id: varchar(20)
 </span><span class="c-dim">*/</span>
 <span class="c-key">select</span> <span class="c-str">'P-1001'</span> <span class="c-key">as</span> parcel_id;</code></pre></div></div>
-<div class="native-example"><h3>Python</h3><p>A class with a read() method. Declare the Table in a module docstring, then return a Spark DataFrame using ordinary Python.</p><div class="code"><div class="code-bar"><span>Tables/Parcel__Event.py</span></div><pre><code data-language="python"><span class="c-str">"""Table ID: Parcel.Event
+<div class="native-example"><h3>Python</h3><p>Write a Python class with a read() method. Describe the table in the file and return a Spark DataFrame.</p><div class="code"><div class="code-bar"><span>Tables/Parcel__Event.py</span></div><pre><code data-language="python"><span class="c-str">"""Table ID: Parcel.Event
 Description: Parcel events.
 Lineage: Example input.
 Schema:
@@ -164,16 +164,16 @@ Schema:
         <span class="c-key">return</span> self.spark.createDataFrame(
             [(<span class="c-str">"</span><span class="c-str">P-1001</span><span class="c-str">"</span>,)], <span class="c-str">"</span><span class="c-str">parcel_id string</span><span class="c-str">"</span>
         )</code></pre></div></div>
-<div class="native-example"><h3>TMDL</h3><p>A native annotation. Weaver applies modelling conventions through overlays, leaving your authored model files unchanged.</p><div class="code"><div class="code-bar"><span>Parcel.tmdl</span></div><pre><code data-language="tmdl"><span class="c-key">model</span> Model
+<div class="native-example"><h3>TMDL</h3><p>Add a standard TMDL annotation to apply modelling rules. Weaver leaves your original Power BI files unchanged.</p><div class="code"><div class="code-bar"><span>Parcel.tmdl</span></div><pre><code data-language="tmdl"><span class="c-key">model</span> Model
     <span class="c-key">annotation</span> <span class="c-str">'Weaver.AutoHideForeignKeys'</span> = <span class="c-key">true</span></code></pre></div></div>
 </div>
-<p class="architecture-statement">Declarations identify each object and specify its keys, schema or modelling rules.</p>
+<p class="architecture-statement">Each file tells Weaver what it represents and what rules to follow.</p>
 <p>File paths and naming conventions supply the rest of the structure.</p>
-<p><a class="text-link" href="https://docs.weaverstack.dev/core-concepts/weaver-documents/">Native authoring →</a></p>
+<p><a class="text-link" href="https://docs.weaverstack.dev/core-concepts/weaver-documents/">How to write a Weaver project →</a></p>
 </div></section>
 <section class="section catalogue-section"><div class="wrap">
 <h2 id="catalogue-title">The Catalogue brings everything together</h2>
-<p class="lede">The Catalogue records definitions, dependencies and run outcomes for registered managed items.</p>
+<p class="lede">Weaver's Catalogue is an ordinary Fabric Warehouse. It records what's deployed, how the parts connect and what happened when they ran—without a separate service to operate.</p>
 <figure class="estate-diagram" aria-labelledby="catalogue-title" aria-describedby="diagram-summary">
 <div class="diagram-grid">
 <div class="diagram-node native-node"><strong>Native definitions</strong><span>Python · SQL · TMDL</span></div>
@@ -193,27 +193,27 @@ Schema:
 <div class="state-exchange"><span>Read state</span><span aria-hidden="true">⇄</span><span>Load / Test<br>results</span></div>
 <div class="diagram-node operations-node"><strong>Load · Test · Health</strong><span>Use the recorded estate</span></div>
 </div>
-<figcaption id="diagram-summary">Build installs Fabric objects and records their definitions and bindings. Load and Test use that state, operate on the installed estate and record outcomes. Health reads the evidence.</figcaption>
+<figcaption id="diagram-summary">Build deploys your Fabric items. Load and Test run the work and record the results. Health shows what needs attention.</figcaption>
 </figure>
-<p>The Catalogue is an ordinary Fabric Warehouse. Its tables hold the shared state used by Build, Load, Test and Health.</p>
+<p>The same recorded state is used by Build, Load, Test and Health.</p>
 <p><a class="text-link" href="https://docs.weaverstack.dev/core-concepts/catalogue/">Inside the Catalogue →</a></p>
-<p class="small">The diagram shows a Catalogue-managed estate. <a href="https://docs.weaverstack.dev/reference/power-bi/requirements-and-compatibility/">Standalone Power BI deployment</a> can also work without a Catalogue.</p>
+<p class="small">The diagram shows how Weaver keeps track of a Fabric project. <a href="https://docs.weaverstack.dev/reference/power-bi/requirements-and-compatibility/">Standalone Power BI deployment</a> can also work without a Catalogue.</p>
 </div></section>
 <section class="section"><div class="wrap">
-<h2>From declarations to execution</h2>
+<h2>From source files to running work</h2>
 <dl class="engineering-capabilities">
-<div><dt>Dependencies</dt><dd>Coordinate related work across Fabric items.</dd></div>
-<div><dt>Incremental processing</dt><dd>Bookmarks, row changes and deletes.</dd></div>
-<div><dt>Concurrency</dt><dd>Run independent work together.</dd></div>
-<div><dt>Fault tolerance</dt><dd>Record failures without losing completed work.</dd></div>
-<div><dt>Tests &amp; Assumptions</dt><dd>Check the data, not just the execution.</dd></div>
-<div><dt>Modelling conventions</dt><dd>Apply standards across Semantic Models.</dd></div>
+<div><dt>Run work in the right order</dt><dd>Coordinate related work across Fabric items.</dd></div>
+<div><dt>Process only changes</dt><dd>Track where each table left off, including new, changed and removed rows.</dd></div>
+<div><dt>Run independent work together</dt><dd>Run steps at the same time when they do not depend on each other.</dd></div>
+<div><dt>Recover from failures</dt><dd>Record failures without losing completed work.</dd></div>
+<div><dt>Check data and calculations</dt><dd>Check the data, not just the execution.</dd></div>
+<div><dt>Apply modelling standards</dt><dd>Apply standards across Semantic Models.</dd></div>
 </dl>
-<p class="architecture-statement">Weaver generates loading machinery, resolves supported dependencies and applies declared validation and modelling rules.</p>
+<p class="architecture-statement">Weaver creates the loading code, runs supported work in the right order and applies your testing and modelling rules.</p>
 <p class="small">Python imports and supported T-SQL references establish dependencies; Spark SQL needs explicit declarations. Incremental policies use bookmarks and authored change/delete logic, not automatic detection of every source change.</p>
 </div></section>
 <section class="section"><div class="wrap">
-<h2>One operating model</h2>
+<h2>One set of commands</h2>
 <ol class="operation-sequence">
 <li><strong>BUILD</strong><span>Install the definitions.</span></li>
 <li><strong>LOAD</strong><span>Process data and refresh models.</span></li>
@@ -228,20 +228,20 @@ Schema:
 <p><a class="text-link" href="https://docs.weaverstack.dev/core-concepts/build-load-and-test/">Operations and their boundaries →</a></p>
 </div></section>
 <section class="section"><div class="wrap">
-<h2>One project. Different environments.</h2>
+<h2>Use the same code in development and production</h2>
 <div class="environment-map" role="group" aria-label="The same logical Warehouse mapped to two physical destinations">
 <div><h3>Development</h3><code>Warehouse/Curated</code><span class="mapping-arrow" aria-hidden="true">↓</span><strong>Curated_Dev</strong></div>
 <div><h3>Production</h3><code>Warehouse/Curated</code><span class="mapping-arrow" aria-hidden="true">↓</span><strong>Curated</strong></div>
 </div>
-<p class="architecture-statement">Same source. Different physical destinations.</p>
-<p>Workspace configuration selects destinations; Build records the installed bindings. Changing configuration alone doesn't move installed objects or rewrite arbitrary external connections.</p>
+<p class="architecture-statement">Same files. Different workspaces.</p>
+<p>A workspace configuration file sets where your Fabric items go. Weaver records those destinations when you build. Changing the file alone does not move deployed items or change external connections.</p>
 <p>Run Weaver from desktop Python, inside a Fabric Notebook, or both.</p>
 <p><a class="text-link" href="https://docs.weaverstack.dev/estate/environments/">Work across environments →</a></p>
 </div></section>
 <section class="section" style="background: var(--paper-deep);"><div class="wrap">
-<h2>Source files and installed work</h2>
-<p class="architecture-statement">This separation distinguishes what the project declares from what Fabric has installed.</p>
-<p>Recorded outcomes show what has actually happened since.</p>
+<h2>What you write and what Weaver deploys</h2>
+<p class="architecture-statement">Your project files describe the Fabric items you want, using Python, SQL and Power BI formats.</p>
+<p>Weaver keeps track of what has been deployed, what has run and what needs attention.</p>
 <div class="actions"><a class="button blue" href="/get-started/">Get started →</a><a class="button ghost" href="/features/#scale">Built for scale →</a></div>
 </div></section>
 </main>

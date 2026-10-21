@@ -31,7 +31,7 @@
       "id": "native-powerbi",
       "group": 1,
       "title": "Native Power BI",
-      "description": "Keep PBIP, TMDL and native Report definitions rather than converting to a Weaver-only format.",
+      "description": "Add enterprise power to your Power BI models and reports, while keeping to native PBIP, TMDL and native Report definitions.",
       "urls": [
         "https://docs.weaverstack.dev/semantic-models/native-tmdl/"
       ]
@@ -127,15 +127,6 @@
       "description": "Record rejected input and refuse proposed update/delete changes that exceed active stability thresholds.",
       "urls": [
         "https://docs.weaverstack.dev/advanced/partial-failures-rejected-data-and-thresholds/"
-      ]
-    },
-    {
-      "id": "model-deployment",
-      "group": 3,
-      "title": "Native Semantic Model deployment",
-      "description": "Deploy the PBIP/TMDL model you already author while preserving its native source files.",
-      "urls": [
-        "https://docs.weaverstack.dev/semantic-models/native-tmdl/"
       ]
     },
     {
@@ -244,15 +235,6 @@
       "description": "Cap one invocation or tune per-resource limits while scheduling independent work in dependency order.",
       "urls": [
         "https://docs.weaverstack.dev/estate/concurrency/"
-      ]
-    },
-    {
-      "id": "workflows",
-      "group": 4,
-      "title": "Sessions and workflows",
-      "description": "Reuse execution context and automate sequences of the same operations used interactively.",
-      "urls": [
-        "https://docs.weaverstack.dev/estate/automation-and-deployment/"
       ]
     },
     {

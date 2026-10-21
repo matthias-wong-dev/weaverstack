@@ -416,8 +416,6 @@ def run(root: Path, developer_site: Path | None):
             "Spark SQL",
             "T-SQL",
             "Refresh",
-            "Logical Shortcut",
-            "SQL endpoint readiness",
         )
     )
     assert not with_class(diagram, "pipeline"), "Invented pipeline glue in graph"

@@ -5,22 +5,22 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#f7f7f6">
 <title>Microsoft Fabric data engineering with Weaver</title>
-<meta name="description" content="Deliver data products in Microsoft Fabric with Python, SQL and native Power BI. Weaver coordinates Lakehouses, Warehouses, semantic models and Reports.">
+<meta name="description" content="Build with native Microsoft Fabric Lakehouses, Warehouses and Power BI. Weaver handles the loading, testing and deployment around familiar Python and SQL.">
 <meta name="robots" content="index, follow, max-image-preview:large">
 <link rel="canonical" href="https://weaverstack.dev/">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://weaverstack.dev/">
 <meta property="og:site_name" content="Weaver">
 <meta property="og:title" content="Weaver for Microsoft Fabric data engineering">
-<meta property="og:description" content="Deliver data products in Microsoft Fabric with Python, SQL and native Power BI. Weaver coordinates Lakehouses, Warehouses, semantic models and Reports.">
+<meta property="og:description" content="Build with native Microsoft Fabric Lakehouses, Warehouses and Power BI. Weaver handles the loading, testing and deployment around familiar Python and SQL.">
 <meta property="og:image" content="https://weaverstack.dev/og.png">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Weaver for Microsoft Fabric data engineering">
-<meta name="twitter:description" content="Deliver data products in Microsoft Fabric with Python, SQL and native Power BI. Weaver coordinates Lakehouses, Warehouses, semantic models and Reports.">
+<meta name="twitter:description" content="Build with native Microsoft Fabric Lakehouses, Warehouses and Power BI. Weaver handles the loading, testing and deployment around familiar Python and SQL.">
 <link rel="icon" type="image/png" href="/favicon.png">
 <link rel="manifest" href="/site.webmanifest">
 <link rel="sitemap" type="application/xml" href="/sitemap.xml">
-<link rel="stylesheet" href="/assets/site.css?v=5d47c0a6f1">
+<link rel="stylesheet" href="/assets/site.css?v=29ecf4692e">
 <meta property="og:image:type" content="image/png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
@@ -40,7 +40,7 @@
             "url": "https://weaverstack.dev/",
             "name": "Weaver",
             "alternateName": "weaverstack",
-            "description": "Deliver data products in Microsoft Fabric with Python, SQL and native Power BI. Weaver coordinates Lakehouses, Warehouses, semantic models and Reports.",
+            "description": "Build with native Microsoft Fabric Lakehouses, Warehouses and Power BI. Weaver handles the loading, testing and deployment around familiar Python and SQL.",
             "inLanguage": "en-AU"
           },
           {
@@ -48,7 +48,7 @@
             "@id": "https://weaverstack.dev/#software",
             "name": "Weaver",
             "alternateName": "weaverstack",
-            "description": "Deliver data products in Microsoft Fabric with Python, SQL and native Power BI. Weaver coordinates Lakehouses, Warehouses, semantic models and Reports.",
+            "description": "Build with native Microsoft Fabric Lakehouses, Warehouses and Power BI. Weaver handles the loading, testing and deployment around familiar Python and SQL.",
             "url": "https://weaverstack.dev/",
             "codeRepository": "https://github.com/matthias-wong-dev/weaverstack",
             "license": "https://www.mozilla.org/en-US/MPL/2.0/",
@@ -143,9 +143,9 @@
 <section class="page-head">
 <div class="wrap">
 <h1>Making Fabric easier to use</h1>
-<p class="lead">Write the Python, SQL and native Power BI your team already knows. Weaver keeps Fabric under control.</p>
+<p class="lead">Keep writing Python, SQL and Power BI. Weaver loads data, runs tests, deploys changes and keeps everything in the right order.</p>
 <div class="actions">
-<a class="button blue" href="https://docs.weaverstack.dev/getting-started/">Get started →</a>
+<a class="button blue" href="/get-started/">Get started →</a>
 <a class="button ghost" href="/features/">Explore features →</a>
 </div>
 <p class="hero-note">Free and open source. Installs with pip. No new language to learn.</p>
@@ -154,7 +154,7 @@
 <section class="section" id="project-at-a-glance">
 <div class="wrap">
 <h2>What a Weaver project looks like</h2>
-<p>Ordinary Python, SQL and native Power BI files, organised by Fabric item. Start with one item; connect more as you need them.</p>
+<p>Use the Python, SQL and Power BI files you already know. Start with one Fabric item and add more as you need them.</p>
 <div class="project-glance">
 <div class="code plain">
 <div class="code-bar"><span>What you write</span></div>
@@ -167,16 +167,16 @@
 │   ├── <span class="c-fn">Tables/Parcel__Event.py</span>
 │   └── <span class="c-fn">Tables/Parcel.CurrentStatus.sql</span>
 ├── <span class="c-key">Warehouse/Operations/</span>
+│   ├── <span class="c-fn">Parcel.LakehouseCurrentStatus.sql</span>
 │   ├── <span class="c-fn">Parcel.StatusEvent.sql</span>
 │   ├── <span class="c-dim">shortcuts.yml</span>
-│   ├── <span class="c-fn">Parcel.LakehouseCurrentStatus.sql</span>
 │   └── <span class="c-key">tests/</span>
 └── <span class="c-key">PowerBI/Parcel/</span>
     ├── <span class="c-key">Parcel.SemanticModel/</span>
     └── <span class="c-key">Parcel.Report/</span></pre>
 </div>
 <figure aria-labelledby="product-project-flow">
-<h3 id="product-project-flow">End-to-end DAG orchestration across Fabric workspace</h3>
+<h3 id="product-project-flow">How the parts of your Fabric project connect</h3>
 <div class="project-diagram-scroll" tabindex="0" role="region" aria-label="Illustrative Fabric project; scroll horizontally on narrow screens">
 <svg class="parcel-diagram" viewBox="0 0 960 340" role="img" aria-labelledby="product-project-flow parcel-product-desc">
 <desc id="parcel-product-desc">An illustrative project: Python files and Tables in a Lakehouse feed Warehouse SQL through a Shortcut, then a native semantic model and Report. A Spark SQL transformation branches from the Lakehouse Table.</desc>
@@ -254,71 +254,42 @@
 </div>
 </div>
 </section>
-<section class="section">
+<section class="section" id="who-its-for">
 <div class="wrap">
-<h2>Keep your work. Lose the repeated engineering.</h2>
-<div class="cards two">
-<a class="card" href="https://docs.weaverstack.dev/lakehouse/">
-<h3>Lakehouse</h3>
-<p><strong>Python and Spark SQL are both <span style="white-space: nowrap;">first-class.</span></strong></p>
-<p>Use them together across files, Tables and transformations. Weaver keeps everything connected and running in the right order, without a tangled web of notebooks and pipelines.</p>
-<span class="go">Explore Lakehouse →</span>
-</a>
-<a class="card" href="https://docs.weaverstack.dev/warehouse/">
-<h3>Warehouse</h3>
-<p><strong>Write the T-SQL your team already knows.</strong></p>
-<p>No macros or handcrafted loading procedures. Weaver takes care of staging, change processing, dependencies and the operational plumbing needed for serious data engineering.</p>
-<span class="go">Explore Warehouse →</span>
-</a>
-<a class="card" href="https://docs.weaverstack.dev/semantic-models/">
-<h3>Semantic Models</h3>
-<p><strong>Keep native TMDL.</strong></p>
-<p>Apply consistent modelling conventions across your organisation's models. Test DAX calculations against independent expectations, so you can have confidence in the numbers.</p>
-<span class="go">Explore Semantic Models →</span>
-</a>
-<a class="card" href="https://docs.weaverstack.dev/reports/">
-<h3>Reports</h3>
-<p><strong>One Power BI Report project. Different environments and models.</strong></p>
-<p>Deploy the same source to different workspaces, with Weaver resolving and verifying the right semantic-model binding for each destination.</p>
-<span class="go">Explore Reports →</span>
-</a>
+<h2>For the people making Fabric work</h2>
+<p class="persona-intro">Fabric gives you the tools. Making them easy to develop with, consistent across a team, and reliable in production is another matter.</p>
+<div class="persona-grid">
+<article class="persona-card" aria-labelledby="persona-developer">
+<h3 id="persona-developer">Data developer</h3>
+<blockquote class="persona-speech">
+<p>“Let me work like a normal developer.”</p>
+<p class="persona-context">“I just want my five tables working, without wrestling with notebooks, pipelines and Fabric-specific workarounds.”</p>
+</blockquote>
+</article>
+<article class="persona-card persona-lead" aria-labelledby="persona-lead">
+<h3 id="persona-lead">Data team lead</h3>
+<blockquote class="persona-speech">
+<p>“Let my team deliver without engineering chaos.”</p>
+<p class="persona-context">“I need everyone building, testing and deploying consistently, without reinventing the engineering for every project.”</p>
+</blockquote>
+</article>
+<article class="persona-card" aria-labelledby="persona-architect">
+<h3 id="persona-architect">Architect</h3>
+<blockquote class="persona-speech">
+<p>“Give me a reliable approach to building on Fabric.”</p>
+<p class="persona-context">“I need something I can confidently recommend, that works beyond the first demonstration.”</p>
+</blockquote>
+</article>
 </div>
 </div>
 </section>
-<section class="section">
+<section class="section weaver-promise" id="promise">
 <div class="wrap">
-<h2>Start with what you already have</h2>
-<p>Have a CSV, a T-SQL query or a Power BI project?</p>
-<p>Start there. You don't need to design an entire data estate before getting something useful running.</p>
-<p>Add more as you need it.</p>
-<p><a class="text-link" href="/get-started/">Choose your first task →</a></p>
-</div>
-</section>
-<section class="section">
-<div class="wrap">
-<h2>Know what ran. Know what needs attention.</h2>
-<p>When something fails, you shouldn't have to piece together what happened from pipeline histories, notebooks and log files.</p>
-<p>Weaver keeps track of dependencies, data changes, test results and failures together. You can see what's current, what's stale and where to pick up when something goes wrong.</p>
-<p><a class="text-link" href="/how-it-works/">See how Weaver works →</a></p>
-</div>
-</section>
-<section class="section">
-<div class="wrap">
-<h2>Multiple environments, without the variable tangle</h2>
-<p>Keep one set of Python, SQL and Power BI files across development and production.</p>
-<p>Weaver handles the different Fabric item names and model bindings without burying your code in environment-specific variables.</p>
-<p>And with Mirror, development can use existing data without copying everything first.</p>
-<p><a class="text-link" href="https://docs.weaverstack.dev/estate/environments/">Develop without the tangle →</a></p>
-</div>
-</section>
-<section class="section">
-<div class="wrap">
-<h2>Useful at three objects. Engineered for three thousand.</h2>
-<p>Repeatable deployment and testing are useful even for a couple of files and a Table.</p>
-<p>As your estate grows, Weaver takes care of increasingly difficult engineering: dependencies, incremental processing, scheduling, concurrency and recovery.</p>
-<p>The same approach works whether you're managing three objects or three thousand.</p>
-<p>In a synthetic 3,000-object test estate on F64, the first load completed in about an hour.</p>
-<p><a class="text-link" href="/features/#scale">Built for scale →</a></p>
+<h2>Making Fabric easier to use, and safer to scale.</h2>
+<p class="promise-lead">Weaver brings a code-first approach to native Fabric Lakehouses, Warehouses, Power BI models and Reports.</p>
+<p>Keep working in Python, SQL and Power BI. Weaver handles the loading, dependencies, testing and deployment around your work, without another platform or service to host.</p>
+<p class="promise-note">Free and open source. Uses your existing Fabric workspaces, compute and permissions.</p>
+<a class="button blue" href="/features/">Explore the features <span aria-hidden="true">→</span></a>
 </div>
 </section>
 </main>
