@@ -10,6 +10,9 @@
 again with nothing changed, then perturbs the source and loads the estate once
 per ``--cycles``. ``weaver test`` follows each load, so every cycle also shows
 each load behaviour converged. Every step appends a line to ``results.jsonl``.
+With ``--telemetry-config``, the same measured window also retains complete
+Weaver reports, Spark history, Warehouse Query Insights and Fabric capacity
+events under one evidence directory.
 
 Only the estate is measured. Populating and perturbing the source is reported
 on its own lines and never counted in the estate's timings.
@@ -21,16 +24,20 @@ Everything here is the public API. If this file needed an import from below
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import statistics
+import subprocess
 import sys
 import tempfile
 import time
 from collections import Counter
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
 import yaml
+from telemetry import EvidenceRun, TelemetryCapture, TelemetryConfig
 
 import weaver
 
@@ -42,10 +49,11 @@ FAILED = frozenset({"failed", "blocked", "invalid"})
 
 
 class Stress:
-    def __init__(self, folder: Path, results: Path, retries: int = 0):
+    def __init__(self, folder: Path, results: Path, retries: int = 0, *, evidence=None):
         self.folder = folder
         self.results = results
         self.retries = retries
+        self.evidence = evidence
         self.plan = json.loads((folder / "plan.json").read_text(encoding="utf-8"))
 
     def config(self, name: str) -> dict:
@@ -53,6 +61,16 @@ class Stress:
 
     def session(self, name: str):
         return weaver.session(workspace_config=str(self.folder / f"{name}.yml"))
+
+    @contextmanager
+    def captured_session(self, name: str, step: str):
+        session = None
+        try:
+            with self.session(name) as session:
+                yield session
+        finally:
+            if self.evidence is not None and session is not None:
+                self.evidence.session(step, name, session)
 
     def physical(self, name: str) -> list[str]:
         """Every physical item a configuration binds, its catalogue last."""
@@ -148,6 +166,8 @@ class Stress:
                 )
                 continue
             report = built.installation_report
+            if self.evidence is not None:
+                self.evidence.report(attempt, name, built)
             self.record(
                 attempt,
                 name,
@@ -177,6 +197,8 @@ class Stress:
                 )
                 continue
             facts = _load_facts(report)
+            if self.evidence is not None:
+                self.evidence.report(attempt, name, report)
             self.record(attempt, name, time.perf_counter() - started, **facts)
             if not facts["failed"]:
                 return
@@ -184,6 +206,8 @@ class Stress:
     def test(self, name: str, items: list[str], session, step: str) -> None:
         started = time.perf_counter()
         report = weaver.test(items, session=session)
+        if self.evidence is not None:
+            self.evidence.report(step, name, report)
         totals = report.totals()
         self.record(
             step,
@@ -198,13 +222,13 @@ class Stress:
     # --- the commands ------------------------------------------------------------
 
     def populate(self) -> None:
-        with self.session("source") as session:
+        with self.captured_session("source", "populate") as session:
             self.wipe("source", session)
             self.build("source", SOURCE_ITEMS, session)
             self.load("source", SOURCE_ITEMS, session, "populate")
 
     def perturb(self, days: int) -> None:
-        with self.session("source") as session:
+        with self.captured_session("source", "perturb") as session:
             for _ in range(days):
                 self.load("source", SOURCE_ITEMS, session, "perturb")
 
@@ -212,7 +236,7 @@ class Stress:
         # Each project's Session ends before the other's starts. An idle Spark
         # session keeps its executors until Fabric's session timeout, so a step
         # started beside one runs on a single executor.
-        with self.session("estate") as estate:
+        with self.captured_session("estate", "initial cycle") as estate:
             if not keep:
                 self.wipe("estate", estate)
             self.build("estate", ESTATE_ITEMS, estate)
@@ -221,9 +245,9 @@ class Stress:
             self.build("estate", ESTATE_ITEMS, estate, step="unchanged build")
             self.load("estate", ESTATE_ITEMS, estate, "unchanged load")
         for cycle in range(1, cycles + 1):
-            with self.session("source") as source:
+            with self.captured_session("source", f"day {cycle} source") as source:
                 self.load("source", SOURCE_ITEMS, source, "perturb")
-            with self.session("estate") as estate:
+            with self.captured_session("estate", f"day {cycle}") as estate:
                 self.load("estate", ESTATE_ITEMS, estate, f"day {cycle} load")
                 self.test("estate", ESTATE_ITEMS, estate, f"day {cycle} converged")
 
@@ -304,24 +328,146 @@ def arguments(argv=None) -> argparse.Namespace:
         default=2,
         help="Times to repeat a build or load that failed. Default: 2.",
     )
+    parser.add_argument(
+        "--telemetry-config",
+        type=Path,
+        help="Capture Fabric telemetry using this configuration.",
+    )
+    parser.add_argument(
+        "--evidence",
+        type=Path,
+        help="Evidence root. Default: evidence beside the generated projects.",
+    )
+    parser.add_argument("--run-id", help="Stable evidence directory name.")
+    parser.add_argument(
+        "--telemetry-settle-seconds",
+        type=int,
+        default=900,
+        help="Seconds to wait for monitoring feeds after the measured work.",
+    )
     return parser.parse_args(argv)
+
+
+def _identity(folder: Path) -> dict:
+    repository = Path(__file__).resolve().parents[2]
+    plan = folder / "plan.json"
+    return {
+        "git_commit": subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=repository, text=True
+        ).strip(),
+        "git_dirty": bool(
+            subprocess.check_output(
+                ["git", "status", "--porcelain"], cwd=repository, text=True
+            ).strip()
+        ),
+        "weaver_version": weaver.__version__,
+        "weaver_import": str(Path(weaver.__file__).resolve()),
+        "python": sys.version,
+        "plan_sha256": hashlib.sha256(plan.read_bytes()).hexdigest(),
+    }
+
+
+def _require_capture(result: dict) -> None:
+    failures = []
+    discovery = result["discovery"]
+    failures.extend(error["error"] for error in discovery["errors"])
+    capacity = result["capacity"]
+    if not capacity["overview"]:
+        failures.append("no capacity overview events")
+    if not capacity["operations"]:
+        failures.append("no capacity operation events")
+    failures.extend(error["error"] for error in capacity["errors"])
+    spark = result["spark"]
+    failures.extend(error["error"] for error in spark["errors"])
+    for target in spark["targets"]:
+        lakehouse = target["lakehouse_name"]
+        if not target["applications"]:
+            failures.append(
+                f"Lakehouse {lakehouse} has no overlapping Spark applications"
+            )
+        failures.extend(error["error"] for error in target["errors"])
+        for application in target["apps"]:
+            application_id = application["application_id"]
+            failures.extend(error["error"] for error in application["errors"])
+            for layer in ("resourceUsage", "jobs", "stages", "executors"):
+                if not application["layers"].get(layer):
+                    failures.append(
+                        f"Spark application {application_id} {layer} is empty"
+                    )
+    warehouses = result["warehouses"]
+    failures.extend(error["error"] for error in warehouses["errors"])
+    for target in warehouses["targets"]:
+        name = target["warehouse_name"]
+        if not target["requests"]:
+            failures.append(
+                f"Warehouse {name} has no overlapping Query Insights requests"
+            )
+        failures.extend(error["error"] for error in target["errors"])
+    if failures:
+        raise SystemExit(
+            "Telemetry capture incomplete: " + "; ".join(dict.fromkeys(failures))
+        )
 
 
 def main(argv=None) -> int:
     options = arguments(argv)
-    stress = Stress(
-        options.folder,
-        options.results or options.folder / "results.jsonl",
-        options.retries,
-    )
-    if options.command == "prepare":
-        stress.prepare()
-    elif options.command == "populate":
-        stress.populate()
-    elif options.command == "perturb":
-        stress.perturb(options.days)
-    else:
-        stress.measure(options.cycles, options.keep)
+    if options.telemetry_config is not None and options.command != "measure":
+        raise SystemExit("Fabric telemetry capture is available for measure only.")
+    if options.telemetry_settle_seconds < 0:
+        raise SystemExit("--telemetry-settle-seconds cannot be negative.")
+    evidence = None
+    if options.evidence is not None or options.telemetry_config is not None:
+        evidence = EvidenceRun(
+            options.evidence or options.folder / "evidence", run_id=options.run_id
+        )
+        evidence.start(
+            command=options.command,
+            options={
+                "cycles": options.cycles,
+                "days": options.days,
+                "keep": options.keep,
+                "retries": options.retries,
+                "telemetry_settle_seconds": options.telemetry_settle_seconds,
+            },
+            identity=_identity(options.folder),
+        )
+    status = "failed"
+    try:
+        telemetry = None
+        if options.telemetry_config is not None:
+            telemetry = TelemetryCapture(TelemetryConfig.load(options.telemetry_config))
+        stress = Stress(
+            options.folder,
+            options.results or options.folder / "results.jsonl",
+            options.retries,
+            evidence=evidence,
+        )
+        if options.command == "prepare":
+            stress.prepare()
+        elif options.command == "populate":
+            stress.populate()
+        elif options.command == "perturb":
+            stress.perturb(options.days)
+        else:
+            stress.measure(options.cycles, options.keep)
+        if telemetry is not None:
+            workload_finished_at = datetime.now(timezone.utc)
+            time.sleep(options.telemetry_settle_seconds)
+            assert evidence is not None and evidence.started_at is not None
+            result = telemetry.collect(
+                evidence,
+                projects={
+                    "source": options.folder / "source.yml",
+                    "estate": options.folder / "estate.yml",
+                },
+                started_at=evidence.started_at,
+                finished_at=workload_finished_at,
+            )
+            _require_capture(result)
+        status = "succeeded"
+    finally:
+        if evidence is not None:
+            evidence.finish(status=status)
     return 0
 
 
