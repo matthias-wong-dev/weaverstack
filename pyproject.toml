@@ -52,6 +52,7 @@ dependencies = [
 # `build` makes the checkout wheel that `environment publish --dev` publishes.
 dev = [
     "pytest>=8.4",
+    "pytest-xdist>=3.6",
     "ruff>=0.14",
     "build>=1.2",
 ]
