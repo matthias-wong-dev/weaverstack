@@ -39,8 +39,8 @@ weaver build
 
 - [Documentation](https://docs.weaverstack.dev): guides and the complete command and API reference
 - [Website](https://weaverstack.dev): what Weaver does
-- [Source](https://github.com/matthias-wong-dev/weaverstack)
+- [Source](https://github.com/weaverstack/weaverstack)
 
 ## Licence
 
-Mozilla Public License 2.0. See [LICENSE](https://github.com/matthias-wong-dev/weaverstack/blob/main/LICENSE).
+Mozilla Public License 2.0. See [LICENSE](https://github.com/weaverstack/weaverstack/blob/main/LICENSE).
