@@ -12,6 +12,7 @@ from support.weaver_test import weaver_test
 ROOT = Path(__file__).resolve().parents[1]
 PAGE = ROOT / "docs/vs-dbt/index.html"
 SOURCE = ROOT / "docs/vs-dbt/migration-agent-brief.md"
+STYLES = ROOT / "docs/vs-dbt/migration-guide.css"
 GENERATOR = ROOT / "tools/build_dbt_migration_guide.py"
 
 
@@ -85,6 +86,35 @@ class PageControls(HTMLParser):
             self.scripts.append(attributes["src"] or "")
 
 
+class GuideFrame(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.scroll_depth = 0
+        self.frame_seen = False
+        self.scroll_attributes: dict[str, str | None] | None = None
+        self.article_in_scroll_region = False
+        self.stylesheets: list[str] = []
+
+    def handle_starttag(self, tag, attrs):
+        attributes = dict(attrs)
+        classes = (attributes.get("class") or "").split()
+        if self.scroll_depth:
+            self.scroll_depth += 1
+        if tag == "link" and attributes.get("rel") == "stylesheet":
+            self.stylesheets.append(attributes.get("href") or "")
+        if "migration-guide-frame" in classes:
+            self.frame_seen = True
+        if "migration-guide-scroll" in classes:
+            self.scroll_depth = 1
+            self.scroll_attributes = attributes
+        if tag == "article" and self.scroll_depth:
+            self.article_in_scroll_region = True
+
+    def handle_endtag(self, tag):
+        if self.scroll_depth:
+            self.scroll_depth -= 1
+
+
 @weaver_test()
 def test_generated_guide_matches_markdown_source():
     result = subprocess.run(
@@ -132,3 +162,25 @@ def test_copy_button_reads_the_original_markdown_source():
     assert "response.text()" in script
     assert "clipboard.writeText(markdown)" in script
     assert "innerText" not in script
+
+
+@weaver_test()
+def test_guide_is_isolated_in_a_bounded_scroll_region():
+    parser = GuideFrame()
+    parser.feed(PAGE.read_text(encoding="utf-8"))
+
+    assert parser.frame_seen
+    assert parser.scroll_attributes is not None
+    assert parser.scroll_attributes["role"] == "region"
+    assert parser.scroll_attributes["tabindex"] == "0"
+    assert parser.scroll_attributes["aria-label"] == "Migrate a dbt project to Weaver"
+    assert parser.article_in_scroll_region
+    assert "migration-guide.css" in parser.stylesheets
+
+    styles = STYLES.read_text(encoding="utf-8")
+    assert ".migration-guide-frame" in styles
+    assert ".migration-guide-scroll" in styles
+    assert "max-height:" in styles
+    assert "overflow-y: auto" in styles
+    assert "border:" in styles
+    assert "background:" in styles

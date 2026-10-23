@@ -1,0 +1,71 @@
+.migration-guide-frame {
+  max-width: 920px;
+  margin: 30px 0 0;
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--white);
+  box-shadow: var(--shadow);
+}
+
+.migration-guide-frame-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  min-height: 48px;
+  padding: 10px 20px;
+  border-bottom: 1px solid var(--line);
+  background: var(--paper-deep);
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.migration-guide-frame-header strong {
+  font-weight: 720;
+}
+
+.migration-guide-frame-header span {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.migration-guide-scroll {
+  max-height: min(68vh, 720px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-gutter: stable;
+  padding: clamp(24px, 4vw, 44px);
+  background: var(--white);
+}
+
+.migration-guide-scroll:focus-visible {
+  outline: 3px solid rgba(42, 82, 216, .45);
+  outline-offset: -4px;
+  border-radius: 0;
+}
+
+.migration-guide > :first-child {
+  margin-top: 0;
+}
+
+.migration-guide > :last-child {
+  margin-bottom: 0;
+}
+
+@media (max-width: 600px) {
+  .migration-guide-frame {
+    margin-top: 24px;
+  }
+
+  .migration-guide-frame-header {
+    padding-inline: 16px;
+  }
+
+  .migration-guide-scroll {
+    max-height: min(64vh, 620px);
+    padding: 24px 18px 32px;
+  }
+}

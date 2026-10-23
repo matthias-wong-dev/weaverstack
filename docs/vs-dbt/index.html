@@ -28,6 +28,7 @@
     <link rel="icon" type="image/png" sizes="128x128" href="../favicon.png">
     <link rel="manifest" href="../site.webmanifest">
     <link rel="stylesheet" href="../assets/site.css?v=07163cf81a">
+    <link rel="stylesheet" href="migration-guide.css">
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to content</a>
@@ -314,8 +315,8 @@ weaver health                              <span class="c-dim"># Inspect the who
       <section class="section" id="migrating-from-dbt" style="scroll-margin-top: 90px;">
         <div class="wrap">
           <h2>Migrating from dbt</h2>
-          <p class="lede">Weaver describes the wider Fabric data project in declarative files, so an existing dbt project has a direct place to land: Tables, Views, Folders, Shortcuts, Tests and Assumptions.</p>
-          <p>A coding agent can inspect the dbt manifest, confirm the decisions that require judgement, then implement and validate the migration. Read the guide below or copy the same instructions as Markdown.</p>
+          <p class="lede">Weaver uses declarative files for the whole Fabric estate. A dbt project fits naturally into the part that handles Tables, Views and Tests.</p>
+          <p>Use this agent brief with a coding agent to migrate your project.</p>
           <div class="actions">
             <button class="button blue" type="button" data-copy-markdown="migration-agent-brief.md" aria-describedby="migration-copy-status" disabled>Copy agent brief</button>
             <a class="button ghost" href="migration-agent-brief.md">View Markdown</a>
@@ -323,6 +324,12 @@ weaver health                              <span class="c-dim"># Inspect the who
           <p class="small muted" id="migration-copy-status" role="status" aria-live="polite"></p>
           <noscript><p class="small muted">JavaScript is off. Open the Markdown version to copy the agent brief.</p></noscript>
           <!-- Edit migration-agent-brief.md, then run python tools/build_dbt_migration_guide.py. -->
+          <div class="migration-guide-frame">
+            <div class="migration-guide-frame-header">
+              <strong>Migration guide</strong>
+              <span>Scroll to read</span>
+            </div>
+            <div class="migration-guide-scroll" role="region" aria-label="Migrate a dbt project to Weaver" tabindex="0">
           <!-- generated:dbt-migration-guide:start -->
           <article class="migration-guide">
           <h3>Migrate a dbt project to Weaver</h3>
@@ -417,6 +424,8 @@ weaver health                              <span class="c-dim"># Inspect the who
           <p>The migration is complete only when the required behaviour has been preserved and independently verified.</p>
           </article>
           <!-- generated:dbt-migration-guide:end -->
+            </div>
+          </div>
         </div>
       </section>
 
