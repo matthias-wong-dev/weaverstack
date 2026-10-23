@@ -28,7 +28,10 @@ class GuideHTML(HTMLParser):
 
     def handle_starttag(self, tag, attrs):
         attributes = dict(attrs)
-        if tag == "article" and "migration-guide" in (attributes.get("class") or "").split():
+        if (
+            tag == "article"
+            and "migration-guide" in (attributes.get("class") or "").split()
+        ):
             self.guide_depth = 1
             return
         if not self.guide_depth:

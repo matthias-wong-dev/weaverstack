@@ -14,9 +14,7 @@ PAGE = ROOT / "docs/vs-dbt/index.html"
 START = "<!-- generated:dbt-migration-guide:start -->"
 END = "<!-- generated:dbt-migration-guide:end -->"
 BLOCK_START = re.compile(r"^(#{1,3}) (.+)$")
-INLINE = re.compile(
-    r"(`[^`]+`|\*\*[^*]+\*\*|\[[^\]]+\]\(https://[^)]+\))"
-)
+INLINE = re.compile(r"(`[^`]+`|\*\*[^*]+\*\*|\[[^\]]+\]\(https://[^)]+\))")
 LINK = re.compile(r"^\[([^\]]+)\]\((https://[^)]+)\)$")
 
 
@@ -137,7 +135,9 @@ def main() -> int:
     expected = update_page(current)
     if args.check:
         if current != expected:
-            print("dbt migration guide is stale; run tools/build_dbt_migration_guide.py")
+            print(
+                "dbt migration guide is stale; run tools/build_dbt_migration_guide.py"
+            )
             return 1
         print("dbt migration guide matches its Markdown source")
         return 0
