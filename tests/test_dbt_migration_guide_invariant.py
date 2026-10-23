@@ -95,14 +95,14 @@ def test_generated_guide_matches_markdown_source():
     )
     assert result.returncode == 0, result.stdout + result.stderr
 
-    markdown = SOURCE.read_text()
+    markdown = SOURCE.read_text(encoding="utf-8")
     assert "dbt parse\n```" in markdown
     assert "--no-partial-parse" not in markdown
     assert "target/manifest.json" in markdown
     assert "weaver check" in markdown
 
     parser = GuideHTML()
-    parser.feed(PAGE.read_text())
+    parser.feed(PAGE.read_text(encoding="utf-8"))
     assert "Migration contract" in parser.headings
     assert "2. Confirm migration decisions with the user" in parser.headings
     assert "A. Source environment and scope" in parser.headings
@@ -117,7 +117,7 @@ def test_generated_guide_matches_markdown_source():
 @weaver_test()
 def test_copy_button_reads_the_original_markdown_source():
     parser = PageControls()
-    parser.feed(PAGE.read_text())
+    parser.feed(PAGE.read_text(encoding="utf-8"))
 
     assert parser.copy_button is not None
     assert parser.copy_button["data-copy-markdown"] == "migration-agent-brief.md"
@@ -128,7 +128,7 @@ def test_copy_button_reads_the_original_markdown_source():
     assert parser.status["aria-live"] == "polite"
     assert "migration-brief.js" in parser.scripts
 
-    script = (ROOT / "docs/vs-dbt/migration-brief.js").read_text()
+    script = (ROOT / "docs/vs-dbt/migration-brief.js").read_text(encoding="utf-8")
     assert "response.text()" in script
     assert "clipboard.writeText(markdown)" in script
     assert "innerText" not in script

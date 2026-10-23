@@ -109,7 +109,7 @@ def render(markdown: str) -> str:
 
 
 def generated_region() -> str:
-    body = render(SOURCE.read_text())
+    body = render(SOURCE.read_text(encoding="utf-8"))
     indented = "\n".join(f"          {line}" for line in body.splitlines())
     return f"{START}\n{indented}\n          {END}"
 
@@ -131,7 +131,7 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    current = PAGE.read_text()
+    current = PAGE.read_text(encoding="utf-8")
     expected = update_page(current)
     if args.check:
         if current != expected:
@@ -142,7 +142,7 @@ def main() -> int:
         print("dbt migration guide matches its Markdown source")
         return 0
 
-    PAGE.write_text(expected)
+    PAGE.write_text(expected, encoding="utf-8", newline="\n")
     print(f"rendered {SOURCE.relative_to(ROOT)} into {PAGE.relative_to(ROOT)}")
     return 0
 
