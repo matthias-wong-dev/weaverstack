@@ -311,6 +311,115 @@ weaver health                              <span class="c-dim"># Inspect the who
         </div>
       </section>
 
+      <section class="section" id="migrating-from-dbt" style="scroll-margin-top: 90px;">
+        <div class="wrap">
+          <h2>Migrating from dbt</h2>
+          <p class="lede">Weaver describes the wider Fabric data project in declarative files, so an existing dbt project has a direct place to land: Tables, Views, Folders, Shortcuts, Tests and Assumptions.</p>
+          <p>A coding agent can inspect the dbt manifest, confirm the decisions that require judgement, then implement and validate the migration. Read the guide below or copy the same instructions as Markdown.</p>
+          <div class="actions">
+            <button class="button blue" type="button" data-copy-markdown="migration-agent-brief.md" aria-describedby="migration-copy-status" disabled>Copy agent brief</button>
+            <a class="button ghost" href="migration-agent-brief.md">View Markdown</a>
+          </div>
+          <p class="small muted" id="migration-copy-status" role="status" aria-live="polite"></p>
+          <noscript><p class="small muted">JavaScript is off. Open the Markdown version to copy the agent brief.</p></noscript>
+          <!-- Edit migration-agent-brief.md, then run python tools/build_dbt_migration_guide.py. -->
+          <!-- generated:dbt-migration-guide:start -->
+          <article class="migration-guide">
+          <h3>Migrate a dbt project to Weaver</h3>
+          <p>You are migrating an existing dbt project on Microsoft Fabric to Weaver.</p>
+          <p>Weaver is a declarative framework for data engineering on Microsoft Fabric. A Weaver project declares Tables, Views, Folders, Shortcuts, Tests and Assumptions using ordinary SQL, Python and metadata. Weaver manages deployment, dependencies, incremental loading, testing and operational state.</p>
+          <p>Express the dbt project’s intent using Weaver’s native architecture rather than mechanically reproducing dbt’s implementation. Inspect the source, confirm the architecture decisions with the user, then implement and validate the migration.</p>
+          <h3>Migration contract</h3>
+          <p>Produce a working Weaver project that preserves the original business logic, data outputs, incremental behaviour and validations.</p>
+          <p>Every in-scope dbt resource must have a corresponding Weaver implementation, documented alternative or explicitly reported gap.</p>
+          <p>Preserve the original dbt project. Do not perform destructive operations or deploy to production without authorisation.</p>
+          <h3>1. Understand the source project</h3>
+          <p>Run:</p>
+          <div class="code plain">
+            <div class="code-bar"><span>terminal</span></div>
+            <pre><code>dbt parse</code></pre>
+          </div>
+          <p>Treat <code>target/manifest.json</code> as the authoritative inventory of models, dependencies, sources, tests and other resources.</p>
+          <p>Use <code>dbt compile</code> where necessary to inspect generated SQL, subject to the permissions and execution requirements of the source project.</p>
+          <p>Reference: <a href="https://docs.getdbt.com/reference/commands/parse">dbt parse</a>.</p>
+          <h3>2. Confirm migration decisions with the user</h3>
+          <p>Before generating Weaver definitions, inspect the source project and propose answers to the following questions.</p>
+          <p>Ask the user to confirm or modify your recommendations. Group the questions into one concise interaction. Do not ask questions whose answers are already clear from the source project.</p>
+          <h4>A. Source environment and scope</h4>
+          <p>Which dbt target/profile and project scope should be migrated? All enabled models, or a selected subset? Should seeds, snapshots, tests and custom hooks be included?</p>
+          <p><strong>Default:</strong> Migrate all enabled resources and report unsupported features.</p>
+          <h4>B. Fabric destinations</h4>
+          <p>Which Fabric workspace, Lakehouses and Warehouses should the new Weaver project use?</p>
+          <p>Propose logical Weaver item names, physical Fabric item names, a catalogue Warehouse and, where required, a Fabric Environment.</p>
+          <p>Should the project use new destinations or existing items?</p>
+          <p><strong>Default:</strong> Use new, isolated development destinations. Preserve the original SQL engine used by each model.</p>
+          <h4>C. Names and schemas</h4>
+          <p>Should schema, table, view and column names remain unchanged, or should they be standardised during migration?</p>
+          <p><strong>Default:</strong> Preserve existing business-facing names.</p>
+          <h4>D. External references</h4>
+          <p>Should references to other Fabric items use Weaver Shortcuts, or retain direct physical references where supported?</p>
+          <p><strong>Default:</strong> Use logical Shortcuts for Weaver-managed producers and physical Shortcuts for external Fabric data wherever supported. Use direct references only where appropriate.</p>
+          <p>Account for differences in supported Shortcut types and workspace boundaries.</p>
+          <h4>E. Incremental loading</h4>
+          <p>Should incremental models retain their current change-selection strategy, or be adapted to use Weaver’s per-consumer bookmarks?</p>
+          <p>Inspect the source’s available timestamps, CDC, change history, deletion handling and late-arriving records before recommending a strategy.</p>
+          <p><strong>Default:</strong> Preserve existing incremental semantics. Recommend bookmark-driven selection where change evidence is sufficient and the resulting behaviour can be validated.</p>
+          <p>Do not silently substitute bookmarks for target-derived watermarks or other existing state mechanisms.</p>
+          <h4>F. Existing data and historical state</h4>
+          <p>Should migrated tables start empty and be rebuilt, or should existing target data, snapshots and history be preserved?</p>
+          <p>Identify any objects that cannot safely be reconstructed.</p>
+          <p><strong>Default:</strong> Build new targets without modifying existing data. Explicitly plan historical-state preservation where required.</p>
+          <h4>G. Validation and deployment</h4>
+          <p>Is an isolated Fabric workspace available for Build, Load and Test? Can the agent read the original datasets to compare results?</p>
+          <p>Should the migration stop at validated project files, or proceed to a fully tested non-production deployment?</p>
+          <p><strong>Default:</strong> Perform local validation without deployment unless explicitly authorised.</p>
+          <p>For unusual resources such as custom dbt materialisations, macros, packages and snapshots, ask additional targeted questions only when necessary.</p>
+          <h3>3. Implement the Weaver project</h3>
+          <p>Follow the architecture and authoring contracts in the documentation.</p>
+          <h4>Architecture and configuration</h4>
+          <ul>
+            <li><a href="https://docs.weaverstack.dev/core-concepts/design-philosophy/">Design philosophy</a></li>
+            <li><a href="https://docs.weaverstack.dev/core-concepts/projects-and-estates/">Projects and estates</a></li>
+            <li><a href="https://docs.weaverstack.dev/reference/weaver-documents/overview/">Weaver documents</a></li>
+            <li><a href="https://docs.weaverstack.dev/reference/configuration-files/workspace-config/">Workspace configuration</a></li>
+          </ul>
+          <h4>Data engineering</h4>
+          <ul>
+            <li><a href="https://docs.weaverstack.dev/reference/weaver-documents/table/">Tables</a></li>
+            <li><a href="https://docs.weaverstack.dev/reference/weaver-documents/view/">Views</a></li>
+            <li><a href="https://docs.weaverstack.dev/reference/weaver-documents/shortcut/">Shortcuts</a></li>
+            <li><a href="https://docs.weaverstack.dev/advanced/incremental-data-processing/">Incremental data processing and bookmarks</a></li>
+            <li><a href="https://docs.weaverstack.dev/advanced/protecting-data/">Protecting existing data</a></li>
+          </ul>
+          <h4>Validation</h4>
+          <ul>
+            <li><a href="https://docs.weaverstack.dev/reference/weaver-documents/test/">Tests</a></li>
+            <li><a href="https://docs.weaverstack.dev/reference/weaver-documents/assumption/">Assumptions</a></li>
+            <li><a href="https://docs.weaverstack.dev/core-concepts/build-load-and-test/">Build, Load and Test</a></li>
+          </ul>
+          <p>Use these specifications to implement the project. Prefer native Weaver capabilities rather than recreating dbt-specific runtime machinery.</p>
+          <h3>4. Validate</h3>
+          <p>Run this throughout the migration and once after completing it:</p>
+          <div class="code plain">
+            <div class="code-bar"><span>terminal</span></div>
+            <pre><code>weaver check</code></pre>
+          </div>
+          <p>Reconcile the migrated project against <code>target/manifest.json</code>. Account for every in-scope resource.</p>
+          <p>Where authorised, perform a Build dry-run:</p>
+          <div class="code plain">
+            <div class="code-bar"><span>terminal</span></div>
+            <pre><code>weaver build --dry-run</code></pre>
+          </div>
+          <p>Where authorised and an isolated Fabric environment is available, deploy there and compare schemas, row counts, keys, calculated results, incremental updates, deletes and test outcomes.</p>
+          <p>A successful <code>dbt parse</code> and <code>weaver check</code> establish structural validity. They do not establish functional data equivalence.</p>
+          <h3>5. Deliver</h3>
+          <p>Provide the complete Weaver project, a dbt-to-Weaver resource mapping, the configuration decisions made, validation evidence and unresolved migration gaps.</p>
+          <p>The migration is complete only when the required behaviour has been preserved and independently verified.</p>
+          </article>
+          <!-- generated:dbt-migration-guide:end -->
+        </div>
+      </section>
+
       <section class="section">
         <div class="wrap">
           <h2>Try it with one Fabric item</h2>
@@ -403,6 +512,7 @@ weaver health                              <span class="c-dim"># Inspect the who
 </div>
 </footer>
 
+    <script src="migration-brief.js" defer></script>
     <script src="../assets/site.js?v=858d1659f7" defer></script>
   </body>
 </html>
